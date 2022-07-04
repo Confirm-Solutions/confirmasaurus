@@ -1,5 +1,6 @@
 import copy
 import jax
+import numpy as np
 import jax.numpy as jnp
 from functools import partial
 import numpyro
@@ -13,6 +14,21 @@ import numpyro.handlers as handlers
 import smalljax
 
 
+# Tried this out, really slow for computing derivatives!
+# flat_ll, slice_dict = inla.build_flat_log_likelihood(model, data)
+# flat_ll(np.array([10.0, 0, 0, 0, 0]), data)
+# def grad_hess(params, data):
+#     grad = jax.grad(flat_ll)(params, data)
+#     hess = jax.hessian(flat_ll)(params, data)
+#     return grad, hess
+
+# grad_hess_vmap = jax.jit(
+#     jax.vmap(jax.vmap(grad_hess, in_axes=(0, None)), in_axes=(0, 0))
+# )
+# y = scipy.stats.binom.rvs(35, 0.3, size=(int(1e4), narms))
+# n = np.full_like(y, 35)
+# data = np.stack((y, n), axis=-1)
+# params = np.random.rand(data.shape[0], 15, narms + 1)
 # def build_flat_log_likelihood(model, example_data):
 #     # see https://num.pyro.ai/en/stable/handlers.html
 
@@ -30,7 +46,7 @@ import smalljax
 
 #     def log_likelihood(params, data):
 #         params_dict = dict()
-#         for k, (i1, i2) in slice_dict:
+#         for k, (i1, i2) in slice_dict.items():
 #             params_dict[k] = params[i1:i2]
 #         trace = handlers.trace(
 #             handlers.substitute(handlers.seed(model, jax.random.PRNGKey(10)), params_dict)
@@ -41,10 +57,30 @@ import smalljax
 
 #     return log_likelihood, slice_dict
 
-def build_log_likelihood(model):
-    def log_likelihood(params, data):
+
+
+def merge(*pytrees):
+    def _merge(*args):
+        combine = None
+        for arg in args:
+            if arg is not None:
+                if combine is not None:
+                    overwrite = jnp.isnan(combine)
+                    combine = jnp.where(overwrite, arg, combine)
+                elif isinstance(arg, jnp.ndarray):
+                    combine = arg
+                else:
+                    return arg
+        return combine
+
+    return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
+
+def build_raw_log_likelihood(model):
+    def log_likelihood(params1, params2, data):
         trace = handlers.trace(
-            handlers.substitute(handlers.seed(model, jax.random.PRNGKey(10)), params)
+            handlers.substitute(
+                handlers.seed(model, jax.random.PRNGKey(10)), merge(params1, params2)
+            )
         ).get_trace(data)
         return sum(
             [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
@@ -52,19 +88,33 @@ def build_log_likelihood(model):
 
     return log_likelihood
 
+
+# def separate_params(ll_fnc, mask):
+#     def wrapped(params, pinned_params, data):
+#         params[]
+
+
 def pin(ll_fnc, pinned_params):
-    def wrapped(params, data):
+    for k in pinned_params:
+        if isinstance(pinned_params[k], np.ndarray):
+            pinned_params[k] = jnp.array(k)
+
+    def wrapped(params, pinned_params, data):
         for k in pinned_params:
-            if isinstance(pinned_params[k], np.ndarray):
+            if isinstance(pinned_params[k], jnp.ndarray):
                 params[k] = jnp.where(
-                    jnp.isnan(pinned_params[k]),
-                    params[k],
-                    pinned_params[k]
+                    jnp.isnan(pinned_params[k]), params[k], pinned_params[k]
                 )
             else:
                 params[k] = pinned_params[k]
         return ll_fnc(params, data)
+
     return wrapped
+
+
+def build_grad_hess():
+    pass
+
 
 class INLA:
     def __init__(self, log_joint, grad_hess, d):

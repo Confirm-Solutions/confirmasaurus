@@ -53,6 +53,27 @@ def test_log_likelihood():
     np.testing.assert_allclose(
         ll, invgamma_term + normal_term + sum(binomial_term), rtol=1e-6
     )
+    
+def test_pin():
+    data = np.array([[7,35], [6.0,35], [5,35], [4,35]])
+    params = dict(
+        sig2 = 11.0,
+        theta = np.array([0.0,0.0,0,0]),
+    )
+    ll_fnc = inla.build_log_likelihood(berry_model(4))
+    correct = ll_fnc(params, data)
+    v1 = inla.pin(ll_fnc, dict(sig2 = 11.0))(dict(sig2 = -1, theta = np.array([0,0,0,0])), data)
+    np.testing.assert_allclose(v1, correct)
+    v2 = inla.pin(ll_fnc, dict(theta=np.array([np.nan, np.nan, 0, np.nan])))(
+        dict(sig2=11.0, theta=np.array([0, 0, 11, 0])), data
+    )
+    np.testing.assert_allclose(v2, correct)
+    
+def test_merge():
+    a, b = dict(sig2 = 10.0, theta = jnp.array([3, np.nan])), dict(sig2 = None, theta=jnp.array([np.nan, 2]))
+    out = inla.merge(a, b)
+    assert(out['sig2'] == 10.0)
+    np.testing.assert_allclose(out['theta'], [3, 2])
 
 def test_optimize_posterior():
     N = 10
