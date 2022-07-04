@@ -16,7 +16,7 @@ mu_0 = -1.34
 mu_sig2 = 100
 sig2_alpha = 0.0005
 sig2_beta = 0.000005
-logit_p1 = -1.0
+logit_p1 = logit(0.3)
 
 
 def berry_model(d):
@@ -38,7 +38,7 @@ def berry_model(d):
 def test_log_likelihood():
     params = dict(sig2=10.0, theta=np.array([0, 0, 0]))
     data = np.array([[6.0, 35], [5, 35], [4, 35]])
-    ll = inla.build_log_likelihood(model)(params, data)
+    ll = inla.build_log_likelihood(berry_model(3))(params, data)
 
     invgamma_term = scipy.stats.invgamma.logpdf(
         params["sig2"], sig2_alpha, scale=sig2_beta
@@ -57,8 +57,8 @@ def test_log_likelihood():
 def test_optimize_posterior():
     N = 10
     n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
-    y_i = np.tile(np.array([0, 1, 9, 10], dtype=np.float64), (N, 1))
-    data = np.stack((y_i, n_i), axis=-1)
+    y_i = np.tile(np.array([0, 1, 9, 10]), (N, 1))
+    data = np.stack((y_i, n_i), axis=-1).astype(np.float64)
     ll_fnc = inla.build_log_likelihood(berry_model(4))
 
     def conditional(theta, sig2, data):
@@ -79,7 +79,7 @@ def test_optimize_posterior():
     )
 
     infer = inla.INLA(conditional_vmap, grad_hess_vmap, 4)
-    sig2_rule = util.log_gauss_rule(15, 1e-2, 1e2)
+    sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
     theta_max, hess, iters = infer.optimize_loop(data, sig2_rule.pts, 1e-3)
     post = infer.posterior(theta_max, hess, sig2_rule.pts, sig2_rule.wts, data)
     np.testing.assert_allclose(

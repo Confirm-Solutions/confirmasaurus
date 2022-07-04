@@ -164,15 +164,6 @@ def gen_lu(ctx, args, d):
     return [LU]
 lu_spec = Spec('lu', gen_lu, in_types=('M',), out_types=('M',))
 
-# def gen_logdet(ctx, args, d):
-#     LU = gen_lu(ctx, args, d)[0]
-#     terms = []
-#     for i in range(d):
-#         terms.append(f'jnp.log(jnp.abs({LU[i][i]}))')
-#     ctx.assign('out', '+'.join(terms))
-#     return ['out']
-# logdet_spec = Spec('logdet', gen_logdet, in_types=('M',), out_types=('s',))
-
 def transpose(A):
     d = len(A)
     return [[A[j][i] for j in range(d)] for i in range(d)]
@@ -262,7 +253,7 @@ def build_linalg(spec, d, print_code=True):
 def gen(name):
     if name in globals():
         return globals()[name]
-    for spec in [lu_spec, logdet_spec, lu_spec, lu_inv_spec, lu_solve_spec, solve_spec]:
+    for spec in [lu_spec, lu_spec, lu_inv_spec, lu_solve_spec, solve_spec]:
         if not name.startswith(spec.prefix):
             continue
         d = int(name[len(spec.prefix):])
