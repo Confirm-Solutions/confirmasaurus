@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.stats
@@ -6,6 +7,10 @@ import numpyro.distributions as dist
 from scipy.special import logit, expit
 
 import inla
+import util
+
+from jax.config import config
+config.update("jax_enable_x64", True)
 
 mu_0 = -1.34
 mu_sig2 = 100
@@ -14,18 +19,20 @@ sig2_beta = 0.000005
 logit_p1 = -1.0
 
 
-def model(data):
-    sig2 = numpyro.sample("sig2", dist.InverseGamma(sig2_alpha, sig2_beta))
-    cov = jnp.full((3, 3), mu_sig2) + jnp.diag(jnp.repeat(sig2, 3))
-    theta = numpyro.sample(
-        "theta",
-        dist.MultivariateNormal(mu_0, cov),
-    )
-    numpyro.sample(
-        "y",
-        dist.BinomialLogits(theta + logit_p1, total_count=data[..., 1]),
-        obs=data[..., 0],
-    )
+def berry_model(d):
+    def model(data):
+        sig2 = numpyro.sample("sig2", dist.InverseGamma(sig2_alpha, sig2_beta))
+        cov = jnp.full((d, d), mu_sig2) + jnp.diag(jnp.repeat(sig2, d))
+        theta = numpyro.sample(
+            "theta",
+            dist.MultivariateNormal(mu_0, cov),
+        )
+        numpyro.sample(
+            "y",
+            dist.BinomialLogits(theta + logit_p1, total_count=data[..., 1]),
+            obs=data[..., 0],
+        )
+    return model
 
 
 def test_log_likelihood():
@@ -46,3 +53,57 @@ def test_log_likelihood():
     np.testing.assert_allclose(
         ll, invgamma_term + normal_term + sum(binomial_term), rtol=1e-6
     )
+
+def test_optimize_posterior():
+    N = 10
+    n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
+    y_i = np.tile(np.array([0, 1, 9, 10], dtype=np.float64), (N, 1))
+    data = np.stack((y_i, n_i), axis=-1)
+    ll_fnc = inla.build_log_likelihood(berry_model(4))
+
+    def conditional(theta, sig2, data):
+        params = dict(theta=theta, sig2=sig2)
+        return ll_fnc(params, data)
+
+
+    def grad_hess(theta, sig2, data):
+        grad = jax.grad(conditional)(theta, sig2, data)
+        hess = jax.hessian(conditional)(theta, sig2, data)
+        return grad, hess
+
+    grad_hess_vmap = jax.jit(
+        jax.vmap(jax.vmap(grad_hess, in_axes=(0, 0, None)), in_axes=(0, None, 0))
+    )
+    conditional_vmap = jax.jit(
+        jax.vmap(jax.vmap(conditional, in_axes=(0, 0, None)), in_axes=(0, None, 0))
+    )
+
+    infer = inla.INLA(conditional_vmap, grad_hess_vmap, 4)
+    sig2_rule = util.log_gauss_rule(15, 1e-2, 1e2)
+    theta_max, hess, iters = infer.optimize_loop(data, sig2_rule.pts, 1e-3)
+    post = infer.posterior(theta_max, hess, sig2_rule.pts, sig2_rule.wts, data)
+    np.testing.assert_allclose(
+        theta_max[0, 12],
+        np.array([-6.04682818, -2.09586893, -0.21474981, -0.07019088]),
+        atol=1e-3,
+    )
+    correct = np.array(
+        [
+            1.25954474e02,
+            4.52520893e02,
+            8.66625278e02,
+            5.08333300e02,
+            1.30365045e02,
+            2.20403048e01,
+            3.15183578e00,
+            5.50967224e-01,
+            2.68365061e-01,
+            1.23585852e-01,
+            1.13330444e-02,
+            5.94800210e-04,
+            4.01075571e-05,
+            4.92782335e-06,
+            1.41605356e-06,
+        ]
+    )
+    np.testing.assert_allclose(post[0], correct, rtol=1e-3)
