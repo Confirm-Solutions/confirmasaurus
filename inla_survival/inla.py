@@ -14,58 +14,13 @@ import numpyro.handlers as handlers
 import smalljax
 
 
-# Tried this out, really slow for computing derivatives!
-# flat_ll, slice_dict = inla.build_flat_log_likelihood(model, data)
-# flat_ll(np.array([10.0, 0, 0, 0, 0]), data)
-# def grad_hess(params, data):
-#     grad = jax.grad(flat_ll)(params, data)
-#     hess = jax.hessian(flat_ll)(params, data)
-#     return grad, hess
-
-# grad_hess_vmap = jax.jit(
-#     jax.vmap(jax.vmap(grad_hess, in_axes=(0, None)), in_axes=(0, 0))
-# )
-# y = scipy.stats.binom.rvs(35, 0.3, size=(int(1e4), narms))
-# n = np.full_like(y, 35)
-# data = np.stack((y, n), axis=-1)
-# params = np.random.rand(data.shape[0], 15, narms + 1)
-# def build_flat_log_likelihood(model, example_data):
-#     # see https://num.pyro.ai/en/stable/handlers.html
-
-#     trace = handlers.trace(handlers.seed(model, jax.random.PRNGKey(10))).get_trace(
-#         example_data
-#     )
-#     slice_dict = dict()
-#     i = 0
-#     for k in trace:
-#         if trace[k]["is_observed"]:
-#             continue
-#         shape = 1 if len(trace[k]["value"].shape) == 0 else trace[k]["value"].shape[0]
-#         slice_dict[k] = (i, i + shape)
-#         i += shape
-
-#     def log_likelihood(params, data):
-#         params_dict = dict()
-#         for k, (i1, i2) in slice_dict.items():
-#             params_dict[k] = params[i1:i2]
-#         trace = handlers.trace(
-#             handlers.substitute(handlers.seed(model, jax.random.PRNGKey(10)), params_dict)
-#         ).get_trace(data)
-#         return sum(
-#             [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
-#         )
-
-#     return log_likelihood, slice_dict
-
-
-
 def merge(*pytrees):
     def _merge(*args):
         combine = None
         for arg in args:
             if arg is not None:
                 if combine is not None:
-                    overwrite = jnp.isnan(combine)
+                    overwrite = ~jnp.isnan(arg)
                     combine = jnp.where(overwrite, arg, combine)
                 elif isinstance(arg, jnp.ndarray):
                     combine = arg
@@ -75,52 +30,45 @@ def merge(*pytrees):
 
     return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
 
-def build_raw_log_likelihood(model):
-    def log_likelihood(params1, params2, data):
-        trace = handlers.trace(
-            handlers.substitute(
-                handlers.seed(model, jax.random.PRNGKey(10)), merge(params1, params2)
-            )
-        ).get_trace(data)
+
+def build_raw_log_likelihood(model, example_p):
+    jax.tree_util.tree
+    ravel_p, unravel_fnc = jax.flatten_util.ravel_pytree(example_p)
+    ravel_fnc = lambda p: jax.flatten_util.ravel_pytree(p)[0]
+    which_nan = jnp.isnan(ravel_p)
+    mult = jax.tree_util.tree_map(lambda x: jnp.any(jnp.isnan(x)).astype(int), example_p)
+
+    def log_likelihood(p, p_pinned, data):
+        param_array = jnp.where(~jnp.array([True, False, False, False, False]), p, p_pinned)
+        seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
+        subs_model = handlers.substitute(seeded_model, unravel_fnc(param_array))
+        trace = handlers.trace(subs_model).get_trace(data)
         return sum(
             [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
         )
 
-    return log_likelihood
+    return log_likelihood, ravel_fnc, unravel_fnc
 
 
-# def separate_params(ll_fnc, mask):
-#     def wrapped(params, pinned_params, data):
-#         params[]
+def build_grad_hess(ll_fnc):
+    def grad_hess(p, p_pinned, data):
+        grad = jax.grad(ll_fnc)(p, p_pinned, data)
+        hess = jax.hessian(ll_fnc)(p, p_pinned, data)
+        return grad, hess
+    return grad_hess
 
-
-def pin(ll_fnc, pinned_params):
-    for k in pinned_params:
-        if isinstance(pinned_params[k], np.ndarray):
-            pinned_params[k] = jnp.array(k)
-
-    def wrapped(params, pinned_params, data):
-        for k in pinned_params:
-            if isinstance(pinned_params[k], jnp.ndarray):
-                params[k] = jnp.where(
-                    jnp.isnan(pinned_params[k]), params[k], pinned_params[k]
-                )
-            else:
-                params[k] = pinned_params[k]
-        return ll_fnc(params, data)
-
-    return wrapped
-
-
-def build_grad_hess():
-    pass
+    # return jax.jit(
+    #     jax.vmap(jax.vmap(grad_hess, in_axes=(0, 0, None)), in_axes=(0, None, 0))
+    # )
 
 
 class INLA:
-    def __init__(self, log_joint, grad_hess, d):
+    def __init__(self, log_joint, d, grad_hess=None):
         self.d = d
         self.log_joint = log_joint
         self.grad_hess = grad_hess
+        if self.grad_hess is None:
+            self.grad_hess = build_grad_hess(self.log_joint)
         self.solver = jax.vmap(jax.vmap(smalljax.gen(f"solve{d}")))
 
     @partial(jax.jit, static_argnums=(0, 3))
@@ -129,7 +77,9 @@ class INLA:
 
         def step(args):
             theta_max, hess, iters, go = args
-            grad, hess = self.grad_hess(theta_max, sig2, data)
+            p1 = dict(theta=theta_max, sig2=None)
+            p2 = dict(theta=None, sig2=sig2)
+            grad, hess = self.grad_hess(p1, p2, data)
             step = -self.solver(hess, grad)
             go = jnp.any(jnp.sum(step**2) > tol**2) & (iters < max_iter)
             return theta_max + step, hess, iters + 1, go

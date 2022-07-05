@@ -54,21 +54,6 @@ def test_log_likelihood():
         ll, invgamma_term + normal_term + sum(binomial_term), rtol=1e-6
     )
     
-def test_pin():
-    data = np.array([[7,35], [6.0,35], [5,35], [4,35]])
-    params = dict(
-        sig2 = 11.0,
-        theta = np.array([0.0,0.0,0,0]),
-    )
-    ll_fnc = inla.build_log_likelihood(berry_model(4))
-    correct = ll_fnc(params, data)
-    v1 = inla.pin(ll_fnc, dict(sig2 = 11.0))(dict(sig2 = -1, theta = np.array([0,0,0,0])), data)
-    np.testing.assert_allclose(v1, correct)
-    v2 = inla.pin(ll_fnc, dict(theta=np.array([np.nan, np.nan, 0, np.nan])))(
-        dict(sig2=11.0, theta=np.array([0, 0, 11, 0])), data
-    )
-    np.testing.assert_allclose(v2, correct)
-    
 def test_merge():
     a, b = dict(sig2 = 10.0, theta = jnp.array([3, np.nan])), dict(sig2 = None, theta=jnp.array([np.nan, 2]))
     out = inla.merge(a, b)
@@ -80,26 +65,25 @@ def test_optimize_posterior():
     n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
     y_i = np.tile(np.array([0, 1, 9, 10]), (N, 1))
     data = np.stack((y_i, n_i), axis=-1).astype(np.float64)
-    ll_fnc = inla.build_log_likelihood(berry_model(4))
+    ll_fnc = inla.build_raw_log_likelihood(berry_model(4))
 
-    def conditional(theta, sig2, data):
-        params = dict(theta=theta, sig2=sig2)
-        return ll_fnc(params, data)
+    # def conditional(theta, sig2, data):
+    #     params = dict(theta=theta, sig2=sig2)
+    #     return ll_fnc(params, dict(sig2=None, theta=None), data)
 
 
-    def grad_hess(theta, sig2, data):
-        grad = jax.grad(conditional)(theta, sig2, data)
-        hess = jax.hessian(conditional)(theta, sig2, data)
-        return grad, hess
+    # def grad_hess(theta, sig2, data):
+    #     grad = jax.grad(conditional)(theta, sig2, data)
+    #     hess = jax.hessian(conditional)(theta, sig2, data)
+    #     return grad, hess
 
-    grad_hess_vmap = jax.jit(
-        jax.vmap(jax.vmap(grad_hess, in_axes=(0, 0, None)), in_axes=(0, None, 0))
-    )
-    conditional_vmap = jax.jit(
-        jax.vmap(jax.vmap(conditional, in_axes=(0, 0, None)), in_axes=(0, None, 0))
-    )
-
-    infer = inla.INLA(conditional_vmap, grad_hess_vmap, 4)
+    # grad_hess_vmap = jax.jit(
+    #     jax.vmap(jax.vmap(grad_hess, in_axes=(0, 0, None)), in_axes=(0, None, 0))
+    # )
+    # conditional_vmap = jax.jit(
+    #     jax.vmap(jax.vmap(conditional, in_axes=(0, 0, None)), in_axes=(0, None, 0))
+    # )
+    infer = inla.INLA(ll_fnc, 4)
     sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
     theta_max, hess, iters = infer.optimize_loop(data, sig2_rule.pts, 1e-3)
     post = infer.posterior(theta_max, hess, sig2_rule.pts, sig2_rule.wts, data)
