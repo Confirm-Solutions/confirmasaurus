@@ -70,11 +70,11 @@ def test_merge():
 def test_ravel_fncs():
     tt = np.arange(4, dtype=np.float64)
     tt[1] = np.nan
-    ex = dict(sig2=None, theta=tt)
-    ravel_f, unravel_f = inla.build_ravel_fncs(ex)
-    r = ravel_f(ex)
+    ex = dict(sig2=np.array([np.nan]), theta=tt)
+    spec = inla.ParamSpec(ex)
+    r = spec.ravel_f(ex)
     np.testing.assert_allclose(r, [0,2,3])
-    ur = unravel_f(r)
+    ur = spec.unravel_f(r)
     for k in ex:
         if ex[k] is None:
             assert(ur[k] is None)
@@ -83,14 +83,14 @@ def test_ravel_fncs():
 
 def test_grad_hess():
     data = np.array([[7, 35], [6.0, 35], [5, 35], [4, 35]])
-    params = dict(
-        sig2=10.0,
+    spec = inla.ParamSpec(dict(
+        sig2=np.array([10.0]),
         theta=np.array([0.0, 0.0, 0, 0]),
-    )
+    ))
     ll_fnc = inla.build_log_likelihood(berry_model(4))
-    grad_hess_vmap = inla.build_grad_hess(ll_fnc, dict(sig2=None, theta=None))
+    grad_hess_vmap = inla.build_grad_hess(ll_fnc, spec)
     grad, hess = grad_hess_vmap(
-        dict(sig2=np.full((1, 1, 1), 10.0), theta=np.zeros((1, 1, 4))),
+        np.concatenate((np.full((1, 1, 1), 10.0), np.zeros((1, 1, 4))), axis=2),
         dict(sig2=None, theta=None),
         data[None],
     )
@@ -102,13 +102,11 @@ def test_grad_hess():
     np.testing.assert_allclose(grad[0, 0], full_grad, rtol=1e-4)
     np.testing.assert_allclose(hess[0, 0, :2], hess01, rtol=1e-4)
 
+    spec2 = inla.ParamSpec(dict(sig2=jnp.array([jnp.nan]), theta=jnp.array([0, np.nan, 0, 0])))
+    grad_hess_vmap = inla.build_grad_hess(ll_fnc, spec2)
     theta_fixed = jnp.array([np.nan, 0.0, np.nan, np.nan])
-    grad_hess_vmap = inla.build_grad_hess(
-        ll_fnc,
-        dict(sig2=jnp.array([10.0]), theta=theta_fixed),
-    )
     grad, hess = grad_hess_vmap(
-        dict(sig2=None, theta=np.zeros((2, 1, 4))),
+        np.zeros((2, 1, 4)),
         dict(sig2=np.array([[10.0]]), theta=theta_fixed[None]),
         np.tile(data[None], (2, 1, 1)),
     )
@@ -121,36 +119,39 @@ def test_optimize_posterior():
     n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
     y_i = np.tile(np.array([0, 1, 9, 10]), (N, 1))
     data = np.stack((y_i, n_i), axis=-1).astype(np.float64)
-    ll_fnc = inla.build_raw_log_likelihood(berry_model(4))
+    ll_fnc = inla.build_log_likelihood(berry_model(4))
 
-    infer = inla.INLA(ll_fnc, 4)
     sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
-    inla.build_optimizer(ll_fnc)
-    theta_max, hess, iters = infer.optimize_loop(data, sig2_rule.pts, 1e-3)
+    x0 = np.zeros((N, sig2_rule.pts.shape[0], 4))
+    spec = inla.ParamSpec(dict(sig2=np.array([np.nan]), theta=np.zeros(4)))
+    optimizer = inla.build_optimizer(ll_fnc, spec)
+    p_pinned = dict(sig2=sig2_rule.pts, theta=None)
+    x_max, hess, iters = optimizer(x0, p_pinned, data)
     np.testing.assert_allclose(
-        theta_max[0, 12],
+        x_max[0, 12],
         np.array([-6.04682818, -2.09586893, -0.21474981, -0.07019088]),
         atol=1e-3,
     )
-
+    post = inla.build_calc_posterior(ll_fnc, spec)(x_max, hess, p_pinned, data)
+    post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
     # post = infer.posterior(theta_max, hess, sig2_rule.pts, sig2_rule.wts, data)
-    # correct = np.array(
-    #     [
-    #         1.25954474e02,
-    #         4.52520893e02,
-    #         8.66625278e02,
-    #         5.08333300e02,
-    #         1.30365045e02,
-    #         2.20403048e01,
-    #         3.15183578e00,
-    #         5.50967224e-01,
-    #         2.68365061e-01,
-    #         1.23585852e-01,
-    #         1.13330444e-02,
-    #         5.94800210e-04,
-    #         4.01075571e-05,
-    #         4.92782335e-06,
-    #         1.41605356e-06,
-    #     ]
-    # )
-    # np.testing.assert_allclose(post[0], correct, rtol=1e-3)
+    correct = np.array(
+        [
+            1.25954474e02,
+            4.52520893e02,
+            8.66625278e02,
+            5.08333300e02,
+            1.30365045e02,
+            2.20403048e01,
+            3.15183578e00,
+            5.50967224e-01,
+            2.68365061e-01,
+            1.23585852e-01,
+            1.13330444e-02,
+            5.94800210e-04,
+            4.01075571e-05,
+            4.92782335e-06,
+            1.41605356e-06,
+        ]
+    )
+    np.testing.assert_allclose(post[0], correct, rtol=1e-3)

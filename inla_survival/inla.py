@@ -1,4 +1,5 @@
 import copy
+from dataclasses import dataclass
 import jax
 import numpy as np
 import jax.numpy as jnp
@@ -10,6 +11,7 @@ import numpyro.handlers as handlers
 # TODO: Test against MCMC.
 # TODO: test multiple n_arms
 # TODO: test automatic gradients and explicit gradients
+# TODO: parameter checks!
 import smalljax
 
 
@@ -43,102 +45,93 @@ def build_log_likelihood(model):
 
     return log_likelihood
 
-def build_ravel_fncs(param_ex):
-    # The ordering of entries in the concatenated grad/hess here will depend on
-    # the order of entries in the param_ex dictionary. Since Python 3.6,
-    # dictionaries are insertion ordered so this depends on user choice of
-    # parameter order. But, because we fix it once ahead of time, later
-    # inconsistency will be just fine!
-    key_order = param_ex.keys()
-    def ravel_f(p, axis=-1):
+
+class ParamSpec:
+    def __init__(self, param_example):
+        # The ordering of entries in the concatenated grad/hess here will depend on
+        # the order of entries in the param_example dictionary. Since Python 3.6,
+        # dictionaries are insertion ordered so this depends on user choice of
+        # parameter order. But, because we fix it once ahead of time, later
+        # inconsistency will be just fine!
+        self.param_example = param_example
+        self.key_order = param_example.keys()
+        self.not_nan = {k: ~jnp.isnan(param_example[k]) for k in self.key_order}
+        self.dont_skip_idxs = {k: np.where(self.not_nan[k])[0] for k in self.key_order}
+        self.n_params = sum([v.shape[0] for k, v in param_example.items()])
+        self.n_pinned = sum([np.sum(np.isnan(v)) for k, v in param_example.items()])
+        self.n_free = self.n_params - self.n_pinned
+
+    def ravel_f(self, p, axis=-1):
         return jnp.concatenate(
-            [
-                p[k][~jnp.isnan(param_ex[k])]
-                for k in key_order
-                if param_ex[k] is not None
-            ],
+            [p[k][self.not_nan[k]] for k in self.key_order if p[k] is not None],
             axis=axis,
         )
 
-    def unravel_f(x):
+    def unravel_f(self, x):
         out = dict()
         i = 0
-        for k in key_order:
-            if param_ex[k] is None:
-                out[k] = None
-                continue
-            end = i + param_ex[k].shape[0]
-            out_arr = jnp.full(param_ex[k].shape[0], jnp.nan)
-            out[k] = out_arr.at[jnp.where(~jnp.isnan(param_ex[k]))[0]].set(x[i:end])
+        for k in self.key_order:
+            out_arr = jnp.full(self.param_example[k].shape[0], jnp.nan)
+            end = i + self.dont_skip_idxs[k].shape[0]
+            out[k] = out_arr.at[self.dont_skip_idxs[k]].set(x[i:end])
             i = end
         return out
 
-    return ravel_f, unravel_f, key_order
 
-def build_grad_hess(log_joint, param_ex, pin_ex):
-    no_pinning = jax.tree_util.tree_all(
-        jax.tree_util.tree_map(lambda x: x is None, pin_ex)
-    )
-    if not no_pinning:
-        isnan_pytree = [jnp.isnan(pin_ex[k]) for k in pin_ex.keys()]
-        not_pinned = jnp.concatenate([v for v in isnan_pytree if not jnp.all(~v)])
-
-    def grad_hess(p, p_pinned, data):
+def build_grad_hess(log_joint, param_spec):
+    def grad_hess(x, p_pinned, data):
         # The inputs to grad_hess are pytrees but the output grad/hess are
         # flattened.
+        p = param_spec.unravel_f(x)
         grad = jax.grad(log_joint)(p, p_pinned, data)
         hess = jax.hessian(log_joint)(p, p_pinned, data)
 
-        full_grad = jnp.concatenate(
-            [grad[k] for k in p.keys() if grad[k] is not None], axis=-1
-        )
+        full_grad = param_spec.ravel_f(grad)
         full_hess = jnp.concatenate(
             [
                 jnp.concatenate(
-                    [hess[k1][k2] for k2 in p.keys() if hess[k1][k2] is not None],
+                    [
+                        hess[k1][k2][param_spec.not_nan[k1]][:, param_spec.not_nan[k2]]
+                        for k2 in param_spec.key_order
+                        if hess[k1][k2] is not None
+                    ],
                     axis=-1,
                 )
-                for k1 in p.keys()
+                for k1 in param_spec.key_order
                 if hess[k1] is not None
             ],
             axis=-2,
         )
-        if no_pinning:
-            return full_grad, full_hess
-        else:
-            return full_grad[not_pinned], full_hess[not_pinned][:, not_pinned]
+        return full_grad, full_hess
 
     return jax.jit(
         jax.vmap(jax.vmap(grad_hess, in_axes=(0, 0, None)), in_axes=(0, None, 0))
     )
 
 
-# TODO: how do I unflatten from the x array into the p dict
-def build_step_hess(log_joint, pin_ex):
-    grad_hess = build_grad_hess(log_joint, pin_ex)
+def build_step_hess(log_joint, param_spec):
+    grad_hess = build_grad_hess(log_joint, param_spec)
+    solver = jax.vmap(jax.vmap(smalljax.gen(f"solve{param_spec.n_free}")))
 
     def step_hess(x, p_pinned, data):
         # Inputs and outputs are arrays, need to convert to pytrees internally.
-        grad, hess = grad_hess(p, p_pinned, data)
-        d = grad.shape[-1]
-        solver = jax.vmap(jax.vmap(smalljax.gen(f"solve{d}")))
-        return -solver(hess, grad)
+        grad, hess = grad_hess(x, p_pinned, data)
+        return -solver(hess, grad), hess
 
     return step_hess
 
 
-def build_optimizer(
-    log_joint=None, pin_ex=None, step_hess=None, max_iter=30, tol=1e-3
-):
+def build_optimizer(log_joint, param_spec, step_hess=None, max_iter=30, tol=1e-3):
     if step_hess is None:
-        if log_joint is None or pin_ex is None:
+        if log_joint is None or param_spec is None:
             raise ValueError(
                 "Either step_hess must be specified or both log_joint and "
-                "pin_ex must be specified."
+                "param_spec must be specified."
             )
-        step_hess = build_grad_hess(log_joint, pin_ex)
+        step_hess = build_step_hess(log_joint, param_spec)
 
     def optimize_loop(x0, p_pinned, data):
+
         def step(args):
             x, hess_info, iters, go = args
             step, hess_info = step_hess(x, p_pinned, data)
@@ -153,6 +146,37 @@ def build_optimizer(
 
     return jax.jit(optimize_loop)
 
+
+def build_calc_posterior(log_joint, param_spec, logdet=None):
+    """
+    The output will not be normalized!
+    """
+    if logdet is None:
+        logdet = lambda x: smalljax.logdet(-x)
+
+    def calc_posterior(x_max, hess_info, p_pinned, data):
+        p_max = param_spec.unravel_f(x_max)
+        lj = log_joint(p_max, p_pinned, data)
+        print(hess_info)
+        log_post = lj + 0.5 * logdet(hess_info)
+        log_post -= jnp.max(log_post)
+        return jnp.exp(log_post)
+
+    return jax.jit(
+        jax.vmap(
+            jax.vmap(calc_posterior, in_axes=(0, 0, 0, None)), in_axes=(0, 0, None, 0)
+        )
+    )
+
+
+class LaplaceAppx:
+    def __init__(self, log_joint, var):
+        param_example = 0
+        # if x0 is None:
+        #     pinned_dim = [p_pinned[k] for k in p_pinned if p_pinned[k] is not None][0]
+        #     x0 = jnp.zeros(
+        #         (data.shape[0], pinned_dim, param_spec.n_free), dtype=data.dtype
+        #     )
 
 class INLA:
     def __init__(self, log_joint, d, grad_hess=None):
