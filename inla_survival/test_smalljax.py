@@ -2,7 +2,7 @@ import timeit
 import pytest
 import jax
 import numpy as np
-from smalljax import inv22, inv33, inv44, inv_recurse, logdet, gen, invJI
+from smalljax import inv22, inv33, inv44, inv_recurse, logdet, gen
 
 
 @pytest.mark.parametrize(
@@ -51,33 +51,4 @@ def test_logdet():
         v = logdet(a)
         np.testing.assert_allclose(v, correct, atol=1e-7)
         
-
-def test_invJI():
-    np.random.seed(10)
-    a, b = np.random.rand(2)
-    for d in range(2, 10):
-        m = np.full((d,d), b) + np.diag(np.full(d, a - b))
-        correct = np.linalg.inv(m)
-        ainv, binv = invJI(a, b, d)
-        m = np.full((d,d), binv) + np.diag(np.full(d, ainv - binv))
-        np.testing.assert_allclose(m, correct, rtol=1e-6)
         
-def my_timeit(f):
-    return np.min(timeit.repeat(f, number = 100))
-
-def benchmark_invJI():
-    for d in range(2, 10):
-        N = int(300000 / (d ** 2))
-        vs = np.random.rand(N, 2)
-        a = vs[:,0]
-        b = vs[:,1]
-        m = b[:, None, None] * np.full((d,d), 1.0) + (a - b)[:, None, None] * np.eye(d)
-        vmap_inv_recurse = jax.jit(jax.vmap(inv_recurse))
-        vmap_invJI = jax.jit(jax.vmap(invJI, in_axes=(0,0,None)))
-        print('\n', d)
-        print(f'inv_recurse', my_timeit(lambda: vmap_inv_recurse(m)))
-        print('invJI', my_timeit(lambda: vmap_invJI(a, b, d)))
-    
-    
-if __name__ == "__main__":
-    benchmark_invJI()

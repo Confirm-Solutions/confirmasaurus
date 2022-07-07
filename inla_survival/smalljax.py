@@ -267,15 +267,3 @@ def logdet(A):
     d = A.shape[0]
     lu = gen(f'lu{d}')(A)
     return jnp.sum(jnp.log(jnp.abs(jnp.diag(lu))))
-
-def invJI(a, b, d):
-    def step(i, arg):
-        ai, bi = arg
-        step = bi ** 2 / ai
-        return (ai - step, bi - step)
-    ai, bi = jax.lax.fori_loop(0, d - 2, step, (a, b))
-    mult = 1 / (ai ** 2 - bi ** 2)
-    ainv = ai * mult
-    binv = -bi * mult
-    return ainv, binv
-    
