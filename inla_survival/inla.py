@@ -7,44 +7,19 @@ from functools import partial
 import numpyro
 import numpyro.distributions as dist
 import numpyro.handlers as handlers
+from jax.config import config
+
+# This line is critical for enabling 64-bit floats.
+config.update("jax_enable_x64", True)
 
 # TODO: Test against MCMC.
 # TODO: test multiple n_arms
 # TODO: test automatic gradients and explicit gradients
 # TODO: parameter checks!
+# TODO: check dtypes input/output
+# TODO: conditional laplace/simplified laplace
+# TODO: integration factors
 import smalljax
-
-
-def merge(*pytrees):
-    def _merge(*args):
-        combine = None
-        for arg in args:
-            if arg is not None:
-                if combine is not None:
-                    overwrite = ~jnp.isnan(arg)
-                    combine = jnp.where(overwrite, arg, combine)
-                elif isinstance(arg, jnp.ndarray):
-                    combine = arg
-                else:
-                    return arg
-        return combine
-
-    return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
-
-
-def build_log_likelihood(model):
-    def log_likelihood(p, p_pinned, data):
-        # Inputs are pytrees
-        p_final = merge(p, p_pinned)
-        seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
-        subs_model = handlers.substitute(seeded_model, p_final)
-        trace = handlers.trace(subs_model).get_trace(data)
-        return sum(
-            [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
-        )
-
-    return log_likelihood
-
 
 class ParamSpec:
     def __init__(self, param_example):
@@ -79,6 +54,63 @@ class ParamSpec:
                 out[k] = out_arr.at[self.dont_skip_idxs[k]].set(x[i:end])
             i = end
         return out
+
+def pin_to_spec(model, pin, data_example):
+    """
+    Facilitates a clean user API.
+
+    pin = "sig2"
+    pin = ["sig2"]
+    pin = [("sig2", 0)]
+    pin = [("sig2", 0), ("theta", 1)]
+    """
+    seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
+    trace = handlers.trace(seeded_model).get_trace(data_example)
+    d = {
+        k: (v["value"].shape[0] if len(v["value"].shape) > 0 else 1)
+        for k, v in trace.items()
+        if not v["is_observed"]
+    }
+
+    param_example = {k: np.zeros(n) for k, n in d.items()}
+    if not isinstance(pin, list):
+        pin = [pin]
+    for pin_entry in pin:
+        if isinstance(pin_entry, str):
+            param_example[pin_entry][:] = np.nan
+        else:
+            param_example[pin_entry[0]][pin_entry[1]] = np.nan
+    return ParamSpec(param_example)
+
+def merge(*pytrees):
+    def _merge(*args):
+        combine = None
+        for arg in args:
+            if arg is not None:
+                if combine is not None:
+                    overwrite = ~jnp.isnan(arg)
+                    combine = jnp.where(overwrite, arg, combine)
+                elif isinstance(arg, jnp.ndarray):
+                    combine = arg
+                else:
+                    return arg
+        return combine
+
+    return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
+
+
+def build_log_likelihood(model):
+    def log_likelihood(p, p_pinned, data):
+        # Inputs are pytrees
+        p_final = merge(p, p_pinned)
+        seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
+        subs_model = handlers.substitute(seeded_model, p_final)
+        trace = handlers.trace(subs_model).get_trace(data)
+        return sum(
+            [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
+        )
+
+    return log_likelihood
 
 
 def build_grad_hess(log_joint, param_spec):
@@ -176,52 +208,27 @@ def build_calc_posterior(log_joint, param_spec, logdet=None):
     return jax.jit(calc_posterior)
 
 
-class LaplaceAppx:
-    def __init__(self, log_joint, var):
-        param_example = 0
-        # if x0 is None:
-        #     pinned_dim = [p_pinned[k] for k in p_pinned if p_pinned[k] is not None][0]
-        #     x0 = jnp.zeros(
-        #         (data.shape[0], pinned_dim, param_spec.n_free), dtype=data.dtype
-        #     )
-
-
-class INLA:
-    def __init__(self, log_joint, d, grad_hess=None):
-        self.d = d
-        self.log_joint = log_joint
-        self.grad_hess = grad_hess
-        if self.grad_hess is None:
-            self.grad_hess = build_grad_hess(self.log_joint)
-        self.solver = jax.vmap(jax.vmap(smalljax.gen(f"solve{d}")))
-
-    @partial(jax.jit, static_argnums=(0, 3))
-    def optimize_loop(self, data, sig2, tol):
-        max_iter = 30
-
-        def step(args):
-            theta_max, hess, iters, go = args
-            p1 = dict(theta=theta_max, sig2=None)
-            p2 = dict(theta=None, sig2=sig2)
-            grad, hess = self.grad_hess(p1, p2, data)
-            step = -self.solver(hess, grad)
-            go = jnp.any(jnp.sum(step**2) > tol**2) & (iters < max_iter)
-            return theta_max + step, hess, iters + 1, go
-
-        n_arms = data.shape[1]
-        theta_max0 = jnp.zeros((data.shape[0], sig2.shape[0], n_arms))
-        hess0 = jnp.zeros((data.shape[0], sig2.shape[0], n_arms, n_arms))
-        init_args = (theta_max0, hess0, 0, True)
-
-        out = jax.lax.while_loop(lambda args: args[3], step, init_args)
-        theta_max, hess, iters, go = out
-        return theta_max, hess, iters
-
-    @partial(jax.jit, static_argnums=(0,))
-    def posterior(self, theta_max, hess, sig2, wts, data):
-        lj = self.log_joint(theta_max, sig2, data)
-        logdet = jax.vmap(jax.vmap(smalljax.logdet))(-hess)
-        log_post = lj - 0.5 * logdet
-        log_post -= jnp.max(log_post)
-        post = jnp.exp(log_post)
-        return post / jnp.sum(post * wts, axis=1)[:, None]
+def pytree_shape0(pyt):
+    shape0 = jax.tree_util.tree_flatten(
+        jax.tree_util.tree_map(lambda x: (x.shape[0] if x is not None else None), pyt)
+    )[0]
+    assert(jnp.all(jnp.array(shape0) == shape0[0]))
+    return shape0[0]
+    
+class FullLaplace:
+    def __init__(self, model, pin, data_example, max_iter=30, tol=1e-3):
+        self.model = model
+        self.pin = pin
+        self.data_example = data_example
+        self.spec = pin_to_spec(self.model, self.pin, self.data_example)
+        self.N = self.spec.n_free
+        self.log_joint = build_log_likelihood(self.model)
+        self.optimizer = build_optimizer(self.log_joint, self.spec, max_iter=max_iter, tol=tol)
+        self.calc_posterior = build_calc_posterior(self.log_joint, self.spec)
+    
+    def __call__(self, p_pinned, data, x0=None):
+        if x0 is None:
+            x0 = jnp.zeros((data.shape[0], pytree_shape0(p_pinned), self.N), dtype=data.dtype)
+        x_max, hess_info, iters = self.optimizer(x0, p_pinned, data)
+        post = self.calc_posterior(x_max, hess_info, p_pinned, data)
+        return post, x_max, hess_info, iters

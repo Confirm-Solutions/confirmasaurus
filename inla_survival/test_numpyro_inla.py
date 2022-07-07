@@ -77,6 +77,20 @@ def test_ravel_fncs():
     ur = spec.unravel_f(r)
     assert(ur['sig2'] is None)
     np.testing.assert_allclose(ur['theta'], ex['theta'])
+    
+
+def test_pin_to_spec():
+    model = berry_model(4)
+    data_ex = np.ones((4, 2))
+
+    for pin in ["sig2", ["sig2"], ("sig2", 0), [("sig2", 0)]]:
+        spec = inla.pin_to_spec(model, pin, data_ex)
+        np.testing.assert_allclose(spec.param_example['sig2'], np.array([np.nan]))
+        np.testing.assert_allclose(spec.param_example['theta'], np.array([0,0,0,0]))
+
+    spec = inla.pin_to_spec(model, [("sig2", 0), ("theta", 1)], data_ex)
+    np.testing.assert_allclose(spec.param_example['sig2'], np.array([np.nan]))
+    np.testing.assert_allclose(spec.param_example['theta'], np.array([0,np.nan,0,0]))
         
 
 def test_grad_hess():
@@ -112,27 +126,20 @@ def test_grad_hess():
     np.testing.assert_allclose(hess[0, 0, 0], hess01[1,[1,3,4]], rtol=1e-4)
 
 
-def test_optimize_posterior():
+def test_full_laplace():
     N = 10
     n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
     y_i = np.tile(np.array([0, 1, 9, 10]), (N, 1))
     data = np.stack((y_i, n_i), axis=-1).astype(np.float64)
-    ll_fnc = inla.build_log_likelihood(berry_model(4))
-
+    fl = inla.FullLaplace(berry_model(4), "sig2", data[0])
     sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
-    x0 = np.zeros((N, sig2_rule.pts.shape[0], 4))
-    spec = inla.ParamSpec(dict(sig2=np.array([np.nan]), theta=np.zeros(4)))
-    optimizer = inla.build_optimizer(ll_fnc, spec)
-    p_pinned = dict(sig2=sig2_rule.pts, theta=None)
-    x_max, hess, iters = optimizer(x0, p_pinned, data)
+    post, x_max, _, _ = fl(dict(sig2=sig2_rule.pts, theta=None), data)
+    post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
     np.testing.assert_allclose(
         x_max[0, 12],
         np.array([-6.04682818, -2.09586893, -0.21474981, -0.07019088]),
         atol=1e-3,
     )
-    post = inla.build_calc_posterior(ll_fnc, spec)(x_max, hess, p_pinned, data)
-    post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
-    # post = infer.posterior(theta_max, hess, sig2_rule.pts, sig2_rule.wts, data)
     correct = np.array(
         [
             1.25954474e02,
