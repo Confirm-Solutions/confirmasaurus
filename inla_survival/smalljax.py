@@ -213,6 +213,7 @@ def gen_solve(ctx, args, d):
 solve_spec = Spec('solve', gen_solve, in_types=('M', 'v'), out_types=('v'))
 
 def build_linalg(spec, d, print_code=True):
+    assert(d < 10)
     ctx = CodeGenCtx()
     args = []
     arg_spec = []
@@ -224,7 +225,6 @@ def build_linalg(spec, d, print_code=True):
             args.append([f'v{k}[{i}]' for i in range(d)])
             arg_spec.append(f'v{k}')
     out_names = spec.generator(ctx, args, d)
-    print(out_names)
     lines = ctx.lines()
     ret_vals = []
     for k, entry in enumerate(spec.out_types):
@@ -257,7 +257,7 @@ def gen(name):
         if not name.startswith(spec.prefix):
             continue
         d = int(name[len(spec.prefix):])
-        name, code = build_linalg(spec, d)
+        name, code = build_linalg(spec, d, print_code=False)
         exec(code)
         globals()[name] = locals()[name]
         return globals()[name]

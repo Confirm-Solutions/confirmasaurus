@@ -75,11 +75,9 @@ def test_ravel_fncs():
     r = spec.ravel_f(ex)
     np.testing.assert_allclose(r, [0,2,3])
     ur = spec.unravel_f(r)
-    for k in ex:
-        if ex[k] is None:
-            assert(ur[k] is None)
-            continue
-        np.testing.assert_allclose(ur[k], ex[k])
+    assert(ur['sig2'] is None)
+    np.testing.assert_allclose(ur['theta'], ex['theta'])
+        
 
 def test_grad_hess():
     data = np.array([[7, 35], [6.0, 35], [5, 35], [4, 35]])

@@ -73,7 +73,10 @@ class ParamSpec:
         for k in self.key_order:
             out_arr = jnp.full(self.param_example[k].shape[0], jnp.nan)
             end = i + self.dont_skip_idxs[k].shape[0]
-            out[k] = out_arr.at[self.dont_skip_idxs[k]].set(x[i:end])
+            if end == i:
+                out[k] = None
+            else:
+                out[k] = out_arr.at[self.dont_skip_idxs[k]].set(x[i:end])
             i = end
         return out
 
@@ -131,7 +134,6 @@ def build_optimizer(log_joint, param_spec, step_hess=None, max_iter=30, tol=1e-3
         step_hess = build_step_hess(log_joint, param_spec)
 
     def optimize_loop(x0, p_pinned, data):
-
         def step(args):
             x, hess_info, iters, go = args
             step, hess_info = step_hess(x, p_pinned, data)
@@ -152,21 +154,26 @@ def build_calc_posterior(log_joint, param_spec, logdet=None):
     The output will not be normalized!
     """
     if logdet is None:
-        logdet = lambda x: smalljax.logdet(-x)
+        logdet = jax.vmap(jax.vmap(lambda x: smalljax.logdet(-x)))
+
+    log_joint_vmap = jax.vmap(
+        jax.vmap(
+            lambda x, p_pinned, data: log_joint(
+                param_spec.unravel_f(x), p_pinned, data
+            ),
+            in_axes=(0, 0, None),
+        ),
+        in_axes=(0, None, 0),
+    )
 
     def calc_posterior(x_max, hess_info, p_pinned, data):
-        p_max = param_spec.unravel_f(x_max)
-        lj = log_joint(p_max, p_pinned, data)
-        print(hess_info)
-        log_post = lj + 0.5 * logdet(hess_info)
+        lj = log_joint_vmap(x_max, p_pinned, data)
+        log_post = lj - 0.5 * logdet(hess_info)
         log_post -= jnp.max(log_post)
-        return jnp.exp(log_post)
+        post = jnp.exp(log_post)
+        return post
 
-    return jax.jit(
-        jax.vmap(
-            jax.vmap(calc_posterior, in_axes=(0, 0, 0, None)), in_axes=(0, 0, None, 0)
-        )
-    )
+    return jax.jit(calc_posterior)
 
 
 class LaplaceAppx:
@@ -177,6 +184,7 @@ class LaplaceAppx:
         #     x0 = jnp.zeros(
         #         (data.shape[0], pinned_dim, param_spec.n_free), dtype=data.dtype
         #     )
+
 
 class INLA:
     def __init__(self, log_joint, d, grad_hess=None):
