@@ -4,6 +4,8 @@
 
 ## Anarchy: a space for doing ANYTHING
 
+Commit and push whatever you want into this directory.
+
 Pull requests are great! But sometimes you just want to do stuff. I see two main uses here:
 
 - notebooks and scratch/prototype code that you don't expect to maintain.
@@ -16,6 +18,8 @@ I'll probably mostly push markdown here. Markdown is nice because there are many
 ## Hiding anarchy/ files in github pull requests
 
 [I set up `.gitattributes` so that it'll be easy to ignore files in the anarchy folder when we make PRs.](https://stackoverflow.com/questions/20120478/ignoring-specific-files-file-types-or-folders-in-a-pull-request-diff/54235094)
+
+We can also eventually ignore changes in this directory.
 
 ## Why not google docs or overleaf or ...?
 
