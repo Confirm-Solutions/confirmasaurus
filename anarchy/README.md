@@ -1,4 +1,4 @@
-# The Wild West
+# Anarchy
 
 This folder is part of the wild west. Do whatever you want. 
 
