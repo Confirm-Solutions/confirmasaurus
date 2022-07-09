@@ -1,0 +1,77 @@
+name: Test
+
+on:
+  schedule:
+    # Every day at 9:00 AM UTC
+    - cron: "0 9 * * *"
+  push:
+jobs:
+  test:
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest"]
+        python-version: ["3.9"]
+    name: Test (${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash -l {0}
+    # https://github.com/marketplace/actions/setup-miniconda#caching-environments
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Mambaforge
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          miniforge-variant: Mambaforge
+          miniforge-version: latest
+          activate-environment: anaconda-client-env
+          use-mamba: true
+          python-version: ${{ matrix.python-version }}
+      - name: Get Date
+        id: get-date
+        run: echo "::set-output name=today::$(/bin/date -u '+%Y%m%d')"
+        shell: bash
+      - name: Cache Dependencies
+        uses: actions/cache@v2
+        with:
+          # Cache the Conda, Bazel, and Pre-commit files
+          path: |
+            ${{ env.CONDA }}/envs
+            ~/.cache/pre-commit
+            ~/.cache/bazel
+          key: conda-${{ runner.os }}--${{ runner.arch }}--${{ steps.get-date.outputs.today }}-${{ hashFiles('environment.yml') }}-${{ env.CACHE_NUMBER }}
+        env:
+          # Increase this value to reset cache if environment.yml has not changed
+          CACHE_NUMBER: 1
+        id: cache
+      - name: Update environment
+        run: mamba env update -n anaconda-client-env -f environment.yml
+        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Run all pre-commit checks on the full repo!
+        run: |
+          pre-commit run --all-files
+      - name: Build and install pyimprint
+        run: |
+          ./generate_bazelrc
+          bazel build -c dbg //python:pyimprint_wheel
+          pip install --force-reinstall bazel-bin/python/dist/*.whl
+      - name: Bazel Test
+        run: |
+          bazel test -c dbg //...
+      - name: Pytest
+        run: |
+          pytest .
+      - name: Report failures on Slack
+        if: failure() && github.event.repository.default_branch == github.event.workflow_run.head_branch
+        id: slack
+        uses: slackapi/slack-github-action@v1.19.0
+        with:
+          # Slack channel id, channel name, or user id to post message.
+          # See also: https://api.slack.com/methods/chat.postMessage#channels
+          channel-id: C02TC2DAN74
+          # For posting a simple plain text message
+          slack-message: "*Build failure on default branch!* 😱\nhttps://github.com/${{github.repository}}/actions/runs/${{github.run_id}}"
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

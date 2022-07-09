@@ -1,0 +1,12 @@
+[py_binary(
+    name = name,
+    srcs = ["{}.py".format(name)],
+    data = ["//python:pyimprint/core.so"],
+    deps = [
+        "//python:pyimprint_lib",
+    ],
+) for name in [
+    "simple_selection",
+    "simple_log_rank",
+    "thompson",
+]]
