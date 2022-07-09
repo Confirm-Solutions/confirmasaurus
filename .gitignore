@@ -1,1 +1,33 @@
-.DS_Store
+*.DS_Store
+build/
+/.vs
+.vscode/
+.history/
+/imprint/CMakeSettings.json
+CMakeCache.txt
+CMakeFiles/
+imprintConfig.cmake
+imprintConfigVersion.cmake
+DartConfiguration.tcl
+.env
+
+/python/dist/
+.spyproject/
+
+# ignore rc because we are tracking generator now
+.bazelrc 
+bazel
+bazel-*
+.vagrant/
+Vagrantfile
+.idea/
+compile_commands.json
+
+# python stuff
+__pycache__
+
+# c++ extensions built in place within the source tree.
+*.so 
+
+# bazel outputs
+*pid*.log
