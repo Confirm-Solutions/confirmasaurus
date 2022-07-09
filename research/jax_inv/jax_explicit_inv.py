@@ -1,8 +1,10 @@
 import time
-import pytest
+
 import jax
-import numpy as np
 import jax.numpy as jnp
+import numpy as np
+import pytest
+
 
 def bench(f, N, d, iters=5):
     np.random.seed(10)
@@ -10,16 +12,19 @@ def bench(f, N, d, iters=5):
     jax_mats = jnp.array(mats)
     for i in range(iters):
         start = time.time()
-        correct = jnp.linalg.inv(jax_mats).block_until_ready()
+        # correct = jnp.linalg.inv(jax_mats).block_until_ready()
+        _ = jnp.linalg.inv(jax_mats).block_until_ready()
         end = time.time()
     jli_time = end - start
     for i in range(iters):
         start = time.time()
-        fout = f(jax_mats).block_until_ready()
+        # fout = f(jax_mats).block_until_ready()
+        _ = f(jax_mats).block_until_ready()
         end = time.time()
     f_time = end - start
     # np.testing.assert_allclose(fout, correct, rtol=1e-4)
     return jli_time / N * 1e6, f_time / N * 1e6
+
 
 def inv22(mat):
     m1, m2 = mat[0]
@@ -108,6 +113,7 @@ def inv44(m):
 
 
 vmap_inv44 = jax.jit(jax.vmap(inv44))
+
 
 def fast_dot(a, b):
     return (a * b).sum()

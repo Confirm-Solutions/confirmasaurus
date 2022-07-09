@@ -1,13 +1,11 @@
-import copy
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import Dict, List
+
 import jax
-import numpy as np
 import jax.numpy as jnp
-from functools import partial
-import numpyro
-import numpyro.distributions as dist
+import numpy as np
 import numpyro.handlers as handlers
+import smalljax
 from jax.config import config
 
 # This line is critical for enabling 64-bit floats.
@@ -24,7 +22,6 @@ config.update("jax_enable_x64", True)
 #       randomly fail. add batching to pytest parameter grid
 # TODO: why is convergence failing in 32 bit. it's not really. it just stalls
 #       out when sig2 is very small.
-import smalljax
 
 
 class FullLaplace:
@@ -72,7 +69,9 @@ class FullLaplace:
         )
         self._jit_backend = jax.jit(self._backend)
 
-    def __call__(self, p_pinned, data, x0=None, jit=True, should_batch=True, batch_size=2**12):
+    def __call__(
+        self, p_pinned, data, x0=None, jit=True, should_batch=True, batch_size=2**12
+    ):
         """
         batch:
             The batched execution mode runs chunks of a fixed number of
@@ -95,7 +94,7 @@ class FullLaplace:
         if x0 is None:
             pin_dim = pytree_shape0(p_pinned)
             x0 = jnp.zeros((data.shape[0], pin_dim, self.d), dtype=data.dtype)
-        
+
         backend = self._jit_backend if jit else self._backend
 
         if should_batch:
@@ -140,10 +139,6 @@ def batch_execute(f, batch_dim, batch_size, *args):
     the goal of only ever compiling the function once.  It also often has the
     positive side effect of reducing memory usage.
     """
-    Ns = np.array([a.shape[0] for a, should_batch in args if should_batch])
-    assert np.all(Ns == Ns[0])
-    N = Ns[0]
-
     n_batchs = int(np.ceil(batch_dim / batch_size))
     pad_N = batch_size * n_batchs
 

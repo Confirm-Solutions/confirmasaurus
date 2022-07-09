@@ -1,19 +1,14 @@
 import timeit
-import pytest
-import jax
-import jax.numpy as jnp
-import numpy as np
-import scipy.stats
-import numpyro
-import numpyro.distributions as dist
-from scipy.special import logit, expit
 
 import berry_model
 import inla
+import jax.numpy as jnp
+import numpy as np
+import pytest
+import scipy.stats
 import util
-import smalljax
-
 from jax.config import config
+from scipy.special import expit, logit
 
 config.update("jax_enable_x64", True)
 
@@ -29,7 +24,6 @@ def test_log_likelihood():
     mu_sig2 = 100
     sig2_alpha = 0.0005
     sig2_beta = 0.000005
-    logit_p1 = logit(0.3)
     invgamma_term = scipy.stats.invgamma.logpdf(
         params["sig2"], sig2_alpha, scale=sig2_beta
     )
@@ -161,12 +155,12 @@ def test_full_laplace(dtype):
 
     np.testing.assert_allclose(x_max[0, 12], xmax0_12, rtol=1e-3)
     np.testing.assert_allclose(post[0], sig2_post, rtol=4e-3)
-    assert(post.dtype == dtype)
-    assert(x_max.dtype == dtype)
+    assert post.dtype == dtype
+    assert x_max.dtype == dtype
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
-@pytest.mark.parametrize("n_arms", [2,3,4])
+@pytest.mark.parametrize("n_arms", [2, 3, 4])
 def test_full_laplace_custom(dtype, n_arms):
     data = berry_example_data(1).astype(dtype)[:, :n_arms]
     sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
@@ -180,7 +174,9 @@ def test_full_laplace_custom(dtype, n_arms):
     # Compare the custom outputs against the
     fl = inla.FullLaplace(berry_model.berry_model(n_arms), "sig2", data[0], tol=1e-6)
     post, x_max, hess, _ = fl(
-        dict(sig2=sig2.astype(np.float64)), data.astype(np.float64), jit=False,
+        dict(sig2=sig2.astype(np.float64)),
+        data.astype(np.float64),
+        jit=False,
     )
     post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
     np.testing.assert_allclose(

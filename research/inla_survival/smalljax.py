@@ -1,14 +1,17 @@
-from typing import Callable, List
 import copy
+from dataclasses import dataclass
+from typing import Callable, List
+
 import jax
 import jax.numpy as jnp
-import numpy as np
+
 
 def inv22(mat):
     m1, m2 = mat[0]
     m3, m4 = mat[1]
     inv_det = 1.0 / (m1 * m4 - m2 * m3)
     return jnp.array([[m4, -m2], [-m3, m1]]) * inv_det
+
 
 def inv33(mat):
     m1, m2, m3 = mat[0]
@@ -26,6 +29,7 @@ def inv33(mat):
         )
         * inv_det
     )
+
 
 def inv44(m):
     """
@@ -119,13 +123,13 @@ def inv_recurse(mat):
         ),
         axis=0,
     )
-    
+
+
 def get_inv_fnc(d):
-    scalar_inv = lambda m: 1.0 / m
-    inv = {1: scalar_inv, 2: inv22, 3: inv33, 4:inv44}
+    inv = {1: lambda m: 1.0 / m, 2: inv22, 3: inv33, 4: inv44}
     return inv.get(d, inv_recurse)
 
-from dataclasses import dataclass
+
 class CodeGenCtx:
     def __init__(self):
         self.assignments = []
@@ -135,9 +139,10 @@ class CodeGenCtx:
         self.assignments.append(name)
         self.definitions[name] = definition
         return self.assignments[-1]
-        
+
     def lines(self):
-        return [f'{a} = {self.definitions[a]}' for a in self.assignments]
+        return [f"{a} = {self.definitions[a]}" for a in self.assignments]
+
 
 @dataclass
 class Spec:
@@ -146,109 +151,131 @@ class Spec:
     in_types: List[str]
     out_types: List[str]
 
+
 def gen_lu(ctx, args, d):
     U = copy.deepcopy(args[0])
     L = [[None] * d for i in range(d)]
     for k in range(d - 1):
-        inv_k = ctx.assign(f'inv_{k}', f'1.0 / {U[k][k]}')
+        inv_k = ctx.assign(f"inv_{k}", f"1.0 / {U[k][k]}")
         for j in range(k + 1, d):
-            L[j][k] = ctx.assign(f'L_{j}{k}', f'{U[j][k]} * {inv_k}')
+            L[j][k] = ctx.assign(f"L_{j}{k}", f"{U[j][k]} * {inv_k}")
         for i in range(k + 1, d):
             for j in range(k + 1, d):
                 if i == k + 1:
-                    name = f'U_{i}{j}'
+                    name = f"U_{i}{j}"
                 else:
-                    name = f'U_{k}_{i}{j}'
-                U[i][j] = ctx.assign(name, f'{U[i][j]} - {U[k][j]} * {U[i][k]} * {inv_k}')
+                    name = f"U_{k}_{i}{j}"
+                U[i][j] = ctx.assign(
+                    name, f"{U[i][j]} - {U[k][j]} * {U[i][k]} * {inv_k}"
+                )
     LU = [[U[i][j] if i <= j else L[i][j] for j in range(d)] for i in range(d)]
     return [LU]
-lu_spec = Spec('lu', gen_lu, in_types=('M',), out_types=('M',))
+
+
+lu_spec = Spec("lu", gen_lu, in_types=("M",), out_types=("M",))
+
 
 def transpose(A):
     d = len(A)
     return [[A[j][i] for j in range(d)] for i in range(d)]
 
+
 def gen_lu_inv(ctx, args, d):
     invU = copy.deepcopy(args[0])
     for k in range(d)[::-1]:
-        invU[k][k] = ctx.assign(f'invU_{k}{k}', f'1.0 / {invU[k][k]}')
+        invU[k][k] = ctx.assign(f"invU_{k}{k}", f"1.0 / {invU[k][k]}")
         for j in range(k + 1, d):
-            invU[k][j] = ctx.assign(f'invU_{k}{j}', f'{invU[k][j]} * {invU[k][k]}')
+            invU[k][j] = ctx.assign(f"invU_{k}{j}", f"{invU[k][j]} * {invU[k][k]}")
         for i in range(k):
-            mult = f'-{invU[i][k]}'
-            invU[i][k] = ctx.assign(f'invU_{k}_{i}{k}', f'{mult} * {invU[k][k]}')
+            mult = f"-{invU[i][k]}"
+            invU[i][k] = ctx.assign(f"invU_{k}_{i}{k}", f"{mult} * {invU[k][k]}")
             for j in range(k + 1, d):
-                invU[i][j] = ctx.assign(f'invU_{k}_{i}{j}', f'{invU[i][j]} + {mult} * {invU[k][j]}')
-                
+                invU[i][j] = ctx.assign(
+                    f"invU_{k}_{i}{j}", f"{invU[i][j]} + {mult} * {invU[k][j]}"
+                )
+
     invLU_T = transpose(invU)
     for i in range(d - 1):
         for j in range(i + 1, d):
-            invLU_T[i][j] = '0'
+            invLU_T[i][j] = "0"
     for k in range(d)[::-1]:
         for i in range(k):
-            mult = f'-{LU[k][i]}'
+            mult = f"-{invLU_T[k][i]}"
             for j in range(d):
-                name = f'invLU_T_{k}_{i}{j}'
-                invLU_T[i][j] = ctx.assign(name, f'{invLU_T[i][j]} + {mult} * {invLU_T[k][j]}')
+                name = f"invLU_T_{k}_{i}{j}"
+                invLU_T[i][j] = ctx.assign(
+                    name, f"{invLU_T[i][j]} + {mult} * {invLU_T[k][j]}"
+                )
     return [transpose(invLU_T)]
-lu_inv_spec = Spec('lu_inv', gen_lu_inv, in_types=('M',), out_types=('M',))
+
+
+lu_inv_spec = Spec("lu_inv", gen_lu_inv, in_types=("M",), out_types=("M",))
+
 
 def gen_lu_solve(ctx, args, d):
     LU, B = args
     Y = [None] * d
     for i in range(d):
-        terms_i = [f'-{LU[i][j]}*{Y[j]}' for j in range(i)]
-        Y[i] = ctx.assign(f'Y_{i}', f'{B[i]}' + ''.join(terms_i))
+        terms_i = [f"-{LU[i][j]}*{Y[j]}" for j in range(i)]
+        Y[i] = ctx.assign(f"Y_{i}", f"{B[i]}" + "".join(terms_i))
     X = [None] * d
     for i in range(d)[::-1]:
-        invkk = ctx.assign(f'inv_{i}', f'1.0 / {LU[i][i]}')
-        terms_i = [f'-{LU[i][j]}*{X[j]}*{invkk}' for j in range(i + 1, d)]
-        X[i] = ctx.assign(f'X_{i}', f'{Y[i]}*{invkk}' + ''.join(terms_i))
+        invkk = ctx.assign(f"inv_{i}", f"1.0 / {LU[i][i]}")
+        terms_i = [f"-{LU[i][j]}*{X[j]}*{invkk}" for j in range(i + 1, d)]
+        X[i] = ctx.assign(f"X_{i}", f"{Y[i]}*{invkk}" + "".join(terms_i))
     return [X]
-lu_solve_spec = Spec('lu_solve', gen_lu_solve, in_types=('M', 'v'), out_types=('v'))
+
+
+lu_solve_spec = Spec("lu_solve", gen_lu_solve, in_types=("M", "v"), out_types=("v"))
+
 
 def gen_solve(ctx, args, d):
     LU = gen_lu(ctx, args[:1], d)[0]
     return gen_lu_solve(ctx, [LU, args[1]], d)
-solve_spec = Spec('solve', gen_solve, in_types=('M', 'v'), out_types=('v'))
+
+
+solve_spec = Spec("solve", gen_solve, in_types=("M", "v"), out_types=("v"))
+
 
 def build_linalg(spec, d, print_code=True):
-    assert(d < 10)
+    assert d < 10
     ctx = CodeGenCtx()
     args = []
     arg_spec = []
     for k, entry in enumerate(spec.in_types):
-        if entry == 'M':
-            args.append([[f'm{k}[{i}, {j}]' for j in range(d)] for i in range(d)])
-            arg_spec.append(f'm{k}')
-        elif entry == 'v':
-            args.append([f'v{k}[{i}]' for i in range(d)])
-            arg_spec.append(f'v{k}')
+        if entry == "M":
+            args.append([[f"m{k}[{i}, {j}]" for j in range(d)] for i in range(d)])
+            arg_spec.append(f"m{k}")
+        elif entry == "v":
+            args.append([f"v{k}[{i}]" for i in range(d)])
+            arg_spec.append(f"v{k}")
     out_names = spec.generator(ctx, args, d)
     lines = ctx.lines()
     ret_vals = []
     for k, entry in enumerate(spec.out_types):
-        if entry == 'M':
-            ret_vals.append('jnp.array([' + ', '.join([
-                '[' + ', '.join(out_names[k][i]) + ']'
-                for i in range(d)
-            ]) + '])')
-        elif entry == 'v':
-            ret_vals.append('jnp.array([' + ', '.join(out_names[k]) + '])')
-        elif entry == 's':
-            ret_vals.append(f'{out_names[k]}')
+        if entry == "M":
+            ret_vals.append(
+                "jnp.array(["
+                + ", ".join(["[" + ", ".join(out_names[k][i]) + "]" for i in range(d)])
+                + "])"
+            )
+        elif entry == "v":
+            ret_vals.append("jnp.array([" + ", ".join(out_names[k]) + "])")
+        elif entry == "s":
+            ret_vals.append(f"{out_names[k]}")
     if len(ret_vals) == 1:
-        lines.append(f'return {ret_vals[0]}')
+        lines.append(f"return {ret_vals[0]}")
     else:
-        lines.append('return (' + ''.join([v + ',' for v in ret_vals]) + ')')
+        lines.append("return (" + "".join([v + "," for v in ret_vals]) + ")")
 
-    name = f'{spec.prefix}{d}'
-    arg_str = ','.join(arg_spec)
-    lines = [f'def {name}({arg_str}):'] + ['    ' + l for l in lines] 
-    code = '\n'.join(lines)
+    name = f"{spec.prefix}{d}"
+    arg_str = ",".join(arg_spec)
+    lines = [f"def {name}({arg_str}):"] + ["    " + L for L in lines]
+    code = "\n".join(lines)
     if print_code:
         print(code)
     return name, code
+
 
 def gen(name):
     if name in globals():
@@ -256,14 +283,15 @@ def gen(name):
     for spec in [lu_spec, lu_spec, lu_inv_spec, lu_solve_spec, solve_spec]:
         if not name.startswith(spec.prefix):
             continue
-        d = int(name[len(spec.prefix):])
+        d = int(name[len(spec.prefix) :])
         name, code = build_linalg(spec, d, print_code=False)
         exec(code)
         globals()[name] = locals()[name]
         return globals()[name]
 
+
 @jax.jit
 def logdet(A):
     d = A.shape[0]
-    lu = gen(f'lu{d}')(A)
+    lu = gen(f"lu{d}")(A)
     return jnp.sum(jnp.log(jnp.abs(jnp.diag(lu))))
