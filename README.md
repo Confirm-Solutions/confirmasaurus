@@ -12,4 +12,15 @@ We still split out some pieces of the repo into separate components because they
 The tool we use to split the repo is `git subtree`. See here for a nice introduction:
 [An introduction to git subtree](https://www.atlassian.com/git/tutorials/git-subtree)
 
-I followed the directions under "Adding the sub-project as a remote".
+I followed the directions under "Adding the sub-project as a remote":
+
+```
+git remote add -f imprint git@github.com:Confirm-Solutions/imprint.git
+git subtree add --prefix imprint imprint main --squash
+```
+
+
+```
+git fetch imprint main
+git subtree pull --prefix imprint imprint main --squash
+```
