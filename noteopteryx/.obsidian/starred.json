@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "type": "file",
+      "title": "Running",
+      "path": "personal/Running.md"
+    },
+    {
+      "type": "file",
+      "title": "Reading List",
+      "path": "organization/Reading List.md"
+    },
+    {
+      "type": "file",
+      "title": "Incoming",
+      "path": "weekly/Incoming.md"
+    },
+    {
+      "type": "file",
+      "title": "Goals",
+      "path": "goals/Goals.md"
+    },
+    {
+      "type": "file",
+      "title": "Dashboard",
+      "path": "organization/Dashboard.md"
+    },
+    {
+      "type": "file",
+      "title": "AdaptiveExperimentationFDA",
+      "path": "topics/AdaptiveExperimentationFDA.md"
+    }
+  ]
+}

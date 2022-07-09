@@ -1,0 +1,5 @@
+{
+  "folder": "daily",
+  "template": "setup/daily_template",
+  "autorun": false
+}
