@@ -1,4 +1,5 @@
 import timeit
+import pytest
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -147,30 +148,40 @@ def berry_example_data(N=10):
     return data
 
 
-def test_full_laplace():
-    data = berry_example_data()
-    fl = inla.FullLaplace(berry_model(4), "sig2", data[0])
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_full_laplace(dtype):
+    data = berry_example_data().astype(dtype)
+    # fl = inla.FullLaplace(berry_model.berry_model(4), "sig2", data[0])
     sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
-    post, x_max, _, _ = fl(dict(sig2=sig2_rule.pts), data)
-    post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
-    np.testing.assert_allclose(
-        x_max[0, 12],
-        xmax0_12,
-        atol=1e-3,
+    sig2 = sig2_rule.pts.astype(dtype)
+    fl = berry_model.fast_berry(sig2, dtype=dtype, max_iter=10, tol=dtype(1e-6))
+    post, x_max, _, iters = fl(dict(sig2=sig2), data, jit=False, should_batch=False)
+    post /= np.sum(post * sig2_rule.wts.astype(dtype), axis=1)[:, None]
+    print(iters)
+
+    np.testing.assert_allclose(x_max[0, 12], xmax0_12, rtol=1e-3)
+    np.testing.assert_allclose(post[0], sig2_post, rtol=4e-3)
+    assert(post.dtype == dtype)
+    assert(x_max.dtype == dtype)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize("n_arms", [2,3,4])
+def test_full_laplace_custom(dtype, n_arms):
+    data = berry_example_data(1).astype(dtype)[:, :n_arms]
+    sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
+    sig2 = sig2_rule.pts.astype(dtype)
+    laplace = berry_model.fast_berry(sig2, n_arms=n_arms, tol=1e-6)
+    post_custom, x_max_custom, hess_custom, _ = laplace(
+        dict(sig2=sig2), data, jit=False, should_batch=False
     )
-    np.testing.assert_allclose(post[0], sig2_post, rtol=1e-3)
-
-
-def test_full_laplace_custom():
-    data = berry_example_data()
-    sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
-    laplace = berry_model.fast_berry(sig2_rule.pts)
-    post_custom, x_max_custom, _, _ = laplace(dict(sig2=sig2_rule.pts), data)
     post_custom /= np.sum(post_custom * sig2_rule.wts, axis=1)[:, None]
 
     # Compare the custom outputs against the
-    fl = inla.FullLaplace(berry_model.berry_model(4), "sig2", data[0])
-    post, x_max, _, _ = fl(dict(sig2=sig2_rule.pts), data)
+    fl = inla.FullLaplace(berry_model.berry_model(n_arms), "sig2", data[0], tol=1e-6)
+    post, x_max, hess, _ = fl(
+        dict(sig2=sig2.astype(np.float64)), data.astype(np.float64), jit=False,
+    )
     post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
     np.testing.assert_allclose(
         x_max_custom,
@@ -180,57 +191,54 @@ def test_full_laplace_custom():
     np.testing.assert_allclose(post_custom, post, rtol=5e-3)
 
 
-def test_inv_logdet_const_diag():
+def test_solve_basket():
     np.random.seed(10)
     b = np.random.rand(1)[0]
-    for d in range(2, 10):
-        a = np.random.rand(d)
-        m = np.full((d, d), b) + np.diag(a - b)
-        correct = np.linalg.inv(m)
-        ainv, binv = berry_model.inv_logdet_const_diag(a, b, d)
-        m = np.full((d, d), binv) + np.diag(np.full(d, ainv - binv))
-        np.testing.assert_allclose(m, correct, rtol=1e-6)
+    for i in range(3):
+        for d in range(2, 10):
+            a = np.random.rand(d)
+            m = np.full((d, d), b) + np.diag(a)
+            v = np.random.rand(d)
+            correct = np.linalg.solve(m, v)
+            x, denom = berry_model.solve_basket(a, b, v)
+            print(x, correct)
+            np.testing.assert_allclose(x, correct)
+            logdet = berry_model.logdet((a, denom))
+            np.testing.assert_allclose(logdet, np.linalg.slogdet(m)[1])
 
 
 def my_timeit(N, f, should_print=True):
     _ = f()
-    runtimes = timeit.repeat(f, number=1)
+    number = 5
+    runtimes = np.array(timeit.repeat(f, number=number)) / number
     if should_print:
         print("median runtime", np.median(runtimes))
-        print("us per sample", np.median(runtimes) * 1e6 / N)
+        print("min us per sample ", np.min(runtimes) * 1e6 / N)
+        print("median us per sample", np.median(runtimes) * 1e6 / N)
     return runtimes
 
 
 def benchmark_custom():
     N = 10000
-    data = berry_example_data(N).astype(np.float32)
-    sig2_rule = util.log_gauss_rule(15, 1e-2, 1e2)
-    sig2 = sig2_rule.pts.astype(np.float32)
-    laplace = berry_model.fast_berry(sig2)
+    dtype = np.float32
+    data = berry_example_data(N).astype(dtype)
+    sig2_rule = util.log_gauss_rule(15, 1e-6, 1e3)
+    sig2 = sig2_rule.pts.astype(dtype)
+    laplace = berry_model.fast_berry(sig2, dtype=dtype, max_iter=10, tol=1e-2)
     print("custom")
     my_timeit(N, lambda: laplace(dict(sig2=sig2), data, should_batch=False)[0])
 
     print("\ngeneric")
     fl = inla.FullLaplace(berry_model.berry_model(4), "sig2", data[0])
-    my_timeit(N, lambda: fl(dict(sig2=sig2), data, should_batch=False)[0])
-
-
-# def benchmark_invJI():
-#     for d in range(2, 10):
-#         N = int(300000 / (d ** 2))
-#         vs = np.random.rand(N, 2)
-#         a = vs[:,0]
-#         b = vs[:,1]
-#         m = b[:, None, None] * np.full((d,d), 1.0) + (a - b)[:, None, None] * np.eye(d)
-#         vmap_inv_recurse = jax.jit(jax.vmap(smalljax.inv_recurse))
-#         vmap_invJI = jax.jit(jax.vmap(berry_model.invJI, in_axes=(0,0,None)))
-#         print('\n', d)
-#         print(f'inv_recurse')
-#         my_timeit(N, lambda: vmap_inv_recurse(m))
-#         print('invJI')
-#         my_timeit(N, lambda: vmap_invJI(a, b, d))
+    my_timeit(
+        N,
+        lambda: fl(
+            dict(sig2=sig2.astype(np.float64)),
+            data.astype(np.float64),
+            should_batch=False,
+        )[0],
+    )
 
 
 if __name__ == "__main__":
     benchmark_custom()
-    benchmark_invJI()

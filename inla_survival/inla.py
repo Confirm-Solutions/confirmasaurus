@@ -13,16 +13,17 @@ from jax.config import config
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
 
-# TODO: Test against MCMC.
-# TODO: test multiple n_arms
-# TODO: test explicit gradients
-# TODO: parameter checks!
-# TODO: check dtypes input/output
+# TODO: laplace arm marginals
 # TODO: conditional laplace/simplified laplace
-# TODO: integration factors
-# TODO: kullback-liebler distance between posteriors from mcmc and laplace
+# TODO: parameter checks and documentation!
+# TODO: Test against MCMC using kullback-liebler.
 # TODO: jax jit the batch_execute function
-# TODO: why do the custom and generic methods not match perfectly?
+# TODO: i could pull the outer data.shape[0] vmap out and apply that to the
+#       whole algorithm. THIS IS A GOOD IDEA.
+# TODO: debug the problems with batching. why is it sometimes causing things to
+#       randomly fail. add batching to pytest parameter grid
+# TODO: why is convergence failing in 32 bit. it's not really. it just stalls
+#       out when sig2 is very small.
 import smalljax
 
 
@@ -56,7 +57,11 @@ class FullLaplace:
                 in_axes=(0, None, 0),
             )
             self.optimizer = build_optimizer(
-                log_joint_single, self.spec, step_hess=step_hess, max_iter=max_iter, tol=tol
+                log_joint_single,
+                self.spec,
+                step_hess=step_hess,
+                max_iter=max_iter,
+                tol=tol,
             )
         else:
             self.optimizer = build_optimizer(
@@ -65,17 +70,11 @@ class FullLaplace:
         self.calc_posterior = build_calc_posterior(
             self.log_joint, self.spec, logdet=logdet
         )
+        self._jit_backend = jax.jit(self._backend)
 
-    def __call__(self, p_pinned, data, x0=None):
-        if x0 is None:
-            x0 = jnp.zeros(
-                (data.shape[0], pytree_shape0(p_pinned), self.d), dtype=data.dtype
-            )
-        return self._call_backend(p_pinned, data, x0)
-
-    def __call__(self, p_pinned, data, x0=None, should_batch=True, batch_size=2**12):
+    def __call__(self, p_pinned, data, x0=None, jit=True, should_batch=True, batch_size=2**12):
         """
-        batch: 
+        batch:
             The batched execution mode runs chunks of a fixed number of
             inferences. Chunking and padding is a useful technique to avoid
             recompilation when calling FullLaplace multiple times with
@@ -96,16 +95,22 @@ class FullLaplace:
         if x0 is None:
             pin_dim = pytree_shape0(p_pinned)
             x0 = jnp.zeros((data.shape[0], pin_dim, self.d), dtype=data.dtype)
+        
+        backend = self._jit_backend if jit else self._backend
 
         if should_batch:
             return batch_execute(
-                self._call_backend, batch_size, (p_pinned, False), (data, True), (x0, True)
+                backend,
+                data.shape[0],
+                batch_size,
+                (p_pinned, False),
+                (data, True),
+                (x0, True),
             )
         else:
-            return self._call_backend(p_pinned, data, x0)
+            return backend(p_pinned, data, x0)
 
-    @partial(jax.jit, static_argnums=(0,))
-    def _call_backend(self, p_pinned, data, x0):
+    def _backend(self, p_pinned, data, x0):
         x_max, hess_info, iters = self.optimizer(x0, p_pinned, data)
         post = self.calc_posterior(x_max, hess_info, p_pinned, data)
         return post, x_max, hess_info, iters
@@ -119,17 +124,32 @@ def pytree_shape0(pyt):
     return shape0[0]
 
 
-def batch_execute(f, batch_size, *args):
+def batch_execute(f, batch_dim, batch_size, *args):
+    """
+    An interesting jax problem is that many jit-ted JAX functions require
+    re-compiling every time you change the array size of the inputs. There’s no
+    general solution to this and if you’re running the same operation on a bunch of
+    differently sized arrays, then the compilation time can become really annoying
+    and expensive.
+
+    One solution is to pad and batch your inputs. For example, we might decide
+    to only run a function on chunks of 2^16 values. Then, any smaller set of
+    values is padded with zeros out to 2^16. Any larger set of values is
+    batched into a bunch of function calls. This has negative side effects
+    (more complexity, potential performance consequences) but it succeeds in
+    the goal of only ever compiling the function once.  It also often has the
+    positive side effect of reducing memory usage.
+    """
     Ns = np.array([a.shape[0] for a, should_batch in args if should_batch])
     assert np.all(Ns == Ns[0])
     N = Ns[0]
 
-    n_batchs = int(np.ceil(N / batch_size))
+    n_batchs = int(np.ceil(batch_dim / batch_size))
     pad_N = batch_size * n_batchs
 
     def leftpad(arr):
         pad_spec = [[0, 0] for dim in arr.shape]
-        rem = N % batch_size
+        rem = batch_dim % batch_size
         pad_spec[0][1] = batch_size - (batch_size if rem == 0 else rem)
         out = np.pad(arr, pad_spec)
         assert out.shape[0] == pad_N
@@ -155,7 +175,7 @@ def batch_execute(f, batch_size, *args):
                 pad_out.append(np.empty_like(arr, shape=shape))
         for target, source in zip(pad_out, out_batch):
             target[start:end] = source
-    return [arr[:N] for arr in pad_out]
+    return [arr[:batch_dim] for arr in pad_out]
 
 
 @dataclass
@@ -290,7 +310,9 @@ def build_grad_hess(log_joint_single, param_spec):
     return jax.vmap(jax.vmap(grad_hess, in_axes=(0, 0, None)), in_axes=(0, None, 0))
 
 
-def build_optimizer(log_joint_single, param_spec, step_hess=None, max_iter=30, tol=1e-3):
+def build_optimizer(
+    log_joint_single, param_spec, step_hess=None, max_iter=30, tol=1e-3
+):
     if step_hess is None:
         if log_joint_single is None or param_spec is None:
             raise ValueError(
@@ -309,7 +331,7 @@ def build_optimizer(log_joint_single, param_spec, step_hess=None, max_iter=30, t
         def step(args):
             x, hess_info, iters, go = args
             step, hess_info = step_hess(x, p_pinned, data)
-            go = jnp.any(jnp.sum(step**2) > tol**2) & (iters < max_iter)
+            go = (jnp.max(jnp.sum(step**2)) > tol**2) & (iters < max_iter)
             return x + step, hess_info, iters + 1, go
 
         step0, hess_info0 = step_hess(x0, p_pinned, data)
