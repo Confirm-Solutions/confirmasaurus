@@ -1,4 +1,3 @@
-import inla
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -6,6 +5,8 @@ import numpyro
 import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
+
+from inlaw import FullLaplace
 
 mu_0 = -1.34
 mu_sig2 = 100.0
@@ -78,7 +79,7 @@ def fast_berry(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
         step, denom = solve_vmap(hess_a, hess_b, -grad)
         return step, (hess_a, denom)
 
-    return inla.FullLaplace(
+    return FullLaplace(
         berry_model(n_arms),
         "sig2",
         np.zeros((n_arms, 2)),

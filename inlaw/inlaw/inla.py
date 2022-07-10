@@ -5,8 +5,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.handlers as handlers
-import smalljax
 from jax.config import config
+
+from . import smalljax
 
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
@@ -111,6 +112,7 @@ class FullLaplace:
 
     def _backend(self, p_pinned, data, x0):
         x_max, hess_info, iters = self.optimizer(x0, p_pinned, data)
+        print(x_max.dtype, hess_info[0].dtype, hess_info[1].dtype)
         post = self.calc_posterior(x_max, hess_info, p_pinned, data)
         return post, x_max, hess_info, iters
 
@@ -347,7 +349,7 @@ def build_calc_posterior(log_joint, param_spec, logdet=None):
 
     def calc_posterior(x_max, hess_info, p_pinned, data):
         lj = log_joint(x_max, p_pinned, data)
-        log_post = lj - 0.5 * logdet(hess_info)
+        log_post = lj - x_max.dtype(0.5) * logdet(hess_info)
         log_post -= jnp.max(log_post)
         post = jnp.exp(log_post)
         return post
