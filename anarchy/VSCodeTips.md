@@ -1,0 +1,16 @@
+- Load up VSCode from the root directory. 
+- Install the Python and jupyter extension
+- Set up unit tests:
+	- useful shortcuts: 
+		- "cmd + ;" is the prefix for most testing commands
+			- "cmd + ;" then "c" runs the test under the cursor
+			- "cmd + ;" then "l" runs the last test(s) you ran
+			- "cmd + ;" then "f" runs all the tests in the file
+			- "cmd + ;" then "e" runs all failed tests
+	- you can also run tests in debug mode and set breakpoints, very helpful
+	- Open the "Output" panel and go to "Python test log" to see the raw pytest output.
+	- If you get "pytest discovery error", go to "Python" in "Output" and find the error and fix it.
+![[Pasted image 20220710170910.png]]
+- the neovim and vim plugins are great if you're into that.
+- https://code.visualstudio.com/docs/languages/python
+- https://realpython.com/advanced-visual-studio-code-python/
