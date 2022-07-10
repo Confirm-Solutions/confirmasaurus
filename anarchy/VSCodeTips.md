@@ -10,5 +10,7 @@
 	- you can also run tests in debug mode and set breakpoints, very helpful
 	- Open the "Output" panel and go to "Python test log" to see the raw pytest output.
 	- If you get "pytest discovery error", go to "Python" in "Output" and find the error and fix it.
-- 
 ![[Pasted image 20220710170910.png]]
+- the neovim and vim plugins are great if you're into that.
+- https://code.visualstudio.com/docs/languages/python
+- https://realpython.com/advanced-visual-studio-code-python/
