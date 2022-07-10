@@ -35,12 +35,30 @@ Overleaf is also great, but it's pretty heavyweight for quick note-taking that I
 
 By default, if you drop a GitHub link to a public github repo, there will be a preview. I like this so that people can read the first few lines without opening something else. But, this markdown link preview doesn't display for links to markdown files in private repos. This can be fixed by inviting the GitHub user to the channel you're in using `\invite @github`. You might also need to authorize the GitHub user for the relevant repo, but I've already done this for the Confirm-Solutions organization.
 
-## Markdown editor suggestions
+## Keeping a separate clone for use with Obsidian
+
+I'm trying out using Obsidian to take notes. There's a nice 
+I've been using [Obsidian](https://obsidian.md). It's quite nice and I use it a lot for my personal life. There's a git auto-sync feature available. The merge conflict handling is not bad at all!
+
+I'm going to try out using Obsidian for writing in the anarchy folder. But to use the git auto-sync, I want to have a separate clone for use only with Obsidian and that only contains the anarchy folder. 
+
+**What if I just want to checkout part of the repo?**
+The main answer [here](https://stackoverflow.com/a/13738951/3817027) explains how to filter and do a sparse checkout. To just get the anarchy subfolder I did:
+```
+git clone \
+  --depth 1  \
+  --filter=blob:none  \
+  --sparse \
+    git@github.com:Confirm-Solutions/confirmasaurus.git
+
+git sparse-checkout set anarchy
+```
+
+## Other markdown editor suggestions
 
 - The GitHub online interface is actually totally fine. Just click on the little edit pencil icon!
-- I've been using [Obsidian](https://obsidian.md). It's quite nice and I use it a lot for my personal life. There's a git auto-sync feature available. The merge conflict handling is not bad at all!
-- Any typical code editor/IDE is fine! I like VSCode.
-- [HackMD](hackmd.io) is really cool: collaborative editing/commenting. I added a nice badge to the top of this doc that let's you open the file directly into hackmd.
+- Any typical code editor/IDE is fine! I like VSCode. 
+- [HackMD](hackmd.io) is reajlly cool: collaborative editing/commenting. I added a nice badge to the top of this doc that let's you open the file directly into hackmd.
 - I do not recommend GitBook.com even though it is also a really cool option since it allows for collaborative editing and commenting kind of like google docs. But, the github sync is really fucked up if there are any merge conflicts - it completely deleted some files and renamed some others in nonsensical ways!
 
 ## Math test
