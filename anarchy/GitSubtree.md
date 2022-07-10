@@ -2,7 +2,7 @@
 
 ## Dealing with our open source library is non-trivial.
 
-We're a small team and it'd be nice to just use a single repo for everything. But, we can't because we want to open source `imprint`. Unfortunately, there are no good tools for splitting repos apart but still treating them as a single repo. The tool we use to split the repo is `git subtree`. See here for a nice introduction:
+We're a small team and it'd be nice to just use a single repo for everything. But, we can't because we want to open source `imprint`. Unfortunately, there are no *good* tools for splitting repos apart but still treating them as a single repo. The tool we use to split the repo is `git subtree`. See here for a nice introduction:
 [An introduction to git subtree](https://www.atlassian.com/git/tutorials/git-subtree)
 
 I followed the directions under "Adding the sub-project as a remote":
