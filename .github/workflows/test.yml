@@ -2,7 +2,14 @@ name: Test
 
 on:
   pull_request:
-    types: ["opened", "synchronize"]
+    types:
+      - opened
+      - synchronize
+    paths-ignore:
+      - 'anarchy/**'
+  push:
+    branches:
+      - main 
     paths-ignore:
       - 'anarchy/**'
 jobs:
