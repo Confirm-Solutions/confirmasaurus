@@ -145,7 +145,7 @@ def berry_example_data(N=10):
 
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
-def test_full_laplace(dtype):
+def test_fast_berry(dtype):
     data = berry_example_data().astype(dtype)
     # fl = inla.FullLaplace(berry_model.berry_model(4), "sig2", data[0])
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
@@ -157,7 +157,7 @@ def test_full_laplace(dtype):
 
     np.testing.assert_allclose(x_max[0, 12], xmax0_12, rtol=1e-3)
     np.testing.assert_allclose(
-        post[0], sig2_post, rtol=4e-3 if dtype is np.float64 else 5e-2
+        post[0], sig2_post, rtol=5e-3 if dtype is np.float64 else 5e-2
     )
     assert post.dtype == dtype
     assert x_max.dtype == dtype
