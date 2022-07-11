@@ -45,10 +45,10 @@ class FullLaplace:
         self.d = self.spec.n_free
         self.log_joint = log_joint
         if self.log_joint is None:
-            log_joint_single = build_log_likelihood(self.model)
+            self.log_joint_single = build_log_likelihood(self.model)
             self.log_joint = jax.vmap(
                 jax.vmap(
-                    lambda x, p_pinned, data: log_joint_single(
+                    lambda x, p_pinned, data: self.log_joint_single(
                         self.spec.unravel_f(x), p_pinned, data
                     ),
                     in_axes=(0, 0, None),
@@ -56,7 +56,7 @@ class FullLaplace:
                 in_axes=(0, None, 0),
             )
             self.optimizer = build_optimizer(
-                log_joint_single,
+                self.log_joint_single,
                 self.spec,
                 step_hess=step_hess,
                 max_iter=max_iter,
@@ -355,3 +355,7 @@ def build_calc_posterior(log_joint, param_spec, logdet=None):
         return post
 
     return calc_posterior
+
+
+def build_simplified_laplace():
+    pass
