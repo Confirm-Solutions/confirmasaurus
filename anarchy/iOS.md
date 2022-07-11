@@ -1,0 +1,1 @@
+Loading up a git repo on iPhone is pleasant and smooth with the Working Copy app. Unfortunately the GitHub app does not allow editing files.
