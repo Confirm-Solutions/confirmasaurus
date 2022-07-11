@@ -1,7 +1,8 @@
 import numpy as np
 import pyimprint.grid as grid
 import scipy.special
-from pyimprint.core.model import ModelBase, SimStateBase
+from pyimprint.core.model import ModelBase
+from pyimprint.core.model import SimStateBase
 
 
 class SimState(SimStateBase):

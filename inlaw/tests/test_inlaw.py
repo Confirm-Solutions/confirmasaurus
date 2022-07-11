@@ -1,14 +1,16 @@
 import timeit
 
-import inlaw.berry_model as berry_model
-import inlaw.inla as inla
-import inlaw.quad as quad
 import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.stats
 from jax.config import config
-from scipy.special import expit, logit
+from scipy.special import expit
+from scipy.special import logit
+
+import inlaw.berry_model as berry_model
+import inlaw.inla as inla
+import inlaw.quad as quad
 
 config.update("jax_enable_x64", True)
 
