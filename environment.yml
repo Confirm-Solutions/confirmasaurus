@@ -1,4 +1,4 @@
-name: imprint
+name: confirm
 channels:
   - conda-forge
 dependencies:

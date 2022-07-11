@@ -50,15 +50,15 @@ def fast_berry(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
     def log_joint(theta, p_pinned, data):
         y = data[..., 0]
         n = data[..., 1]
-        theta_m0 = theta - mu_0
-        theta_adj = theta + logit_p1
+        theta_m0 = theta - data.dtype.type(mu_0)
+        theta_adj = theta + data.dtype.type(logit_p1)
         exp_theta_adj = jnp.exp(theta_adj)
         quad = jnp.sum(
             theta_m0 * (dotJI_vmap(neg_precQ_a, neg_precQ_b, theta_m0)),
             axis=-1,
         )
         return (
-            0.5 * quad
+            data.dtype.type(0.5) * quad
             + jnp.sum(
                 theta_adj * y[:, None] - n[:, None] * jnp.log(exp_theta_adj + 1),
                 axis=-1,
