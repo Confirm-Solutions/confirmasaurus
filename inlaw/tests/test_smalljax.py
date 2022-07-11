@@ -1,6 +1,7 @@
 import jax
 import numpy as np
 import pytest
+
 from inlaw.smalljax import gen, inv22, inv33, inv44, inv_recurse, logdet
 
 
