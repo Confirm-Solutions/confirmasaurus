@@ -73,7 +73,17 @@ def gauss_rule(n, a=-1, b=1):
     return QuadRule(pts, wts)
 
 
-def log_gauss_rule(N, a, b):
+def log_gauss_rule(N: int, a: float, b: float):
+    """Return a Gaussian quadrature rule in the log domain (log(a), log(b))
+
+    Args:
+        N: The number of quadrature points
+        a: Left end of interval
+        b: Right end of interval
+
+    Returns:
+        QuadRule: The points and weights.
+    """
     A = np.log(a)
     B = np.log(b)
     qr = gauss_rule(N, a=A, b=B)
