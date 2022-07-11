@@ -14,3 +14,5 @@
 - the neovim and vim plugins are great if you're into that.
 - https://code.visualstudio.com/docs/languages/python
 - https://realpython.com/advanced-visual-studio-code-python/
+- getting nice docstrings, install the auto docstring extension and set: `"autoDocstring.docstringFormat": "google-notypes"`
+	- why use google docstring style? they are just prettier. the numpy docstring style is also nice, but it's a bit more verbose and takes up a lot of space. https://sphinxcontrib-napoleon.readthedocs.io/en/latest/
