@@ -65,6 +65,8 @@ jobs:
           ./generate_bazelrc
           bazel build -c dbg //python:pyimprint_wheel
           pip install --force-reinstall bazel-bin/python/dist/*.whl
+      - name: Install our libraries
+        run: ./install.sh
       - name: Bazel Test
         run: |
           cd imprint
