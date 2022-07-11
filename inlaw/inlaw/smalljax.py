@@ -1,6 +1,7 @@
 import copy
 from dataclasses import dataclass
-from typing import Callable, List
+from typing import Callable
+from typing import List
 
 import jax
 import jax.numpy as jnp

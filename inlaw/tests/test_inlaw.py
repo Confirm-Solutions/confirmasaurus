@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 import scipy.stats
 from jax.config import config
-from scipy.special import expit, logit
+from scipy.special import expit
+from scipy.special import logit
 
 import inlaw.berry_model as berry_model
 import inlaw.inla as inla

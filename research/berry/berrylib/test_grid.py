@@ -2,7 +2,10 @@ import time
 
 import numpy as np
 import pytest
-from berrylib.grid import HyperPlane, build_grid, get_edges, prune
+from berrylib.grid import build_grid
+from berrylib.grid import get_edges
+from berrylib.grid import HyperPlane
+from berrylib.grid import prune
 from numpy import nan
 
 
