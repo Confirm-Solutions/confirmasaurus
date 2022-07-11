@@ -357,5 +357,18 @@ def build_calc_posterior(log_joint, param_spec, logdet=None):
     return calc_posterior
 
 
-def build_simplified_laplace():
+def build_conditional_inla(param_spec, param_idx):
+    d = 4
+    i = 0
+    i_vec = jnp.eye(d, dtype=bool)[i]
+    not_i = ~i_vec
+
+    def conditional_mu(mu, cov, x):
+        cov12 = cov[i, not_i]
+        cov22 = cov[i, i]
+        mu1 = mu[not_i]
+        mu_cond = mu1 + cov12 / cov22 * (x - mu[i_vec])
+        mu_out = jnp.empty(d, dtype=mu.dtype).at[i_vec].set(x).at[not_i].set(mu_cond)
+        return mu_out
+
     pass
