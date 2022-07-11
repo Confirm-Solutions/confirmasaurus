@@ -1,10 +1,10 @@
 name: Test
 
 on:
-  schedule:
-    # Every day at 9:00 AM UTC
-    - cron: "0 9 * * *"
-  push:
+  pull_request:
+    types: ["opened", "synchronize"]
+    paths-ignore:
+      - 'anarchy/**'
 jobs:
   test:
     timeout-minutes: 15
