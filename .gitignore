@@ -25,6 +25,7 @@ compile_commands.json
 
 # python stuff
 __pycache__
+*.pkl
 
 # c++ extensions built in place within the source tree.
 *.so 
