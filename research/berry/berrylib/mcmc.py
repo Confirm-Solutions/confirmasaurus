@@ -14,6 +14,7 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import numpyro.infer
+from scipy.special import logit
 
 # This line is critical for enabling 64-bit floats.
 from jax.config import config
@@ -21,10 +22,20 @@ from jax.config import config
 config.update("jax_enable_x64", True)
 
 
+logit_p1 = logit(0.3)
+
+
 def mcmc_berry(
-    data, logit_p1, suc_thresh, dtype=np.float64, n_samples=10000, sigma2_val=None
+    data,
+    logit_p1=logit_p1,
+    suc_thresh=None,
+    dtype=np.float64,
+    n_samples=10000,
+    sigma2_val=None,
 ):
     n_arms = data.shape[-2]
+    if suc_thresh is None:
+        suc_thresh = np.full(n_arms, logit(0.1) - self.logit_p1)
 
     def mcmc_berry_model(y, n):
         mu = numpyro.sample("mu", dist.Normal(-1.34, 10))

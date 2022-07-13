@@ -360,7 +360,7 @@ def build_calc_log_posterior(log_joint, logdet=None):
 
 @partial(jax.jit, static_argnums=2)
 def exp_and_normalize(log_d, wts, axis):
-    log_d -= jnp.max(log_d, axis=axis)
+    log_d -= jnp.expand_dims(jnp.max(log_d, axis=axis), axis)
     d = jnp.exp(log_d)
     scaling_factor = jnp.sum(d * wts, axis=axis)
     d /= jnp.expand_dims(scaling_factor, axis)
@@ -387,14 +387,12 @@ def build_conditional_inla(log_joint_single, param_spec):
         # When j != i, this is mu + cov12 / ...
         return jnp.where(i_vec, x, mu) + cov12 / cov[i, i] * (x - mu[i])
 
-    cond_mu_vmap = jax.jit(
+    cond_mu_vmap = jax.vmap(
         jax.vmap(
-            jax.vmap(
-                jax.vmap(conditional_mu, in_axes=(0, 0, 0, None)),
-                in_axes=(0, 0, 0, None),
-            ),
-            in_axes=(None, None, 0, None),
-        )
+            jax.vmap(conditional_mu, in_axes=(0, 0, 0, None)),
+            in_axes=(0, 0, 0, None),
+        ),
+        in_axes=(None, None, 0, None),
     )
     grad_hess_vmap = jax.vmap(
         build_grad_hess(log_joint_single, param_spec), in_axes=(0, None, None)

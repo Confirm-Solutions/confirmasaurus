@@ -14,9 +14,11 @@ def broadcast(arr, target_shape, dest_dims):
     This is a helper functions for the gnarly broadcasting operations required
     in the quadrature code.
 
-    arr: the array to broadcast
-    target_shape: the requested broadcast shape.
-    dest_dims: the index of the output dimensions corresponding to each input dimension.
+    Args:
+        arr: the array to broadcast
+        target_shape: the requested broadcast shape.
+        dest_dims: the index of the output dimensions corresponding to each
+            input dimension.
     """
 
     broadcast_shape = [1] * len(target_shape)
@@ -82,9 +84,10 @@ def gauss_herm_rule(n, center=0, scale=1.0):
         center: Weight function center. Defaults to 0.
         scale: Weight function scaling. Defaults to 1.0.
     """
-    pts, wts = np.polynomial.hermite.hermgauss(n)
-    pts = (pts - center) / scale
-    wts = wts / scale / np.exp(-(pts**2))
+    orig_pts, orig_wts = np.polynomial.hermite.hermgauss(n)
+    orig_wts /= np.exp(-(orig_pts**2))
+    pts = (orig_pts - center) * scale
+    wts = orig_wts * scale
     return QuadRule(pts, wts)
 
 

@@ -151,9 +151,8 @@ def test_fast_berry(dtype):
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     fl = berry_model.fast_berry(sig2, dtype=dtype, max_iter=10, tol=dtype(1e-6))
-    post, x_max, _, iters = fl(dict(sig2=sig2), data, jit=False, should_batch=False)
-    print(post.dtype)
-    post /= np.sum(post * sig2_rule.wts.astype(dtype), axis=1)[:, None]
+    logpost, x_max, _, iters = fl(dict(sig2=sig2), data, jit=False, should_batch=False)
+    post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1)
 
     np.testing.assert_allclose(x_max[0, 12], xmax0_12, rtol=1e-3)
     np.testing.assert_allclose(
@@ -170,19 +169,21 @@ def test_full_laplace_custom(dtype, n_arms):
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     laplace = berry_model.fast_berry(sig2, n_arms=n_arms, tol=1e-6)
-    post_custom, x_max_custom, hess_custom, _ = laplace(
+    logpost_custom, x_max_custom, hess_custom, _ = laplace(
         dict(sig2=sig2), data, jit=False, should_batch=False
     )
-    post_custom /= np.sum(post_custom * sig2_rule.wts, axis=1)[:, None]
+    post_custom = inla.exp_and_normalize(
+        logpost_custom, sig2_rule.wts.astype(dtype)[None, :], axis=1
+    )
 
     # Compare the custom outputs against the
     fl = inla.FullLaplace(berry_model.berry_model(n_arms), "sig2", data[0], tol=1e-6)
-    post, x_max, hess, _ = fl(
+    logpost, x_max, hess, _ = fl(
         dict(sig2=sig2.astype(np.float64)),
         data.astype(np.float64),
         jit=False,
     )
-    post /= np.sum(post * sig2_rule.wts, axis=1)[:, None]
+    post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1)
     np.testing.assert_allclose(
         x_max_custom,
         x_max,
