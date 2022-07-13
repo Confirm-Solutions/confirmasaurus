@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.4 ('imprint')
+    display_name: Python 3.10.5 ('imprint2')
     language: python
     name: python3
 ---
@@ -178,7 +178,7 @@ First, we'll check that the inference does something reasonable. It rejects the 
 import berrylib.fast_inla as fast_inla
 y = [[4,5,9]]
 n = [[35,35,35]]
-fi = fast_inla.FastINLA(n_arms, critical_value=0.95)
+fi = fast_inla.FastINLA(n_arms=n_arms, critical_value=0.95)
 fi.rejection_inference(np.stack((y, n), axis=-1))
 ```
 
@@ -281,9 +281,8 @@ Next, we haven't implemented the second order bound for the model demonstrated h
 ```python
 
 from pyimprint.model.binomial import SimpleSelection
-simple_selection_model = SimpleSelection(fi.n_arms, n_arm_samples, 1, [])
+simple_selection_model = SimpleSelection(fi.n_arms, n_arm_samples, 1, np.array([0.0]))
 simple_selection_model.critical_values([fi.critical_value])
-
 ```
 
 Finally, we actually compute the bound.
@@ -330,7 +329,7 @@ plt.show()
 ```
 
 ```python
-t2 = np.unique(theta_tiles[:, 2])[5]
+t2 = np.unique(theta_tiles[:, 2])[4]
 selection = (theta_tiles[:,2] == t2)
 
 np.savetxt('P_tutorial.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")

@@ -73,6 +73,21 @@ def gauss_rule(n, a=-1, b=1):
     return QuadRule(pts, wts)
 
 
+def gauss_herm_rule(n, center=0, scale=1.0):
+    """Points and weights for the Gauss-Hermite quadrature rule with n points,
+    scaled so that the weight function is exp(-((x - center) / scale)^2).
+
+    Args:
+        n: Number of quadrature points
+        center: Weight function center. Defaults to 0.
+        scale: Weight function scaling. Defaults to 1.0.
+    """
+    pts, wts = np.polynomial.hermite.hermgauss(n)
+    pts = (pts - center) / scale
+    wts = wts / scale / np.exp(-(pts**2))
+    return QuadRule(pts, wts)
+
+
 def log_gauss_rule(N: int, a: float, b: float):
     """Return a Gaussian quadrature rule in the log domain (log(a), log(b))
 

@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.2 ('imprint')
+    display_name: Python 3.10.5 ('imprint2')
     language: python
     name: python3
 ---
@@ -363,8 +363,8 @@ name = "berry2"
 fi = fast_inla.FastINLA(4)
 seed = 10
 n_arm_samples = 35
-n_theta_1d = 10
-sim_size = 10000
+n_theta_1d = 64
+sim_size = 8160
 
 ```
 
@@ -376,7 +376,6 @@ typeI_score = loaded["score"]
 table = loaded["table"]
 theta_tiles = loaded["theta_tiles"]
 is_null_per_arm = loaded["is_null_per_arm"]
-
 ```
 
 ```python

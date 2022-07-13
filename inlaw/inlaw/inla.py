@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import partial
 from typing import Dict
 from typing import List
 
@@ -14,7 +15,7 @@ from . import smalljax
 config.update("jax_enable_x64", True)
 
 # TODO: laplace arm marginals
-# TODO: conditional laplace/simplified laplace
+# TODO: conditional laplace
 # TODO: parameter checks and documentation!
 # TODO: Test against MCMC using kullback-liebler.
 # TODO: jax jit the batch_execute function
@@ -24,6 +25,10 @@ config.update("jax_enable_x64", True)
 #       randomly fail. add batching to pytest parameter grid
 # TODO: why is convergence failing in 32 bit. it's not really. it just stalls
 #       out when sig2 is very small.
+# TODO: sampling: https://github.com/inbo/INLA/blob/0fa332471d2e19548cc0f63e36873e31dbd685be/R/posterior.sample.R#L193 # noqa: E501
+# TODO: there are a number of duplicated vmap calls in here. I'm concerned this
+#       will increase the jit time dramatically.
+# TODO: mu vs x_max??
 
 
 class FullLaplace:
@@ -66,9 +71,7 @@ class FullLaplace:
             self.optimizer = build_optimizer(
                 None, None, step_hess=step_hess, max_iter=max_iter, tol=tol
             )
-        self.calc_posterior = build_calc_posterior(
-            self.log_joint, self.spec, logdet=logdet
-        )
+        self.calc_posterior = build_calc_log_posterior(self.log_joint, logdet=logdet)
         self._jit_backend = jax.jit(self._backend)
 
     def __call__(
@@ -113,8 +116,8 @@ class FullLaplace:
 
     def _backend(self, p_pinned, data, x0):
         x_max, hess_info, iters = self.optimizer(x0, p_pinned, data)
-        post = self.calc_posterior(x_max, hess_info, p_pinned, data)
-        return post, x_max, hess_info, iters
+        logpost = self.calc_posterior(x_max, hess_info, p_pinned, data)
+        return logpost, x_max, hess_info, iters
 
 
 def pytree_shape0(pyt):
@@ -340,35 +343,80 @@ def build_optimizer(
     return optimize_loop
 
 
-def build_calc_posterior(log_joint, param_spec, logdet=None):
+def build_calc_log_posterior(log_joint, logdet=None):
     """
     The output will not be normalized!
     """
     if logdet is None:
         logdet = jax.vmap(jax.vmap(lambda x: smalljax.logdet(-x)))
 
-    def calc_posterior(x_max, hess_info, p_pinned, data):
+    def calc_log_posterior(x_max, hess_info, p_pinned, data):
         lj = log_joint(x_max, p_pinned, data)
         log_post = lj - x_max.dtype.type(0.5) * logdet(hess_info)
-        log_post -= jnp.max(log_post)
-        post = jnp.exp(log_post)
-        return post
+        return log_post
 
-    return calc_posterior
+    return calc_log_posterior
 
 
-def build_conditional_inla(param_spec, param_idx):
-    d = 4
-    i = 0
-    i_vec = jnp.eye(d, dtype=bool)[i]
-    not_i = ~i_vec
+@partial(jax.jit, static_argnums=2)
+def exp_and_normalize(log_d, wts, axis):
+    log_d -= jnp.max(log_d, axis=axis)
+    d = jnp.exp(log_d)
+    scaling_factor = jnp.sum(d * wts, axis=axis)
+    d /= jnp.expand_dims(scaling_factor, axis)
+    return d
 
-    def conditional_mu(mu, cov, x):
-        cov12 = cov[i, not_i]
-        cov22 = cov[i, i]
-        mu1 = mu[not_i]
-        mu_cond = mu1 + cov12 / cov22 * (x - mu[i_vec])
-        mu_out = jnp.empty(d, dtype=mu.dtype).at[i_vec].set(x).at[not_i].set(mu_cond)
-        return mu_out
 
-    pass
+def build_conditional_inla(log_joint_single, param_spec):
+    def conditional_mu(mu, cov, x, i):
+        """Compute the conditional mean of a multivariate normal distribution
+        on one of its variables
+
+        Args:
+            mu: The mean of the joint distribution
+            cov: The covariance of the joint distribution
+            x: The value of the variable conditioned on.
+            i: The index of the variable conditioned on.
+
+        Returns:
+            The conditional mean
+        """
+        i_vec = jnp.eye(mu.shape[0], dtype=bool)[i]
+        cov12 = jnp.where(i_vec, 0, cov[i])
+        # When j == i, this is: x + 0 (because cov12 is 0 when j == i)
+        # When j != i, this is mu + cov12 / ...
+        return jnp.where(i_vec, x, mu) + cov12 / cov[i, i] * (x - mu[i])
+
+    cond_mu_vmap = jax.jit(
+        jax.vmap(
+            jax.vmap(
+                jax.vmap(conditional_mu, in_axes=(0, 0, 0, None)),
+                in_axes=(0, 0, 0, None),
+            ),
+            in_axes=(None, None, 0, None),
+        )
+    )
+    grad_hess_vmap = jax.vmap(
+        build_grad_hess(log_joint_single, param_spec), in_axes=(0, None, None)
+    )
+    log_joint = jax.vmap(
+        jax.vmap(
+            lambda x, p_pinned, data: log_joint_single(
+                param_spec.unravel_f(x), p_pinned, data
+            ),
+            in_axes=(0, 0, None),
+        ),
+        in_axes=(0, None, 0),
+    )
+    calc_log_posterior = jax.vmap(
+        build_calc_log_posterior(log_joint), in_axes=(0, 0, None, None)
+    )
+
+    def conditional_inla(x_max, p_pinned, data, hess_info, cx, i):
+        inv_hess = jnp.linalg.inv(hess_info)
+        cond_mu = cond_mu_vmap(x_max, inv_hess, cx, i)
+        _, cond_hess = grad_hess_vmap(cond_mu, p_pinned, data)
+        cond_hess = jnp.delete(jnp.delete(cond_hess, i, axis=3), i, axis=4)
+        return calc_log_posterior(cond_mu, cond_hess, p_pinned, data)
+
+    return conditional_inla
