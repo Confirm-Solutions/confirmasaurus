@@ -35,9 +35,7 @@ def test_lu():
     for d in range(2, 5):
         m = np.random.rand(d, d)
         lu = gen(f"lu{d}")(m)
-        print(lu)
         L = np.tril(lu, k=-1)
-        print(L)
         np.fill_diagonal(L, np.full(d, 1.0))
         U = np.triu(lu)
         np.testing.assert_allclose(L.dot(U), m, atol=1e-7)

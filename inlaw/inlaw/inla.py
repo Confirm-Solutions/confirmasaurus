@@ -6,7 +6,6 @@ from typing import List
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpyro.handlers as handlers
 from jax.config import config
 
 from . import quad
@@ -27,29 +26,27 @@ config.update("jax_enable_x64", True)
 #       will increase the jit time dramatically.
 # TODO: explain x_max vs mu: x_max is the mode, mu is used when we're assuming
 #       gaussianity
+# TODO: deal with the scalar vs unit vector distinction in an elegant way:
+#       currently sometimes unravel will produce a unit vector instead of scalar and
+#       it can make writing a log joint function a bit trickier
 
 
 class FullLaplace:
-    @profile
     def __init__(
         self,
-        model,
-        pin,
-        data_example,
+        param_example,
+        log_joint_single,
         max_iter=30,
         tol=1e-3,
         log_joint=None,
         step_hess=None,
         logdet=None,
     ):
-        self.model = model
-        self.pin = pin
-        self.data_example = data_example
-        self.spec = pin_to_spec(self.model, self.pin, self.data_example)
+        self.spec = ParamSpec(param_example)
         self.d = self.spec.n_free
         self.log_joint = log_joint
         if self.log_joint is None:
-            self.log_joint_single = build_log_likelihood(self.model)
+            self.log_joint_single = lambda p1, p2, d: log_joint_single(merge(p1, p2), d)
             self.log_joint = jax.vmap(
                 jax.vmap(
                     lambda x, p_pinned, data: self.log_joint_single(
@@ -117,6 +114,27 @@ class FullLaplace:
         x_max, hess_info, iters = self.optimizer(x0, p_pinned, data)
         logpost = self.calc_posterior(x_max, hess_info, p_pinned, data)
         return logpost, x_max, hess_info, iters
+
+
+def from_log_joint(log_joint, param_example):
+    return FullLaplace(param_example, log_joint)
+
+
+def merge(*pytrees):
+    def _merge(*args):
+        combine = None
+        for arg in args:
+            if arg is not None:
+                if combine is not None:
+                    overwrite = ~jnp.isnan(arg)
+                    combine = jnp.where(overwrite, arg, combine)
+                elif isinstance(arg, jnp.ndarray):
+                    combine = arg
+                else:
+                    return arg
+        return combine
+
+    return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
 
 
 def pytree_shape0(pyt):
@@ -222,86 +240,6 @@ class ParamSpec:
                 out[k] = out_arr.at[self.dont_skip_idxs[k]].set(x[i:end])
             i = end
         return out
-
-
-@partial(jax.jit, static_argnums=(0,))
-def log_likelihood(model, p, p_pinned, data):
-    # seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
-    # trace = handlers.trace(seeded_model).get_trace(data)
-    # d = {
-    #     k: (v["value"].shape[0] if len(v["value"].shape) > 0 else 1)
-    #     for k, v in trace.items()
-    #     if not v["is_observed"]
-    # }
-    # return d
-
-    p_final = merge(p, p_pinned)
-    seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
-    subs_model = handlers.substitute(seeded_model, p_final)
-    trace = handlers.trace(subs_model).get_trace(data)
-    d = {
-        k: (v["value"].shape[0] if len(v["value"].shape) > 0 else 1)
-        for k, v in trace.items()
-        if not v["is_observed"]
-    }
-    return d, sum(
-        [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
-    )
-
-
-@profile
-def pin_to_spec(model, pin, data_example):
-    """
-    Facilitates a clean user API.
-
-    pin = "sig2"
-    pin = ["sig2"]
-    pin = [("sig2", 0)]
-    pin = [("sig2", 0), ("theta", 1)]
-    """
-    # d = call_model(model, data_example)
-    d, _ = log_likelihood(model, dict(), dict(), data_example)
-
-    param_example = {k: np.zeros(n) for k, n in d.items()}
-    if not isinstance(pin, list):
-        pin = [pin]
-    for pin_entry in pin:
-        if isinstance(pin_entry, str):
-            param_example[pin_entry][:] = np.nan
-        else:
-            param_example[pin_entry[0]][pin_entry[1]] = np.nan
-    return ParamSpec(param_example)
-
-
-def merge(*pytrees):
-    def _merge(*args):
-        combine = None
-        for arg in args:
-            if arg is not None:
-                if combine is not None:
-                    overwrite = ~jnp.isnan(arg)
-                    combine = jnp.where(overwrite, arg, combine)
-                elif isinstance(arg, jnp.ndarray):
-                    combine = arg
-                else:
-                    return arg
-        return combine
-
-    return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
-
-
-def build_log_likelihood(model):
-    def log_likelihood(p, p_pinned, data):
-        # Inputs are pytrees
-        p_final = merge(p, p_pinned)
-        seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
-        subs_model = handlers.substitute(seeded_model, p_final)
-        trace = handlers.trace(subs_model).get_trace(data)
-        return sum(
-            [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
-        )
-
-    return log_likelihood
 
 
 def build_grad_hess(log_joint_single, param_spec):
@@ -459,13 +397,13 @@ def gauss_hermite_grid(x_max, hess, latent_idx, n=25):
     Returns:
         The integration grid for the conditioned-on variable.
     """
-    hg_rule = quad.gauss_herm_rule(n)
-    hg_pts, hg_wts = hg_rule.pts, hg_rule.wts
+    gh_rule = quad.gauss_herm_rule(n)
+    gh_pts, gh_wts = gh_rule.pts, gh_rule.wts
     sd = jnp.sqrt(-jnp.diagonal(jnp.linalg.inv(hess), axis1=2, axis2=3))
     pts = (
-        x_max[None, ..., latent_idx] + sd[None, ..., latent_idx] * hg_pts[:, None, None]
+        x_max[None, ..., latent_idx] + sd[None, ..., latent_idx] * gh_pts[:, None, None]
     )
-    wts = sd[None, ..., latent_idx] * hg_wts[:, None, None]
+    wts = sd[None, ..., latent_idx] * gh_wts[:, None, None]
     return pts, wts
 
 

@@ -6,7 +6,7 @@ import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
 
-from inlaw import FullLaplace
+from inlaw.inla import FullLaplace
 
 mu_0 = -1.34
 mu_sig2 = 100.0
@@ -21,7 +21,7 @@ def figure2_data(N=10):
     return np.stack((y_i, n_i), axis=-1).astype(np.float64)
 
 
-def berry_model(d):
+def model(d):
     def model(data):
         sig2 = numpyro.sample("sig2", dist.InverseGamma(sig2_alpha, sig2_beta))
         cov = jnp.full((d, d), mu_sig2) + jnp.diag(jnp.repeat(sig2, d))
@@ -38,7 +38,24 @@ def berry_model(d):
     return model
 
 
-def fast_berry(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
+def log_joint(d):
+    def ll(params, data):
+        sig2 = params["sig2"]
+        cov = jnp.full((d, d), mu_sig2) + jnp.diag(jnp.repeat(sig2, d))
+        return (
+            jnp.sum(dist.InverseGamma(sig2_alpha, sig2_beta).log_prob(sig2))
+            + dist.MultivariateNormal(mu_0, cov).log_prob(params["theta"])
+            + jnp.sum(
+                dist.BinomialLogits(
+                    params["theta"] + logit_p1, total_count=data[..., 1]
+                ).log_prob(data[..., 0])
+            )
+        )
+
+    return ll
+
+
+def optimized(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
     sigma2_n = sig2.shape[0]
     arms = np.arange(n_arms)
     cov = np.full((sigma2_n, n_arms, n_arms), mu_sig2)
@@ -86,9 +103,8 @@ def fast_berry(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
         return step, (hess_a, denom)
 
     return FullLaplace(
-        berry_model(n_arms),
-        "sig2",
-        np.zeros((n_arms, 2)),
+        dict(sig2=np.array([np.nan]), theta=np.full(n_arms, 0)),
+        None,
         log_joint=log_joint,
         step_hess=step_hess,
         logdet=logdet,
