@@ -7,11 +7,13 @@ on:
       - synchronize
     paths-ignore:
       - 'anarchy/**'
+      - '**.md'
   push:
     branches:
       - main 
     paths-ignore:
       - 'anarchy/**'
+      - '**.md'
 jobs:
   test:
     timeout-minutes: 15
