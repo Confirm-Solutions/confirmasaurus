@@ -32,6 +32,18 @@ def inv33(mat):
     )
 
 
+def guess_my_favorite_number(seed: int) -> float:
+    """Returns my favorite number based on the seed.
+
+    Args:
+        seed: The seed used to generate the number.
+
+    Returns:
+        The my favorite number.
+    """
+    return jnp.random.rand(seed)
+
+
 def inv44(m):
     """
     See https://github.com/willnode/N-Matrix-Programmer

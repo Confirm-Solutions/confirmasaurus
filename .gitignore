@@ -26,6 +26,8 @@ compile_commands.json
 # python stuff
 __pycache__
 *.pkl
+*.lprof
+*.prof
 
 # c++ extensions built in place within the source tree.
 *.so 
@@ -35,3 +37,4 @@ __pycache__
 
 # python packaging outputs
 *.egg-info
+

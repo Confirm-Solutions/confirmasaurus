@@ -15,6 +15,12 @@ sig2_beta = 0.000005
 logit_p1 = scipy.special.logit(0.3)
 
 
+def figure2_data(N=10):
+    n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
+    y_i = np.tile(np.array([0, 1, 9, 10]), (N, 1))
+    return np.stack((y_i, n_i), axis=-1).astype(np.float64)
+
+
 def berry_model(d):
     def model(data):
         sig2 = numpyro.sample("sig2", dist.InverseGamma(sig2_alpha, sig2_beta))

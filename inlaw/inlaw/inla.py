@@ -9,29 +9,28 @@ import numpy as np
 import numpyro.handlers as handlers
 from jax.config import config
 
+from . import quad
 from . import smalljax
 
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
 
 # TODO: laplace arm marginals
-# TODO: conditional laplace
 # TODO: parameter checks and documentation!
-# TODO: Test against MCMC using kullback-liebler.
 # TODO: jax jit the batch_execute function
 # TODO: i could pull the outer data.shape[0] vmap out and apply that to the
 #       whole algorithm. THIS IS A GOOD IDEA.
 # TODO: debug the problems with batching. why is it sometimes causing things to
 #       randomly fail. add batching to pytest parameter grid
-# TODO: why is convergence failing in 32 bit. it's not really. it just stalls
-#       out when sig2 is very small.
 # TODO: sampling: https://github.com/inbo/INLA/blob/0fa332471d2e19548cc0f63e36873e31dbd685be/R/posterior.sample.R#L193 # noqa: E501
 # TODO: there are a number of duplicated vmap calls in here. I'm concerned this
 #       will increase the jit time dramatically.
-# TODO: mu vs x_max??
+# TODO: explain x_max vs mu: x_max is the mode, mu is used when we're assuming
+#       gaussianity
 
 
 class FullLaplace:
+    @profile
     def __init__(
         self,
         model,
@@ -130,6 +129,9 @@ def pytree_shape0(pyt):
 
 def batch_execute(f, batch_dim, batch_size, *args):
     """
+    TODO: it would be feasible to re-design this to have a similar interface
+    to jax.vmap
+
     An interesting jax problem is that many jit-ted JAX functions require
     re-compiling every time you change the array size of the inputs. There’s no
     general solution to this and if you’re running the same operation on a bunch of
@@ -222,6 +224,32 @@ class ParamSpec:
         return out
 
 
+@partial(jax.jit, static_argnums=(0,))
+def log_likelihood(model, p, p_pinned, data):
+    # seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
+    # trace = handlers.trace(seeded_model).get_trace(data)
+    # d = {
+    #     k: (v["value"].shape[0] if len(v["value"].shape) > 0 else 1)
+    #     for k, v in trace.items()
+    #     if not v["is_observed"]
+    # }
+    # return d
+
+    p_final = merge(p, p_pinned)
+    seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
+    subs_model = handlers.substitute(seeded_model, p_final)
+    trace = handlers.trace(subs_model).get_trace(data)
+    d = {
+        k: (v["value"].shape[0] if len(v["value"].shape) > 0 else 1)
+        for k, v in trace.items()
+        if not v["is_observed"]
+    }
+    return d, sum(
+        [jnp.sum(site["fn"].log_prob(site["value"])) for k, site in trace.items()]
+    )
+
+
+@profile
 def pin_to_spec(model, pin, data_example):
     """
     Facilitates a clean user API.
@@ -231,13 +259,8 @@ def pin_to_spec(model, pin, data_example):
     pin = [("sig2", 0)]
     pin = [("sig2", 0), ("theta", 1)]
     """
-    seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
-    trace = handlers.trace(seeded_model).get_trace(data_example)
-    d = {
-        k: (v["value"].shape[0] if len(v["value"].shape) > 0 else 1)
-        for k, v in trace.items()
-        if not v["is_observed"]
-    }
+    # d = call_model(model, data_example)
+    d, _ = log_likelihood(model, dict(), dict(), data_example)
 
     param_example = {k: np.zeros(n) for k, n in d.items()}
     if not isinstance(pin, list):
@@ -418,3 +441,44 @@ def build_conditional_inla(log_joint_single, param_spec):
         return calc_log_posterior(cond_mu, cond_hess, p_pinned, data)
 
     return conditional_inla
+
+
+def gauss_hermite_grid(x_max, hess, latent_idx, n=25):
+    """
+    Returns a grid of quadrature points centered at the conditional modes of
+    the densities under consideration. The width of the grid is determined by
+    the standard deviation of the density as calculated from the provided
+    hessian.
+
+    Args:
+        x_max: The mode of the density.
+        hess: The hessian at the mode.
+        latent_idx: The index of the latent variable to condition on.
+        n: The number of points for the Gauss-Hermite grid.
+
+    Returns:
+        The integration grid for the conditioned-on variable.
+    """
+    hg_rule = quad.gauss_herm_rule(n)
+    hg_pts, hg_wts = hg_rule.pts, hg_rule.wts
+    sd = jnp.sqrt(-jnp.diagonal(jnp.linalg.inv(hess), axis1=2, axis2=3))
+    pts = (
+        x_max[None, ..., latent_idx] + sd[None, ..., latent_idx] * hg_pts[:, None, None]
+    )
+    wts = sd[None, ..., latent_idx] * hg_wts[:, None, None]
+    return pts, wts
+
+
+def jensen_shannon_div(x, y, wts, axis):
+    """
+    Compute the Jensen-Shannon divergence between two distributions.
+    """
+    R = 0.5 * (x + y)
+
+    def rel_entropy_integral(d):
+        e = jnp.where(d == 0, 0, d * jnp.log(d / R))
+        return jnp.sum(wts * e, axis=axis)
+
+    a = rel_entropy_integral(x)
+    b = rel_entropy_integral(y)
+    return 0.5 * (a + b)

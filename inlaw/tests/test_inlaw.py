@@ -1,5 +1,9 @@
 import timeit
 
+if "profile" not in __builtins__:
+    __builtins__.profile = lambda x: x
+
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -11,6 +15,7 @@ from scipy.special import logit
 import inlaw.berry_model as berry_model
 import inlaw.inla as inla
 import inlaw.quad as quad
+import inlaw.smalljax as smalljax
 
 config.update("jax_enable_x64", True)
 
@@ -137,16 +142,9 @@ sig2_post = np.array(
 )
 
 
-def berry_example_data(N=10):
-    n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
-    y_i = np.tile(np.array([0, 1, 9, 10]), (N, 1))
-    data = np.stack((y_i, n_i), axis=-1).astype(np.float64)
-    return data
-
-
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 def test_fast_berry(dtype):
-    data = berry_example_data().astype(dtype)
+    data = berry_model.figure2_data().astype(dtype)
     # fl = inla.FullLaplace(berry_model.berry_model(4), "sig2", data[0])
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
@@ -164,8 +162,8 @@ def test_fast_berry(dtype):
 
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("n_arms", [2, 3, 4])
-def test_full_laplace_custom(dtype, n_arms):
-    data = berry_example_data(1).astype(dtype)[:, :n_arms]
+def test_full_laplace(dtype, n_arms):
+    data = berry_model.figure2_data(1).astype(dtype)[:, :n_arms]
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     laplace = berry_model.fast_berry(sig2, n_arms=n_arms, tol=1e-6)
@@ -190,6 +188,52 @@ def test_full_laplace_custom(dtype, n_arms):
         atol=1e-3,
     )
     np.testing.assert_allclose(post_custom, post, rtol=5e-3)
+
+
+def test_conditional_inla(cur_loc):
+    # The origin of this test is in conditional_inla.ipynb Take a look there
+    # for figures showing density comparisons.
+    n_arms = 4
+    data = berry_model.figure2_data(1)[:, :n_arms]
+    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+    fl = inla.FullLaplace(berry_model.berry_model(n_arms), "sig2", data[0])
+    p_pinned = dict(sig2=sig2_rule.pts, theta=None)
+    logpost, x_max, hess, _ = fl(p_pinned, data)
+    # post = inla.exp_and_normalize(logpost, sig2_rule.wts[None, :], axis=1)
+
+    arm_idx = 0
+    cond_inla_f = inla.build_conditional_inla(fl.log_joint_single, fl.spec)
+    cx, wts = inla.gauss_hermite_grid(x_max, hess, arm_idx, n=25)
+    lp = cond_inla_f(x_max, p_pinned, data, hess, cx, arm_idx)
+    arm_marg = inla.exp_and_normalize(lp, wts, axis=0)
+
+    mcmc_test_data = np.load(cur_loc.joinpath("test_conditional_inla.npy"))
+
+    divergence = inla.jensen_shannon_div(
+        arm_marg[:, 0, :], mcmc_test_data[..., 1], wts[:, 0, :], axis=0
+    )
+    print(divergence)
+    target_divergence = np.array(
+        [
+            1.04143232e-04,
+            3.07438844e-04,
+            6.45982416e-05,
+            9.89656738e-05,
+            7.83444433e-05,
+            4.13895995e-05,
+            2.81239500e-05,
+            1.96616409e-05,
+            3.00670662e-05,
+            2.55080402e-05,
+            7.19278681e-05,
+            1.96892343e-04,
+            1.42703595e-03,
+            1.01020761e-04,
+            1.32290054e-04,
+        ]
+    )
+    np.testing.assert_allclose(cx[:, 0, :], mcmc_test_data[..., 0])
+    np.testing.assert_allclose(divergence, target_divergence, rtol=1e-3)
 
 
 def test_solve_basket():
@@ -220,9 +264,9 @@ def my_timeit(N, f, should_print=True):
 
 
 def benchmark_custom():
-    N = 10000
+    N = 1000
     dtype = np.float32
-    data = berry_example_data(N).astype(dtype)
+    data = berry_model.figure2_data(N).astype(dtype)
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     laplace = berry_model.fast_berry(sig2, dtype=dtype, max_iter=10, tol=1e-2)
@@ -241,5 +285,28 @@ def benchmark_custom():
     )
 
 
+@profile
+def benchmark_jit():
+    n_arms = 4
+    data = berry_model.figure2_data(1)[:, :n_arms]
+    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+
+    fl = inla.FullLaplace(berry_model.berry_model(n_arms), "sig2", data[0])
+    p_pinned = dict(sig2=sig2_rule.pts, theta=None)
+
+    x0 = jnp.zeros((data.shape[0], 15, 4), dtype=data.dtype)
+    x_max, hess_info, iters = jax.jit(fl.optimizer)(x0, p_pinned, data)
+
+    logdet = jax.vmap(jax.vmap(lambda x: smalljax.logdet(-x)))
+
+    def calc_log_posterior(x_max, hess_info, p_pinned, data):
+        lj = fl.log_joint(x_max, p_pinned, data)
+        log_post = lj - x_max.dtype.type(0.5) * logdet(hess_info)
+        return log_post
+
+    jax.jit(calc_log_posterior)(x_max, hess_info, p_pinned, data)
+
+
 if __name__ == "__main__":
-    benchmark_custom()
+    # benchmark_custom()
+    benchmark_jit()
