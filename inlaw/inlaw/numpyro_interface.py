@@ -55,7 +55,7 @@ def from_numpyro(model, pin, shape):
             )
         )
 
-    return param_example, log_joint
+    return log_joint, param_example
 
 
 @partial(jax.jit, static_argnums=(0,))

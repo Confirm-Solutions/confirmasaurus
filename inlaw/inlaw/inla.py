@@ -1,3 +1,8 @@
+"""
+The INLA backend library.
+See this github issue for a discussion of ways to mitigate JAX compilation times:
+https://github.com/Confirm-Solutions/confirmasaurus/issues/22
+"""
 import copy
 from dataclasses import dataclass
 from functools import partial
@@ -12,15 +17,13 @@ import numpy as np
 from . import quad
 from . import smalljax
 
-# TODO: sampling: https://github.com/inbo/INLA/blob/0fa332471d2e19548cc0f63e36873e31dbd685be/R/posterior.sample.R#L193 # noqa: E501
 # TODO: user interface
-# TODO: try creating another operations set for computing the latent marginals
 # TODO: deal with the scalar vs unit vector distinction in an elegant way:
 #       currently sometimes unravel will produce a unit vector instead of scalar and
 #       it can make writing a log joint function a bit trickier
-#
-# See this github issue for a discussion of ways to mitigate JAX compilation times:
-# https://github.com/Confirm-Solutions/confirmasaurus/issues/22
+# TODO: precise description of the operations, including call signatures
+# TODO: it would be possible to specify a subset of the operation and then
+#       derive the other operations from the specified subset.
 
 
 @dataclass
@@ -73,11 +76,10 @@ class Operations:
     functions here are generated from a model or specified by the user.
 
     Operations that are suffixed with "v" are vectorized over the pinned
-    variables dimension.
-
-    TODO: precise description of the operations, including call signatures
-    TODO: it would be possible to specify a subset of the operation and then
-          derive the other operations from the specified subset.
+    variables dimension. This vectorization is done so that a custom model can
+    perform optimization and pre-computations with respect to the pinned
+    variables. For example, the custom basket trial model can pre-compute the
+    the precision matrix and its determinant.
     """
 
     spec: ParamSpec
@@ -108,7 +110,7 @@ class Operations:
         out.max_iter = max_iter or self.max_iter
         return out
 
-    def optimize_loop(self, x0, p_pinned, data):
+    def find_mode(self, x0, p_pinned, data):
         def step(args):
             x, hess_info, iters, go = args
             step, hess_info = self.step_hessv(x, p_pinned, data)
@@ -123,20 +125,26 @@ class Operations:
         )
         return x, hess_info, iters
 
-    def laplace_logpost(self, x_max, hess_info, p_pinned, data):
+    def integrate_cond_gaussian(self, x_max, hess_info, p_pinned, data):
         lj = self.log_jointv(x_max, p_pinned, data)
         log_post = lj - x_max.dtype.type(0.5) * self.logdetv(hess_info)
         return log_post
 
-    def hyper_logpost(self, x0, p_pinned, data):
-        x_max, hess_info, iters = self.optimize_loop(x0, p_pinned, data)
-        logpost = self.laplace_logpost(x_max, hess_info, p_pinned, data)
+    def laplace_logpost(self, x0, p_pinned, data):
+        x_max, hess_info, iters = self.find_mode(x0, p_pinned, data)
+        logpost = self.integrate_cond_gaussian(x_max, hess_info, p_pinned, data)
         return logpost, x_max, hess_info, iters
 
-    def latent_logpost(self, x_max, inv_hess_row, p_pinned, data, x, latent_idx):
+    def cond_laplace_logpost(
+        self, x_max, inv_hess_row, p_pinned, data, x, latent_idx, reduced=False
+    ):
         cond_mu = mvn_conditional_meanv(x_max, inv_hess_row, x, latent_idx)
-        cond_hess = self.reduced_hessv(cond_mu, p_pinned, data, latent_idx)
-        return self.laplace_logpost(cond_mu, cond_hess, p_pinned, data)
+        if reduced:
+            cond_hess = self.reduced_hessv(cond_mu, p_pinned, data, latent_idx)
+        else:
+            cond_mu = jnp.delete(cond_mu, latent_idx, axis=-1)
+            cond_hess = self.hessv(cond_mu, p_pinned, data)
+        return self.integrate_cond_gaussian(cond_mu, cond_hess, p_pinned, data)
 
 
 def from_log_joint(log_joint, param_example):
@@ -174,10 +182,9 @@ def from_log_joint(log_joint, param_example):
             axis=-2,
         )
 
-    def reduced_hess(x, p_pinned, data, drop_idx):
+    def reduced_hess(x, p_pinned, data, latent_idx):
         H = hess(x, p_pinned, data)
-        H = jnp.delete(jnp.delete(H, drop_idx, axis=0), drop_idx, axis=1)
-        return H
+        return jnp.delete(H, latent_idx, axis=-1)
 
     solver = smalljax.gen(f"solve{spec.n_free}")
 

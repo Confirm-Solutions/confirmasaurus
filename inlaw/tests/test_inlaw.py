@@ -20,7 +20,7 @@ import jax.numpy as jnp
 def test_log_joint_from_numpyro():
     params = dict(sig2=10.0, theta=np.array([0, 0, 0]))
     data = np.array([[6.0, 35], [5, 35], [4, 35]])
-    _, ll_fnc = numpyro_interface.from_numpyro(berry.model(3), "sig2", (3, 2))
+    ll_fnc, _ = numpyro_interface.from_numpyro(berry.model(3), "sig2", (3, 2))
     ll = jax.jit(ll_fnc)(params, data)
 
     mu_0 = -1.34
@@ -148,7 +148,7 @@ def test_fast_berry(dtype):
         max_iter=10, opt_tol=dtype(1e-6)
     )
     logpost, x_max, _, iters = jax.jit(
-        jax.vmap(inla_ops.hyper_logpost, in_axes=(None, None, 0))
+        jax.vmap(inla_ops.laplace_logpost, in_axes=(None, None, 0))
     )(np.zeros((15, 4), dtype=dtype), dict(sig2=sig2), data)
 
     post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1)
@@ -162,7 +162,7 @@ def test_fast_berry(dtype):
 
 
 @pytest.mark.parametrize("n_arms", [2, 3, 4])
-def test_full_laplace(n_arms):
+def test_gaussian_laplace(n_arms):
     dtype = np.float64
     data = berry.figure2_data(1).astype(dtype)[:, :n_arms]
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
@@ -170,7 +170,7 @@ def test_full_laplace(n_arms):
     p_pinned = dict(sig2=sig2, theta=None)
 
     def logpost(ops):
-        f = jax.jit(jax.vmap(custom_ops.hyper_logpost, in_axes=(None, None, 0)))
+        f = jax.jit(jax.vmap(custom_ops.laplace_logpost, in_axes=(None, None, 0)))
         logpost, x_max, _, iters = f(
             np.zeros((15, n_arms), dtype=dtype), p_pinned, data
         )
@@ -198,59 +198,16 @@ def test_full_laplace(n_arms):
     np.testing.assert_allclose(custom_post, ad_post, rtol=5e-3)
 
 
-def test_conditional_inla(cur_loc):
-    # The origin of this test is in conditional_inla.ipynb Take a look there
-    # for figures showing density comparisons.
-
-    # Step 1) Set up the data and problem, hyperparam posterior
-    n_arms = 4
-    data = berry.figure2_data(1)[:, :n_arms]
-    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
-    sig2 = sig2_rule.pts
-    p_ex = dict(sig2=np.array([nan]), theta=np.zeros(n_arms))
-    ad_ops = inla.from_log_joint(berry.log_joint(n_arms), p_ex)
-    p_pinned = dict(sig2=sig2, theta=None)
-    _, x_max, hess, _ = jax.jit(
-        jax.vmap(ad_ops.hyper_logpost, in_axes=(None, None, 0))
-    )(np.zeros((15, n_arms)), p_pinned, data)
-
-    # Step 2) Arm marginals from the automatic differentiation version
-    arm_idx = 0
-    inv_hess = jnp.linalg.inv(hess)
-    cx, wts = inla.gauss_hermite_grid(x_max, inv_hess[:, :, arm_idx], arm_idx, n=25)
-    lm_fnc = jax.jit(
-        jax.vmap(
-            jax.vmap(ad_ops.latent_logpost, in_axes=(0, 0, None, 0, 0, None)),
-            in_axes=(None, None, None, None, 0, None),
-        ),
-        static_argnums=(5,),
-    )
-    logpost_arm = lm_fnc(x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx)
-    arm_marg = inla.exp_and_normalize(logpost_arm, wts, axis=0)
-
-    # Step 3) Arm marginals from the custom version
-    custom_ops = berry.optimized(sig2, n_arms=n_arms).config()
-    lm_fnc = jax.jit(
-        jax.vmap(
-            jax.vmap(custom_ops.latent_logpost, in_axes=(0, 0, None, 0, 0, None)),
-            in_axes=(None, None, None, None, 0, None),
-        ),
-        static_argnums=(5,),
-    )
-    custom_logpost_arm = lm_fnc(
-        x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx
-    )
-    custom_arm_marg = inla.exp_and_normalize(custom_logpost_arm, wts, axis=0)
-    divergence = inla.jensen_shannon_div(
-        arm_marg[:, 0, :], custom_arm_marg[:, 0, :], wts[:, 0, :], axis=0
-    )
-    assert np.all(divergence < 5e-5)
-
-    # Step 4) Compare against MCMC
+def compare_arm0_against_mcmc(cur_loc, arm_marg, cx, wts, exact):
+    """Compare the arm 0 posterior against the stored MCMC results using
+    Jensen-Shannon divergence.
+    """
     mcmc_test_data = np.load(cur_loc.joinpath("test_conditional_inla.npy"))
     divergence = inla.jensen_shannon_div(
         arm_marg[:, 0, :], mcmc_test_data[..., 1], wts[:, 0, :], axis=0
     )
+    # These are divergence values produced by a run of the conditional laplace
+    # approximation.
     target_divergence = np.array(
         [
             1.04143232e-04,
@@ -271,7 +228,93 @@ def test_conditional_inla(cur_loc):
         ]
     )
     np.testing.assert_allclose(cx[:, 0, :], mcmc_test_data[..., 0])
-    np.testing.assert_allclose(divergence, target_divergence, rtol=1e-3)
+    if exact:
+        np.testing.assert_allclose(divergence, target_divergence, rtol=1e-3)
+    else:
+        assert np.all(divergence < 2 * target_divergence)
+
+
+def test_full_laplace(cur_loc):
+    n_arms = 4
+    data = berry.figure2_data(1)[:, :n_arms]
+    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+    sig2 = sig2_rule.pts
+    p_ex = dict(sig2=np.array([nan]), theta=np.zeros(n_arms))
+    ad_ops = inla.from_log_joint(berry.log_joint(n_arms), p_ex)
+    p_pinned = dict(sig2=sig2, theta=None)
+    _, x_max, hess, _ = jax.jit(
+        jax.vmap(ad_ops.laplace_logpost, in_axes=(None, None, 0))
+    )(np.zeros((15, n_arms)), p_pinned, data)
+
+    arm_idx = 0
+    theta_arm_ex = np.zeros(4)
+    theta_arm_ex[arm_idx] = nan
+    arm_ex = dict(sig2=np.array([nan]), theta=theta_arm_ex)
+    ad_arm_ops = inla.from_log_joint(berry.log_joint(n_arms), arm_ex)
+
+    inv_hess = jnp.linalg.inv(hess)
+    cx, wts = inla.gauss_hermite_grid(x_max, inv_hess[:, :, arm_idx], arm_idx, n=25)
+
+    sig2_tiled = np.tile(sig2[None, None, :], (cx.shape[0], data.shape[0], 1))
+    theta_fixed = np.full((*sig2_tiled.shape, 4), nan)
+    theta_fixed[..., arm_idx] = cx
+    arm_pinned = dict(sig2=sig2_tiled, theta=theta_fixed)
+
+    x0 = jnp.delete(x_max, arm_idx, -1)
+    laplace_f = jax.jit(
+        jax.vmap(
+            jax.vmap(ad_arm_ops.laplace_logpost, in_axes=(0, 0, 0)),
+            in_axes=(None, 0, None),
+        )
+    )
+    logpost_arm, arm_x_max, arm_hess, arm_iters = laplace_f(x0, arm_pinned, data)
+    arm_marg = inla.exp_and_normalize(logpost_arm, wts, axis=0)
+
+    compare_arm0_against_mcmc(cur_loc, arm_marg, cx, wts, exact=False)
+
+
+def test_conditional_inla(cur_loc):
+    # The origin of this test is in conditional_inla.ipynb Take a look there
+    # for figures showing density comparisons.
+
+    # Step 1) Set up the data and problem, hyperparam posterior
+    n_arms = 4
+    data = berry.figure2_data(1)[:, :n_arms]
+    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+    sig2 = sig2_rule.pts
+    p_ex = dict(sig2=np.array([nan]), theta=np.zeros(n_arms))
+    ad_ops = inla.from_log_joint(berry.log_joint(n_arms), p_ex)
+    p_pinned = dict(sig2=sig2, theta=None)
+    _, x_max, hess, _ = jax.jit(
+        jax.vmap(ad_ops.laplace_logpost, in_axes=(None, None, 0))
+    )(np.zeros((15, n_arms)), p_pinned, data)
+
+    arm_idx = 0
+    theta_arm_ex = np.zeros(4)
+    theta_arm_ex[arm_idx] = nan
+    arm_ex = dict(sig2=np.array([nan]), theta=theta_arm_ex)
+    ad_arm_ops = inla.from_log_joint(berry.log_joint(n_arms), arm_ex)
+
+    inv_hess = jnp.linalg.inv(hess)
+    cx, wts = inla.gauss_hermite_grid(x_max, inv_hess[:, :, arm_idx], arm_idx, n=25)
+
+    sig2_tiled = np.tile(sig2[None, None, :], (cx.shape[0], data.shape[0], 1))
+    theta_fixed = np.full((*sig2_tiled.shape, 4), nan)
+    theta_fixed[..., arm_idx] = cx
+    arm_pinned = dict(sig2=sig2_tiled, theta=theta_fixed)
+
+    cond_laplace_f = jax.jit(
+        jax.vmap(
+            jax.vmap(ad_arm_ops.cond_laplace_logpost, in_axes=(0, 0, 0, 0, 0, None)),
+            in_axes=(None, None, 0, None, 0, None),
+        ),
+        static_argnums=(5,),
+    )
+    logpost_arm = cond_laplace_f(
+        x_max, inv_hess[:, :, arm_idx], arm_pinned, data, cx, arm_idx
+    )
+    arm_marg = inla.exp_and_normalize(logpost_arm, wts, axis=0)
+    compare_arm0_against_mcmc(cur_loc, arm_marg, cx, wts, exact=True)
 
 
 def test_solve_inv_basket():
@@ -320,7 +363,7 @@ def benchmark(N=10000, iter=5):
 
     def bench_ops(name, ops):
         print(f"\n{name} gaussian")
-        hyperpost = jax.jit(jax.vmap(ops.hyper_logpost, in_axes=(None, None, 0)))
+        hyperpost = jax.jit(jax.vmap(ops.laplace_logpost, in_axes=(None, None, 0)))
         p_pinned = dict(sig2=sig2, theta=None)
         my_timeit(
             N, lambda: hyperpost(x0, p_pinned, data)[0].block_until_ready(), iter=iter
@@ -330,10 +373,12 @@ def benchmark(N=10000, iter=5):
         _, x_max, hess_info, _ = hyperpost(x0, p_pinned, data)
         arm_logpost_f = jax.jit(
             jax.vmap(
-                jax.vmap(ops.latent_logpost, in_axes=(0, 0, None, 0, 0, None)),
-                in_axes=(None, None, None, None, 0, None),
+                jax.vmap(
+                    ops.cond_laplace_logpost, in_axes=(0, 0, None, 0, 0, None, None)
+                ),
+                in_axes=(None, None, None, None, 0, None, None),
             ),
-            static_argnums=(5,),
+            static_argnums=(5, 6),
         )
         invv = jax.jit(jax.vmap(jax.vmap(ops.invert)))
 
@@ -345,7 +390,7 @@ def benchmark(N=10000, iter=5):
                     x_max, inv_hess[..., arm_idx, :], arm_idx, n=25
                 )
                 arm_logpost = arm_logpost_f(
-                    x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx
+                    x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx, True
                 )
                 arm_post.append(inla.exp_and_normalize(arm_logpost, wts, axis=0))
             return jnp.array(arm_post)
