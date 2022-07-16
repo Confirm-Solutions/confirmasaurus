@@ -6,7 +6,7 @@ import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
 
-from inlaw.inla import FullLaplace
+import inlaw.inla as inla
 
 mu_0 = -1.34
 mu_sig2 = 100.0
@@ -55,7 +55,7 @@ def log_joint(d):
     return ll
 
 
-def optimized(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
+def optimized(sig2, n_arms=4, dtype=np.float64):
     sigma2_n = sig2.shape[0]
     arms = np.arange(n_arms)
     cov = np.full((sigma2_n, n_arms, n_arms), mu_sig2)
@@ -67,10 +67,10 @@ def optimized(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
     neg_precQ_b = jnp.array(neg_precQ[:, 0, 1], dtype=dtype)
     neg_precQ_a = jnp.array(neg_precQ[:, 0, 0] - neg_precQ_b, dtype=dtype)
     const = jnp.array(log_prior + logprecQdet, dtype=dtype)
-    dotJI_vmap = jax.vmap(jax.vmap(dotJI, in_axes=(0, 0, 0)), in_axes=(None, None, 0))
-    solve_vmap = jax.vmap(jax.vmap(solve_basket), in_axes=(0, None, 0))
+    dotJI_vmap = jax.vmap(dotJI)
+    solve_vmap = jax.vmap(solve_basket)
 
-    def log_joint(theta, p_pinned, data):
+    def log_joint(theta, _, data):
         y = data[..., 0]
         n = data[..., 1]
         theta_m0 = theta - data.dtype.type(mu_0)
@@ -83,38 +83,60 @@ def optimized(sig2, n_arms=4, dtype=np.float64, max_iter=30, tol=1e-3):
         return (
             data.dtype.type(0.5) * quad
             + jnp.sum(
-                theta_adj * y[:, None] - n[:, None] * jnp.log(exp_theta_adj + 1),
+                theta_adj * y[None] - n[None] * jnp.log(exp_theta_adj + 1),
                 axis=-1,
             )
             + const
         )
 
-    def step_hess(theta, _, data):
+    def grad_hess(theta, _, data):
         y = data[..., 0]
         n = data[..., 1]
         theta_m0 = theta - dtype(mu_0)
         exp_theta_adj = jnp.exp(theta + dtype(logit_p1))
         C = 1 / (exp_theta_adj + 1)
-        nCeta = n[:, None] * C * exp_theta_adj
-        grad = dotJI_vmap(neg_precQ_a, neg_precQ_b, theta_m0) + y[:, None] - nCeta
-        hess_a = neg_precQ_a[None, :, None] - nCeta * C
+        nCeta = n[None] * C * exp_theta_adj
+        grad = dotJI_vmap(neg_precQ_a, neg_precQ_b, theta_m0) + y[None] - nCeta
+        hess_a = neg_precQ_a[:, None] - nCeta * C
         hess_b = neg_precQ_b
+        return grad, (hess_a, hess_b)
+
+    def grad(theta, _, data):
+        return grad_hess(theta, _, data)[0]
+
+    def hess(theta, _, data):
+        return grad_hess(theta, _, data)[1]
+
+    def reduced_hess(theta, _, data, drop_idx):
+        H = hess(theta, _, data)
+        return (jnp.delete(H[0], drop_idx, axis=-1), H[1])
+
+    def step_hess(theta, _, data):
+        grad, (hess_a, hess_b) = grad_hess(theta, _, data)
         step, denom = solve_vmap(hess_a, hess_b, -grad)
         return step, (hess_a, denom)
 
-    return FullLaplace(
-        dict(sig2=np.array([np.nan]), theta=np.full(n_arms, 0)),
-        None,
-        log_joint=log_joint,
-        step_hess=step_hess,
-        logdet=logdet,
-        max_iter=max_iter,
-        tol=tol,
+    return inla.Operations(
+        spec=inla.ParamSpec(dict(sig2=np.array([np.nan]), theta=np.full(n_arms, 0))),
+        log_jointv=log_joint,
+        gradv=grad,
+        hessv=hess,
+        reduced_hessv=reduced_hess,
+        logdetv=logdet,
+        step_hessv=step_hess,
+        solve=lambda H, v: solve_basket(*H, v),
+        invert=lambda H: inv_basket(*H),
     )
 
 
 def dotJI(a, b, v):
     return v.sum() * b + v * a
+
+
+def inv_basket(a, b):
+    inv_a = 1 / a
+    denom = 1 + b * inv_a.sum()
+    return jnp.diag(inv_a) - jnp.outer(inv_a, inv_a) * b / denom
 
 
 def solve_basket(a, b, v):
@@ -125,7 +147,7 @@ def solve_basket(a, b, v):
     """
     inv_a = 1 / a
     v_over_a = v * inv_a
-    denom = 1 + (b * inv_a).sum()
+    denom = 1 + b * inv_a.sum()
     x = v_over_a - inv_a * (b * v_over_a.sum() / denom)
     return x, denom
 

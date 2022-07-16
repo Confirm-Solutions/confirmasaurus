@@ -9,31 +9,6 @@ class QuadRule:
     wts: np.ndarray
 
 
-def broadcast(arr, target_shape, dest_dims):
-    """
-    This is a helper functions for the gnarly broadcasting operations required
-    in the quadrature code.
-
-    Args:
-        arr: the array to broadcast
-        target_shape: the requested broadcast shape.
-        dest_dims: the index of the output dimensions corresponding to each
-            input dimension.
-    """
-
-    broadcast_shape = [1] * len(target_shape)
-    for d, size in enumerate(arr.shape):
-        target_dim = dest_dims[d]
-        broadcast_shape[target_dim] = size
-        if not target_shape[target_dim] == size:
-            raise ValueError(
-                f"Input array size of {size} along dimension {d}"
-                f" does not match requested shape of {target_shape[d]}"
-                f" on dimension {target_dim}."
-            )
-    return arr.reshape(broadcast_shape)
-
-
 def simpson_rule(n, a=-1, b=1):
     """
     Output the points and weights for a Simpson rule quadrature on the interval
@@ -108,34 +83,3 @@ def log_gauss_rule(N: int, a: float, b: float):
     pts = np.exp(qr.pts)
     wts = np.exp(qr.pts) * qr.wts
     return QuadRule(pts, wts)
-
-
-def integrate_multidim(f, axes, quad_rules):
-    """
-    Integrate a function along the specified array dimensions using the
-    specified quadrature rules.
-
-    e.g.
-    integrate_multidim(f, (2,1), (gauss_rule(5), gauss_rule(6)))
-    where f is an array with shape (2, 6, 5, 3)
-
-    will perform a multidimensional integral along the second and third axes
-    resulting in an output with shape (2, 3)
-    """
-    If = f
-    # integrate the last axis first so that the axis numbers don't change.
-    reverse_axes = np.argsort(axes)[::-1]
-    for idx in reverse_axes:
-        ax = axes[idx]
-        q = quad_rules[idx]
-
-        # we need to make sure q has the same dimensionality as If to make numpy
-        # happy. this converts the weight array from shape
-        # e.g. (15,) to (1, 1, 15, 1)
-        broadcast_shape = [1] * If.ndim
-        broadcast_shape[ax] = q.pts.shape[0]
-        q_broadcast = q.wts.reshape(broadcast_shape)
-
-        # actually integrate!
-        If = np.sum(q_broadcast * If, axis=ax)
-    return If

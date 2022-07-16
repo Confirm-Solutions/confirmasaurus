@@ -1,11 +1,9 @@
-import timeit
+import time
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.stats
-from jax.config import config
+from numpy import nan
 from scipy.special import expit
 from scipy.special import logit
 
@@ -13,9 +11,10 @@ import inlaw.berry as berry
 import inlaw.inla as inla
 import inlaw.numpyro_interface as numpyro_interface
 import inlaw.quad as quad
-import inlaw.smalljax as smalljax
 
-config.update("jax_enable_x64", True)
+# noreorder
+import jax
+import jax.numpy as jnp
 
 
 def test_log_joint_from_numpyro():
@@ -44,8 +43,8 @@ def test_log_joint_from_numpyro():
 
 
 def test_merge():
-    a, b = dict(sig2=10.0, theta=jnp.array([3, np.nan])), dict(
-        sig2=None, theta=jnp.array([np.nan, 2])
+    a, b = dict(sig2=10.0, theta=jnp.array([3, nan])), dict(
+        sig2=None, theta=jnp.array([nan, 2])
     )
     out = inla.merge(a, b)
     assert out["sig2"] == 10.0
@@ -54,8 +53,8 @@ def test_merge():
 
 def test_ravel_fncs():
     tt = np.arange(4, dtype=np.float64)
-    tt[1] = np.nan
-    ex = dict(sig2=np.array([np.nan]), theta=tt)
+    tt[1] = nan
+    ex = dict(sig2=np.array([nan]), theta=tt)
     spec = inla.ParamSpec(ex)
     r = spec.ravel_f(ex)
     np.testing.assert_allclose(r, [0, 2, 3])
@@ -72,33 +71,31 @@ def test_pin_to_spec():
 
     for pin in ["sig2", ["sig2"], ("sig2", 0), [("sig2", 0)]]:
         spec = inla.ParamSpec(numpyro_interface.pin_params(full_params, pin))
-        np.testing.assert_allclose(spec.param_example["sig2"], np.array([np.nan]))
+        np.testing.assert_allclose(spec.param_example["sig2"], np.array([nan]))
         np.testing.assert_allclose(spec.param_example["theta"], np.array([0, 0, 0, 0]))
 
     spec = inla.ParamSpec(
         numpyro_interface.pin_params(full_params, [("sig2", 0), ("theta", 1)])
     )
-    np.testing.assert_allclose(spec.param_example["sig2"], np.array([np.nan]))
-    np.testing.assert_allclose(spec.param_example["theta"], np.array([0, np.nan, 0, 0]))
+    np.testing.assert_allclose(spec.param_example["sig2"], np.array([nan]))
+    np.testing.assert_allclose(spec.param_example["theta"], np.array([0, nan, 0, 0]))
 
 
 def test_grad_hess():
     data = np.array([[7, 35], [6.0, 35], [5, 35], [4, 35]])
-    spec = inla.ParamSpec(
-        dict(
-            sig2=np.array([10.0]),
-            theta=np.array([0.0, 0.0, 0, 0]),
-        )
+
+    def grad_hess(p_ex, x, p_pinned, data):
+        ops = inla.from_log_joint(berry.log_joint(4), p_ex)
+        grad = ops.gradv(x[None], p_pinned, data)
+        hess = ops.hessv(x[None], p_pinned, data)
+        return grad, hess
+
+    p_ex = dict(
+        sig2=np.array([10.0]),
+        theta=np.array([0.0, 0.0, 0, 0]),
     )
-
-    def ll_single(p1, p2, d):
-        return berry.log_joint(4)(inla.merge(p1, p2), d)
-
-    grad_hess_vmap = jax.jit(inla.build_grad_hess(ll_single, spec))
-    grad, hess = grad_hess_vmap(
-        np.array([10, 0, 0, 0, 0.0])[None, None],
-        dict(sig2=None, theta=None),
-        data[None],
+    grad, hess = grad_hess(
+        p_ex, np.array([10.0, 0, 0, 0, 0]), dict(sig2=None, theta=None), data
     )
     full_grad = np.array([-0.25124812, -3.5032682, -4.5032682, -5.5032682, -6.5032682])
     hess01 = np.array(
@@ -107,21 +104,17 @@ def test_grad_hess():
             [7.9710153e-06, -7.4256096e00, 2.4390254e-02, 2.4390249e-02, 2.4390247e-02],
         ]
     )
-    np.testing.assert_allclose(grad[0, 0], full_grad, rtol=1e-4)
-    np.testing.assert_allclose(hess[0, 0, :2], hess01, rtol=1e-4)
+    np.testing.assert_allclose(grad[0], full_grad, rtol=1e-4)
+    np.testing.assert_allclose(hess[0, :2], hess01, rtol=1e-4)
 
-    spec2 = inla.ParamSpec(
-        dict(sig2=jnp.array([jnp.nan]), theta=jnp.array([0, np.nan, 0, 0]))
+    grad, hess = grad_hess(
+        dict(sig2=jnp.array([nan]), theta=jnp.array([0, nan, 0, 0])),
+        np.array([0, 0, 0, 0]),
+        dict(sig2=np.array([10.0]), theta=jnp.array([[nan, 0.0, nan, nan]])),
+        data,
     )
-    grad_hess_vmap = jax.jit(inla.build_grad_hess(ll_single, spec2))
-    theta_fixed = jnp.array([np.nan, 0.0, np.nan, np.nan])
-    grad, hess = grad_hess_vmap(
-        np.zeros((2, 1, 4)),
-        dict(sig2=np.array([[10.0]]), theta=theta_fixed[None]),
-        np.tile(data[None], (2, 1, 1)),
-    )
-    np.testing.assert_allclose(grad[0, 0], full_grad[[1, 3, 4]], rtol=1e-4)
-    np.testing.assert_allclose(hess[0, 0, 0], hess01[1, [1, 3, 4]], rtol=1e-4)
+    np.testing.assert_allclose(grad[0], full_grad[[1, 3, 4]], rtol=1e-4)
+    np.testing.assert_allclose(hess[0, 0], hess01[1, [1, 3, 4]], rtol=1e-4)
 
 
 xmax0_12 = np.array([-6.04682818, -2.09586893, -0.21474981, -0.07019088])
@@ -149,13 +142,15 @@ sig2_post = np.array(
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 def test_fast_berry(dtype):
     data = berry.figure2_data().astype(dtype)
-    # fl = inla.FullLaplace(berry_model.berry_model(4), "sig2", data[0])
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
-    inla_model = berry.optimized(sig2, dtype=dtype, max_iter=10, tol=dtype(1e-6))
-    logpost, x_max, _, iters = inla_model(
-        dict(sig2=sig2), data, jit=False, should_batch=False
+    inla_ops = berry.optimized(sig2, dtype=dtype).config(
+        max_iter=10, opt_tol=dtype(1e-6)
     )
+    logpost, x_max, _, iters = jax.jit(
+        jax.vmap(inla_ops.hyper_logpost, in_axes=(None, None, 0))
+    )(np.zeros((15, 4), dtype=dtype), dict(sig2=sig2), data)
+
     post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1)
 
     np.testing.assert_allclose(x_max[0, 12], xmax0_12, rtol=1e-3)
@@ -166,61 +161,93 @@ def test_fast_berry(dtype):
     assert x_max.dtype == dtype
 
 
-@pytest.mark.parametrize("dtype", [np.float32, np.float64])
 @pytest.mark.parametrize("n_arms", [2, 3, 4])
-def test_full_laplace(dtype, n_arms):
+def test_full_laplace(n_arms):
+    dtype = np.float64
     data = berry.figure2_data(1).astype(dtype)[:, :n_arms]
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
-    laplace = berry.optimized(sig2, n_arms=n_arms, tol=1e-6)
-    logpost_custom, x_max_custom, hess_custom, _ = laplace(
-        dict(sig2=sig2), data, jit=True, should_batch=False
+    p_pinned = dict(sig2=sig2, theta=None)
+
+    def logpost(ops):
+        f = jax.jit(jax.vmap(custom_ops.hyper_logpost, in_axes=(None, None, 0)))
+        logpost, x_max, _, iters = f(
+            np.zeros((15, n_arms), dtype=dtype), p_pinned, data
+        )
+        return (
+            inla.exp_and_normalize(
+                logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1
+            ),
+            x_max,
+        )
+
+    custom_ops = berry.optimized(sig2, n_arms=n_arms, dtype=dtype).config(
+        opt_tol=dtype(1e-3)
     )
-    post_custom = inla.exp_and_normalize(
-        logpost_custom, sig2_rule.wts.astype(dtype)[None, :], axis=1
-    )
+    custom_post, custom_x_max = logpost(custom_ops)
 
     # Compare the custom outputs against the version that uses automatic differentiation
-    fl = inla.FullLaplace(
-        dict(sig2=np.array([np.nan]), theta=np.zeros(n_arms)),
-        berry.log_joint(n_arms),
-        tol=1e-6,
-    )
-    logpost, x_max, hess, _ = fl(
-        dict(sig2=sig2.astype(np.float64)),
-        data.astype(np.float64),
-        jit=True,
-    )
-    post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1)
+    p_ex = dict(sig2=np.array([nan]), theta=np.zeros(n_arms))
+    ad_ops = inla.from_log_joint(berry.log_joint(n_arms), p_ex)
+    ad_post, ad_x_max = logpost(ad_ops)
     np.testing.assert_allclose(
-        x_max_custom,
-        x_max,
+        custom_x_max,
+        ad_x_max,
         atol=1e-3,
     )
-    np.testing.assert_allclose(post_custom, post, rtol=5e-3)
+    np.testing.assert_allclose(custom_post, ad_post, rtol=5e-3)
 
 
 def test_conditional_inla(cur_loc):
     # The origin of this test is in conditional_inla.ipynb Take a look there
     # for figures showing density comparisons.
+
+    # Step 1) Set up the data and problem, hyperparam posterior
     n_arms = 4
     data = berry.figure2_data(1)[:, :n_arms]
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
-    fl = inla.FullLaplace(
-        dict(sig2=np.array([np.nan]), theta=np.zeros(n_arms)), berry.log_joint(n_arms)
-    )
-    p_pinned = dict(sig2=sig2_rule.pts, theta=None)
-    logpost, x_max, hess, _ = fl(p_pinned, data)
-    # post = inla.exp_and_normalize(logpost, sig2_rule.wts[None, :], axis=1)
+    sig2 = sig2_rule.pts
+    p_ex = dict(sig2=np.array([nan]), theta=np.zeros(n_arms))
+    ad_ops = inla.from_log_joint(berry.log_joint(n_arms), p_ex)
+    p_pinned = dict(sig2=sig2, theta=None)
+    _, x_max, hess, _ = jax.jit(
+        jax.vmap(ad_ops.hyper_logpost, in_axes=(None, None, 0))
+    )(np.zeros((15, n_arms)), p_pinned, data)
 
+    # Step 2) Arm marginals from the automatic differentiation version
     arm_idx = 0
-    cond_inla_f = inla.build_conditional_inla(fl.log_joint_single, fl.spec)
-    cx, wts = inla.gauss_hermite_grid(x_max, hess, arm_idx, n=25)
-    lp = cond_inla_f(x_max, p_pinned, data, hess, cx, arm_idx)
-    arm_marg = inla.exp_and_normalize(lp, wts, axis=0)
+    inv_hess = jnp.linalg.inv(hess)
+    cx, wts = inla.gauss_hermite_grid(x_max, inv_hess[:, :, arm_idx], arm_idx, n=25)
+    lm_fnc = jax.jit(
+        jax.vmap(
+            jax.vmap(ad_ops.latent_logpost, in_axes=(0, 0, None, 0, 0, None)),
+            in_axes=(None, None, None, None, 0, None),
+        ),
+        static_argnums=(5,),
+    )
+    logpost_arm = lm_fnc(x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx)
+    arm_marg = inla.exp_and_normalize(logpost_arm, wts, axis=0)
 
+    # Step 3) Arm marginals from the custom version
+    custom_ops = berry.optimized(sig2, n_arms=n_arms).config()
+    lm_fnc = jax.jit(
+        jax.vmap(
+            jax.vmap(custom_ops.latent_logpost, in_axes=(0, 0, None, 0, 0, None)),
+            in_axes=(None, None, None, None, 0, None),
+        ),
+        static_argnums=(5,),
+    )
+    custom_logpost_arm = lm_fnc(
+        x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx
+    )
+    custom_arm_marg = inla.exp_and_normalize(custom_logpost_arm, wts, axis=0)
+    divergence = inla.jensen_shannon_div(
+        arm_marg[:, 0, :], custom_arm_marg[:, 0, :], wts[:, 0, :], axis=0
+    )
+    assert np.all(divergence < 5e-5)
+
+    # Step 4) Compare against MCMC
     mcmc_test_data = np.load(cur_loc.joinpath("test_conditional_inla.npy"))
-
     divergence = inla.jensen_shannon_div(
         arm_marg[:, 0, :], mcmc_test_data[..., 1], wts[:, 0, :], axis=0
     )
@@ -247,25 +274,36 @@ def test_conditional_inla(cur_loc):
     np.testing.assert_allclose(divergence, target_divergence, rtol=1e-3)
 
 
-def test_solve_basket():
+def test_solve_inv_basket():
     np.random.seed(10)
     b = np.random.rand(1)[0]
     for i in range(3):
         for d in range(2, 10):
             a = np.random.rand(d)
             m = np.full((d, d), b) + np.diag(a)
+
+            # Test inverse:
+            minv = np.linalg.inv(m)
+            np.testing.assert_allclose(berry.inv_basket(a, b), minv)
+
+            # Test solve:
             v = np.random.rand(d)
             correct = np.linalg.solve(m, v)
             x, denom = berry.solve_basket(a, b, v)
             np.testing.assert_allclose(x, correct)
+
+            # Test logdet:
             logdet = berry.logdet((a, denom))
             np.testing.assert_allclose(logdet, np.linalg.slogdet(m)[1])
 
 
-def my_timeit(N, f, should_print=True):
+def my_timeit(N, f, iter=5, inner_iter=10, should_print=True):
     _ = f()
-    number = 5
-    runtimes = np.array(timeit.repeat(f, number=number)) / number
+    runtimes = []
+    for i in range(iter):
+        start = time.time()
+        f()
+        runtimes.append(time.time() - start)
     if should_print:
         print("median runtime", np.median(runtimes))
         print("min us per sample ", np.min(runtimes) * 1e6 / N)
@@ -273,56 +311,57 @@ def my_timeit(N, f, should_print=True):
     return runtimes
 
 
-def benchmark_custom():
-    N = 10000
+def benchmark(N=10000, iter=5):
     dtype = np.float32
     data = berry.figure2_data(N).astype(dtype)
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
-    laplace = berry.optimized(sig2, dtype=dtype, max_iter=10, tol=1e-2)
-    print("custom")
-    my_timeit(N, lambda: laplace(dict(sig2=sig2), data, should_batch=False)[0])
+    x0 = jnp.zeros((sig2.shape[0], 4), dtype=dtype)
 
-    print("\ngeneric")
-    fl = inla.FullLaplace(
-        *numpyro_interface.from_numpyro(berry.model(4), "sig2", (4, 2))
-    )
-    my_timeit(
-        N,
-        lambda: fl(
-            dict(sig2=sig2.astype(np.float64)),
-            data.astype(np.float64),
-            should_batch=False,
-        )[0],
-    )
+    def bench_ops(name, ops):
+        print(f"\n{name} gaussian")
+        hyperpost = jax.jit(jax.vmap(ops.hyper_logpost, in_axes=(None, None, 0)))
+        p_pinned = dict(sig2=sig2, theta=None)
+        my_timeit(
+            N, lambda: hyperpost(x0, p_pinned, data)[0].block_until_ready(), iter=iter
+        )
 
+        print(f"\n{name} laplace")
+        _, x_max, hess_info, _ = hyperpost(x0, p_pinned, data)
+        arm_logpost_f = jax.jit(
+            jax.vmap(
+                jax.vmap(ops.latent_logpost, in_axes=(0, 0, None, 0, 0, None)),
+                in_axes=(None, None, None, None, 0, None),
+            ),
+            static_argnums=(5,),
+        )
+        invv = jax.jit(jax.vmap(jax.vmap(ops.invert)))
 
-def benchmark_jit():
-    n_arms = 4
-    data = berry.figure2_data(1)
-    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+        def f():
+            inv_hess = invv(hess_info)
+            arm_post = []
+            for arm_idx in range(4):
+                cx, wts = inla.gauss_hermite_grid(
+                    x_max, inv_hess[..., arm_idx, :], arm_idx, n=25
+                )
+                arm_logpost = arm_logpost_f(
+                    x_max, inv_hess[:, :, arm_idx], p_pinned, data, cx, arm_idx
+                )
+                arm_post.append(inla.exp_and_normalize(arm_logpost, wts, axis=0))
+            return jnp.array(arm_post)
 
-    fl = inla.FullLaplace(
-        *numpyro_interface.from_numpyro(berry.model(n_arms), "sig2", (4, 2))
-    )
-    p_pinned = dict(sig2=sig2_rule.pts, theta=None)
+        my_timeit(N, jax.jit(f), iter=iter)
 
-    x0 = jnp.zeros((data.shape[0], 15, 4), dtype=data.dtype)
-    x_max, hess_info, iters = jax.jit(fl.optimizer)(x0, p_pinned, data)
+    custom_ops = berry.optimized(sig2, dtype=dtype).config(max_iter=10)
+    bench_ops("custom berry", custom_ops)
 
-    logdet = jax.vmap(jax.vmap(lambda x: smalljax.logdet(-x)))
-
-    def calc_log_posterior(x_max, hess_info, p_pinned, data):
-        lj = fl.log_joint(x_max, p_pinned, data)
-        log_post = lj - x_max.dtype.type(0.5) * logdet(hess_info)
-        return log_post
-
-    jax.jit(calc_log_posterior)(x_max, hess_info, p_pinned, data)
-
-    fb = berry.optimized(sig2_rule.pts)
-    fb(dict(sig2=sig2_rule.pts), data, should_batch=False)
+    ad_ops = inla.from_log_joint(
+        berry.log_joint(4), dict(sig2=np.array([nan]), theta=np.full(4, 0.0))
+    ).config(max_iter=10)
+    bench_ops("numpyro berry", ad_ops)
 
 
 if __name__ == "__main__":
-    benchmark_custom()
-    benchmark_jit()
+    benchmark(N=10000, iter=1)
+    # Running with N=1 is useful for benchmarking the JIT.
+    # benchmark(N=1, iter=1)
