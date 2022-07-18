@@ -1,0 +1,35 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/imprint/imprint/include",
+                "${workspaceFolder}/imprint/bazel-imprint/external/eigen",
+                "${workspaceFolder}/imprint/bazel-imprint/external/fmtlib/include",
+                "${workspaceFolder}/imprint/bazel-imprint/external/com_github_scipy_boost/",
+                "${workspaceFolder}/imprint/bazel-imprint/external/pybind11/include",
+                "${workspaceFolder}/imprint/bazel-imprint/external/com_github_google_benchmark/include",
+                "${workspaceFolder}/imprint/bazel-imprint/external/com_google_googletest/googletest/include"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-clang-x64",
+            "compilerArgs": [],
+            "mergeConfigurations": false,
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/**"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            },
+            "forcedInclude": [
+                "${workspaceFolder}/imprint/.vscode/eigen_fix.h"
+            ],
+            "compileCommands": "${workspaceFolder}/compile_commands.json"
+        }
+    ],
+    "version": 4
+}
