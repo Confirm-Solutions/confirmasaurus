@@ -11,6 +11,7 @@ dependencies:
   - matplotlib
   - sympy
   - pandas
+  - notebook
 
 # C++ toolchain
   - cxx-compiler 
@@ -41,3 +42,4 @@ dependencies:
   - pip:
     - "pybind11[global]"
     - cppimport
+    - latex
