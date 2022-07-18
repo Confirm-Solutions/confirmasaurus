@@ -13,7 +13,8 @@ git subtree add --prefix imprint imprint main --squash
 ```
 The `--prefix=imprint` tells git what directory to treat as a subtree. The next `imprint` is the remote we use. 
 
-That code only needs to be run once. So you don't need to worry about this.
+The first line only needs to be run once _per clone_. So all users should run this exactly once after cloning this repo. 
+The second line only needs to be run once _ever_. Since it has already been run before, you don't need to run it.
 
 Now, for the most part, we can act like the open source external repo does not exist. This is nice. The painful part comes when we want to send our internal changes back to the external repo.
 ## Contributing subtree changes back upstream
