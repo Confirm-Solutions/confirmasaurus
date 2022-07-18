@@ -65,8 +65,13 @@ jobs:
         run: |
           cd imprint
           ./generate_bazelrc
+          # this is to see if installation via wheel works
           bazel build -c dbg //python:pyimprint_wheel
           pip install --force-reinstall bazel-bin/python/dist/*.whl
+          # this is to see if editable installation works
+          bazel build -c dbg //python:pyimprint/core.so
+          ln -sf ./bazel-bin/python/pyimprint/core.so python/pyimprint/core.so
+          pip install -e python
       - name: Install our libraries
         run: ./install.sh
       - name: Bazel Test
