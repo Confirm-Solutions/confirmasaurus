@@ -35,7 +35,7 @@ def mcmc_berry(
 ):
     n_arms = data.shape[-2]
     if suc_thresh is None:
-        suc_thresh = np.full(n_arms, logit(0.1) - self.logit_p1)
+        suc_thresh = np.full(n_arms, logit(0.1) - logit_p1)
 
     def mcmc_berry_model(y, n):
         mu = numpyro.sample("mu", dist.Normal(-1.34, 10))

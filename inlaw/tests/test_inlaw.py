@@ -336,7 +336,7 @@ def test_solve_inv_basket():
             np.testing.assert_allclose(x, correct)
 
             # Test logdet:
-            logdet = berry.logdet((a, denom))
+            logdet = berry.logdet_basket((a, denom))
             np.testing.assert_allclose(logdet, np.linalg.slogdet(m)[1])
 
 
@@ -360,6 +360,14 @@ def benchmark(N=10000, iter=5):
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     x0 = jnp.zeros((sig2.shape[0], 4), dtype=dtype)
+
+    print("\ncustom dirty bayes")
+    db = jax.jit(jax.vmap(berry.build_dirty_bayes(sig2, n_arms=4, dtype=dtype)))
+    my_timeit(N, lambda: db(data)[0].block_until_ready(), iter=iter)
+
+    print("\ncustom dirty bayes")
+    db = jax.jit(jax.vmap(berry.build_dirty_bayes(sig2, n_arms=4, dtype=dtype)))
+    my_timeit(N, lambda: db(data)[0].block_until_ready(), iter=iter)
 
     def bench_ops(name, ops):
         print(f"\n{name} gaussian")
@@ -407,6 +415,6 @@ def benchmark(N=10000, iter=5):
 
 
 if __name__ == "__main__":
-    benchmark(N=10000, iter=1)
+    benchmark(N=100000, iter=1)
     # Running with N=1 is useful for benchmarking the JIT.
     # benchmark(N=1, iter=1)

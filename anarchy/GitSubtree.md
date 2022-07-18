@@ -40,7 +40,7 @@ git subtree push --prefix=imprint imprint branchname
 The process will get a bit more complex in the future if there are external developers who are submitting PRs to imprint. To handle this, *at that point in time*, we should:
 
 1. look around for new tools that solve this nicely.
-2. try setting up some CI tools that automatically keep the repos in sync. I think this could be quite easy if we follow some simple branch name conventions. 
+2. try setting up some CI tools that automatically keep the repos in sync. I think this could be quite easy if we follow some simple branch name conventions.
 
 ## Useful references
 
