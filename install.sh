@@ -4,5 +4,5 @@
 # List the internal packages that should be available here.
 for PKG in ./inlaw ./research/berry ./imprint/python
 do
-    [ -d "$PKG" ] && echo "Directory $PKG exists" && pip install -e "$PKG"
+    [ -d "$PKG" ] && echo "Directory $PKG exists" && pip install --no-deps -e "$PKG"
 done

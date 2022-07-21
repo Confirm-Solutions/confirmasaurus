@@ -67,11 +67,14 @@ jobs:
           ./generate_bazelrc
           # this is to see if installation via wheel works
           bazel build -c dbg //python:pyimprint_wheel
-          pip install --force-reinstall bazel-bin/python/dist/*.whl
+          pip install --no-deps --force-reinstall bazel-bin/python/dist/*.whl
           # this is to see if editable installation works
+          # the pip install -e is not run until ./install.sh in the next step.
           bazel build -c dbg //python:pyimprint/core.so
-          ln -sf ./bazel-bin/python/pyimprint/core.so python/pyimprint/core.so
-          pip install -e python
+          # Unfortunately, using a symlink doesn't work here for reasons that I
+          # don't understand
+          # ln -sf ./bazel-bin/python/pyimprint/core.so python/pyimprint/core.so
+          cp ./bazel-bin/python/pyimprint/core.so python/pyimprint/core.so
       - name: Install our libraries
         run: ./install.sh
       - name: Bazel Test
