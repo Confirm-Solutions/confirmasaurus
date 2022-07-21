@@ -184,7 +184,7 @@ def from_log_joint(log_joint, param_example):
 
     def reduced_hess(x, p_pinned, data, latent_idx):
         H = hess(x, p_pinned, data)
-        return jnp.delete(H, latent_idx, axis=-1)
+        return jnp.delete(jnp.delete(H, latent_idx, axis=-2), latent_idx, axis=-1)
 
     solver = smalljax.gen(f"solve{spec.n_free}")
 
@@ -241,7 +241,7 @@ def mvn_conditional_mean(mu, cov, x, i):
     cov12 = jnp.where(i_vec, 0, cov)
     # When j == i, this is: x + 0 (because cov12 is 0 when j == i)
     # When j != i, this is mu + cov12 / ...
-    return jnp.where(i_vec, x, mu) + cov12 / cov[i] * (x - mu[i])
+    return jnp.where(i_vec, x, mu) + cov12 * (x - mu[i]) / cov[i]
 
 
 mvn_conditional_meanv = jax.vmap(mvn_conditional_mean, in_axes=(0, 0, 0, None))
