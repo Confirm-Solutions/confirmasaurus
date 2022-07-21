@@ -29,5 +29,5 @@ setup(
     install_requires=["numpy", "pybind11"],
     data_files=[("../../pyimprint", ["core.so"])],
     zip_safe=False,
-    version=os.environ["VERSION"],
+    version="0.0.1",
 )
