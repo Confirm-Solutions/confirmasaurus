@@ -9,26 +9,20 @@ dependencies:
   - numpy
   - scipy
   - matplotlib
-  - sympy
-  - pandas
-  - notebook
 
 # C++ toolchain
   - cxx-compiler 
   - clang-tools
   - bazel 
 
-# some more nice stuff for easy dev.
+# essential dev tools
   - pytest
   - pre-commit
   - black
   - flake8
   - isort
   - jupytext
-  - cython
-  - line_profiler
   - pip
-  - seaborn
 
 # numerical tools
   - jax==0.3.7
@@ -42,4 +36,3 @@ dependencies:
   - pip:
     - "pybind11[global]"
     - cppimport
-    - latex

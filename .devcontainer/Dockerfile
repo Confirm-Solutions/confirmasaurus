@@ -2,18 +2,28 @@
 
 FROM mcr.microsoft.com/vscode/devcontainers/miniconda:0-3
 
-RUN /opt/conda/bin/conda install -y -c conda-forge mamba
 
 # [Choice] Node.js version: none, lts/*, 16, 14, 12, 10
-ARG NODE_VERSION="none"
+ARG NODE_VERSION="lts/*"
 RUN if [ "${NODE_VERSION}" != "none" ]; then su vscode -c "umask 0002 && . /usr/local/share/nvm/nvm.sh && nvm install ${NODE_VERSION} 2>&1"; fi
 
+# Install mamba for faster installs
+RUN /opt/conda/bin/conda install -y -c conda-forge mamba
 # Copy environment.yml (if found) to a temp location so we update the environment. Also
 # copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
-COPY environment.yml* .devcontainer/noop.txt /tmp/conda-tmp/
-RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml; fi \
-    && rm -rf /tmp/conda-tmp
+# After the env update, 
+COPY environment*.yml .devcontainer/noop.txt /tmp/conda-tmp/
+RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
+    umask 0002 \
+    && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml \
+    && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
+    fi \
+    && rm -rf /tmp/conda-tmp \
 
 # [Optional] Uncomment this section to install additional OS packages.
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get -y install --no-install-recommends neovim
+    && apt-get -y install --no-install-recommends\
+    neovim\
+    texlive-latex-extra
+    
+RUN /opt/conda/bin/conda run ./install.sh

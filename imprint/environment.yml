@@ -6,12 +6,9 @@ dependencies:
   - python
   - setuptools
   - jupyterlab
-  - ipykernel
   - numpy
   - scipy
   - matplotlib
-  - sympy
-  - pandas
 
 # C++ toolchain
   - cxx-compiler 
@@ -25,10 +22,7 @@ dependencies:
   - flake8
   - isort
   - jupytext
-  - cython
-  - line_profiler
   - pip
-  - seaborn
 
 # numerical tools
   - jax==0.3.7
