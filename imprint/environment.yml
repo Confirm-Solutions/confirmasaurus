@@ -6,6 +6,7 @@ dependencies:
   - python
   - setuptools
   - jupyterlab
+  - ipykernel
   - numpy
   - scipy
   - matplotlib

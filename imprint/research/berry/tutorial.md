@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('imprint2')
+    display_name: Python 3.10.5 (conda)
     language: python
     name: python3
 ---
@@ -39,13 +39,16 @@ n_arm_samples = 35
 
 ## Step 1: constructing a parameter grid
 
-We're going to use the `pyimprint.grid.make_cartesian_grid_range` function to produce a 3 dimensional grid covering $\theta_i \in [-3.5, 1.0]$. This grid consists of points that lie at the center of (hyper)rectangular cells. The cells cover the whole box.
+We're going to use the `grid.make_cartesian_gridpts` function to produce a 3 dimensional set of points covering $\theta_i \in [-3.5, 1.0]$. The points lie at the center of (hyper)rectangular cells. The cells cover the whole box.
 
 ```python
-import pyimprint.grid as grid
+import grid
+
 n_theta_1d = 16
 sim_size = 2000
-gr = grid.make_cartesian_grid_range(n_theta_1d, np.full(n_arms, -3.5), np.full(n_arms, 1.0), sim_size)
+theta, radii = grid.make_cartesian_gridpts(
+    n_theta_1d, np.full(n_arms, -3.5), np.full(n_arms, 1.0)
+)
 
 ```
 
@@ -60,7 +63,7 @@ However, we use the convention that the normal vector of the plane will point in
 \mathbf{n_{interior}} = (-1, 0, 0)
 \end{align}
 
-Once we have defined these planes, we subdivide the cells created above. This subdivision is done by the `gr.create_tiles` method. For each hyperrectangular cell, the method intersects with the null hypothesis boundaries and splits into multiple tiles whenever a cell is intersected by a null hypothesis plane. 
+Once we have defined these planes, we subdivide the cells created above. This subdivision is done by the `grid.build_grid` method. For each hyperrectangular cell, the method intersects with the null hypothesis boundaries and splits into multiple tiles whenever a cell is intersected by a null hypothesis plane. 
 
 ```python
 null_hypos = [
@@ -68,22 +71,21 @@ null_hypos = [
     grid.HyperPlane([0, -1, 0], -logit(0.1)),
     grid.HyperPlane([0, 0, -1], -logit(0.1))
 ]
-gr.create_tiles(null_hypos)
+g = grid.build_grid(theta, radii, null_hypos)
 ```
 
-Next, we can optionally prune our grid by calling `gr.prune()`. Pruning will remove any tiles that are entirely in the alternative hypothesis space for all arms. Since our goal is to calculate type I error, we do not care about the alternative hypothesis space. For a false positive to occur, the truth must be negative!
+Next, we can optionally prune our grid by calling `grid.prune(g)`. Pruning will remove any tiles that are entirely in the alternative hypothesis space for all arms. Since our goal is to calculate type I error, we do not care about the alternative hypothesis space. For a false positive to occur, the truth must be negative!
 
 ```python
-
-gr.prune()
+g = grid.prune(g)
 ```
 
 **At this point, you can skip to the next section if you're not interested in learning about the details of the grid object.**
 
-Here, we'll grab a few of the important variables from the grid range object and examine them. First, let's look at `theta_tiles`. This array represents the center of each tile in the grid. The shape of the array will be `(n_tiles, 3)` because we have 3 parameter values per point.
+Here, we'll grab a few of the important variables from the grid object and examine them. First, let's look at `theta_tiles`. This array represents the center of each tile in the grid. The shape of the array will be `(n_tiles, 3)` because we have 3 parameter values per point.
 
 ```python
-theta_tiles = grid.theta_tiles(gr)
+theta_tiles = g.thetas[g.grid_pt_idx]
 theta_tiles.shape
 ```
 
@@ -116,23 +118,22 @@ plt.ylim(np.min(theta_tiles[:,1]) - 0.2, np.max(theta_tiles[:,1]) + 0.2)
 plt.show()
 ```
 
-Let's explore another useful array produced for the grid. The `is_null_per_arm` array will contain whether the null hypothesis is true for each arm for each tile. Naturally, this has the same shape as `theta_tiles`. 
+Let's explore another useful array produced for the grid. The `g.null_truth` array will contain whether the null hypothesis is true for each arm for each tile. Naturally, this has the same shape as `theta_tiles`. 
 
 ```python
-is_null_per_arm = grid.is_null_per_arm(gr)
-is_null_per_arm.shape
+g.null_truth.shape
 ```
 
 Since we've pruned the grid, the tiles are all in the null hypothesis space for at least one arm.
 
 ```python
-np.all(np.any(is_null_per_arm, axis=1))
+np.all(np.any(g.null_truth, axis=1))
 ```
 
 The last array that we'll explore is called `n_tiles_per_pt`. To understand this array, we need to return to the tile splitting that occurs in `gr.create_tiles`. Whenever a hypothesis plane splits a cell, that cell is split with one tile for each side of the plane. Since most cells are not split, `n_tiles_per_pt` will be 1 for most input grid points. 
 
 ```python
-n_tiles_per_pt = grid.n_tiles_per_pt(gr)
+n_tiles_per_pt = g.n_tiles_per_pt()
 n_tiles_per_pt
 ```
 
@@ -145,15 +146,14 @@ n_tiles_per_pt[n_tiles_per_pt > 1]
 Let's plot up the number of tiles per cell below for a particularly interesting slice!
 
 ```python
-theta = gr.thetas().T
  
-selection = (theta[:,2] == unique_t2[4])
+selection = (g.thetas[:,2] == unique_t2[4])
 plt.title(f'Tile count per cell, $\\theta_2 = {unique_t2[4]}$')
-plt.scatter(theta[selection,0], theta[selection,1], c=n_tiles_per_pt[selection])
+plt.scatter(g.thetas[selection,0], g.thetas[selection,1], c=n_tiles_per_pt[selection])
 plt.hlines(logit(0.1), -4, 2)
 plt.vlines(logit(0.1), -4, 2)
-plt.xlim(np.min(theta[:,0]) - 0.2, np.max(theta[:,0]) + 0.2)
-plt.ylim(np.min(theta[:,1]) - 0.2, np.max(theta[:,1]) + 0.2)
+plt.xlim(np.min(g.thetas[:,0]) - 0.2, np.max(g.thetas[:,0]) + 0.2)
+plt.ylim(np.min(g.thetas[:,1]) - 0.2, np.max(g.thetas[:,1]) + 0.2)
 plt.colorbar()
 plt.show()
 ```
@@ -168,7 +168,7 @@ First, in order to do this, we need to build an inference algorithm that tells u
 First, we'll check that the inference does something reasonable. It rejects the null for arms 1 and 2 where the success counts are 4 and 8 but does not reject the null for arm 0 where the success count is 3. This seems reasonable!
 
 ```python
-import berrylib.fast_inla as fast_inla
+import fast_inla as fast_inla
 y = [[4,5,9]]
 n = [[35,35,35]]
 fi = fast_inla.FastINLA(n_arms=n_arms, critical_value=0.95)
@@ -195,9 +195,9 @@ Here, we are running 2000 simulations for each of 3185 tiles.
 
 ```python
 %%time
-import berrylib.binomial as binomial
+import binomial as binomial
 accumulator = binomial.binomial_accumulator(fi.rejection_inference)
-typeI_sum, typeI_score = accumulator(theta_tiles, is_null_per_arm, samples)
+typeI_sum, typeI_score = accumulator(theta_tiles, g.null_truth, samples)
 ```
 
 Before continuing, let's look at a couple slices of this type I error grid:
@@ -259,32 +259,20 @@ Intuitively, this bound is constructed from the three pieces above:
 1. The estimated pointwise type I error provides a starting point with an easily estimated sampling error.
 2. The gradient and also a bound on the hessian of the type I error function are used to extrapolate the pointwise bound across each tile using a second order Taylor expansion. 
 
-First, we need to create a `TypeIErrorAccum` object from the `typeI_sum` and `typeI_score` arrays that we computed previously. The code to do this is currently a little messy.
+The code below computes the bound. Note that it requires knowledge of both the grid and the simulation outcomes. The vertices of the grid tiles are needed in order to compute the first and second order bound terms.
 
 ```python
-from pyimprint.bound import TypeIErrorAccum
-acc_o = TypeIErrorAccum(1, gr.n_tiles(), gr.n_params())
-typeI_sum = typeI_sum.astype(np.uint32).reshape((1, -1))
-score_sum = typeI_score.flatten()
-acc_o.pool_raw(typeI_sum, score_sum)
-```
-
-Next, we haven't implemented the second order bound for the model demonstrated here. Fortunately, it is exactly the same as the second order bound term from a simpler non-hierarchical trial. So, we construct a model object for a `SimpleSelection` and use that as a stand-in for our model here when it comes to bound construction.
-
-```python
-
-from pyimprint.model.binomial import SimpleSelection
-simple_selection_model = SimpleSelection(fi.n_arms, n_arm_samples, 1, np.array([0.0]))
-simple_selection_model.critical_values([fi.critical_value])
-```
-
-Finally, we actually compute the bound.
-
-```python
-delta = 0.025
-from pyimprint.bound import TypeIErrorBound
-ub = TypeIErrorBound()
-ub.create(simple_selection_model.make_imprint_bound_state(gr), acc_o, gr, delta)
+tile_radii = g.radii[g.grid_pt_idx]
+sim_sizes = np.full(g.n_tiles, sim_size)
+total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
+    theta_tiles,
+    tile_radii,
+    g.vertices,
+    sim_sizes,
+    n_arm_samples,
+    typeI_sum.to_py(),
+    typeI_score,
+)
 ```
 
 ## Step 4: Bound visualization
@@ -296,12 +284,12 @@ Note that the upper bound here is going to be quite loose because we have a very
 
 ```python
 bound_components = np.array([
-    ub.delta_0()[0, :],
-    ub.delta_0_u()[0, :],
-    ub.delta_1()[0, :],
-    ub.delta_1_u()[0, :],
-    ub.delta_2_u()[0, :],
-    ub.get()[0, :],
+    d0,
+    d0u,
+    d1w,
+    d1uw,
+    d2uw,
+    total,
 ]).T
 ```
 
