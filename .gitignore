@@ -37,3 +37,6 @@ __pycache__
 # python packaging outputs
 *.egg-info
 
+# Codespaces
+oryx-build-commands.txt
+venv
