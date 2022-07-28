@@ -54,7 +54,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 # RUN bash /tmp/library-scripts/python-debian.sh "none" "/opt/conda" "${PIPX_HOME}" "${USERNAME}" "true" \ 
 #     && apt-get clean -y && rm -rf /var/lib/apt/lists/* .devcontainer/library-scripts/python-debian.sh
     
-ARG NODE_VERSION="lts/*"
+ARG NODE_VERSION="none"
 ENV NVM_DIR=/usr/local/share/nvm
 ENV NVM_SYMLINK_CURRENT=true \
     PATH=${NVM_DIR}/current/bin:${PATH}
@@ -63,6 +63,13 @@ RUN bash /tmp/library-scripts/node-debian.sh "${NVM_DIR}" "${NODE_VERSION}" "${U
 # END COPY
 # END COPY
 # END COPY
+    
+    
+# A little funny that the section above looks like it might install node. But
+# it seems to fail to do so even if I set NODE_VERSION. So, this is the actual
+# node installation.
+ARG NODE_VERSION="lts/*"
+RUN if [ "${NODE_VERSION}" != "none" ]; then su vscode -c "umask 0002 && . /usr/local/share/nvm/nvm.sh && nvm install ${NODE_VERSION} 2>&1"; fi
 
 # Install mamba for faster environment install
 RUN /opt/conda/bin/conda install -y -c conda-forge mamba
