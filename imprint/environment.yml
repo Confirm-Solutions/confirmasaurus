@@ -35,4 +35,3 @@ dependencies:
 # - pybind11[global] is only used by the same cppimport code. 
   - pip:
     - "pybind11[global]"
-    - cppimport

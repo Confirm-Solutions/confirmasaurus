@@ -32,16 +32,11 @@ Please run all the steps here to get a fully functional development environment.
 
     ```bash
     cd confirm/
-    conda update -y conda
-    conda env create
+    mamba update -y conda
+    mamba env create
     conda activate confirm
     ```
-4. To set up pre-commit for this git repo:
-
-    ```bash
-    pre-commit install
-    ```
-5. Get set up with our internal python libraries by running:
+4. Get set up with pre-commit and our internal python libraries by running:
 
     ```bash
     ./install.sh
