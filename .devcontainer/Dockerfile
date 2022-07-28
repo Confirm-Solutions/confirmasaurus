@@ -42,6 +42,22 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && usermod -aG conda ${USERNAME} \
     && /tmp/library-scripts/add-notice.sh
 
+# Install R
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+        && apt-get install -y --no-install-recommends \
+                 littler \
+ 		 r-base \
+ 		 r-base-dev \
+ 		 r-recommended \
+                 r-cran-docopt \
+  	&& ln -s /usr/lib/R/site-library/littler/examples/install.r /usr/local/bin/install.r \
+ 	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
+ 	&& ln -s /usr/lib/R/site-library/littler/examples/installGithub.r /usr/local/bin/installGithub.r \
+ 	&& ln -s /usr/lib/R/site-library/littler/examples/testInstalled.r /usr/local/bin/testInstalled.r \
+  	&& ln -s /usr/lib/R/site-library/littler/examples/update.r /usr/local/bin/update.r \
+ 	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
+ 	&& rm -rf /var/lib/apt/lists/*
+
 # Install Node!
 ENV NODE_VERSION="v18"
 ENV NVM_DIR=/usr/local/share/nvm
