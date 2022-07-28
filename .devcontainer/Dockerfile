@@ -63,13 +63,12 @@ RUN bash /tmp/library-scripts/node-debian.sh "${NVM_DIR}" "${NODE_VERSION}" "${U
 # END COPY
 # END COPY
 # END COPY
-    
+
     
 # A little funny that the section above looks like it might install node. But
 # it seems to fail to do so even if I set NODE_VERSION. So, this is the actual
 # node installation.
-ARG NODE_VERSION="lts/*"
-RUN if [ "${NODE_VERSION}" != "none" ]; then su vscode -c "umask 0002 && . /usr/local/share/nvm/nvm.sh && nvm install ${NODE_VERSION} 2>&1"; fi
+RUN nvm install "lts/*" 2>&1
 
 # Install mamba for faster environment install
 RUN /opt/conda/bin/conda install -y -c conda-forge mamba
