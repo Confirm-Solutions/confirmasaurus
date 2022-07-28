@@ -1,9 +1,6 @@
-# COPY
-# COPY
-# COPY
-# Starting here, this is modified from:
+# Most of what is here is modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
-FROM continuumio/miniconda3 as upstream
+FROM condaforge/mambaforge as upstream
 
 # Update, change owner
 RUN groupadd -r conda --gid 900 \
@@ -44,50 +41,37 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && groupadd -r conda --gid 900 \
     && usermod -aG conda ${USERNAME} \
     && /tmp/library-scripts/add-notice.sh
-    
-# ARG NODE_VERSION="lts/*"
-# ENV NVM_DIR=/usr/local/share/nvm
-# ENV NVM_SYMLINK_CURRENT=true \
-#     PATH=${NVM_DIR}/current/bin:${PATH}
-
-# Ben Note: the first call installs nvm and the second installs node itself. yeah, it's
-# weird. ask microsoft why they did it this way.
-# RUN bash /tmp/library-scripts/node-debian.sh "${NVM_DIR}" "${NODE_VERSION}" "${USERNAME}" \
-#     && bash /tmp/library-scripts/node-debian.sh "${NVM_DIR}" "${NODE_VERSION}" "${USERNAME}" \
-#     && rm -rf .devcontainer/library-scripts
-# END COPY
-# END COPY
-# END COPY
 
 # Install Node!
-ENV NODE_VERSION="lts/*"
+ENV NODE_VERSION="v18"
 ENV NVM_DIR=/usr/local/share/nvm
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash \
+RUN mkdir -p $NVM_DIR \
+    && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash \
     && . "$NVM_DIR/nvm.sh" \
     && nvm install ${NODE_VERSION} \
-    && nvm use v${NODE_VERSION} \
-    nvm alias default v${NODE_VERSION}
-ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
-
-# Install mamba for faster environment install
-# RUN /opt/conda/bin/conda install -y -c conda-forge mamba
+    && nvm use ${NODE_VERSION} \
+    nvm alias default ${NODE_VERSION}
+# I don't think this is necessary?
+# ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
 
 # # Copy environment.yml (if found) to a temp location so we update the environment. Also
 # # copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
 # # After the env update, 
-# COPY environment*.yml .devcontainer/noop.txt /tmp/conda-tmp/
-# RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
-#     umask 0002 \
-#     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml \
-#     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
-#     fi \
-#     && rm -rf /tmp/conda-tmp
+COPY environment*.yml .devcontainer/noop.txt /tmp/conda-tmp/
+RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
+    umask 0002 \
+    && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml \
+    && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
+    fi \
+    && rm -rf /tmp/conda-tmp
 
-# RUN apt-get update \
-#     && export DEBIAN_FRONTEND=noninteractive \
-#     && apt-get install -y --no-install-recommends\
-#         neovim\
-#         texlive-latex-extra\
-#     && apt-get upgrade -y\
-#     && apt-get clean -y
-#     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get install -y --no-install-recommends\
+        neovim\
+        texlive-latex-extra\
+    && apt-get upgrade -y\
+    && apt-get clean -y\
+    && rm -rf /var/lib/apt/lists/*
+
+# RUN usermod -s /bin/zsh root
