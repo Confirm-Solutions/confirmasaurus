@@ -59,7 +59,8 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "/opt/conda/bin/conda run ./install.sh"
+	// CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
+	"postCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 install.sh"
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	// We are connecting as root because it simplifies things and there is no
 	// strong reason to have isolation in this context.

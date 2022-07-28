@@ -39,5 +39,5 @@ Please run all the steps here to get a fully functional development environment.
 4. Get set up with pre-commit and our internal python libraries by running:
 
     ```bash
-    ./install.sh
+    CONFIRM_IMPRINT_SSH=1 ./install.sh
     ```
