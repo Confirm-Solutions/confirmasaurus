@@ -28,3 +28,11 @@ dependencies:
   - jax==0.3.7
   - jaxlib==0.3.7
   - numpyro
+
+# dependencies only available from pip.
+# - cppimport is only used for a few things in the research folder so we don't
+#   need to worry about it much. That code could be removed safely.
+# - pybind11[global] is only used by the same cppimport code. 
+  - pip:
+    - "pybind11[global]"
+    - cppimport
