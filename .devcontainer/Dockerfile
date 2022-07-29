@@ -54,28 +54,29 @@ RUN apt-get update \
 # Based on the Dockerfiles here:
 # https://gitlab.com/nvidia/container-images/cuda/-/tree/master/dist/11.7.0/ubuntu2204
 # We combine the packages from the base, runtime and devel images.
-ENV CUDA_VERSION="11-7"
+ARG CUDA_PKG_VERSION="11-7"
+ENV CUDA_VERSION 11.7.0
 ENV NVARCH=x86_64
 RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/cuda-keyring_1.0-1_all.deb \
     && dpkg -i cuda-keyring_1.0-1_all.deb \
     && apt update \
     && apt install -y --no-install-recommends \
-        cuda-cudart-${CUDA_VERSION} \
-        cuda-compat-${CUDA_VERSION} \
-        cuda-libraries-${CUDA_VERSION} \
-        libnpp-${CUDA_VERSION} \
-        cuda-nvtx-${CUDA_VERSION} \
-        libcusparse-${CUDA_VERSION} \
-        libcublas-${CUDA_VERSION} \
-        cuda-cudart-dev-${CUDA_VERSION} \
-        cuda-command-line-tools-${CUDA_VERSION} \
-        cuda-minimal-build-${CUDA_VERSION} \
-        cuda-libraries-dev-${CUDA_VERSION} \
-        cuda-nvml-dev-${CUDA_VERSION} \
-        cuda-nvprof-${CUDA_VERSION} \
-        libnpp-dev-${CUDA_VERSION} \
-        libcusparse-dev-${CUDA_VERSION} \
-        libcublas-dev-${CUDA_VERSION}
+        cuda-cudart-${CUDA_PKG_VERSION} \
+        cuda-compat-${CUDA_PKG_VERSION} \
+        cuda-libraries-${CUDA_PKG_VERSION} \
+        libnpp-${CUDA_PKG_VERSION} \
+        cuda-nvtx-${CUDA_PKG_VERSION} \
+        libcusparse-${CUDA_PKG_VERSION} \
+        libcublas-${CUDA_PKG_VERSION} \
+        cuda-cudart-dev-${CUDA_PKG_VERSION} \
+        cuda-command-line-tools-${CUDA_PKG_VERSION} \
+        cuda-minimal-build-${CUDA_PKG_VERSION} \
+        cuda-libraries-dev-${CUDA_PKG_VERSION} \
+        cuda-nvml-dev-${CUDA_PKG_VERSION} \
+        cuda-nvprof-${CUDA_PKG_VERSION} \
+        libnpp-dev-${CUDA_PKG_VERSION} \
+        libcusparse-dev-${CUDA_PKG_VERSION} \
+        libcublas-dev-${CUDA_PKG_VERSION}
 RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf \
     && echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
@@ -94,81 +95,81 @@ ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 # NOTE: it is possible to install R through conda instead. I tried this, but it
 # adds a bunch of code to conda activate that results in conda activate running
 # SHOCKINGLY slowly: https://github.com/conda/conda/issues/8806
-RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
-    && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
-    && apt-get update \
-    # Install any R packages that we can from apt because these are binary
-    # packages whereas using install.packages or install2.r will install from
-    # source and require a build.
-    # The apt repo here gets us the latest version of R.
-    && apt-get install -y --no-install-recommends \
-        littler \
-        r-base \
-        r-base-dev \
-        r-recommended \
-        r-cran-docopt \
-        r-cran-roxygen2 \
-        r-cran-rmarkdown \
-        r-cran-pbdzmq \
-        r-cran-uuid \
-        r-cran-jsonlite \
-        r-cran-irkernel \
-        r-cran-foreach \
-        r-cran-sp \
-        libcairo2-dev \
-        libfontconfig1-dev \
-  	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
-    # this step will install several packages that look like they're already
-    # installed. this is because languageserver depends on a different (newer?)
-    # version than in the r-cran apt repo
-    && install2.r --skipinstalled --ncpus 6 --error \
-        languageserver \
-        httpgd \
-    # from https://www.r-inla.org/download-install
-    # we set dep=FALSE because INLA pulls in the kitchen sink but doesn't
-    # actually need 95% of its dependencies for our main use cases.
-    && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
-    # clean up to shrink image size a little bit.
- 	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
-    && apt-get clean -y \
-    && rm -rf /var/lib/apt/lists/*
+# RUN wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
+#     && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
+#     && apt-get update \
+#     # Install any R packages that we can from apt because these are binary
+#     # packages whereas using install.packages or install2.r will install from
+#     # source and require a build.
+#     # The apt repo here gets us the latest version of R.
+#     && apt-get install -y --no-install-recommends \
+#         littler \
+#         r-base \
+#         r-base-dev \
+#         r-recommended \
+#         r-cran-docopt \
+#         r-cran-roxygen2 \
+#         r-cran-rmarkdown \
+#         r-cran-pbdzmq \
+#         r-cran-uuid \
+#         r-cran-jsonlite \
+#         r-cran-irkernel \
+#         r-cran-foreach \
+#         r-cran-sp \
+#         libcairo2-dev \
+#         libfontconfig1-dev \
+#   	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
+#     # this step will install several packages that look like they're already
+#     # installed. this is because languageserver depends on a different (newer?)
+#     # version than in the r-cran apt repo
+#     && install2.r --skipinstalled --ncpus 6 --error \
+#         languageserver \
+#         httpgd \
+#     # from https://www.r-inla.org/download-install
+#     # we set dep=FALSE because INLA pulls in the kitchen sink but doesn't
+#     # actually need 95% of its dependencies for our main use cases.
+#     && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
+#     # clean up to shrink image size a little bit.
+#  	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
+#     && apt-get clean -y \
+#     && rm -rf /var/lib/apt/lists/*
 
-# Install Node!
-# Node is used for our frontend tool, but is also handy since there are a lot
-# of useful small packages built on node
-# The NODE_VERSION should ideally be the latest LTS release.
-ENV NODE_VERSION="v18"
-ENV NVM_DIR=/usr/local/share/nvm
-RUN mkdir -p $NVM_DIR \
-    && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash \
-    && . "$NVM_DIR/nvm.sh" \
-    && nvm install ${NODE_VERSION} \
-    && nvm use ${NODE_VERSION} \
-    && nvm alias default ${NODE_VERSION} \
-    # why do we export PATH like this instead of using sourcing nvm.sh like normal?
-    # 1. we only need a single node version. we're not doing complex multi-version crazy stuff
-    # 2. adding nvm.sh to my shell was making it super slow!!
-    && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/bash.bashrc \
-    && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/zsh/zshrc
+# # Install Node!
+# # Node is used for our frontend tool, but is also handy since there are a lot
+# # of useful small packages built on node
+# # The NODE_VERSION should ideally be the latest LTS release.
+# ENV NODE_VERSION="v18"
+# ENV NVM_DIR=/usr/local/share/nvm
+# RUN mkdir -p $NVM_DIR \
+#     && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash \
+#     && . "$NVM_DIR/nvm.sh" \
+#     && nvm install ${NODE_VERSION} \
+#     && nvm use ${NODE_VERSION} \
+#     && nvm alias default ${NODE_VERSION} \
+#     # why do we export PATH like this instead of using sourcing nvm.sh like normal?
+#     # 1. we only need a single node version. we're not doing complex multi-version crazy stuff
+#     # 2. adding nvm.sh to my shell was making it super slow!!
+#     && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/bash.bashrc \
+#     && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/zsh/zshrc
 
-# Set up our conda environment! Since we're inside a container, we'll just
-# install everything into the "base" environment.
-# The instructions here are mostly copied from the miniconda codespaces
-# devcontainer dockerfile but I swapped in mamba.
-# NOTE: installing g++ gcc binutils through conda results in conda activate
-# being slightly slow. this is weird and kind of a bummer.
-COPY environment*.yml /tmp/conda-tmp/
-RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
-    umask 0002 \
-    && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml \
-    && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
-    fi \
-    && rm -rf /tmp/conda-tmp
+# # Set up our conda environment! Since we're inside a container, we'll just
+# # install everything into the "base" environment.
+# # The instructions here are mostly copied from the miniconda codespaces
+# # devcontainer dockerfile but I swapped in mamba.
+# # NOTE: installing g++ gcc binutils through conda results in conda activate
+# # being slightly slow. this is weird and kind of a bummer.
+# COPY environment*.yml /tmp/conda-tmp/
+# RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
+#     umask 0002 \
+#     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml \
+#     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
+#     fi \
+#     && rm -rf /tmp/conda-tmp
     
-# Now that Jupyter is installed, we install the R kernel from IRkernel. This
-# means you can run R in Jupyter!
-RUN R -e "IRkernel::installspec()"
+# # Now that Jupyter is installed, we install the R kernel from IRkernel. This
+# # means you can run R in Jupyter!
+# RUN R -e "IRkernel::installspec()"
 
-# I've commented this out because I don't know if we should force everyone to
-# use zsh.
-# RUN usermod -s /bin/zsh root
+# # I've commented this out because I don't know if we should force everyone to
+# # use zsh.
+# # RUN usermod -s /bin/zsh root
