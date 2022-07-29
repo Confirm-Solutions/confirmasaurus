@@ -1,24 +1,20 @@
 # Most of what is here is modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
 FROM condaforge/mambaforge as upstream
-
-# Update, change owner
-RUN groupadd -r conda --gid 900 \
-    && chown -R :conda /opt/conda \
-    && chmod -R g+w /opt/conda \
-    && find /opt -type d | xargs -n 1 chmod g+s
     
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 
 COPY --from=upstream /opt /opt/
 
 # Copy library scripts to execute
-COPY .devcontainer/library-scripts/*.sh .devcontainer/add-notice.sh .devcontainer/library-scripts/*.env /tmp/library-scripts/
+COPY .devcontainer/library-scripts/*.env /tmp/library-scripts/
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     PATH=/opt/conda/bin:$PATH
     
 ARG USERNAME="root"
+
+# Install useful basic tools... boring stuff, but also neovim and latex
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
         bzip2 \
@@ -33,14 +29,14 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
         procps \
         subversion \
         wget \
-    && bash /tmp/library-scripts/add-notice.sh \
+        software-properties-common \
+        dirmngr \
+        neovim \
+        texlive-latex-extra\
     && mv -f "/tmp/library-scripts/meta.env" /usr/local/etc/vscode-dev-containers/meta.env \
     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc \
-    && echo "conda activate base" >> ~/.bashrc \
-    && groupadd -r conda --gid 900 \
-    && usermod -aG conda ${USERNAME} \
-    && /tmp/library-scripts/add-notice.sh
+    && echo "conda activate base" >> ~/.bashrc
 
 # Install R and enough tools to run R scripts and test r-inla
 # This R install was copied from: https://github.com/rocker-org/rocker/blob/master/r-ubuntu/jammy/Dockerfile
@@ -50,12 +46,11 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 # - https://code.visualstudio.com/docs/languages/r
 # the advice here is also useful: https://schiff.co.nz/blog/r-and-vscode/
 # NOTE: this could be easily split out as part of a multistage build
-RUN apt-get update \
-    && export DEBIAN_FRONTEND=noninteractive \
-    && apt install -y --no-install-recommends \
-        software-properties-common dirmngr \
+# NOTE: radian repl is install throughed environment-dev.yml
+RUN export DEBIAN_FRONTEND=noninteractive \
     && wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
     && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         littler \
         r-base \
@@ -68,19 +63,14 @@ RUN apt-get update \
         r-cran-uuid \
         r-cran-jsonlite \
         r-cran-irkernel \
-        r-cran-lazyeval \
-        r-cran-backports \
-        r-cran-ps \
         libcairo2-dev \
         libfontconfig1-dev \
-    && mamba install -y -c conda-forge radian \
-  	&& ln -s /usr/lib/R/site-library/littler/examples/install.r /usr/local/bin/install.r \
-    && install.r --error \
-        languageserver \
-        httpgd \
+    && R -e "install.packages('languageserver')" \
+    && R -e "install.packages('httpgd')" \
     && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
  	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
- 	&& rm -rf /var/lib/apt/lists/*
+    && apt-get clean -y\
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Node!
 # Node is used for our frontend tool, but is also handy since there are a lot
@@ -111,15 +101,5 @@ RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
     
 # Now that Jupyter is installed, we insert the R kernel.
 RUN R -e "IRkernel::installspec()"
-
-# Finally, install neovim and latex since these are commonly needed tools.
-RUN apt-get update \
-    && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get install -y --no-install-recommends\
-        neovim\
-        texlive-latex-extra\
-    && apt-get upgrade -y\
-    && apt-get clean -y\
-    && rm -rf /var/lib/apt/lists/*
 
 # RUN usermod -s /bin/zsh root

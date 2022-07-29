@@ -6,3 +6,4 @@ dependencies:
   - sympy
   - pandas
   - cython
+  - radian
