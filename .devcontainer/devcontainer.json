@@ -3,17 +3,8 @@
 	"name": "Standard Config",
 	"build": {
 		"context": "..",
-		"dockerfile": "Dockerfile",
-		"args": {
-			"NODE_VERSION": "none"
-		}
+		"dockerfile": "Dockerfile"
 	},
- 	"runArgs": [
- 		// Requires WSL2, see https://docs.nvidia.com/cuda/wsl-user-guide/index.html#wsl2-system-requirements
- 		"--gpus=all",
- 		// If multiprocessing used, see https://github.com/pytorch/pytorch#using-pre-built-images
- 		"--ipc=host"
- 	],
 	// Configure tool-specific properties.
 	"customizations": {
 		// Configure properties specific to VS Code.
@@ -69,9 +60,18 @@
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
-	"onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh"
+	"onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh",
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	// We are connecting as root because it simplifies things and there is no
 	// strong reason to have isolation in this context.
 	// "remoteUser": "vscode"
+	"overrideCommand": false,
+	"mounts": ["source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"],
+	"runArgs": [
+		"--cap-add=SYS_PTRACE",
+		"--security-opt",
+		"seccomp=unconfined",
+		"--privileged",
+		"--init"
+	]
 }
