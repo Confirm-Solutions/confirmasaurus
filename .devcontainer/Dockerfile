@@ -68,6 +68,9 @@ RUN apt-get update \
         r-cran-uuid \
         r-cran-jsonlite \
         r-cran-irkernel \
+        r-cran-lazyeval \
+        r-cran-backports \
+        r-cran-ps \
         libcairo2-dev \
         libfontconfig1-dev \
     && mamba install -y -c conda-forge radian \
@@ -90,8 +93,8 @@ RUN mkdir -p $NVM_DIR \
     && nvm install ${NODE_VERSION} \
     && nvm use ${NODE_VERSION} \
     && nvm alias default ${NODE_VERSION} \
-    && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/bash.bashrc \
-    && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/zsh/zshrc
+    && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/bash.bashrc \
+    && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/zsh/zshrc
 
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
