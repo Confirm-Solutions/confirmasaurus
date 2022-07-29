@@ -1,5 +1,6 @@
-# Most of what is here is modified from:
+# Some things here are modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
+# mambaforge image: https://github.com/conda-forge/miniforge-images/blob/master/ubuntu/Dockerfile
 FROM condaforge/mambaforge as upstream
     
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
@@ -17,9 +18,6 @@ ARG USERNAME="root"
 # Install useful basic tools... boring stuff, but also neovim and latex
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
-        bzip2 \
-        ca-certificates \
-        git \
         libglib2.0-0 \
         libsm6 \
         libxext6 \
@@ -28,7 +26,6 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
         openssh-client \
         procps \
         subversion \
-        wget \
         software-properties-common \
         dirmngr \
         neovim \
@@ -63,10 +60,13 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         r-cran-uuid \
         r-cran-jsonlite \
         r-cran-irkernel \
+        r-cran-bh
         libcairo2-dev \
         libfontconfig1-dev \
-    && R -e "install.packages('languageserver')" \
-    && R -e "install.packages('httpgd')" \
+  	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
+    && install2.r --skipinstalled --ncpus 6 --error \
+        languageserver \
+        httpgd \
     && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
  	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
     && apt-get clean -y\
