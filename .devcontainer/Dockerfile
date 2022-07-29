@@ -21,8 +21,8 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 
 COPY --from=mambaforge_upstream /opt /opt/
 
-ARG SAGE_ROOT=/opt/sage
-COPY --from=sagemath_upstream /home/sage/sage $SAGE_ROOT/
+ARG SAGE_ROOT=/home/sage/sage
+COPY --from=sagemath_upstream $SAGE_ROOT/ $SAGE_ROOT/
 # RUN $SAGE_ROOT/sage --nodotsage -c "install_scripts('/usr/bin')" \
 #   && jupyter kernelspec install --user ./SageMath/local/share/jupyter/kernels/sagemath
 
