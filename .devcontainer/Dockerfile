@@ -5,6 +5,7 @@
 # - lots of apt packages (1.5 minutes)
 # - cuda (3 minutes)
 # - R packages (5 minutes)
+# - sage (1 minute)
 # - the whole environment*.yml conda environment (3 minutes)
 # - the Node install is actually really fast.
 # There are lots of ways to solve this, but they all require effort and I don't
@@ -22,7 +23,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 COPY --from=mambaforge_upstream /opt /opt/
 
 ARG SAGE_ROOT=/home/sage/sage
-COPY --from=sagemath_upstream $SAGE_ROOT/ $SAGE_ROOT/
+COPY --chown=root:root --from=sagemath_upstream $SAGE_ROOT/ $SAGE_ROOT/
 # RUN $SAGE_ROOT/sage --nodotsage -c "install_scripts('/usr/bin')" \
 #   && jupyter kernelspec install --user ./SageMath/local/share/jupyter/kernels/sagemath
 
