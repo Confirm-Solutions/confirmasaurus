@@ -57,7 +57,7 @@ RUN apt-get update \
 ENV CUDA_VERSION="11-7"
 ENV NVARCH=x86_64
 RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/cuda-keyring_1.0-1_all.deb \
-    && dpkg -i cuda-keyring_1.0-1_all.deb && \
+    && dpkg -i cuda-keyring_1.0-1_all.deb \
     && apt update \
     && apt install -y --no-install-recommends \
         cuda-cudart-${CUDA_VERSION} \
