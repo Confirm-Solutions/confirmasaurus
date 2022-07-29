@@ -32,7 +32,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
         openssh-client \
         procps \
         subversion \
-        wget \    
+        wget \
     && bash /tmp/library-scripts/add-notice.sh \
     && mv -f "/tmp/library-scripts/meta.env" /usr/local/etc/vscode-dev-containers/meta.env \
     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
@@ -49,11 +49,11 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 # - https://github.com/REditorSupport/vscode-R/wiki/Installation:-Linux
 # - https://code.visualstudio.com/docs/languages/r
 # the advice here is also useful: https://schiff.co.nz/blog/r-and-vscode/
-RUN apt-get update \ 
+RUN apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \
     && apt install -y --no-install-recommends \
         software-properties-common dirmngr \
-    && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/"
+    && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
     && apt-get install -y --no-install-recommends \
         littler \
         r-base \
@@ -73,7 +73,7 @@ RUN apt-get update \
         jsonlite \
         httpgd \
         IRkernel \
-    && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)"
+    && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
  	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
  	&& rm -rf /var/lib/apt/lists/*
 
@@ -87,7 +87,9 @@ RUN mkdir -p $NVM_DIR \
     && . "$NVM_DIR/nvm.sh" \
     && nvm install ${NODE_VERSION} \
     && nvm use ${NODE_VERSION} \
-    nvm alias default ${NODE_VERSION}
+    && nvm alias default ${NODE_VERSION}
+    && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/bash.bashrc
+    && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/zsh/zshrc
 
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
