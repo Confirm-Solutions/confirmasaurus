@@ -1,8 +1,9 @@
 # Many things here are modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
 # mambaforge image: https://github.com/conda-forge/miniforge-images/blob/master/ubuntu/Dockerfile
-# This image kind of sucks to build. It takes around 10 minutes because we're installing a lot of stuff:
+# This image kind of sucks to build. It takes around 15 minutes because we're installing a lot of stuff:
 # - lots of apt packages (1.5 minutes)
+# - cuda (3 minutes)
 # - R packages (5 minutes)
 # - the whole environment*.yml conda environment (3 minutes)
 # - the Node install is actually really fast.
@@ -21,7 +22,7 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 COPY --from=mambaforge_upstream /opt /opt/
 
 ARG SAGE_ROOT=/opt/sage
-COPY --from=make-release /home/sage/sage $SAGE_ROOT/
+COPY --from=sagemath_upstream /home/sage/sage $SAGE_ROOT/
 # RUN $SAGE_ROOT/sage --nodotsage -c "install_scripts('/usr/bin')" \
 #   && jupyter kernelspec install --user ./SageMath/local/share/jupyter/kernels/sagemath
 
