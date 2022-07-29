@@ -87,8 +87,8 @@ RUN mkdir -p $NVM_DIR \
     && . "$NVM_DIR/nvm.sh" \
     && nvm install ${NODE_VERSION} \
     && nvm use ${NODE_VERSION} \
-    && nvm alias default ${NODE_VERSION}
-    && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/bash.bashrc
+    && nvm alias default ${NODE_VERSION} \
+    && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/bash.bashrc \
     && echo -e "export PATH=$(dirname $(nvm which v18)):$PATH" >> /etc/zsh/zshrc
 
 # Set up our conda environment! Since we're inside a container, we'll just
