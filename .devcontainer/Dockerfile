@@ -8,7 +8,9 @@
 # - the Node install is actually really fast.
 # There are lots of ways to solve this, but they all require effort and I don't
 # think it's worth it right now.
-FROM condaforge/mambaforge as upstream
+FROM condaforge/mambaforge as mambaforge_upstream
+
+FROM sagemath/sagemath as sagemath_upstream
     
 # The devcontainer base image is quite useful and sets up a lots of stuff for us. 
 # It would be nice to be able to use a larger base image, but that seems like
@@ -16,72 +18,77 @@ FROM condaforge/mambaforge as upstream
 # added maintenance burden.
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 
-COPY --from=upstream /opt /opt/
+COPY --from=mambaforge_upstream /opt /opt/
+
+ARG SAGE_ROOT=/opt/sage
+COPY --from=make-release /home/sage/sage $SAGE_ROOT/
+# RUN $SAGE_ROOT/sage --nodotsage -c "install_scripts('/usr/bin')" \
+#   && jupyter kernelspec install --user ./SageMath/local/share/jupyter/kernels/sagemath
 
 # Copy library scripts to execute
-COPY .devcontainer/library-scripts/*.env /tmp/library-scripts/
-ENV LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    PATH=/opt/conda/bin:$PATH
+# COPY .devcontainer/library-scripts/*.env /tmp/library-scripts/
+# ENV LANG=C.UTF-8 \
+#     LC_ALL=C.UTF-8 \
+#     PATH=/opt/conda/bin:$PATH
     
-ARG USERNAME="root"
+# ARG USERNAME="root"
 
-# Install useful basic tools... boring stuff, but also neovim and latex
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        libglib2.0-0 \
-        libsm6 \
-        libxext6 \
-        libxrender1 \
-        mercurial \
-        openssh-client \
-        procps \
-        subversion \
-        software-properties-common \
-        dirmngr \
-        neovim \
-        texlive-latex-extra\
-    # I don't know what this meta.env file does, but all the Codespaces images
-    # have it, so I've left it in
-    && mv -f "/tmp/library-scripts/meta.env" /usr/local/etc/vscode-dev-containers/meta.env \
-    # I don't know why this line is here, but I don't want to debug any
-    # problems that might crop up from deleting it.
-    && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
-    # Install conda into root's bash!
-    && echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc \
-    && echo "conda activate base" >> ~/.bashrc
+# # Install useful basic tools... boring stuff, but also neovim and latex
+# RUN apt-get update \
+#     && apt-get install -y --no-install-recommends \
+#         libglib2.0-0 \
+#         libsm6 \
+#         libxext6 \
+#         libxrender1 \
+#         mercurial \
+#         openssh-client \
+#         procps \
+#         subversion \
+#         software-properties-common \
+#         dirmngr \
+#         neovim \
+#         texlive-latex-extra\
+#     # I don't know what this meta.env file does, but all the Codespaces images
+#     # have it, so I've left it in
+#     && mv -f "/tmp/library-scripts/meta.env" /usr/local/etc/vscode-dev-containers/meta.env \
+#     # I don't know why this line is here, but I don't want to debug any
+#     # problems that might crop up from deleting it.
+#     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
+#     # Install conda into root's bash!
+#     && echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc \
+#     && echo "conda activate base" >> ~/.bashrc
 
-# Based on the Dockerfiles here:
-# https://gitlab.com/nvidia/container-images/cuda/-/tree/master/dist/11.7.0/ubuntu2204
-# We combine the packages from the base, runtime and devel images.
-ARG CUDA_PKG_VERSION="11-7"
-ENV CUDA_VERSION 11.7.0
-ENV NVARCH=x86_64
-RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/cuda-keyring_1.0-1_all.deb \
-    && dpkg -i cuda-keyring_1.0-1_all.deb \
-    && apt update \
-    && apt install -y --no-install-recommends \
-        cuda-cudart-${CUDA_PKG_VERSION} \
-        cuda-compat-${CUDA_PKG_VERSION} \
-        cuda-libraries-${CUDA_PKG_VERSION} \
-        libnpp-${CUDA_PKG_VERSION} \
-        cuda-nvtx-${CUDA_PKG_VERSION} \
-        libcusparse-${CUDA_PKG_VERSION} \
-        libcublas-${CUDA_PKG_VERSION} \
-        cuda-cudart-dev-${CUDA_PKG_VERSION} \
-        cuda-command-line-tools-${CUDA_PKG_VERSION} \
-        cuda-minimal-build-${CUDA_PKG_VERSION} \
-        cuda-libraries-dev-${CUDA_PKG_VERSION} \
-        cuda-nvml-dev-${CUDA_PKG_VERSION} \
-        cuda-nvprof-${CUDA_PKG_VERSION} \
-        libnpp-dev-${CUDA_PKG_VERSION} \
-        libcusparse-dev-${CUDA_PKG_VERSION} \
-        libcublas-dev-${CUDA_PKG_VERSION}
-RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf \
-    && echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
-ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
-ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
+# # Based on the Dockerfiles here:
+# # https://gitlab.com/nvidia/container-images/cuda/-/tree/master/dist/11.7.0/ubuntu2204
+# # We combine the packages from the base, runtime and devel images.
+# ARG CUDA_PKG_VERSION="11-7"
+# ENV CUDA_VERSION 11.7.0
+# ENV NVARCH=x86_64
+# RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/cuda-keyring_1.0-1_all.deb \
+#     && dpkg -i cuda-keyring_1.0-1_all.deb \
+#     && apt update \
+#     && apt install -y --no-install-recommends \
+#         cuda-cudart-${CUDA_PKG_VERSION} \
+#         cuda-compat-${CUDA_PKG_VERSION} \
+#         cuda-libraries-${CUDA_PKG_VERSION} \
+#         libnpp-${CUDA_PKG_VERSION} \
+#         cuda-nvtx-${CUDA_PKG_VERSION} \
+#         libcusparse-${CUDA_PKG_VERSION} \
+#         libcublas-${CUDA_PKG_VERSION} \
+#         cuda-cudart-dev-${CUDA_PKG_VERSION} \
+#         cuda-command-line-tools-${CUDA_PKG_VERSION} \
+#         cuda-minimal-build-${CUDA_PKG_VERSION} \
+#         cuda-libraries-dev-${CUDA_PKG_VERSION} \
+#         cuda-nvml-dev-${CUDA_PKG_VERSION} \
+#         cuda-nvprof-${CUDA_PKG_VERSION} \
+#         libnpp-dev-${CUDA_PKG_VERSION} \
+#         libcusparse-dev-${CUDA_PKG_VERSION} \
+#         libcublas-dev-${CUDA_PKG_VERSION}
+# RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf \
+#     && echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
+# ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
+# ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+# ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
 # Install R and enough tools to run R scripts and test r-inla
 # This R install was copied from: https://github.com/rocker-org/rocker/blob/master/r-ubuntu/jammy/Dockerfile

@@ -65,6 +65,10 @@
 	// We are connecting as root because it simplifies things and there is no
 	// strong reason to have isolation in this context.
 	// "remoteUser": "vscode"
+	
+	// Based on https://github.com/microsoft/vscode-dev-containers/blob/main/containers/codespaces-linux/.devcontainer/devcontainer.json
+	// adding capabilities to the container so that we can do things like use
+	// the GPU!
 	"mounts": ["source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"],
 	"runArgs": [
 		"--cap-add=SYS_PTRACE",
