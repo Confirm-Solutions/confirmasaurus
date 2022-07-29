@@ -7,3 +7,4 @@ dependencies:
   - pandas
   - cython
   - radian
+  - cudatoolkit-dev

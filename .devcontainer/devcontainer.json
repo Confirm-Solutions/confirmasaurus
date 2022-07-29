@@ -8,6 +8,12 @@
 			"NODE_VERSION": "none"
 		}
 	},
+ 	"runArgs": [
+ 		// Requires WSL2, see https://docs.nvidia.com/cuda/wsl-user-guide/index.html#wsl2-system-requirements
+ 		"--gpus=all",
+ 		// If multiprocessing used, see https://github.com/pytorch/pytorch#using-pre-built-images
+ 		"--ipc=host"
+ 	],
 	// Configure tool-specific properties.
 	"customizations": {
 		// Configure properties specific to VS Code.
