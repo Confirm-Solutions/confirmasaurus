@@ -1,32 +1,28 @@
-# COPY
-# COPY
-# COPY
-# Starting here, this is modified from:
+# Many things here are modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
-FROM continuumio/miniconda3 as upstream
-
-# Update, change owner
-RUN groupadd -r conda --gid 900 \
-    && chown -R :conda /opt/conda \
-    && chmod -R g+w /opt/conda \
-    && find /opt -type d | xargs -n 1 chmod g+s
+# mambaforge image: https://github.com/conda-forge/miniforge-images/blob/master/ubuntu/Dockerfile
+# This image kind of sucks to build. It takes around 10 minutes because we're installing a lot of stuff:
+# - lots of apt packages (1.5 minutes)
+# - R packages (5 minutes)
+# - the whole environment*.yml conda environment (3 minutes)
+# - the Node install is actually really fast.
+FROM condaforge/mambaforge as upstream
     
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 
 COPY --from=upstream /opt /opt/
 
 # Copy library scripts to execute
-COPY .devcontainer/library-scripts/*.sh .devcontainer/add-notice.sh .devcontainer/library-scripts/*.env /tmp/library-scripts/
+COPY .devcontainer/library-scripts/*.env /tmp/library-scripts/
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     PATH=/opt/conda/bin:$PATH
     
 ARG USERNAME="root"
+
+# Install useful basic tools... boring stuff, but also neovim and latex
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
-        bzip2 \
-        ca-certificates \
-        git \
         libglib2.0-0 \
         libsm6 \
         libxext6 \
@@ -35,56 +31,106 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
         openssh-client \
         procps \
         subversion \
-        wget \    
-    && apt-get upgrade -y \
-    && bash /tmp/library-scripts/add-notice.sh \
+        software-properties-common \
+        dirmngr \
+        neovim \
+        texlive-latex-extra\
+    # I don't know what this meta.env file does, but all the Codespaces images
+    # have it, so I've left it in
     && mv -f "/tmp/library-scripts/meta.env" /usr/local/etc/vscode-dev-containers/meta.env \
+    # I don't know why this line is here, but I don't want to debug any
+    # problems that might crop up from deleting it.
     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
+    # Install conda into root's bash!
     && echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc \
-    && echo "conda activate base" >> ~/.bashrc \
-    && groupadd -r conda --gid 900 \
-    && usermod -aG conda ${USERNAME} \
-    && apt-get clean -y && rm -rf /var/lib/apt/lists/* /tmp/library-scripts/add-notice.sh
+    && echo "conda activate base" >> ~/.bashrc
 
-# Setup default python tools in a venv via pipx to avoid conflicts
-# Ben Note: this is unnecessary
-# ENV PIPX_HOME=/usr/local/py-utils \
-#     PIPX_BIN_DIR=/usr/local/py-utils/bin
-# ENV PATH=${PATH}:${PIPX_BIN_DIR}
-# RUN bash /tmp/library-scripts/python-debian.sh "none" "/opt/conda" "${PIPX_HOME}" "${USERNAME}" "true" \ 
-#     && apt-get clean -y && rm -rf /var/lib/apt/lists/* .devcontainer/library-scripts/python-debian.sh
-    
-ARG NODE_VERSION="none"
+# Install R and enough tools to run R scripts and test r-inla
+# This R install was copied from: https://github.com/rocker-org/rocker/blob/master/r-ubuntu/jammy/Dockerfile
+# and combined with the advice from here: https://cran.r-project.org/bin/linux/ubuntu/
+# I also used the instructions here: 
+# - https://github.com/REditorSupport/vscode-R/wiki/Installation:-Linux
+# - https://code.visualstudio.com/docs/languages/r
+# the advice here is also useful: https://schiff.co.nz/blog/r-and-vscode/
+# NOTE: this could be easily split out as part of a multistage build
+# NOTE: radian repl is install throughed environment-dev.yml
+# NOTE: it is possible to install R through conda instead. I tried this, but it
+# adds a bunch of code to conda activate that results in conda activate running
+# SHOCKINGLY slowly: https://github.com/conda/conda/issues/8806
+RUN export DEBIAN_FRONTEND=noninteractive \
+    # Install any R packages that we can from apt because these are binary
+    # packages whereas using install.packages or install2.r will install from
+    # source and require a build.
+    # The apt repo here gets us the latest version of R.
+    && wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
+    && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        littler \
+        r-base \
+        r-base-dev \
+        r-recommended \
+        r-cran-docopt \
+        r-cran-roxygen2 \
+        r-cran-rmarkdown \
+        r-cran-pbdzmq \
+        r-cran-uuid \
+        r-cran-jsonlite \
+        r-cran-irkernel \
+        libcairo2-dev \
+        libfontconfig1-dev \
+  	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
+    # this step will install several packages that look like they're already
+    # installed. this is because languageserver depends on a different (newer?)
+    # version than in the r-cran apt repo
+    && install2.r --skipinstalled --ncpus 6 --error \
+        languageserver \
+        httpgd \
+    # from https://www.r-inla.org/download-install
+    # we set dep=FALSE because INLA pulls in the kitchen sink but doesn't
+    # actually need 95% of its dependencies.
+    && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
+    # clean up to shrink image size a little bit.
+ 	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
+    && apt-get clean -y\
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node!
+# Node is used for our frontend tool, but is also handy since there are a lot
+# of useful small packages built on node
+# The NODE_VERSION should ideally be the latest LTS release.
+ENV NODE_VERSION="v18"
 ENV NVM_DIR=/usr/local/share/nvm
-ENV NVM_SYMLINK_CURRENT=true \
-    PATH=${NVM_DIR}/current/bin:${PATH}
-RUN bash /tmp/library-scripts/node-debian.sh "${NVM_DIR}" "${NODE_VERSION}" "${USERNAME}" \
-    && apt-get clean -y && rm -rf /var/lib/apt/lists/* .devcontainer/library-scripts
-# END COPY
-# END COPY
-# END COPY
+RUN mkdir -p $NVM_DIR \
+    && curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash \
+    && . "$NVM_DIR/nvm.sh" \
+    && nvm install ${NODE_VERSION} \
+    && nvm use ${NODE_VERSION} \
+    && nvm alias default ${NODE_VERSION} \
+    # why do we export PATH like this instead of using sourcing nvm.sh like normal?
+    # 1. we only need a single node version. we're not doing complex multi-version crazy stuff
+    # 2. adding nvm.sh to my shell was making it super slow!!
+    && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/bash.bashrc \
+    && echo "export PATH=$(dirname $(nvm which v18)):\$PATH" >> /etc/zsh/zshrc
 
-    
-# A little funny that the section above looks like it might install node. But
-# it seems to fail to do so even if I set NODE_VERSION. So, this is the actual
-# node installation.
-RUN nvm install "lts/*" 2>&1
-
-# Install mamba for faster environment install
-RUN /opt/conda/bin/conda install -y -c conda-forge mamba
-# Copy environment.yml (if found) to a temp location so we update the environment. Also
-# copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
-# After the env update, 
-COPY environment*.yml .devcontainer/noop.txt /tmp/conda-tmp/
+# Set up our conda environment! Since we're inside a container, we'll just
+# install everything into the "base" environment.
+# The instructions here are mostly copied from the miniconda codespaces
+# devcontainer dockerfile but I swapped in mamba.
+# NOTE: installing g++ gcc binutils through conda results in conda activate
+# being slightly slow. this is weird and kind of a bummer.
+COPY environment*.yml /tmp/conda-tmp/
 RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
     umask 0002 \
     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment.yml \
     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
     fi \
     && rm -rf /tmp/conda-tmp
+    
+# Now that Jupyter is installed, we install the R kernel from IRkernel. This
+# means you can run R in Jupyter!
+RUN R -e "IRkernel::installspec()"
 
-RUN apt-get update \
-    && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get install -y --no-install-recommends\
-    neovim\
-    texlive-latex-extra
+# I've commented this out because I don't know if we should force everyone to
+# use zsh.
+# RUN usermod -s /bin/zsh root

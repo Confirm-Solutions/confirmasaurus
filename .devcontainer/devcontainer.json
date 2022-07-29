@@ -32,7 +32,10 @@
 				// "python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
 				// "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint",
 				"autoDocstring.docstringFormat": "google-notypes",
-				"C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 4, TabWidth: 4, AllowShortIfStatementsOnASingleLine: false, IndentCaseLabels: false, ColumnLimit: 100, AccessModifierOffset: -4, NamespaceIndentation: All, FixNamespaceComments: false, PointerAlignment: Left}"
+				"C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 4, TabWidth: 4, AllowShortIfStatementsOnASingleLine: false, IndentCaseLabels: false, ColumnLimit: 100, AccessModifierOffset: -4, NamespaceIndentation: All, FixNamespaceComments: false, PointerAlignment: Left}",
+				"r.bracketedPaste": true,
+				"r.rterm.linux": "radian",
+				"r.plot.useHttpgd": true
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
@@ -59,7 +62,8 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "/opt/conda/bin/conda run ./install.sh"
+	// CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
+	"postCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh"
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	// We are connecting as root because it simplifies things and there is no
 	// strong reason to have isolation in this context.
