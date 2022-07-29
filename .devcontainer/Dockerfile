@@ -60,7 +60,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         r-cran-uuid \
         r-cran-jsonlite \
         r-cran-irkernel \
-        r-cran-bh
+        r-cran-bh \
         libcairo2-dev \
         libfontconfig1-dev \
   	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
