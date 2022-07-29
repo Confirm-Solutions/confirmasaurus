@@ -8,7 +8,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.2 ('imprint')
+    display_name: Python 3.10.5 ('base')
     language: python
     name: python3
 ---
@@ -19,6 +19,10 @@ berrylib.util.setup_nb()
 ```
 
 # The Berry model
+
+Two other useful good introductions to INLA:
+- [INLA from scratch](https://stefansiegert.net/inla-project/inla-from-scratch)
+- [A gentle INLA tutorial](https://www.precision-analytics.ca/articles/a-gentle-inla-tutorial/)
 
 ## Notation
 * $d$ is the number of arms in the trial

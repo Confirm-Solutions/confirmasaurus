@@ -70,7 +70,7 @@ RUN apt-get update \
         r-cran-irkernel \
         libcairo2-dev \
         libfontconfig1-dev \
-    && mamba install -c conda-forge radian \
+    && mamba install -y -c conda-forge radian \
   	&& ln -s /usr/lib/R/site-library/littler/examples/install.r /usr/local/bin/install.r \
     && install.r --error \
         languageserver \
