@@ -65,7 +65,6 @@
 	// We are connecting as root because it simplifies things and there is no
 	// strong reason to have isolation in this context.
 	// "remoteUser": "vscode"
-	"overrideCommand": false,
 	"mounts": ["source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"],
 	"runArgs": [
 		"--cap-add=SYS_PTRACE",
