@@ -56,9 +56,14 @@ The dev environment should be set up quite cleanly. To see some of the relevant 
 - [Dockerfile](.devcontainer/Dockerfile)
 - the [environment.yml](environment.yml) and [environment-dev.yml](environment-dev.yml) are used to define the conda environment.
 
-The set up focuses on things that anyone using our repo should have installed and set up. It sets up a conda environment including all our standard tools. It installs VSCode extensions that I think you should use for Python, Jupyter, C++, Latex, R.
+The set up focuses on things that anyone using our repo should have installed and set up. It sets up a conda environment including all our standard tools. It gives a good development experience for:
+- Python: VSCode extensions, all our dependencies, linting, formatting, debugging, pytest.
+- Jupyter: lovely.
+- C++: linting, formatting (using clang format), compilation and debugging integrated into the IDE.
+- R: handles R markdown documents, [also Jupyter with R](https://stackoverflow.com/a/67320274/3817027), r-inla, debugging, etc. Actually a pretty nice R development experience. 
+- Latex and markdown and a lot more.
 
-After you've set up your codespace, all the steps above in "Getting set up" will have already been done for you! There's no setup left to do. Just code and enjoy.
+After you've set up your codespace, all the steps above in "Getting set up" above will have already been done for you! There's no setup left to do. Just code and enjoy.
 
 For personal customizations, you get to do two things. These are not mutually exclusive and allow configuring different components of your environment.
 - you can either run the browser-based VSCode that is the Codespaces default or you can connect to the remote machine from your local VSCode app. I much prefer connecting with my local app but I haven't tried the browser version very much! 

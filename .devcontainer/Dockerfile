@@ -42,23 +42,44 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && usermod -aG conda ${USERNAME} \
     && /tmp/library-scripts/add-notice.sh
 
-# Install R
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-        && apt-get install -y --no-install-recommends \
-                 littler \
- 		 r-base \
- 		 r-base-dev \
- 		 r-recommended \
-                 r-cran-docopt \
+# Install R and enough tools to run R scripts and test r-inla
+# This R install was copied from: https://github.com/rocker-org/rocker/blob/master/r-ubuntu/jammy/Dockerfile
+# and combined with the advice from here: https://cran.r-project.org/bin/linux/ubuntu/
+# I also used the instructions here: 
+# - https://github.com/REditorSupport/vscode-R/wiki/Installation:-Linux
+# - https://code.visualstudio.com/docs/languages/r
+# the advice here is also useful: https://schiff.co.nz/blog/r-and-vscode/
+RUN apt-get update \ 
+    && export DEBIAN_FRONTEND=noninteractive \
+    && apt install -y --no-install-recommends \
+        software-properties-common dirmngr
+    && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/"
+    && apt-get install -y --no-install-recommends \
+        littler \
+        r-base \
+        r-base-dev \
+        r-recommended \
+        r-cran-docopt \
+        r-cran-roxygen2 \
+        r-cran-rmarkdown \
+        r-cran-pbdzmq \
+        r-cran-uuid \
+        libcairo2-dev \
+        libfontconfig1-dev \
+    && mamba install -c conda-forge radian \
   	&& ln -s /usr/lib/R/site-library/littler/examples/install.r /usr/local/bin/install.r \
- 	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
- 	&& ln -s /usr/lib/R/site-library/littler/examples/installGithub.r /usr/local/bin/installGithub.r \
- 	&& ln -s /usr/lib/R/site-library/littler/examples/testInstalled.r /usr/local/bin/testInstalled.r \
-  	&& ln -s /usr/lib/R/site-library/littler/examples/update.r /usr/local/bin/update.r \
+    && install.r --error \
+        languageserver \
+        jsonlite \
+        httpgd \
+        IRkernel \
+    && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)"
  	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
  	&& rm -rf /var/lib/apt/lists/*
 
 # Install Node!
+# Node is used for our frontend tool, but is also handy since there are a lot
+# of useful small packages built on node
 ENV NODE_VERSION="v18"
 ENV NVM_DIR=/usr/local/share/nvm
 RUN mkdir -p $NVM_DIR \
@@ -67,12 +88,12 @@ RUN mkdir -p $NVM_DIR \
     && nvm install ${NODE_VERSION} \
     && nvm use ${NODE_VERSION} \
     nvm alias default ${NODE_VERSION}
-# I don't think this is necessary?
-# ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
 
-# # Copy environment.yml (if found) to a temp location so we update the environment. Also
-# # copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
-# # After the env update, 
+# Set up our conda environment! Since we're inside a container, we'll just
+# install everything into the "base" environment.
+# Copy environment.yml (if found) to a temp location so we update the environment. Also
+# copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
+# After the env update, 
 COPY environment*.yml .devcontainer/noop.txt /tmp/conda-tmp/
 RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
     umask 0002 \
@@ -80,7 +101,11 @@ RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then \
     && /opt/conda/bin/mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml; \
     fi \
     && rm -rf /tmp/conda-tmp
+    
+# Now that Jupyter is installed, we insert the R kernel.
+RUN R -e "IRkernel::installspec()"
 
+# Finally, install neovim and latex since these are commonly needed tools.
 RUN apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends\
