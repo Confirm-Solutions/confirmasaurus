@@ -52,7 +52,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \ 
     && export DEBIAN_FRONTEND=noninteractive \
     && apt install -y --no-install-recommends \
-        software-properties-common dirmngr
+        software-properties-common dirmngr \
     && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/"
     && apt-get install -y --no-install-recommends \
         littler \
