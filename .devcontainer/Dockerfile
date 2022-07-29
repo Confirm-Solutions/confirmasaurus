@@ -49,10 +49,12 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
 # - https://github.com/REditorSupport/vscode-R/wiki/Installation:-Linux
 # - https://code.visualstudio.com/docs/languages/r
 # the advice here is also useful: https://schiff.co.nz/blog/r-and-vscode/
+# NOTE: this could be easily split out as part of a multistage build
 RUN apt-get update \
     && export DEBIAN_FRONTEND=noninteractive \
     && apt install -y --no-install-recommends \
         software-properties-common dirmngr \
+    && wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | sudo tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
     && add-apt-repository -y "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" \
     && apt-get install -y --no-install-recommends \
         littler \
@@ -64,15 +66,15 @@ RUN apt-get update \
         r-cran-rmarkdown \
         r-cran-pbdzmq \
         r-cran-uuid \
+        r-cran-jsonlite \
+        r-cran-irkernel \
         libcairo2-dev \
         libfontconfig1-dev \
     && mamba install -c conda-forge radian \
   	&& ln -s /usr/lib/R/site-library/littler/examples/install.r /usr/local/bin/install.r \
     && install.r --error \
         languageserver \
-        jsonlite \
         httpgd \
-        IRkernel \
     && R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=FALSE)" \
  	&& rm -rf /tmp/downloaded_packages/ /tmp/*.rds \
  	&& rm -rf /var/lib/apt/lists/*
