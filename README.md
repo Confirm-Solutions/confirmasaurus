@@ -72,6 +72,15 @@ For personal customizations, you get to do two things. These are not mutually ex
 
 I am happy to share my dotfiles and VSCode settings if you'd like. To share the dotfiles, I'll need to scrub out some passwords first, but that's probably an improvement anyway. :embarrassed:
 
+## Developing the docker image
+
+- Install docker locally or launch a codespace with the "docker" configuration.
+- The main development will be something like: `docker build --progress=plain -t test_devimage . && ./test test_devimage`
+- The `test` script checks that everything is installed properly.
+- Once you commit changes to the Dockerfile to the main branch, it will be
+  built and pushed to the Github Container Registry to be used as a base image
+  for our other work. The image will be: `ghcr.io/confirm-solutions/devimage:main`
+
 ## Other useful notes:
 
 - [Advice for dealing with our imprint subtree](./docs/GitSubtree.md)

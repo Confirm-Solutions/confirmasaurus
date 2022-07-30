@@ -1,7 +1,17 @@
 #!/bin/bash
 
+if ! [ -x "$(command -v nvidia-smi)" ]; then
+    echo 'No GPUs available. Replacing jax[cuda] with jax[cpu].' >&2
+    pip uninstall -y jax jaxlib numpyro
+    pip install -y "jax[cpu]" numpyro
+fi
+
 # Set up pre-commit so it's fast the first time it gets used
 pre-commit install --install-hooks
+
+pushd imprint
+./generate_bazelrc
+popd
 
 # List the internal packages that should be available here.
 for PKG in ./inlaw ./research/berry ./imprint/python

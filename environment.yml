@@ -24,15 +24,19 @@ dependencies:
   - jupytext
   - pip
 
-# numerical tools
-  - jax==0.3.7
-  - jaxlib==0.3.7
-  - numpyro
-
 # dependencies only available from pip.
 # - cppimport is only used for a few things in the research folder so we don't
 #   need to worry about it much. That code could be removed safely.
 # - pybind11[global] is only used by the same cppimport code. 
+# - conda-forge gpu jax support is fairly new and might be fragile,
+#   and I can't get it to consistently install correctly.
+#   https://github.com/conda-forge/jaxlib-feedstock/issues/34
+#   so we install jax and numpyro from pypi instead. Importantly, we install a
+#   CUDA jax here. If your system doesn't support CUDA, the ./install.sh script
+#   will overwrite with a CPU jax.
   - pip:
+    - -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    - "jax[cuda]"
+    - "numpyro[cuda]"
     - "pybind11[global]"
     - cppimport

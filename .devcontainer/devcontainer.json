@@ -1,41 +1,20 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
-	"name": "Standard Config",
+	"name": "Big useful dev container",
 	"build": {
-		"context": "..",
-		"dockerfile": "Dockerfile",
-		"args": {
-			"NODE_VERSION": "none"
-		}
+		"context": "../..",
+		"dockerfile": "Dockerfile"
 	},
 	// Configure tool-specific properties.
 	"customizations": {
 		// Configure properties specific to VS Code.
 		"vscode": {
 			// Set *default* container specific settings.json values on container create.
+			// if settings should also be applied to anyone checking out the
+			// repo locally, put them in .vscode/settings.json instead
 			"settings": {
 				"python.defaultInterpreterPath": "/opt/conda/bin/python",
-				"python.testing.pytestEnabled": true,
-				"python.linting.enabled": true,
-				"python.linting.pylintEnabled": true,
-				"python.formatting.provider": "black",
-				// commented out from the default config because the paths to
-				// these tools are known via the activated "base" conda
-				// environment
-				// "python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
-				// "python.formatting.blackPath": "/usr/local/py-utils/bin/black",
-				// "python.formatting.yapfPath": "/usr/local/py-utils/bin/yapf",
-				// "python.linting.banditPath": "/usr/local/py-utils/bin/bandit",
-				// "python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
-				// "python.linting.mypyPath": "/usr/local/py-utils/bin/mypy",
-				// "python.linting.pycodestylePath": "/usr/local/py-utils/bin/pycodestyle",
-				// "python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
-				// "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint",
-				"autoDocstring.docstringFormat": "google-notypes",
-				"C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 4, TabWidth: 4, AllowShortIfStatementsOnASingleLine: false, IndentCaseLabels: false, ColumnLimit: 100, AccessModifierOffset: -4, NamespaceIndentation: All, FixNamespaceComments: false, PointerAlignment: Left}",
-				"r.bracketedPaste": true,
-				"r.rterm.linux": "radian",
-				"r.plot.useHttpgd": true
+				"r.rterm.linux": "radian"
 			},
 			// Add the IDs of extensions you want installed when the container is created.
 			"extensions": [
@@ -63,9 +42,21 @@
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
-	"onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh"
+	"onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh",
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	// We are connecting as root because it simplifies things and there is no
 	// strong reason to have isolation in this context.
 	// "remoteUser": "vscode"
+	
+	// Based on https://github.com/microsoft/vscode-dev-containers/blob/main/containers/codespaces-linux/.devcontainer/devcontainer.json
+	// adding capabilities to the container so that we can do things like use
+	// the GPU!
+	"mounts": ["source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"],
+	"runArgs": [
+		"--cap-add=SYS_PTRACE",
+		"--security-opt",
+		"seccomp=unconfined",
+		"--privileged",
+		"--init"
+	]
 }
