@@ -37,7 +37,8 @@ dependencies:
 #   not reinstall here because the package is already installed. This has
 #   already been done for our devimage.
   - pip:
-    - "jax[cpu]==0.3.14"
+    -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    - "jax[cpu]"
     - numpyro
     - "pybind11[global]"
     - cppimport
