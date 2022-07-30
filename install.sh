@@ -3,6 +3,10 @@
 # Set up pre-commit so it's fast the first time it gets used
 pre-commit install --install-hooks
 
+pushd imprint
+./generate_bazelrc
+popd
+
 # List the internal packages that should be available here.
 for PKG in ./inlaw ./research/berry ./imprint/python
 do

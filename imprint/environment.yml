@@ -24,6 +24,11 @@ dependencies:
   - jupytext
   - pip
 
-# numerical tools
-  - jax==0.3.7
-  - jaxlib==0.3.7
+# dependencies only available from pip.
+# - conda-forge gpu jax support is fairly new and might be fragile,
+#   and I can't get it to consistently install correctly.
+#   https://github.com/conda-forge/jaxlib-feedstock/issues/34
+#   so we install jax from pypi instead
+  - pip:
+    - -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    - "jax[cuda]"
