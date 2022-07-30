@@ -1,6 +1,6 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
-	"name": "Standard Config",
+	"name": "Big useful dev container",
 	"build": {
 		"context": "..",
 		"dockerfile": "Dockerfile"
