@@ -13,7 +13,6 @@
                 "${workspaceFolder}/imprint/bazel-imprint/external/com_google_googletest/googletest/include"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/clang",
             "cStandard": "c11",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-clang-x64",
