@@ -32,11 +32,12 @@ dependencies:
 #   and I can't get it to consistently install correctly.
 #   https://github.com/conda-forge/jaxlib-feedstock/issues/34
 #   so we install jax and numpyro from pypi instead
-#   IMPORTANTLY, we install a cpu jax here. If you want gpu jax, install it
-#   before building from this environment.yml. Then, pip will not reinstall
-#   here because the package is already installed.
+#   IMPORTANTLY, we install a cpu jax here. If you want gpu jax, install an
+#   identical version before building from this environment.yml. Then, pip will
+#   not reinstall here because the package is already installed. This has
+#   already been done for our devimage.
   - pip:
-    - "jax[cpu]"
+    - "jax[cpu]==0.3.14"
     - numpyro
     - "pybind11[global]"
     - cppimport
