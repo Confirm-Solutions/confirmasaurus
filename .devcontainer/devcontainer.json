@@ -3,7 +3,7 @@
 	"name": "Big useful dev container",
 	"build": {
 		"context": "../..",
-		"dockerfile": "Dockerfile"
+		"dockerfile": "./bigdev/Dockerfile"
 	},
 	// Configure tool-specific properties.
 	"customizations": {
