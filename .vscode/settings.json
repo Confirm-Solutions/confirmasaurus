@@ -113,7 +113,15 @@
         "bvh": "cpp"
     },
     "C_Cpp.errorSquiggles": "Enabled",
+    "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 4, TabWidth: 4, AllowShortIfStatementsOnASingleLine: false, IndentCaseLabels: false, ColumnLimit: 100, AccessModifierOffset: -4, NamespaceIndentation: All, FixNamespaceComments: false, PointerAlignment: Left}",
     "cmake.configureOnOpen": false,
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "python.linting.enabled": true,
+	"python.formatting.provider": "black",
+    "autoDocstring.docstringFormat": "google-notypes",
+    "r.bracketedPaste": true,
+    "r.plot.useHttpgd": true
 }

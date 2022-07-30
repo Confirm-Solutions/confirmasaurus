@@ -115,20 +115,20 @@ RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2
     && apt install -y --no-install-recommends \
         cuda-cudart-${CUDA_PKG_VERSION} \
         cuda-compat-${CUDA_PKG_VERSION} \
-        # cuda-libraries-${CUDA_PKG_VERSION} \
-        # libnpp-${CUDA_PKG_VERSION} \
-        # cuda-nvtx-${CUDA_PKG_VERSION} \
-        # libcusparse-${CUDA_PKG_VERSION} \
-        # libcublas-${CUDA_PKG_VERSION} \
-        # cuda-cudart-dev-${CUDA_PKG_VERSION} \
-        # cuda-command-line-tools-${CUDA_PKG_VERSION} \
-        # cuda-minimal-build-${CUDA_PKG_VERSION} \
-        # cuda-libraries-dev-${CUDA_PKG_VERSION} \
-        # cuda-nvml-dev-${CUDA_PKG_VERSION} \
-        # cuda-nvprof-${CUDA_PKG_VERSION} \
-        # libnpp-dev-${CUDA_PKG_VERSION} \
-        # libcusparse-dev-${CUDA_PKG_VERSION} \
-        # libcublas-dev-${CUDA_PKG_VERSION} \
+        cuda-libraries-${CUDA_PKG_VERSION} \
+        libnpp-${CUDA_PKG_VERSION} \
+        cuda-nvtx-${CUDA_PKG_VERSION} \
+        libcusparse-${CUDA_PKG_VERSION} \
+        libcublas-${CUDA_PKG_VERSION} \
+        cuda-cudart-dev-${CUDA_PKG_VERSION} \
+        cuda-command-line-tools-${CUDA_PKG_VERSION} \
+        cuda-minimal-build-${CUDA_PKG_VERSION} \
+        cuda-libraries-dev-${CUDA_PKG_VERSION} \
+        cuda-nvml-dev-${CUDA_PKG_VERSION} \
+        cuda-nvprof-${CUDA_PKG_VERSION} \
+        libnpp-dev-${CUDA_PKG_VERSION} \
+        libcusparse-dev-${CUDA_PKG_VERSION} \
+        libcublas-dev-${CUDA_PKG_VERSION} \
     && apt-get clean -y \
     && rm -rf /var/lib/apt/lists/*
 RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf \
