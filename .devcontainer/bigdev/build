@@ -1,0 +1,1 @@
+docker build --progress=plain -t test_devimage . && ./test test_devimage

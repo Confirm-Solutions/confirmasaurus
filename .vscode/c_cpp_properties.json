@@ -26,8 +26,7 @@
             },
             "forcedInclude": [
                 "${workspaceFolder}/imprint/.vscode/eigen_fix.h"
-            ],
-            "compileCommands": "${workspaceFolder}/compile_commands.json"
+            ]
         }
     ],
     "version": 4
