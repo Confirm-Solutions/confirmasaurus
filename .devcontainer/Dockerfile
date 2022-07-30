@@ -4,7 +4,7 @@
 # As a general rule:
 # - anything that would be installed as part of our README.md file should be installed here.
 # - anything that would be assumed to be installed as part of a dev's system should be in the devimage.
-FROM docker pull ghcr.io/confirm-solutions/devimage:main
+FROM ghcr.io/confirm-solutions/devimage:main
 
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
