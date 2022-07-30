@@ -2,7 +2,7 @@
 {
 	"name": "Big useful dev container",
 	"build": {
-		"context": "../..",
+		"context": "..",
 		"dockerfile": "./bigdev/Dockerfile"
 	},
 	// Configure tool-specific properties.
