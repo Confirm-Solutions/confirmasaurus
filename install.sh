@@ -1,5 +1,10 @@
 #!/bin/bash
 
+if ! [ -x "$(command -v nvidia-smi)" ]; then
+  echo 'No GPUs available. Replacing jax[cuda] with jax[cpu].' >&2
+  pip "jax[cpu]" numpyro -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+fi
+
 # Set up pre-commit so it's fast the first time it gets used
 pre-commit install --install-hooks
 

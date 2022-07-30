@@ -31,14 +31,12 @@ dependencies:
 # - conda-forge gpu jax support is fairly new and might be fragile,
 #   and I can't get it to consistently install correctly.
 #   https://github.com/conda-forge/jaxlib-feedstock/issues/34
-#   so we install jax and numpyro from pypi instead
-#   IMPORTANTLY, we install a cpu jax here. If you want gpu jax, install an
-#   identical version before building from this environment.yml. Then, pip will
-#   not reinstall here because the package is already installed. This has
-#   already been done for our devimage.
+#   so we install jax and numpyro from pypi instead. Importantly, we install a
+#   CUDA jax here. If your system doesn't support CUDA, the ./install.sh script
+#   will overwrite with a CPU jax.
   - pip:
     -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-    - "jax[cpu]"
-    - numpyro
+    - "jax[cuda]"
+    - "numpyro[cuda]"
     - "pybind11[global]"
     - cppimport
