@@ -15,7 +15,6 @@
             "defines": [],
             "cStandard": "c11",
             "cppStandard": "c++17",
-            "intelliSenseMode": "linux-clang-x64",
             "compilerArgs": [],
             "mergeConfigurations": false,
             "browse": {
