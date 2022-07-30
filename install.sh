@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if ! [ -x "$(command -v nvidia-smi)" ]; then
+if ! [ -x "$(command -v nvidia-smi)" ] && [[ -z "$CONFIRM_FORCE_JAX_CUDA" ]]; then
     echo 'No GPUs available. Replacing jax[cuda] with jax[cpu].' >&2
     pip uninstall -y jax jaxlib numpyro
     pip install "jax[cpu]" numpyro
