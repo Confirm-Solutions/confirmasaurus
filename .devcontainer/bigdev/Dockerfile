@@ -169,6 +169,7 @@ RUN mamba create -n sagemath -y sage \
     && mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
+    && pip cache purge \
     # Now that Jupyter is installed, we install the R kernel from IRkernel. This
     # means you can run R in Jupyter!
     && R -e "IRkernel::installspec()"
