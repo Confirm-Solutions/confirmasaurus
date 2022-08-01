@@ -43,6 +43,8 @@ RUN apt-get update \
         # Install neovim and texlive since they're useful!
         neovim \
         texlive-latex-extra \
+        cm-super \
+        dvipng \
     # I don't know why this line is here, but I don't want to debug any
     # problems that might crop up from deleting it.
     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
