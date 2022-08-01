@@ -365,10 +365,6 @@ def benchmark(N=10000, iter=5):
     db = jax.jit(jax.vmap(berry.build_dirty_bayes(sig2, n_arms=4, dtype=dtype)))
     my_timeit(N, lambda: db(data)[0].block_until_ready(), iter=iter)
 
-    print("\ncustom dirty bayes")
-    db = jax.jit(jax.vmap(berry.build_dirty_bayes(sig2, n_arms=4, dtype=dtype)))
-    my_timeit(N, lambda: db(data)[0].block_until_ready(), iter=iter)
-
     def bench_ops(name, ops):
         print(f"\n{name} gaussian")
         hyperpost = jax.jit(jax.vmap(ops.laplace_logpost, in_axes=(None, None, 0)))
@@ -403,18 +399,23 @@ def benchmark(N=10000, iter=5):
                 arm_post.append(inla.exp_and_normalize(arm_logpost, wts, axis=0))
             return jnp.array(arm_post)
 
-        my_timeit(N, jax.jit(f), iter=iter)
+        f_jit = jax.jit(f)
+        my_timeit(N, lambda: f_jit().block_until_ready(), iter=iter)
 
     custom_ops = berry.optimized(sig2, dtype=dtype).config(max_iter=10)
     bench_ops("custom berry", custom_ops)
 
     ad_ops = inla.from_log_joint(
-        berry.log_joint(4), dict(sig2=np.array([nan]), theta=np.full(4, 0.0))
+        berry.log_joint(4),
+        dict(sig2=np.array([nan], dtype=dtype), theta=np.full(4, 0.0, dtype=dtype)),
     ).config(max_iter=10)
     bench_ops("numpyro berry", ad_ops)
 
 
 if __name__ == "__main__":
-    benchmark(N=100000, iter=1)
+    # set to cpu or gpu to run on a specific device.
+    jax.config.update("jax_platform_name", "gpu")
+
+    benchmark(N=10000, iter=1)
     # Running with N=1 is useful for benchmarking the JIT.
     # benchmark(N=1, iter=1)
