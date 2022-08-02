@@ -99,23 +99,6 @@ def benchmark(N=10000, iter=5):
     bench_ops("numpyro berry", ad_ops)
 ```
 
-```python
-N = 3
-dtype = np.float64
-data = berry.figure2_data(N).astype(dtype)
-sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
-sig2 = sig2_rule.pts.astype(dtype)
-x0 = jnp.zeros((sig2.shape[0], 4), dtype=dtype)
-
-ad_ops = inla.from_log_joint(
-    berry.log_joint(4), dict(sig2=np.array([np.nan]), theta=np.full(4, 0.0))
-).config(max_iter=10)
-
-hyperpost = jax.jit(jax.vmap(ad_ops.laplace_logpost, in_axes=(None, None, 0)))
-p_pinned = dict(sig2=sig2, theta=None)
-out = hyperpost(x0, p_pinned, data)
-```
-
 # Lei Example
 
 
@@ -209,23 +192,143 @@ By approximating $\theta_i | y, n$ as normal, the first integrand term can be es
 The second term can be estimated by INLA.
 
 ```python
-def pr_normal_best(best_index, mean, cov, key, n_sims=100):
+def pr_normal_best(mean, cov, key, n_sims):
     '''
     Estimates P[X_i > max_{j != i} X_j] where X ~ N(mean, cov) via sampling.
     '''
-    sims = jax.random.multivariate_normal(key, mean, cov, shape=(n_sims,))
-    return jnp.mean(sims[:, best_index] == jnp.max(sims, axis=-1))
+    out_shape = (n_sims, *mean.shape[:-1])
+    sims = jax.random.multivariate_normal(key, mean, cov, shape=out_shape)
+    order = jnp.arange(1, mean.shape[-1])
+    compute_pr_best_all = jax.vmap(lambda i: jnp.mean(jnp.argmax(sims, axis=-1) == i, axis=0))
+    return compute_pr_best_all(order)
 ```
 
 ```python
-d = 3
-mean = jnp.array([2, 2, 2])
+d = 4
+mean = jnp.array([2, 2, 2, 5])
 cov = jnp.eye(d)
 key = jax.random.PRNGKey(0)
-pr_normal_best(0, mean, cov, key, n_sims=100000)
+n_sims = 100000
+jax.jit(pr_normal_best, static_argnums=(3,))(mean, cov, key, n_sims=n_sims)
 ```
 
 Next, we perform INLA to estimate $p(\sigma^2 | y, n)$ on a grid of values for $\sigma^2$.
+
+```python
+sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+custom_ops = berry.optimized(sig2_rule.pts, n_arms=4).config(
+    opt_tol=1e-3
+)
+
+```
+
+```python
+def posterior_sigma_sq(data, pts, wts):
+    _, n_arms, _ = data.shape
+    sig2 = pts
+    n_sig2 = sig2.shape[0]
+    p_pinned = dict(sig2=sig2, theta=None)
+
+    f = jax.jit(jax.vmap(custom_ops.laplace_logpost, in_axes=(None, None, 0)))
+    logpost, x_max, hess, iters = f(
+        np.zeros((n_sig2, n_arms)), p_pinned, data
+    )
+    post = inla.exp_and_normalize(
+            logpost, wts, axis=1)
+
+    return post, x_max, hess, iters 
+```
+
+```python
+dtype = jnp.float64
+N = 1
+data = berry.figure2_data(N).astype(dtype)[0]
+post, _, hess, _ = jax.jit(posterior_sigma_sq)(data[None,:], sig2_rule.pts, sig2_rule.wts)
+n_arms = 4
+ff = jax.jit(jax.vmap(jax.vmap(
+    lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))))
+```
+
+Putting the two pieces together, we have the following function to compute the probability of best treatment arm.
+
+```python
+def pr_best(data, pts, wts, key, n_sims):
+    n_arms, _ = data.shape
+    post, x_max, hess, _ = posterior_sigma_sq(data[None,:], pts, wts) 
+    mean = x_max
+    hess_fn = jax.vmap(jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])))
+    prec = -hess_fn(hess) # (n_sims, n_sigs, n_arms, n_arms)
+    cov = jnp.linalg.inv(prec)
+    pr_normal_best_out = pr_normal_best(mean, cov, key=key, n_sims=n_sims)
+    return jnp.matmul(pr_normal_best_out[:,0,:], post[0] * wts)
+```
+
+```python
+n_sims = 13
+out = jax.jit(pr_best, static_argnums=(4,))(data, sig2_rule.pts, sig2_rule.wts, key, n_sims)
+out
+```
+
+## Posterior Probability of Success
+
+The next quantity we need to compute is the posterior probability of success (PPS).
+For convenience of implementation, we will take this to mean the following:
+let $y, n$ denote the currently observed data
+and $A_i = \{ \text{Phase III rejects using treatment arm i} \}$.
+Then, we wish to compute
+\begin{align*}
+\mathbb{P}(A_i | y, n)
+\end{align*}
+Expanding the quantity,
+\begin{align*}
+\mathbb{P}(A_i | y, n) &=
+\int \mathbb{P}(A_i | y, n, \theta_i, \theta_0) p(\theta_0, \theta_i | y, n) \, d\theta_i d\theta_0 \\&=
+\int \mathbb{P}(A_i | y, n, \theta_i, \theta_0) p(\theta_0, \theta_i | y, n) \, d\theta_i d\theta_0
+\end{align*}
+
+Once we have an estimate for $p(\theta_0, \theta_i | y, n)$, 
+we can use 2-D quadrature to numerically integrate the integrand.
+Similar to computing the probability of best arm,
+\begin{align*}
+p(\theta_0, \theta_i | y, n)
+&=
+\int p(\theta_0, \theta_i | y, n, \sigma^2) p(\sigma^2 | y, n) \, d\sigma^2
+\end{align*}
+We will use the Gaussian approximation for $p(\theta_0, \theta_i | y, n, \sigma^2)$
+and use INLA to estimate $p(\sigma^2 | y, n)$.
+
+\begin{align*}
+p(\theta | y, n, \sigma^2)
+\approx
+\mathcal{N}(\theta^*, -(H\log p(\theta^*, y, \sigma^2))^{-1})
+\\
+\implies
+p(\theta_0, \theta_i | y, n, \sigma^2)
+\approx
+\mathcal{N}(\theta^*_{[0,i]}, -(H\log p(\theta^*, y, \sigma^2))^{-1}_{[0,i], [0,i]})
+\end{align*}
+
+Method 1:
+
+
+
+## Phase III Final Analysis
+
+\begin{align*}
+\mathbb{P}(\theta_i - \theta_0 < t | y, n) < 0.1
+\end{align*}
+
+\begin{align*}
+\mathbb{P}(\theta_i - \theta_0 < t | y, n)
+&=
+\mathbb{P}(q_1^\top \theta < t | y,n)
+=
+\int \mathbb{P}(q_1^\top \theta < t | y, n, \sigma^2) p(\sigma^2 | y, n) \, d\sigma^2
+\\&=
+\int \mathbb{P}(q_1^\top \theta < t | y, n, \sigma^2) p(\sigma^2 | y, n) \, d\sigma^2
+\\
+q_1^\top \theta | y, n, \sigma^2 &\sim \mathcal{N}(q_1^\top \theta^*, -q_1^\top (H\log p(\theta^*, y, \sigma^2))^{-1} q_1)
+\end{align*}
 
 
 ## Design Implementation
@@ -239,6 +342,7 @@ key = jax.random.PRNGKey(0)
 class Lewis45:
     def __init__(
         self,
+        n_arms,
         n_stage_1,
         n_stage_2,
         n_interims,
@@ -248,6 +352,8 @@ class Lewis45:
         pps_threshold_upper,
         posterior_difference_threshold,
         rejection_threshold,
+        sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3),
+        dtype = jnp.float64,
     ):
         """
         Constructs an object to run the Lei example.
@@ -267,6 +373,7 @@ class Lewis45:
                                 P(p_selected_treatment_arm - p_control_arm < posterior_difference_threshold | data) < rejection_threshold
                                 <=> rejection.
         """
+        self.n_arms = n_arms
         self.n_stage_1 = n_stage_1
         self.n_stage_2 = n_stage_2
         self.n_interims = n_interims
@@ -276,15 +383,55 @@ class Lewis45:
         self.pps_threshold_upper = pps_threshold_upper
         self.posterior_difference_threshold = posterior_difference_threshold
         self.rejection_threshold = rejection_threshold
+        
+        self.dtype = dtype
+
+        self.sig2_rule = sig2_rule
+        self.sig2_rule.pts = self.sig2_rule.pts.astype(self.dtype)
+        self.sig2_rule.wts = self.sig2_rule.wts.astype(self.dtype)
+        self.custom_ops = berry.optimized(self.sig2_rule.pts, n_arms=n_arms).config(
+            opt_tol=1e-3
+        )
+        
+    def posterior_sigma_sq(self, data):
+        '''
+        Computes the posterior of sigma^2 given data, p(sigma^2 | y)
+        using INLA method.
+        '''
+        _, n_arms, _ = data.shape
+        sig2 = sig2_rule.pts
+        n_sig2 = sig2.shape[0]
+        p_pinned = dict(sig2=sig2, theta=None)
+        f = jax.vmap(self.custom_ops.laplace_logpost, in_axes=(None, None, 0))
+        logpost, x_max, hess, iters = f(
+            np.zeros((n_sig2, n_arms), dtype=self.dtype), p_pinned, data
+        )
+        post = inla.exp_and_normalize(logpost, sig2_rule.wts[None, :], axis=1)
+
+        return post, x_max, hess, iters 
 
     @staticmethod
-    def compute_pr_best(data, non_futile_idx):
-        # TODO: fill in detail.
-        pr_best = np.zeros(data.shape[0])
-        pr_best[0] = np.Inf
-        pr_best[1:] = 0.5
-        return pr_best
+    def pr_normal_best(mean, cov, key, n_sims):
+        '''
+        Estimates P[X_i > max_{j != i} X_j] where X ~ N(mean, cov) via sampling.
+        '''
+        out_shape = (n_sims, *mean.shape[:-1])
+        sims = jax.random.multivariate_normal(key, mean, cov, shape=out_shape)
+        order = jnp.arange(1, mean.shape[-1])
+        compute_pr_best_all = jax.vmap(lambda i: jnp.mean(jnp.argmax(sims, axis=-1) == i, axis=0))
+        return compute_pr_best_all(order)
 
+    def compute_pr_best(self, data, non_futile_idx, n_sims):
+        n_arms, _ = data.shape
+        post, x_max, hess, _ = self.posterior_sigma_sq(data[None,:]) 
+        mean = x_max
+        hess_fn = jax.vmap(jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])))
+        prec = -hess_fn(hess) # (n_sims, n_sigs, n_arms, n_arms)
+        cov = jnp.linalg.inv(prec)
+        pr_normal_best_out = pr_normal_best(mean, cov, key=key, n_sims=n_sims)
+        pr_best_out = jnp.matmul(pr_normal_best_out[:,0,:], post[0] * self.sig2_rule.wts)
+        return jnp.where(non_futile_idx == 0, jnp.nan, pr_best_out)
+             
     @staticmethod
     def compute_pps(data):
         # TODO: fill in detail
@@ -295,7 +442,7 @@ class Lewis45:
         # TODO: fill in detail
         return 0.1
 
-    def stage_1(self, p, key):
+    def stage_1(self, p, key, n_sims):
         """
         Runs a single simulation of Stage 1 of the Lei example.
 
@@ -317,12 +464,11 @@ class Lewis45:
         key:            last PRNG key used.
         """
 
+        n_arms = self.n_arms
         n_stage_1 = self.n_stage_1
         n_interims = self.n_interims
         n_add_per_interim = self.n_add_per_interim
         futility_threshold = self.futility_threshold
-
-        n_arms = len(p)
 
         # create initial data
         n_arr = jnp.full(shape=n_arms, fill_value=n_stage_1)
@@ -332,14 +478,14 @@ class Lewis45:
         # auxiliary variables
         stage_1_not_done = True
         non_futile_idx = jnp.ones(n_arms, dtype=bool)
-        pr_best = self.compute_pr_best(data, non_futile_idx)
+        pr_best = self.compute_pr_best(data, non_futile_idx, n_sims)
         order = jnp.arange(0, len(non_futile_idx))
 
         # Stage 1:
         for _ in range(n_interims):
             # get non-futile arm indices (offset by 1 because of control arm)
-            non_futile_idx = pr_best >= futility_threshold
-            non_futile_idx[0] = True  # force control arm to be non-futile
+            # force control arm to be non-futile
+            non_futile_idx = jnp.where(order == 0, True, pr_best >= futility_threshold)
 
             # if no non-futile treatment arms, terminate trial
             # else if exactly 1 non-futile arm, terminate stage 1 by choosing that arm.
@@ -358,7 +504,7 @@ class Lewis45:
             data = data + jnp.stack((y_new, n_new), axis=-1)
 
             # compute probability of best for each arm
-            pr_best = self.compute_pr_best(data, continue_idx)
+            pr_best = self.compute_pr_best(data, continue_idx, n_sims)
 
         return data, n_non_futile, non_futile_idx, pr_best, key
 
@@ -423,7 +569,7 @@ class Lewis45:
             ),
         )
 
-    def single_sim(self, p, key):
+    def single_sim(self, p, key, n_sims):
         """
         Runs a single simulation of both stage 1 and stage 2.
 
@@ -437,6 +583,7 @@ class Lewis45:
         data, n_non_futile, non_futile_idx, pr_best, key = self.stage_1(
             p=p,
             key=key,
+            n_sims=n_sims,
         )
 
         # Stage 2 only if no early termination based on futility
@@ -452,20 +599,21 @@ class Lewis45:
             ),
         )
 
-    def simulate_point(self, n_sims, p, key):
+    def simulate_point(self, n_sims, p, key, n_pr_best_sims):
         keys = jax.random.split(key, num=n_sims)
-        single_sim_vmapped = jax.vmap(self.single_sim, in_axes=(None, 0))
-        return single_sim_vmapped(p, keys)
+        single_sim_vmapped = jax.vmap(self.single_sim, in_axes=(None, 0, None))
+        return single_sim_vmapped(p, keys, n_pr_best_sims)
 
-    def simulate(self, n_sims, grid_points, key):
-        simulate_point_vmapped = jax.vmap(self.simulate_point, in_axes=(None, 0, None))
-        return simulate_point_vmapped(n_sims, grid_points, key)
+    def simulate(self, n_sims, grid_points, key, n_pr_best_sims):
+        simulate_point_vmapped = jax.vmap(self.simulate_point, in_axes=(None, 0, None, None))
+        return simulate_point_vmapped(n_sims, grid_points, key, n_pr_best_sims)
 
 ```
 
 ```python
 %%time
 params = {
+    "n_arms" : 2,
     "n_stage_1" : 50,
     "n_interims" : 3,
     "n_add_per_interim" : 100,
@@ -483,26 +631,17 @@ lei_obj = Lewis45(**params)
 ```python
 %%time
 p = jnp.zeros(2)
-grid_points = jnp.array([p] * 2)
-n_sims = 1000
+grid_points = jnp.array([p] * 1000)
+n_sims = 100000
 ```
 
 ```python
 %%time
-simulate_point_jit = jax.jit(lei_obj.simulate_point, static_argnums=(0))
-simulate_jit = jax.jit(lei_obj.simulate, static_argnums=(0))
-```
-
-```python
-%%time
-#rejections = simulate_point_jit(n_sims, p, key)
-rejections = simulate_jit(n_sims, grid_points, key)
+#rejections = jax.jit(lei_obj.single_sim, static_argnums=(2,))(p, key, 100)
+#rejections = jax.jit(lei_obj.simulate_point, static_argnums=(0, 3,))(n_sims, p, key, 100)
+rejections = jax.jit(lei_obj.simulate, static_argnums=(0, 3))(n_sims, grid_points, key, 100)
 ```
 
 ```python
 rejections.shape
-```
-
-```python
-# Probability of Best Treatment Arm
 ```

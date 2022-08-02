@@ -114,7 +114,7 @@ def optimized(sig2, n_arms=4, dtype=np.float64):
     def step_hess(theta, _, data):
         grad, (hess_a, hess_b) = grad_hess(theta, _, data)
         step, denom = solve_vmap(hess_a, hess_b, -grad)
-        return step, (hess_a, denom)
+        return step, (hess_a, hess_b, denom)
 
     return inla.Operations(
         spec=inla.ParamSpec(dict(sig2=np.array([np.nan]), theta=np.full(n_arms, 0))),
@@ -122,10 +122,10 @@ def optimized(sig2, n_arms=4, dtype=np.float64):
         gradv=grad,
         hessv=hess,
         reduced_hessv=reduced_hess,
-        logdetv=logdet_basket,
+        logdetv=lambda H: logdet_basket((H[0], H[2])),
         step_hessv=step_hess,
-        solve=lambda H, v: solve_basket(*H, v),
-        invert=lambda H: inv_basket(*H),
+        solve=lambda H, v: solve_basket(H[0], H[2], v),
+        invert=lambda H: inv_basket(H[0], H[2]),
     )
 
 
