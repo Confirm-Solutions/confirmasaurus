@@ -58,6 +58,6 @@
 		"--security-opt",
 		"seccomp=unconfined",
 		"--privileged",
-		"--init",
+		"--init"
 	]
 }

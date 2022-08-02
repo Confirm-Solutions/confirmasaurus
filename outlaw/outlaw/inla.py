@@ -221,7 +221,7 @@ def merge(*pytrees):
                     return arg
         return combine
 
-    return jax.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
+    return jax.tree_util.tree_map(_merge, *pytrees, is_leaf=lambda x: x is None)
 
 
 def mvn_conditional_mean(mu, cov, x, i):

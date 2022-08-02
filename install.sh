@@ -9,14 +9,14 @@ fi
 # Set up pre-commit so it's fast the first time it gets used
 pre-commit install --install-hooks
 
-pushd imprint
+pushd imprint || exit
 ./generate_bazelrc
-popd
+popd || exit
 
 # List the internal packages that should be available here.
 for PKG in ./outlaw ./research/berry ./imprint/python
 do
-    [ -d "$PKG" ] && printf "\nDirectory $PKG exists. Installing... \n" && pip install --no-deps -e "$PKG"
+    [ -d "$PKG" ] && echo -e "\nDirectory $PKG exists. Installing... \n" && pip install --no-deps -e "$PKG"
 done
 
 # Set up our imprint remote so we can use subtree. On Codespaces, we need
