@@ -13,7 +13,6 @@ dependencies:
 # C++ toolchain
   - cxx-compiler 
   - clang-tools
-  - bazel 
 
 # essential dev tools
   - pytest
