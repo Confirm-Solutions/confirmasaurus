@@ -2,12 +2,12 @@ import jax
 import numpy as np
 import pytest
 
-from inlaw.smalljax import gen
-from inlaw.smalljax import inv22
-from inlaw.smalljax import inv33
-from inlaw.smalljax import inv44
-from inlaw.smalljax import inv_recurse
-from inlaw.smalljax import logdet
+from outlaw.smalljax import gen
+from outlaw.smalljax import inv22
+from outlaw.smalljax import inv33
+from outlaw.smalljax import inv44
+from outlaw.smalljax import inv_recurse
+from outlaw.smalljax import logdet
 
 
 @pytest.mark.parametrize(

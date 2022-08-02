@@ -7,10 +7,10 @@ from numpy import nan
 from scipy.special import expit
 from scipy.special import logit
 
-import inlaw.berry as berry
-import inlaw.inla as inla
-import inlaw.numpyro_interface as numpyro_interface
-import inlaw.quad as quad
+import outlaw.berry as berry
+import outlaw.inla as inla
+import outlaw.numpyro_interface as numpyro_interface
+import outlaw.quad as quad
 
 # noreorder
 import jax
