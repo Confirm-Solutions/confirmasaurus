@@ -32,15 +32,24 @@ class Lewis45:
         -----------
         n_stage_1:      number of patients to enroll at stage 1 for each arm.
         n_interims:     number of interims.
-        n_add_per_interim:      number of total patients to add per interim.
-        futility_threshold:     probability cut-off to decide futility for treatment arms.
-                                If P(arm_i best | data) < futility_threshold, declare arm_i as futile.
+        n_add_per_interim:      number of total patients to
+                                add per interim.
+        futility_threshold:     probability cut-off to decide
+                                futility for treatment arms.
+                                If P(arm_i best | data) < futility_threshold,
+                                declare arm_i as futile.
         n_stage_2:              number of patients to add for stage 2 for each arm.
-        pps_threshold_lower:    threshold for checking futility: PPS < pps_threshold_lower <=> futility.
-        pps_threshold_upper:    threshold for checking efficacy: PPs > pps_threshold_upper <=> efficacy.
-        posterior_difference_threshold: threshold to compute posterior difference of selected arm p and control arm p.
-        rejection_threshold:    threshold for rejection at the final analysis (if reached):
-                                P(p_selected_treatment_arm - p_control_arm < posterior_difference_threshold | data) < rejection_threshold
+        pps_threshold_lower:    threshold for checking futility:
+                                PPS < pps_threshold_lower <=> futility.
+        pps_threshold_upper:    threshold for checking efficacy:
+                                PPS > pps_threshold_upper <=> efficacy.
+        posterior_difference_threshold: threshold to compute posterior difference
+                                        of selected arm p and control arm p.
+        rejection_threshold:    threshold for rejection at the final analysis
+                                (if reached):
+                                P(p_selected_treatment_arm - p_control_arm <
+                                    posterior_difference_threshold | data)
+                                    < rejection_threshold
                                 <=> rejection.
         """
         self.n_arms = n_arms
@@ -69,26 +78,25 @@ class Lewis45:
         Computes the posterior of sigma^2 given data, p(sigma^2 | y)
         using INLA method.
         """
-        _, n_arms, _ = data.shape
+        n_arms, _ = data.shape
         sig2 = self.sig2_rule.pts
         n_sig2 = sig2.shape[0]
         p_pinned = dict(sig2=sig2, theta=None)
-        f = jax.vmap(self.custom_ops.laplace_logpost, in_axes=(None, None, 0))
+        f = self.custom_ops.laplace_logpost
         logpost, x_max, hess, iters = f(
             np.zeros((n_sig2, n_arms), dtype=self.dtype), p_pinned, data
         )
-        post = inla.exp_and_normalize(logpost, self.sig2_rule.wts[None, :], axis=1)
+        post = inla.exp_and_normalize(logpost, self.sig2_rule.wts, axis=-1)
 
         return post, x_max, hess, iters
 
-    @staticmethod
-    def pr_normal_best(mean, cov, key, n_sims):
+    def pr_normal_best(self, mean, cov, key, n_sims):
         """
         Estimates P[X_i > max_{j != i} X_j] where X ~ N(mean, cov) via sampling.
         """
         out_shape = (n_sims, *mean.shape[:-1])
         sims = jax.random.multivariate_normal(key, mean, cov, shape=out_shape)
-        order = jnp.arange(1, mean.shape[-1])
+        order = jnp.arange(0, mean.shape[-1])
         compute_pr_best_all = jax.vmap(
             lambda i: jnp.mean(jnp.argmax(sims, axis=-1) == i, axis=0)
         )
@@ -96,17 +104,14 @@ class Lewis45:
 
     def compute_pr_best(self, data, non_futile_idx, key):
         n_arms, _ = data.shape
-        post, x_max, hess, _ = self.posterior_sigma_sq(data[None, :])
-        post = post[0]
-        x_max = x_max[0]
-        hess = (hess[0][0], hess[1][0])
+        post, x_max, hess, _ = self.posterior_sigma_sq(data)
         mean = x_max
         hess_fn = jax.vmap(
             lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])
         )
         prec = -hess_fn(hess)  # (n_sigs, n_arms, n_arms)
         cov = jnp.linalg.inv(prec)
-        pr_normal_best_out = Lewis45.pr_normal_best(
+        pr_normal_best_out = self.pr_normal_best(
             mean, cov, key=key, n_sims=self.n_pr_best_sims
         )
         pr_best_out = jnp.matmul(pr_normal_best_out, post * self.sig2_rule.wts)
@@ -119,27 +124,25 @@ class Lewis45:
 
     def posterior_difference(self, data, arm, thresh):
         # TODO: p(sigma^2 | y) can be precomputed in a table?
-        # n_arms, _ = data.shape
-        # post, x_max, hess, _ = self.posterior_sigma_sq(data[None,:])
-        # post = post[0]
-        # x_max = x_max[0]
-        # hess = (hess[0][0], hess[1][0])
+        n_arms, _ = data.shape
+        post, x_max, hess, _ = self.posterior_sigma_sq(data)
 
-        # post_weighted = self.sig2_rule.wts * post
-        # hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
-        # prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
+        post_weighted = self.sig2_rule.wts * post
+        hess_fn = jax.vmap(
+            lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])
+        )
+        prec = -hess_fn(hess)  # (n_sigs, n_arms, n_arms)
 
-        # order = jnp.arange(n_arms)
-        # q1 = jnp.where(order == 0, -1, 0)
-        # q1 = jnp.where(jnp.arange(n_arms) == arm, 1, q1)
+        order = jnp.arange(n_arms)
+        q1 = jnp.where(order == 0, -1, 0)
+        q1 = jnp.where(jnp.arange(n_arms) == arm, 1, q1)
 
-        # loc = x_max @ q1
-        # scale = jnp.linalg.solve(prec, q1[None,:]) @ q1
-        # normal_term = jax.scipy.stats.norm.cdf(thresh, loc=loc, scale=scale)
-        # out = normal_term @ post_weighted
+        loc = x_max @ q1
+        scale = jnp.linalg.solve(prec, q1[None, :]) @ q1
+        normal_term = jax.scipy.stats.norm.cdf(thresh, loc=loc, scale=scale)
+        out = normal_term @ post_weighted
 
-        # return out
-        return 0
+        return out
 
     def stage_1(self, p, key):
         """
@@ -154,12 +157,16 @@ class Lewis45:
         --------
         data, n_non_futile, non_futile_idx, pr_best, key
 
-        data:           (number of arms, 2) where column 0 is the simulated binomial data for each arm
-                        and column 1 is the corresponding value for the Binomial n parameter.
+        data:           (number of arms, 2) where column 0 is the
+                        simulated binomial data for each arm
+                        and column 1 is the corresponding value
+                        for the Binomial n parameter.
         n_non_futile:   number of non-futile treatment arms.
         non_futile_idx: vector of booleans indicating whether each arm is non-futile.
-        pr_best:        vector containing probability of being the best arm for each arm.
-                        It is set to jnp.nan if the arm was dropped for futility or if the arm is control (index 0).
+        pr_best:        vector containing probability of
+                        being the best arm for each arm.
+                        It is set to jnp.nan if the arm was dropped for
+                        futility or if the arm is control (index 0).
         key:            last PRNG key used.
         """
 
@@ -171,9 +178,8 @@ class Lewis45:
 
         # create initial data
         n_arr = jnp.full(shape=n_arms, fill_value=n_stage_1)
-        p_no_zeros = jnp.where(p == 0, 1e-5, p)
-        data = dist.Binomial(total_count=n_arr, probs=p_no_zeros).sample(key)
-        data = jnp.stack((data, n_arr))
+        data = dist.Binomial(total_count=n_arr, probs=p).sample(key)
+        data = jnp.stack((data, n_arr), axis=-1)
 
         # auxiliary variables
         stage_1_not_done = True
@@ -196,17 +202,16 @@ class Lewis45:
             continue_idx = non_futile_idx & stage_1_not_done
 
             # evenly distribute the next patients across non-futile arms
-            remainder = n_add_per_interim % n_arms
-            n_new = jnp.where(
-                continue_idx, n_add_per_interim // n_non_futile + (order < remainder), 0
-            )
+            # Note: for simplicity, we remove the remainder patients.
+            # remainder = n_add_per_interim % n_arms
+            n_new = jnp.where(continue_idx, n_add_per_interim // n_non_futile, 0)
             _, key = jax.random.split(key)
-            y_new = dist.Binomial(total_count=n_new, probs=p_no_zeros).sample(key)
+            y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
             data = data + jnp.stack((y_new, n_new), axis=-1)
 
-            # compute probability of best for each arm
+            # compute probability of best for each arm that are non-futile
             _, key = jax.random.split(key)
-            pr_best = self.compute_pr_best(data, continue_idx, key)
+            pr_best = self.compute_pr_best(data, non_futile_idx, key)
 
         return data, n_non_futile, non_futile_idx, pr_best, key
 
@@ -226,7 +231,8 @@ class Lewis45:
         data:   simulated binomial data as in lei_stage_1 output.
         non_futile_idx:         a boolean vector indicating which arm is non-futile.
         pr_best:                a vector of probability of each arm being best.
-                                Assume to be only well-defined whenever non_futile_idx is True.
+                                Assume to be only well-defined
+                                whenever non_futile_idx is True.
         p:                      simulation grid-point.
         key:                    jax PRNG key.
 
@@ -246,7 +252,8 @@ class Lewis45:
         pr_best_subset = jnp.where(non_futile_idx[1:], pr_best[1:], 0)
         best_arm = jnp.argmax(pr_best_subset) + 1
 
-        # add n_stage_2 number of patients to each of the control and selected treatment arms.
+        # add n_stage_2 number of patients to each
+        # of the control and selected treatment arms.
         n_new = jnp.where(non_futile_idx, n_stage_2, 0)
         _, key = jax.random.split(key)
         y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
@@ -279,10 +286,13 @@ class Lewis45:
         p:      simulation grid-point.
         key:    jax PRNG key.
         """
+        # temporary fix: binomial sampling requires this if n parameter
+        # cannot be constant folded and p == 0 in some entries.
+        p_no_zeros = jnp.where(p == 0, 1e-5, p)
 
         # Stage 1:
         data, n_non_futile, non_futile_idx, pr_best, key = self.stage_1(
-            p=p,
+            p=p_no_zeros,
             key=key,
         )
 
@@ -294,7 +304,7 @@ class Lewis45:
                 data=data,
                 non_futile_idx=non_futile_idx,
                 pr_best=pr_best,
-                p=p,
+                p=p_no_zeros,
                 key=key,
             ),
         )
