@@ -299,18 +299,21 @@ params = {
 }
 lei_obj = lewis.Lewis45(**params)
 p = jnp.array([0.5, 0.5, 0.5])
-grid_points = jnp.array([p] * 1000)
-n_sims = 100
+n_sims = 10000
+n_grid_points = 10
 keys = jax.random.split(key, num=n_sims)
+grid_points = jnp.array([p] * n_grid_points)
 ```
 
 ```python
 %%time
 #rejections = jax.jit(lei_obj.single_sim)(p, key)
 rejections = jax.jit(lei_obj.simulate_point)(p, keys)
-#rejections = jax.jit(lei_obj.simulate, static_argnums=(0, 3))(n_sims, grid_points, key, 1)
+#rejections = jax.jit(lei_obj.simulate)(grid_points, keys)
+
+jnp.mean(rejections, axis=-1)
 ```
 
 ```python
-jnp.mean(rejections)
+
 ```

@@ -182,14 +182,14 @@ class Lewis45:
         data = jnp.stack((data, n_arr), axis=-1)
 
         # auxiliary variables
-        stage_1_not_done = True
         non_futile_idx = jnp.ones(n_arms, dtype=bool)
         _, key = jax.random.split(key)
         pr_best = self.compute_pr_best(data, non_futile_idx, key)
         order = jnp.arange(0, len(non_futile_idx))
 
         # Stage 1:
-        for _ in range(n_interims):
+        def body_func(args):
+            i, _, data, _, non_futile_idx, pr_best, key = args
             # get non-futile arm indices (offset by 1 because of control arm)
             # force control arm to be non-futile
             non_futile_idx = jnp.where(order == 0, True, pr_best >= futility_threshold)
@@ -199,11 +199,10 @@ class Lewis45:
             n_non_futile = jnp.sum(non_futile_idx[1:])
             stage_1_not_done = n_non_futile > 1
 
-            continue_idx = non_futile_idx & stage_1_not_done
-
             # evenly distribute the next patients across non-futile arms
             # Note: for simplicity, we remove the remainder patients.
             # remainder = n_add_per_interim % n_arms
+            continue_idx = non_futile_idx & stage_1_not_done
             n_new = jnp.where(continue_idx, n_add_per_interim // n_non_futile, 0)
             _, key = jax.random.split(key)
             y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
@@ -212,6 +211,22 @@ class Lewis45:
             # compute probability of best for each arm that are non-futile
             _, key = jax.random.split(key)
             pr_best = self.compute_pr_best(data, non_futile_idx, key)
+
+            return (
+                i + 1,
+                stage_1_not_done,
+                data,
+                n_non_futile,
+                non_futile_idx,
+                pr_best,
+                key,
+            )
+
+        _, _, data, n_non_futile, non_futile_idx, pr_best, key = jax.lax.while_loop(
+            lambda tup: (tup[0] < n_interims) & tup[1],
+            body_func,
+            (0, True, data, n_arms, non_futile_idx, pr_best, key),
+        )
 
         return data, n_non_futile, non_futile_idx, pr_best, key
 
