@@ -6,7 +6,7 @@ JAX development patterns that might be useful:
   - grouping more operations before jit-ing gives more room for the compiler to optimize.
   - `jax.jit(jax.vmap(...` is better than `jax.vmap(jax.jit(...`
 - Put a bunch of shared variables into a class and then include `self` in the list of `static_argnums`. This is a useful strategy for having a large number of static args.
-- `jax.jit(f).lower(*args).compile()` is a useful snippet for compiling a function without running the function.
+- `jax.jit(f).lower(*args).compile()` is a useful snippet for compiling a function without running the function. [There is a long running JAX project to build better ahead-of-time compilation tools.](https://github.com/google/jax/issues/7733)
 
 Techniques for avoiding non-deterministic behavior that will make jax complain:
 - `jnp.where(...`
