@@ -29,7 +29,7 @@ from lei_obj import Lewis45
 params = {
     "n_arms" : 2,
     "n_stage_1" : 50,
-    "n_interims" : 3,
+    "n_interims" : 1,
     "n_add_per_interim" : 100,
     "futility_threshold" : 0.1,
     "n_stage_2" : 100,
@@ -50,15 +50,20 @@ keyN = jax.random.split(jax.random.PRNGKey(0), num=n_sims * 4).reshape((n_sims, 
 ```python
 print(len(jax.make_jaxpr(lei_obj.single_sim)(p, key1).pretty_print()))
 print(len(jax.make_jaxpr(lei_obj.simulate_point)(p, keyN).pretty_print()))
+print(len(jax.make_jaxpr(lei_obj.stage_1)(p, key1[:-1]).pretty_print()))
 print(len(jax.make_jaxpr(lei_obj.posterior_sigma_sq)(np.random.rand(2,2)).pretty_print()))
 # jax.make_jaxpr(lei_obj.posterior_sigma_sq)(np.random.rand(2,2))
 ```
 
 ```python
 %%time
-lei_obj.single_sim(p, keyN[0])
+# lei_obj.single_sim(p, keyN[0])
 # rejections = jax.jit(lei_obj.single_sim)(p, key1)
 # jax.vmap(lei_obj.single_sim, in_axes=(None, 0))(p, keyN)
-# rejections = jax.jit(lei_obj.simulate_point)(p, keyN)
+rejections = jax.jit(lei_obj.simulate_point)(p, keyN)
 #rejections = jax.jit(lei_obj.simulate, static_argnums=(0, 3))(n_sims, grid_points, key, 1)
+```
+
+```python
+
 ```

@@ -167,7 +167,9 @@ class Lewis45:
 
         # create initial data
         n_arr = jnp.full(shape=n_arms, fill_value=n_stage_1)
-        data = dist.Binomial(total_count=n_arr, probs=p).sample(keys[0])
+        data = jax.random.normal(keys[0]) * jnp.ones_like(
+            p
+        )  # dist.Binomial(total_count=n_arr, probs=p).sample(keys[0])
         data = jnp.stack((data, n_arr))
 
         # auxiliary variables
@@ -197,7 +199,9 @@ class Lewis45:
             n_new = jnp.where(
                 continue_idx, n_add_per_interim // n_non_futile + (order < remainder), 0
             )
-            y_new = dist.Binomial(total_count=n_new, probs=p).sample(keys[i + 1])
+            y_new = jax.random.normal(keys[i + 1]) * jnp.ones_like(
+                p
+            )  # dist.Binomial(total_count=n_new, probs=p).sample(keys[i + 1])
             data = data + jnp.stack((y_new, n_new), axis=-1)
 
             # compute probability of best for each arm
@@ -283,19 +287,20 @@ class Lewis45:
             p=p,
             keys=keys[:-1],
         )
+        return n_non_futile
 
         # Stage 2 only if no early termination based on futility
-        return jax.lax.cond(
-            n_non_futile == 0,
-            lambda: False,
-            lambda: self.stage_2(
-                data=data,
-                non_futile_idx=non_futile_idx,
-                pr_best=pr_best,
-                p=p,
-                key=keys[-1],
-            ),
-        )
+        # return jax.lax.cond(
+        #     n_non_futile == 0,
+        #     lambda: False,
+        #     lambda: self.stage_2(
+        #         data=data,
+        #         non_futile_idx=non_futile_idx,
+        #         pr_best=pr_best,
+        #         p=p,
+        #         key=keys[-1],
+        #     ),
+        # )
 
     def simulate_point(self, p, keys):
         single_sim_vmapped = jax.vmap(self.single_sim, in_axes=(None, 0))
