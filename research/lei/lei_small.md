@@ -29,7 +29,7 @@ from lei_obj import Lewis45
 params = {
     "n_arms" : 2,
     "n_stage_1" : 50,
-    "n_interims" : 1,
+    "n_interims" : 3,
     "n_add_per_interim" : 100,
     "futility_threshold" : 0.1,
     "n_stage_2" : 100,
@@ -40,11 +40,12 @@ params = {
 }
 
 lei_obj = Lewis45(**params)
+p = jnp.array([0.05, 0.05])
 p = jnp.zeros(2)
 grid_points = jnp.array([p] * 1000)
 n_sims = 1
-key1 = jax.random.split(jax.random.PRNGKey(0), num=4)
-keyN = jax.random.split(jax.random.PRNGKey(0), num=n_sims * 4).reshape((n_sims, 4, 2))
+key1 = jax.random.split(jax.random.PRNGKey(0), num=9)
+keyN = jax.random.split(jax.random.PRNGKey(0), num=n_sims * 9).reshape((n_sims, 9, 2))
 ```
 
 ```python
@@ -56,12 +57,41 @@ print(len(jax.make_jaxpr(lei_obj.posterior_sigma_sq)(np.random.rand(2,2)).pretty
 ```
 
 ```python
+from numpyro.distributions.util import _binomial_dispatch
+len(jax.make_jaxpr(_binomial_dispatch)(key1[0], 0.5, 30).pretty_print())
+```
+
+```python
 %%time
 # lei_obj.single_sim(p, keyN[0])
 # rejections = jax.jit(lei_obj.single_sim)(p, key1)
 # jax.vmap(lei_obj.single_sim, in_axes=(None, 0))(p, keyN)
 rejections = jax.jit(lei_obj.simulate_point)(p, keyN)
 #rejections = jax.jit(lei_obj.simulate, static_argnums=(0, 3))(n_sims, grid_points, key, 1)
+```
+
+```python
+import jax
+import numpyro.distributions as dist
+
+def lets_break_this(p, key):
+    n = (jax.random.uniform(key) > 0.5) * 3
+    _, key = jax.random.split(key)
+    return dist.Binomial(total_count=n, probs=p).sample(key)
+
+print('this works fine')
+jax.jit(lets_break_this)(0.1, jax.random.PRNGKey(0))
+jax.jit(jax.vmap(lets_break_this, in_axes=(None, 0)))(
+    0.1, jax.random.split(jax.random.PRNGKey(0), 1)
+)
+
+print('this works fine too!')
+jax.jit(lets_break_this)(0, jax.random.PRNGKey(0))
+
+print('jit with vmap and p=0 results in hanging forever')
+jax.jit(jax.vmap(lets_break_this, in_axes=(None, 0)))(
+    0, jax.random.split(jax.random.PRNGKey(0), 1)
+)
 ```
 
 ```python
