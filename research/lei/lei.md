@@ -224,17 +224,17 @@ custom_ops = berry.optimized(sig2_rule.pts, n_arms=4).config(
 
 ```python
 def posterior_sigma_sq(data, pts, wts):
-    _, n_arms, _ = data.shape
+    n_arms, _ = data.shape
     sig2 = pts
     n_sig2 = sig2.shape[0]
     p_pinned = dict(sig2=sig2, theta=None)
 
-    f = jax.jit(jax.vmap(custom_ops.laplace_logpost, in_axes=(None, None, 0)))
+    f = custom_ops.laplace_logpost
     logpost, x_max, hess, iters = f(
         np.zeros((n_sig2, n_arms)), p_pinned, data
     )
     post = inla.exp_and_normalize(
-            logpost, wts, axis=1)
+            logpost, wts, axis=-1)
 
     return post, x_max, hess, iters 
 ```
@@ -243,10 +243,8 @@ def posterior_sigma_sq(data, pts, wts):
 dtype = jnp.float64
 N = 1
 data = berry.figure2_data(N).astype(dtype)[0]
-post, _, hess, _ = jax.jit(posterior_sigma_sq)(data[None,:], sig2_rule.pts, sig2_rule.wts)
+post, _, hess, _ = jax.jit(posterior_sigma_sq)(data, sig2_rule.pts, sig2_rule.wts)
 n_arms = 4
-ff = jax.jit(jax.vmap(jax.vmap(
-    lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))))
 ```
 
 Putting the two pieces together, we have the following function to compute the probability of best treatment arm.
@@ -254,10 +252,7 @@ Putting the two pieces together, we have the following function to compute the p
 ```python
 def pr_best(data, pts, wts, key, n_sims):
     n_arms, _ = data.shape
-    post, x_max, hess, _ = posterior_sigma_sq(data[None,:], pts, wts) 
-    post = post[0]
-    x_max = x_max[0]
-    hess = (hess[0][0], hess[1][0])
+    post, x_max, hess, _ = posterior_sigma_sq(data, pts, wts) 
     mean = x_max
     hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
     prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
@@ -433,9 +428,7 @@ class Lewis45:
         logpost, x_max, hess, iters = f(
             np.zeros((n_sig2, n_arms), dtype=self.dtype), p_pinned, data
         )
-        #post = inla.exp_and_normalize(logpost, self.sig2_rule.wts, axis=-1)
-        print(logpost.shape)
-        post = logpost
+        post = inla.exp_and_normalize(logpost, self.sig2_rule.wts, axis=-1)
 
         return post, x_max, hess, iters 
 
@@ -452,9 +445,6 @@ class Lewis45:
     def compute_pr_best(self, data, non_futile_idx):
         n_arms, _ = data.shape
         post, x_max, hess, _ = self.posterior_sigma_sq(data) 
-        post = post[0]
-        x_max = x_max[0]
-        hess = (hess[0][0], hess[1][0])
         mean = x_max
         hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
         prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
@@ -470,27 +460,23 @@ class Lewis45:
 
     def posterior_difference(self, data, arm, thresh):
         # TODO: p(sigma^2 | y) can be precomputed in a table?
-        #n_arms, _ = data.shape
-        #post, x_max, hess, _ = self.posterior_sigma_sq(data[None,:])
-        #post = post[0]
-        #x_max = x_max[0]
-        #hess = (hess[0][0], hess[1][0])
+        n_arms, _ = data.shape
+        post, x_max, hess, _ = self.posterior_sigma_sq(data)
 
-        #post_weighted = self.sig2_rule.wts * post
-        #hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
-        #prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
+        post_weighted = self.sig2_rule.wts * post
+        hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
+        prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
 
-        #order = jnp.arange(n_arms)
-        #q1 = jnp.where(order == 0, -1, 0)
-        #q1 = jnp.where(jnp.arange(n_arms) == arm, 1, q1)
+        order = jnp.arange(n_arms)
+        q1 = jnp.where(order == 0, -1, 0)
+        q1 = jnp.where(jnp.arange(n_arms) == arm, 1, q1)
 
-        #loc = x_max @ q1
-        #scale = jnp.linalg.solve(prec, q1[None,:]) @ q1
-        #normal_term = jax.scipy.stats.norm.cdf(thresh, loc=loc, scale=scale)
-        #out = normal_term @ post_weighted
+        loc = x_max @ q1
+        scale = jnp.linalg.solve(prec, q1[None,:]) @ q1
+        normal_term = jax.scipy.stats.norm.cdf(thresh, loc=loc, scale=scale)
+        out = normal_term @ post_weighted
 
-        #return out
-        return 0
+        return out
 
     def stage_1(self, p, key):
         """
@@ -533,6 +519,7 @@ class Lewis45:
 
         # Stage 1:
         for _ in range(n_interims):
+            print(pr_best)
             # get non-futile arm indices (offset by 1 because of control arm)
             # force control arm to be non-futile
             non_futile_idx = jnp.where(order == 0, True, pr_best >= futility_threshold)
@@ -545,16 +532,17 @@ class Lewis45:
             continue_idx = non_futile_idx & stage_1_not_done
 
             # evenly distribute the next patients across non-futile arms
-            remainder = n_add_per_interim % n_arms
+            # Note: for simplicity, we remove the remainder patients.
+            #remainder = n_add_per_interim % n_arms
             n_new = jnp.where(
-                continue_idx, n_add_per_interim // n_non_futile + (order < remainder), 0
+                continue_idx, n_add_per_interim // n_non_futile, 0
             )
             _, key = jax.random.split(key)
             y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
             data = data + jnp.stack((y_new, n_new), axis=-1)
 
-            # compute probability of best for each arm
-            pr_best = self.compute_pr_best(data, continue_idx)
+            # compute probability of best for each arm that are non-futile
+            pr_best = self.compute_pr_best(data, non_futile_idx)
 
         return data, n_non_futile, non_futile_idx, pr_best, key
 
@@ -625,10 +613,13 @@ class Lewis45:
         p:      simulation grid-point.
         key:    jax PRNG key.
         """
+        # temporary fix: binomial sampling requires this if n parameter
+        # cannot be constant folded and p == 0 in some entries.
+        p_no_zeros = jnp.where(p == 0, 1e-5, p) 
 
         # Stage 1:
         data, n_non_futile, non_futile_idx, pr_best, key = self.stage_1(
-            p=p,
+            p=p_no_zeros,
             key=key,
         )
 
@@ -640,7 +631,7 @@ class Lewis45:
                 data=data,
                 non_futile_idx=non_futile_idx,
                 pr_best=pr_best,
-                p=p,
+                p=p_no_zeros,
                 key=key,
             ),
         )
@@ -671,7 +662,7 @@ params = {
     "n_stage_2" : 100,
     "pps_threshold_lower" : 0.1,
     "pps_threshold_upper" : 0.9,
-    "posterior_difference_threshold" : 0.1,
+    "posterior_difference_threshold" : -1000,
     "rejection_threshold" : 0.05,
 }
 
@@ -680,20 +671,23 @@ lei_obj = Lewis45(**params)
 
 ```python
 %%time
-p = jnp.zeros(2)
+p = jnp.array([0.5, 0.5])
 grid_points = jnp.array([p] * 1000)
-n_sims = 1
+n_sims = 10
 keys = jax.random.split(key, num=n_sims)
 ```
 
 ```python
 %%time
 #rejections = jax.jit(lei_obj.single_sim)(p, key)
-rejections = jax.jit(lei_obj.simulate_point)(p, keys)
+rejections = lei_obj.simulate_point(p, keys)
 #rejections = jax.jit(lei_obj.simulate, static_argnums=(0, 3))(n_sims, grid_points, key, 1)
 ```
 
 ```python
-#jnp.sum(rejections)
-rejections
+jnp.mean(rejections)
+```
+
+```python
+
 ```
