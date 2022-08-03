@@ -364,11 +364,6 @@ Method 1:
 ## Design Implementation
 
 ```python
-%%time
-key = jax.random.PRNGKey(0)
-```
-
-```python
 class Lewis45:
     def __init__(
         self,
@@ -430,20 +425,21 @@ class Lewis45:
         Computes the posterior of sigma^2 given data, p(sigma^2 | y)
         using INLA method.
         '''
-        _, n_arms, _ = data.shape
+        n_arms, _ = data.shape
         sig2 = self.sig2_rule.pts
         n_sig2 = sig2.shape[0]
         p_pinned = dict(sig2=sig2, theta=None)
-        f = jax.vmap(self.custom_ops.laplace_logpost, in_axes=(None, None, 0))
+        f = self.custom_ops.laplace_logpost
         logpost, x_max, hess, iters = f(
             np.zeros((n_sig2, n_arms), dtype=self.dtype), p_pinned, data
         )
-        post = inla.exp_and_normalize(logpost, self.sig2_rule.wts[None, :], axis=1)
+        #post = inla.exp_and_normalize(logpost, self.sig2_rule.wts, axis=-1)
+        print(logpost.shape)
+        post = logpost
 
         return post, x_max, hess, iters 
 
-    @staticmethod
-    def pr_normal_best(mean, cov, key, n_sims):
+    def pr_normal_best(self, mean, cov, key, n_sims):
         '''
         Estimates P[X_i > max_{j != i} X_j] where X ~ N(mean, cov) via sampling.
         '''
@@ -455,7 +451,7 @@ class Lewis45:
 
     def compute_pr_best(self, data, non_futile_idx):
         n_arms, _ = data.shape
-        post, x_max, hess, _ = self.posterior_sigma_sq(data[None,:]) 
+        post, x_max, hess, _ = self.posterior_sigma_sq(data) 
         post = post[0]
         x_max = x_max[0]
         hess = (hess[0][0], hess[1][0])
@@ -463,7 +459,7 @@ class Lewis45:
         hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
         prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
         cov = jnp.linalg.inv(prec)
-        pr_normal_best_out = Lewis45.pr_normal_best(mean, cov, key=key, n_sims=self.n_pr_best_sims)
+        pr_normal_best_out = self.pr_normal_best(mean, cov, key=key, n_sims=self.n_pr_best_sims)
         pr_best_out = jnp.matmul(pr_normal_best_out, post * self.sig2_rule.wts)
         return jnp.where(non_futile_idx == 0, jnp.nan, pr_best_out)
              
@@ -657,6 +653,11 @@ class Lewis45:
         simulate_point_vmapped = jax.vmap(self.simulate_point, in_axes=(0, None))
         return simulate_point_vmapped(grid_points, keys)
 
+```
+
+```python
+%%time
+key = jax.random.PRNGKey(0)
 ```
 
 ```python
