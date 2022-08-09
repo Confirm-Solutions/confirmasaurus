@@ -275,7 +275,11 @@ def latent_grid(x_max, inv_hess_row, latent_idx, quad):
         x_max: The mode of the density.
         hess: The hessian at the mode.
         latent_idx: The index of the latent variable to condition on.
-        quad: The quadrature rule on an standardized domain.
+        quad: The quadrature rule on an standardized domain. Note that if the
+              domain of the input quadrature is [-1, 1], then the integral will
+              compute over [-1 * std_dev, 1 * std_dev]. So, for the common case of
+              integrating over 3 standard deviations, you will need to input a
+              quadrature rule over the domain [-3, 3].
 
     Returns:
         The integration grid for the conditioned-on variable.
@@ -296,6 +300,11 @@ def latent_grid(x_max, inv_hess_row, latent_idx, quad):
 
 
 def gauss_hermite_grid(x_max, inv_hess_row, latent_idx, n=25):
+    """
+    See the docstring for `latent_grid`. This passes a Gauss-Hermite quadrature
+    rule as the quadrature rule. Gauss-Hermite quadrature is nice for
+    integrating from -inf to inf.
+    """
     return latent_grid(x_max, inv_hess_row, latent_idx, quad.gauss_herm_rule(n))
 
 
