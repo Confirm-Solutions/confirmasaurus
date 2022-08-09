@@ -85,6 +85,7 @@ RUN apt-get update \
         r-cran-irkernel \
         r-cran-foreach \
         r-cran-sp \
+        r-cran-ggplot2 \
         libcairo2-dev \
         libfontconfig1-dev \
   	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
