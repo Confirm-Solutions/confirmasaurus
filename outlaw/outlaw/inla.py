@@ -293,6 +293,11 @@ def latent_grid(x_max, inv_hess_row, latent_idx, quad):
     # One solution in this situation would be to use an adaptive grid where we
     # extend left and right until the posterior density values are getting
     # small.
+    # GOOD STUFF: A further idea is to use the SLA to identify the width of the
+    # distribution. This has the advantage of being simple and potentially
+    # quite accurate. If we find the point at which the SLA goes below 0.005
+    # CDF, and then go twice as far, we are very likely to get the relevant
+    # distributional width.
     sd = jnp.sqrt(jnp.abs(inv_hess_row[..., latent_idx]))
     pts = x_max[None, ..., latent_idx] + sd[None] * quad.pts[:, None, None]
     wts = sd[None] * quad.wts[:, None, None]

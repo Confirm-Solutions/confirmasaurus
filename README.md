@@ -84,3 +84,14 @@ I am happy to share my dotfiles and VSCode settings if you'd like. To share the 
 
 - [Advice for dealing with our imprint subtree](./docs/GitSubtree.md)
 - [Very rough coding standards](./docs/standards.md)
+
+## A list of useful notebook:
+
+It would be good to organize a little bit.
+- [Imprint tutorial](./imprint/research/berry/tutorial.ipynb)
+- [Intro to INLA](./research/berry/intro_to_inla.ipynb)
+- [Berry 2013 Imprint example](./research/berry/berry_imprint.ipynb)
+- [Working through getting the conditional full Laplace INLA working](./anarchy/conditional_inla.ipynb)
+- [Global optimization of the type I error](./anarchy/opt/opt.ipynb)
+- [Comparing against R-INLA](./anarchy/vs_rinla/outlaw.ipynb)
+- Messy survival analysis notebooks in research/survival replicating stuff in the Thall 2003 and Thall 2005 papers.
