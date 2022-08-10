@@ -4,7 +4,7 @@
 - [And here for higher level strategy and planning](https://docs.google.com/document/d/1XhVMvYwWAb-27SIsYVME5pClfd-cnSDZxQh-3xJrrJ8/edit)
 
 Here:
-- `imprint` - our open source tools.
+- `imprint` - our open source tools. [Open source repo](https://github.com/Confirm-Solutions/imprint)
 - `outlaw` - our fast INLA tools
 - `research` - Research! Stuff in here might be in various of states of rough/polished.
 - `anarchy` - [Do whatever you want here](anarchy/README.md)
