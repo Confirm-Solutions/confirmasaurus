@@ -332,11 +332,11 @@ def test_solve_inv_basket():
             # Test solve:
             v = np.random.rand(d)
             correct = np.linalg.solve(m, v)
-            x, denom = berry.solve_basket(a, b, v)
+            x = berry.solve_basket(a, b, v)
             np.testing.assert_allclose(x, correct)
 
             # Test logdet:
-            logdet = berry.logdet_basket((a, denom))
+            logdet = berry.logdet_basket(a, b)
             np.testing.assert_allclose(logdet, np.linalg.slogdet(m)[1])
 
 
