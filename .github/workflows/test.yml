@@ -7,12 +7,14 @@ on:
       - synchronize
     paths-ignore:
       - 'anarchy/**'
+      - '**.ipynb'
       - '**.md'
   push:
     branches:
       - main 
     paths-ignore:
       - 'anarchy/**'
+      - '**.ipynb'
       - '**.md'
 jobs:
   test:
