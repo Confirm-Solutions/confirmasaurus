@@ -15,6 +15,9 @@ Techniques for avoiding non-deterministic behavior that will make jax complain:
 Other things:
 - understanding pytrees in JAX is really helpful: https://jax.readthedocs.io/en/latest/pytrees.html
 - other difficult stuff: https://jax.readthedocs.io/en/latest/notebooks/Common_Gotchas_in_JAX.html
+- useful issues talking about using JAX with async/await: 
+  - https://github.com/google/jax/issues/6772
+  - https://github.com/google/jax/issues/3769
 
 Scary things:
 - sometimes `jax.lax.cond` combined with `jax.vmap` will result in both branches of your `cond` executing. In extreme cases, this can result in infinite loops. See [the problem James and I ran into here](https://github.com/pyro-ppl/numpyro/issues/1461).
