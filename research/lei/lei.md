@@ -439,7 +439,7 @@ plt.show()
 %%time
 key = jax.random.PRNGKey(0)
 params = {
-    "n_arms" : 4,
+    "n_arms" : 3,
     "n_stage_1" : 10,
     "n_stage_2" : 10,
     "n_interims" : 3,
@@ -451,7 +451,7 @@ params = {
     "rejection_threshold" : 0.05,
     "n_pr_sims" : 100,
     "n_sig2_sim" : 20,
-    "batch_size" : 2**17,
+    "batch_size" : 2**10,
 }
 lei_obj = lewis.Lewis45(**params)
 p = jnp.array([0.5] * params['n_arms'])

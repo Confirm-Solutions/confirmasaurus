@@ -107,10 +107,7 @@ class Lewis45:
         self.order = jnp.arange(0, self.n_arms, dtype=int)
 
         # posterior difference tables for every possible combination of n
-        self.posterior_difference_table = self.posterior_difference_table__(batch_size)
-
-        # vector of offsets into self.posterior_difference_tables
-        self.table_offsets = None
+        self.posterior_difference_table = None
 
         # TODO add more tables
 
@@ -151,41 +148,30 @@ class Lewis45:
 
         def internal(n_arr, n_add, n_interims, n_drop):
             n_arms = n_arr.shape[-1]
-            out_ph2 = np.empty((0, n_arms), dtype=int)
-            out_ph3 = np.empty((0, n_arms), dtype=int)
+            out = np.empty((0, n_arms), dtype=int)
 
-            if n_arms - n_drop <= 2 or n_interims <= 0:
-                return out_ph2, n_arr
+            if n_interims <= 0:
+                return n_arr
 
             n_arr_new = np.copy(n_arr)
             for n_drop_new in range(n_drop, n_arms - 1):
                 n_arr_incr = n_add // (n_arms - n_drop_new)
                 n_arr_new[n_drop_new:] += n_arr_incr
-                rest_ph2, rest_ph3 = internal(
-                    n_arr_new, n_add, n_interims - 1, n_drop_new
-                )
-                out_ph2 = np.vstack(
+                rest = internal(n_arr_new, n_add, n_interims - 1, n_drop_new)
+                out = np.vstack(
                     (
-                        out_ph2,
+                        out,
                         n_arr_new,
-                        rest_ph2,
-                    )
-                )
-                out_ph3 = np.vstack(
-                    (
-                        out_ph3,
-                        rest_ph3,
+                        rest,
                     )
                 )
                 n_arr_new[n_drop_new:] -= n_arr_incr
 
-            return out_ph2, out_ph3
+            return out
 
         # make array of all n configurations
         n_arr = np.full(self.n_arms, self.n_stage_1, dtype=int)
-        n_configs_ph2, n_configs_ph3 = internal(
-            n_arr, self.n_add_per_interim, self.n_interims, 0
-        )
+        n_configs_ph2 = internal(n_arr, self.n_add_per_interim, self.n_interims, 0)
         n_configs_ph2 = np.vstack(
             (
                 n_arr,
@@ -193,8 +179,8 @@ class Lewis45:
             )
         )
         n_configs_ph2 = np.unique(n_configs_ph2, axis=0)
-        n_configs_ph3 = np.unique(n_configs_ph3, axis=0)
-        n_configs_ph3 = n_configs_ph3 + self.n_stage_2
+        n_configs_ph3 = np.copy(n_configs_ph2)
+        n_configs_ph3[:, -2:] += +self.n_stage_2
 
         return n_configs_ph2, n_configs_ph3
 
