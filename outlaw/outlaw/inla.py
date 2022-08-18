@@ -264,7 +264,7 @@ def exp_and_normalize(log_d, wts, axis):
     return d
 
 
-def gauss_hermite_grid(x_max, inv_hess_row, latent_idx, n=25):
+def latent_grid(x_max, inv_hess_row, latent_idx, quad):
     """
     Returns a grid of quadrature points centered at the conditional modes of
     the densities under consideration. The width of the grid is determined by
@@ -275,17 +275,42 @@ def gauss_hermite_grid(x_max, inv_hess_row, latent_idx, n=25):
         x_max: The mode of the density.
         hess: The hessian at the mode.
         latent_idx: The index of the latent variable to condition on.
-        n: The number of points for the Gauss-Hermite grid.
+        quad: The quadrature rule on an standardized domain. Note that if the
+              domain of the input quadrature is [-1, 1], then the integral will
+              compute over [-1 * std_dev, 1 * std_dev]. So, for the common case of
+              integrating over 3 standard deviations, you will need to input a
+              quadrature rule over the domain [-3, 3].
 
     Returns:
         The integration grid for the conditioned-on variable.
     """
-    gh_rule = quad.gauss_herm_rule(n)
-    gh_pts, gh_wts = gh_rule.pts, gh_rule.wts
-    sd = jnp.sqrt(-inv_hess_row[..., latent_idx])
-    pts = x_max[None, ..., latent_idx] + sd[None] * gh_pts[:, None, None]
-    wts = sd[None] * gh_wts[:, None, None]
+    # TODO: what to do about negative values here? a negative value implies
+    # that the hessian is not positive definite. this could be a saddle point
+    # or local minimum caused by multi-modality. The goal here is to have some
+    # measure of how wide to make our posterior density. Unfortunately, when
+    # the density is far from gaussian (e.g. not positive definite!), the
+    # hessian no longer provides a good measure of distributional width.
+    # One solution in this situation would be to use an adaptive grid where we
+    # extend left and right until the posterior density values are getting
+    # small.
+    # GOOD STUFF: A further idea is to use the SLA to identify the width of the
+    # distribution. This has the advantage of being simple and potentially
+    # quite accurate. If we find the point at which the SLA goes below 0.005
+    # CDF, and then go twice as far, we are very likely to get the relevant
+    # distributional width.
+    sd = jnp.sqrt(jnp.abs(inv_hess_row[..., latent_idx]))
+    pts = x_max[None, ..., latent_idx] + sd[None] * quad.pts[:, None, None]
+    wts = sd[None] * quad.wts[:, None, None]
     return pts, wts
+
+
+def gauss_hermite_grid(x_max, inv_hess_row, latent_idx, n=25):
+    """
+    See the docstring for `latent_grid`. This passes a Gauss-Hermite quadrature
+    rule as the quadrature rule. Gauss-Hermite quadrature is nice for
+    integrating from -inf to inf.
+    """
+    return latent_grid(x_max, inv_hess_row, latent_idx, quad.gauss_herm_rule(n))
 
 
 def jensen_shannon_div(x, y, wts, axis):
