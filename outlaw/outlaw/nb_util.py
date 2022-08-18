@@ -66,7 +66,7 @@ def scale_text(factor=0.75):
 
 
 def contourf_tbt(x, y, z, levels=None):
-    cbar = plt.contourf(x, y, z, levels=levels, extend="both")
+    cntf = plt.contourf(x, y, z, levels=levels, extend="both")
     plt.contour(
         x,
         y,
@@ -77,4 +77,5 @@ def contourf_tbt(x, y, z, levels=None):
         linewidths=0.5,
         extend="both",
     )
-    plt.colorbar(cbar)
+    cbar = plt.colorbar(cntf)
+    return cntf, cbar
