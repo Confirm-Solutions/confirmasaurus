@@ -1,3 +1,6 @@
+from functools import partial
+
+import batch
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -24,6 +27,7 @@ class Lewis45:
         sig2_int=quad.log_gauss_rule(15, 1e-6, 1e3),
         n_pr_sims: int = 100,
         n_sig2_sim: int = 100,
+        batch_size: int = 2**16,
         dtype=jnp.float64,
     ):
         """
@@ -64,7 +68,6 @@ class Lewis45:
         self.posterior_difference_threshold = posterior_difference_threshold
         self.rejection_threshold = rejection_threshold
         self.n_pr_sims = n_pr_sims
-
         self.dtype = dtype
 
         # sig2 for quadrature integration
@@ -104,7 +107,7 @@ class Lewis45:
         self.order = jnp.arange(0, self.n_arms, dtype=int)
 
         # posterior difference tables for every possible combination of n
-        self.posterior_difference_table = self.posterior_difference_table__()
+        self.posterior_difference_table = self.posterior_difference_table__(batch_size)
 
         # vector of offsets into self.posterior_difference_tables
         self.table_offsets = None
@@ -251,6 +254,7 @@ class Lewis45:
             offsets_ph3,
         )
 
+    @partial(jax.jit, static_argnums=(0,))
     def table_data__(self, ns, coords):
         """
         Creates a data array used to construct internal tables.
@@ -269,37 +273,64 @@ class Lewis45:
         data = jnp.stack((data, n_arr), axis=-1)
         return data
 
-    def posterior_difference_table_internal__(self, ns, coords):
-        data = self.table_data__(ns, coords)
-        return jax.vmap(self.posterior_difference, in_axes=(0,))(data)
+    def posterior_difference_table__(self, batch_size):
+        def internal(data):
+            return jax.vmap(self.posterior_difference, in_axes=(0,))(data)
 
-    def posterior_difference_table__(self):
-        f_jit = jax.jit(self.posterior_difference_table_internal__)
+        def process_batch__(ns, f, batch_size):
+            f_batched = batch.batch_all(
+                f,
+                batch_size,
+                in_axes=(0,),
+            )
+            outs, n_padded = f_batched(
+                self.table_data__(
+                    ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij")
+                )
+            )
+            out = jnp.row_stack(outs)
+            return out[:(-n_padded)] if n_padded > 0 else out
+
+        internal_jit = jax.jit(internal)
         tup_tables = tuple(
-            f_jit(ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij"))
-            for ns in self.n_configs_ph3
+            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_ph3
         )
         return jnp.row_stack(tup_tables)
 
-    def pr_best_pps_table_internal__(self, ns, coords, key, unifs):
-        data = self.table_data__(ns, coords)
-        return jax.vmap(self.pr_best_pps, in_axes=(0, None, None))(data, key, unifs)
-
-    def pr_best_pps_table__(self, key):
+    def pr_best_pps_table__(self, key, batch_size):
         unifs = jax.random.uniform(
             key=key,
             shape=(self.n_pr_sims, self.n_stage_2, self.n_arms),
         )
         _, key = jax.random.split(key)
-        f_jit = jax.jit(self.pr_best_pps_table_internal__)
-        tup_tables = tuple(
-            f_jit(
-                ns,
-                jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij"),
-                key,
-                unifs,
+
+        def internal(data):
+            return jax.vmap(self.pr_best_pps, in_axes=(0, None, None))(data, key, unifs)
+
+        def process_batch__(ns, f, batch_size):
+            f_batched = batch.batch_all(
+                f,
+                batch_size,
+                in_axes=(0,),
             )
-            for ns in self.n_configs_ph2
+            outs, n_padded = f_batched(
+                self.table_data__(
+                    ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij")
+                )
+            )
+            pr_best_outs = tuple(t[0] for t in outs)
+            pps_outs = tuple(t[1] for t in outs)
+            pr_best_out = jnp.row_stack(pr_best_outs)
+            pps_outs = jnp.row_stack(pps_outs)
+            return (
+                (pr_best_out[:(-n_padded)], pps_outs[:(-n_padded)])
+                if n_padded > 0
+                else (pr_best_out, pps_outs)
+            )
+
+        internal_jit = jax.jit(internal)
+        tup_tables = tuple(
+            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_ph3
         )
         pr_best_tables = tuple(t[0] for t in tup_tables)
         pps_tables = tuple(t[1] for t in tup_tables)
@@ -553,29 +584,36 @@ class Lewis45:
             i, _, data, _, non_futile_idx, pr_best, key = args
             # get non-futile arm indices (offset by 1 because of control arm)
             # force control arm to be non-futile
-            non_futile_idx = jnp.where(order == 0, True, pr_best >= futility_threshold)
+            non_futile_idx = (
+                jnp.where(order == 0, True, pr_best >= futility_threshold)
+                * non_futile_idx
+            )
 
             # if no non-futile treatment arms, terminate trial
             # else if exactly 1 non-futile arm, terminate stage 1 by choosing that arm.
+            # TODO: include the control and remove + 1 at line 600
             n_non_futile = jnp.sum(non_futile_idx[1:])
-            stage_1_not_done = n_non_futile > 1
+
+            # TODO: if n_non_futile == 0, early exits.
+
+            # TODO: check PPS for all treatment arms
+            # if PPS is > threshold, break early and don't add the new samples.
 
             # evenly distribute the next patients across non-futile arms
             # Note: for simplicity, we remove the remainder patients.
             # remainder = n_add_per_interim % n_arms
-            continue_idx = non_futile_idx & stage_1_not_done
-            n_new = jnp.where(continue_idx, n_add_per_interim // n_non_futile, 0)
+            n_new = jnp.where(
+                non_futile_idx, n_add_per_interim // (n_non_futile + 1), 0
+            )
             _, key = jax.random.split(key)
             y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
             data = data + jnp.stack((y_new, n_new), axis=-1)
 
             # compute probability of best for each arm that are non-futile
-            _, key = jax.random.split(key)
             pr_best = self.compute_pr_best(data, non_futile_idx, key)
 
             return (
                 i + 1,
-                stage_1_not_done,
                 data,
                 n_non_futile,
                 non_futile_idx,
@@ -584,9 +622,9 @@ class Lewis45:
             )
 
         _, _, data, n_non_futile, non_futile_idx, pr_best, key = jax.lax.while_loop(
-            lambda tup: (tup[0] < n_interims) & tup[1],
+            lambda tup: (tup[0] < n_interims),
             body_func,
-            (0, True, data, n_arms, non_futile_idx, pr_best, key),
+            (0, data, n_arms, non_futile_idx, pr_best, key),
         )
 
         return data, n_non_futile, non_futile_idx, pr_best, key
@@ -622,11 +660,16 @@ class Lewis45:
         posterior_difference_threshold = self.posterior_difference_threshold
         rejection_threshold = self.rejection_threshold
 
+        # TODO: move this logic to single_sim(). Check along with pps.
         # select best treatment arm based on probability of each arm being best
         # since non_futile_idx always treats control arm (index 0) as non-futile,
         # we read past it.
         pr_best_subset = jnp.where(non_futile_idx[1:], pr_best[1:], 0)
         best_arm = jnp.argmax(pr_best_subset) + 1
+
+        # TODO: make sure that at this point, non_futile_idx contains exactly 2 1's.
+        # - one in control
+        # - one in treatment
 
         # add n_stage_2 number of patients to each
         # of the control and selected treatment arms.
@@ -642,6 +685,7 @@ class Lewis45:
         # check early-stop based on futility (lower) or efficacy (upper)
         early_stop = (pps < pps_threshold_lower) | (pps > pps_threshold_upper)
 
+        # TODO: if early stop bc of futility, return False. For efficacy, return True.
         return jax.lax.cond(
             early_stop,
             lambda: False,
@@ -673,6 +717,8 @@ class Lewis45:
         )
 
         # Stage 2 only if no early termination based on futility
+        # TODO: if early-exited because of PPS, pick the best arm based on PPS
+        # along with control and move to stage 2.
         return jax.lax.cond(
             n_non_futile == 0,
             lambda: False,

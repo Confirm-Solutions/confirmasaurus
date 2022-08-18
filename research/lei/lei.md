@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('imprint')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -26,11 +26,13 @@ import jax.numpy as jnp
 import jax
 import time
 import inlaw.inla as inla
-import lewis
 import matplotlib.pyplot as plt
 import numpyro.distributions as dist
 from functools import partial
 from itertools import combinations
+
+import lewis
+import batch
 ```
 
 # Lei Example
@@ -437,7 +439,7 @@ plt.show()
 %%time
 key = jax.random.PRNGKey(0)
 params = {
-    "n_arms" : 3,
+    "n_arms" : 4,
     "n_stage_1" : 10,
     "n_stage_2" : 10,
     "n_interims" : 3,
@@ -449,6 +451,7 @@ params = {
     "rejection_threshold" : 0.05,
     "n_pr_sims" : 100,
     "n_sig2_sim" : 20,
+    "batch_size" : 2**17,
 }
 lei_obj = lewis.Lewis45(**params)
 p = jnp.array([0.5] * params['n_arms'])
@@ -486,10 +489,12 @@ sim_keys = jax.random.split(key, num=n_data)
 
 ```python
 %%time
-lei_obj.posterior_difference_table__()
+pd = lei_obj.posterior_difference_table__(batch_size=params['batch_size'])
+pd.shape
 ```
 
 ```python
 %%time
-lei_obj.pr_best_pps_table__(key)
+pr_best, pps = lei_obj.pr_best_pps_table__(key, batch_size=params['batch_size'])
+pr_best.shape, pps.shape
 ```
