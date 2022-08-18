@@ -1,10 +1,10 @@
 from functools import partial
 
-import batch
 import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
+from lewis import batch
 
 import inlaw.berry as berry
 import inlaw.inla as inla

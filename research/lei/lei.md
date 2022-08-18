@@ -32,7 +32,7 @@ from functools import partial
 from itertools import combinations
 
 import lewis
-import batch
+from lewis import batch
 ```
 
 # Lei Example
@@ -485,6 +485,10 @@ sim_keys = jax.random.split(key, num=n_data)
 #rejections = jax.jit(lei_obj.simulate_point)(p, keys)
 #rejections = jax.jit(lei_obj.simulate)(grid_points, keys)
 #jnp.mean(rejections, axis=-1)
+```
+
+```python
+lei_obj.n_configs_setting__()
 ```
 
 ```python

@@ -125,6 +125,7 @@
     "r.bracketedPaste": true,
     "r.plot.useHttpgd": true,
     "python.analysis.extraPaths": [
-        "./inlaw"
-    ]
+        "./inlaw",
+        "./imprint/python",
+    ],
 }
