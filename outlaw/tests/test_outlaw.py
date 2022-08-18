@@ -7,10 +7,10 @@ from numpy import nan
 from scipy.special import expit
 from scipy.special import logit
 
-import inlaw.berry as berry
-import inlaw.inla as inla
-import inlaw.numpyro_interface as numpyro_interface
-import inlaw.quad as quad
+import outlaw.berry as berry
+import outlaw.inla as inla
+import outlaw.numpyro_interface as numpyro_interface
+import outlaw.quad as quad
 
 # noreorder
 import jax
@@ -332,11 +332,11 @@ def test_solve_inv_basket():
             # Test solve:
             v = np.random.rand(d)
             correct = np.linalg.solve(m, v)
-            x, denom = berry.solve_basket(a, b, v)
+            x = berry.solve_basket(a, b, v)
             np.testing.assert_allclose(x, correct)
 
             # Test logdet:
-            logdet = berry.logdet_basket((a, denom))
+            logdet = berry.logdet_basket(a, b)
             np.testing.assert_allclose(logdet, np.linalg.slogdet(m)[1])
 
 
@@ -360,10 +360,6 @@ def benchmark(N=10000, iter=5):
     sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     x0 = jnp.zeros((sig2.shape[0], 4), dtype=dtype)
-
-    print("\ncustom dirty bayes")
-    db = jax.jit(jax.vmap(berry.build_dirty_bayes(sig2, n_arms=4, dtype=dtype)))
-    my_timeit(N, lambda: db(data)[0].block_until_ready(), iter=iter)
 
     print("\ncustom dirty bayes")
     db = jax.jit(jax.vmap(berry.build_dirty_bayes(sig2, n_arms=4, dtype=dtype)))
@@ -403,18 +399,23 @@ def benchmark(N=10000, iter=5):
                 arm_post.append(inla.exp_and_normalize(arm_logpost, wts, axis=0))
             return jnp.array(arm_post)
 
-        my_timeit(N, jax.jit(f), iter=iter)
+        f_jit = jax.jit(f)
+        my_timeit(N, lambda: f_jit().block_until_ready(), iter=iter)
 
     custom_ops = berry.optimized(sig2, dtype=dtype).config(max_iter=10)
     bench_ops("custom berry", custom_ops)
 
     ad_ops = inla.from_log_joint(
-        berry.log_joint(4), dict(sig2=np.array([nan]), theta=np.full(4, 0.0))
+        berry.log_joint(4),
+        dict(sig2=np.array([nan], dtype=dtype), theta=np.full(4, 0.0, dtype=dtype)),
     ).config(max_iter=10)
     bench_ops("numpyro berry", ad_ops)
 
 
 if __name__ == "__main__":
-    benchmark(N=100000, iter=1)
+    # set to cpu or gpu to run on a specific device.
+    jax.config.update("jax_platform_name", "gpu")
+
+    benchmark(N=10000, iter=1)
     # Running with N=1 is useful for benchmarking the JIT.
     # benchmark(N=1, iter=1)

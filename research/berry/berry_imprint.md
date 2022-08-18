@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('imprint2')
+    display_name: Python 3.10.5 ('base')
     language: python
     name: python3
 ---
@@ -23,12 +23,16 @@ util.setup_nb()
 from scipy.special import logit, expit
 import matplotlib.pyplot as plt
 import numpy as np
+import jax.numpy as jnp
 import warnings
-import pyimprint.grid as grid
+# import pyimprint.grid as grid
 import berrylib.fast_inla as fast_inla
 import berrylib.binomial as binomial
 import berrylib.grid as berrylibgrid
 
+import jax
+# set to cpu or gpu to run on a specific device.
+jax.config.update('jax_platform_name', 'gpu')
 ```
 
 ```python
@@ -36,12 +40,11 @@ name = "berry2d"
 n_arms = 2
 n_arm_samples = 35
 seed = 10
-n_theta_1d = 32
-sim_size = 1000
+n_theta_1d = 64
+sim_size = 10000
 ```
 
 ```python
-
 %%time
 # null is:
 # theta_i <= logit(0.1)
@@ -59,16 +62,14 @@ radii = np.empty(theta.shape)
 for i in range(theta.shape[1]):
     radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
 g = berrylibgrid.prune(berrylibgrid.build_grid(theta, radii, null_hypos))
-```
 
-```python
 theta = g.thetas
 theta_tiles = g.thetas[g.grid_pt_idx]
 ```
 
 ```python
 %%time
-fi = fast_inla.FastINLA(n_arms)
+fi = fast_inla.FastINLA(n_arms=n_arms)
 rejection_table = binomial.build_rejection_table(n_arms, n_arm_samples, fi.rejection_inference)
 ```
 
@@ -76,7 +77,7 @@ rejection_table = binomial.build_rejection_table(n_arms, n_arm_samples, fi.rejec
 %%time
 np.random.seed(seed)
 samples = np.random.uniform(size=(sim_size, n_arm_samples, n_arms))
-accumulator = binomial.binomial_accumulator(lambda y,n: binomial.lookup_rejection(rejection_table, y))
+accumulator = binomial.binomial_accumulator(lambda data: binomial.lookup_rejection(rejection_table, data[...,0]))
 
 # Chunking improves performance dramatically for larger tile counts:
 # ~6x for a 64^3 grid
@@ -84,11 +85,17 @@ typeI_sum = np.empty(theta_tiles.shape[0])
 typeI_score = np.empty((theta_tiles.shape[0], n_arms))
 chunk_size = 5000
 n_chunks = int(np.ceil(theta_tiles.shape[0] / chunk_size))
-for i in range(n_chunks):
+
+device = jax.devices('cpu')[0]
+for i in range(2):
     start = i * chunk_size
     end = (i + 1) * chunk_size
     end = min(end, theta_tiles.shape[0])
-    typeI_sum[start:end], typeI_score[start:end] = accumulator(theta_tiles[start:end], g.null_truth[start:end], samples)
+    typeI_sum[start:end], typeI_score[start:end] = accumulator(
+        theta_tiles[start:end],
+        g.null_truth[start:end],
+        samples
+    )
 ```
 
 ```python
@@ -105,6 +112,9 @@ plt.xlim(np.min(theta[:, 0]) - 0.2, np.max(theta[:, 0]) + 0.2)
 plt.ylim(np.min(theta[:, 1]) - 0.2, np.max(theta[:, 1]) + 0.2)
 plt.colorbar()
 plt.show()
+```
+
+```python
 
 plt.title("Is null for arm 1?")
 plt.scatter(theta[:, 0], theta[:, 1], c=is_null_per_arm_gridpt[:, 1], cmap="Set1")
@@ -162,7 +172,7 @@ total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
     corners,
     sim_sizes,
     n_arm_samples,
-    typeI_sum.to_py(),
+    typeI_sum,
     typeI_score,
 )
 
@@ -170,12 +180,19 @@ total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
 
 ```python
 plt.figure()
-plt.title("Type I error at grid points.")
+plt.title("Type I bound at grid points.")
 plt.scatter(theta_tiles[:, 0], theta_tiles[:, 1], c=total)
 cbar = plt.colorbar()
 plt.xlabel(r"$\theta_0$")
 plt.ylabel(r"$\theta_1$")
 cbar.set_label("Type I error")
+plt.figure()
+plt.title("Bound minus empirical type I error")
+plt.scatter(theta_tiles[:, 0], theta_tiles[:, 1], c=total - typeI_sum / sim_size)
+cbar = plt.colorbar()
+plt.xlabel(r"$\theta_0$")
+plt.ylabel(r"$\theta_1$")
+cbar.set_label("Type I delta")
 plt.show()
 ```
 

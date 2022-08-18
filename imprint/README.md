@@ -64,6 +64,8 @@ Please run all the steps here to get a fully functional development environment.
     bazel build //python:pyimprint_wheel
     pip install bazel-bin/python/dist/pyimprint-0.1-py3-none-any.whl
     ```
+    
+    The default build uses `clang`. If you want to use `gcc`, run: `bazel build --config gcc //python:pyimprint_wheel`.
 
 8. (it's okay to skip this step if this is your first time installing imprint) To recompile and reinstall the pyimprint package after making changes to the C++ backend, run the following:
 

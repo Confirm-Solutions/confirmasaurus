@@ -43,6 +43,8 @@ RUN apt-get update \
         # Install neovim and texlive since they're useful!
         neovim \
         texlive-latex-extra \
+        cm-super \
+        dvipng \
     # I don't know why this line is here, but I don't want to debug any
     # problems that might crop up from deleting it.
     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
@@ -83,6 +85,7 @@ RUN apt-get update \
         r-cran-irkernel \
         r-cran-foreach \
         r-cran-sp \
+        r-cran-ggplot2 \
         libcairo2-dev \
         libfontconfig1-dev \
   	&& ln -s /usr/lib/R/site-library/littler/examples/install2.r /usr/local/bin/install2.r \
@@ -134,7 +137,7 @@ RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2
 RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf \
     && echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
-ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH /usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
 ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
 

@@ -6,13 +6,19 @@ import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
 
-import inlaw.inla as inla
+import outlaw.inla as inla
 
 mu_0 = -1.34
 mu_sig2 = 100.0
 sig2_alpha = 0.0005
 sig2_beta = 0.000005
 logit_p1 = scipy.special.logit(0.3)
+
+
+def figure1_data(N=1):
+    n_i = np.tile(np.array([35, 35, 35, 35]), (N, 1))
+    y_i = np.tile(np.array([11, 11, 10, 9]), (N, 1))
+    return np.stack((y_i, n_i), axis=-1).astype(np.float64)
 
 
 def figure2_data(N=10):
@@ -113,8 +119,8 @@ def optimized(sig2, n_arms=4, dtype=np.float64):
 
     def step_hess(theta, _, data):
         grad, (hess_a, hess_b) = grad_hess(theta, _, data)
-        step, denom = solve_vmap(hess_a, hess_b, -grad)
-        return step, (hess_a, hess_b, denom)
+        step = solve_vmap(hess_a, hess_b, -grad)
+        return step, (hess_a, hess_b)
 
     return inla.Operations(
         spec=inla.ParamSpec(dict(sig2=np.array([np.nan]), theta=np.full(n_arms, 0))),
@@ -122,11 +128,21 @@ def optimized(sig2, n_arms=4, dtype=np.float64):
         gradv=grad,
         hessv=hess,
         reduced_hessv=reduced_hess,
-        logdetv=lambda H: logdet_basket((H[0], H[2])),
+        logdetv=jax.vmap(lambda H: logdet_basket(*H)),
         step_hessv=step_hess,
-        solve=lambda H, v: solve_basket(H[0], H[2], v),
-        invert=lambda H: inv_basket(H[0], H[2]),
+        solve=lambda H, v: solve_basket(*H, v),
+        invert=lambda H: inv_basket(*H),
     )
+
+
+def get_full_hessian(hess_info):
+    n_arms = hess_info[0].shape[0]
+    return jnp.diag(hess_info[0]) + jnp.full(
+        shape=(n_arms, n_arms), fill_value=hess_info[1]
+    )
+
+
+get_full_hessianv = jax.vmap(get_full_hessian)
 
 
 def dotJI(a, b, v):
@@ -168,23 +184,24 @@ def solve_basket(a, b, v):
     v_over_a = v * inv_a
     denom = 1 + b * inv_a.sum()
     x = v_over_a - inv_a * (b * v_over_a.sum() / denom)
-    return x, denom
+    return x
 
 
-def logdet_basket(hess_info):
+def logdet_basket(a, b):
     """The log determinant of a Basket trial hessian using the Matrix
     Determinant Lemma:
     https://en.wikipedia.org/wiki/Matrix_determinant_lemma
 
     Args:
-        hess_info: A tuple (a, denom) where (aI + bJ) is the hessian. a is a vector
-            and b is a scalar and denom = 1 / (1 + b * (1.0 / a).sum()).
+        hess_info: A tuple (a, b) where (aI + bJ) is the hessian. a is a vector
+            and b is a scalar.
 
     Returns:
         The log of the determinant of the hessian.
     """
-    hess_a, denom = hess_info
-    return jnp.log(jnp.abs(denom)) + jnp.sum(jnp.log(jnp.abs(hess_a)), axis=-1)
+    inv_a = 1 / a
+    denom = 1 + b * inv_a.sum()
+    return jnp.log(jnp.abs(denom)) + jnp.sum(jnp.log(jnp.abs(a)), axis=-1)
 
 
 def build_dirty_bayes(sig2, n_arms=4, dtype=np.float64):

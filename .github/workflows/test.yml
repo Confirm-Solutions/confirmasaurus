@@ -7,12 +7,14 @@ on:
       - synchronize
     paths-ignore:
       - 'anarchy/**'
+      - '**.ipynb'
       - '**.md'
   push:
     branches:
       - main 
     paths-ignore:
       - 'anarchy/**'
+      - '**.ipynb'
       - '**.md'
 jobs:
   test:
@@ -30,6 +32,7 @@ jobs:
     # https://github.com/marketplace/actions/setup-miniconda#caching-environments
     steps:
       - uses: actions/checkout@v2
+      - uses: bazelbuild/setup-bazelisk@v2
       - name: Setup Mambaforge
         uses: conda-incubator/setup-miniconda@v2
         with:

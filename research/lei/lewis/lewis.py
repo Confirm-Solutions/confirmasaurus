@@ -6,9 +6,9 @@ import numpy as np
 import numpyro.distributions as dist
 from lewis import batch
 
-import inlaw.berry as berry
-import inlaw.inla as inla
-import inlaw.quad as quad
+import outlaw.berry as berry
+import outlaw.inla as inla
+import outlaw.quad as quad
 
 
 class Lewis45:
@@ -32,6 +32,9 @@ class Lewis45:
     ):
         """
         Constructs an object to run the Lei example.
+
+        acronyms:
+        - "pps" == "Posterior probability of success"
 
         Parameters:
         -----------
