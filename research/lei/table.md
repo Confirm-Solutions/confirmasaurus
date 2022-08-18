@@ -19,7 +19,7 @@ Things to explore/do here:
 4. unstructured interpolation grids that are higher density in regions where that's necessary. We could start by dividing the domain into just a few hyper-triangles and then divide only those triangles where the edge midpts/center are substantially different from the existing vertices. This might be necessary fairly early because it seems like the function we're interpolating can have dramatic changes in value with respect to the input space.
 
 ```python
-import inlaw.nb_util as nb_util
+import outlaw.nb_util as nb_util
 nb_util.setup_nb()
 ```
 
@@ -144,9 +144,6 @@ yplot_grid = jnp.meshgrid(y2, y3, indexing="ij")
 yplot_grid1d = np.stack(yplot_grid, axis=-1).reshape((-1, 2))
 nplot = yplot_grid1d.shape[0]
 yplot_grid1d = np.concatenate((np.full((nplot, 1), y0), np.full((nplot, 1), y1), yplot_grid1d), axis=-1)
-```
-
-```python
 Aplot = table_n0[get_idx_vmap(yplot_grid1d, n)][:,0].reshape(yplot_grid[0].shape)
 
 plt.figure(figsize=(10, 10))

@@ -18,14 +18,14 @@ jupyter:
 ```
 
 ```python
-import inlaw
-import inlaw.berry as berry
-import inlaw.quad as quad
+import outlaw
+import outlaw.berry as berry
+import outlaw.quad as quad
 import numpy as np
 import jax.numpy as jnp
 import jax
 import time
-import inlaw.inla as inla
+import outlaw.inla as inla
 import matplotlib.pyplot as plt
 import numpyro.distributions as dist
 from functools import partial

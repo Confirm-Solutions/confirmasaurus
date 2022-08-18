@@ -6,9 +6,9 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 
-import inlaw.berry as berry
-import inlaw.inla as inla
-import inlaw.quad as quad
+import outlaw.berry as berry
+import outlaw.inla as inla
+import outlaw.quad as quad
 
 
 class Lewis45:
