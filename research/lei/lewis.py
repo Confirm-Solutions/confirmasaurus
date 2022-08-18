@@ -33,6 +33,9 @@ class Lewis45:
         """
         Constructs an object to run the Lei example.
 
+        acronyms:
+        - "pps" == "Posterior probability of success"
+
         Parameters:
         -----------
         n_stage_1:      number of patients to enroll at stage 1 for each arm.

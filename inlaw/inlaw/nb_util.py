@@ -63,3 +63,18 @@ def scale_text(factor=0.75):
     plt.rcParams["ytick.labelsize"] = 16 * factor
     plt.rcParams["legend.fontsize"] = 20 * factor
     plt.rcParams["figure.titlesize"] = 22 * factor
+
+
+def contourf_tbt(x, y, z, levels=None):
+    cbar = plt.contourf(x, y, z, levels=levels, extend="both")
+    plt.contour(
+        x,
+        y,
+        z,
+        levels=levels,
+        colors="k",
+        linestyles="-",
+        linewidths=0.5,
+        extend="both",
+    )
+    plt.colorbar(cbar)
