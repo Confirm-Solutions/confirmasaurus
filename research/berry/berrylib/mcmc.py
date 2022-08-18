@@ -32,7 +32,12 @@ def mcmc_berry(
     dtype=np.float64,
     n_samples=10000,
     sigma2_val=None,
+    device_name="cpu",
 ):
+    """
+    CPU vs GPU: I've had some very unpleasant experiences trying to run this
+    code on the GPU. It seems to just run super slow. I'm not sure why.
+    """
     n_arms = data.shape[-2]
     if suc_thresh is None:
         suc_thresh = np.full(n_arms, logit(0.1) - logit_p1)
@@ -88,7 +93,8 @@ def mcmc_berry(
         mcmc.run(rng_key, y, n)
         return mcmc.get_samples(group_by_chain=True)
 
-    p_do_mcmc = jax.pmap(do_mcmc)
+    # p_do_mcmc = jax.pmap(do_mcmc)
+    p_do_mcmc = jax.vmap(do_mcmc)
 
     mcmc_stats = dict(
         cilow=np.empty((n_data, n_arms)),
@@ -98,7 +104,7 @@ def mcmc_berry(
         x=[None] * n_data,
         summary=[None] * n_data,
     )
-    n_cores_mcmc = jax.local_device_count()
+    n_cores_mcmc = jax.local_device_count() if device_name == "cpu" else 1
     for i in range(0, n_data, n_cores_mcmc):
         chunk_end = i + n_cores_mcmc
         data_chunk = data[i:chunk_end]
@@ -114,7 +120,12 @@ def mcmc_berry(
         # We need to generate new keys each time because they are immutable.
         # Otherwise, the same random numbers will be re-used over and over.
         rng_keys = jax.random.split(jax.random.PRNGKey(seed + i), n_cores_mcmc)
-        traces = p_do_mcmc(rng_keys, data_chunk[..., 0], data_chunk[..., 1])
+        device = jax.devices(device_name)[i]
+        traces = p_do_mcmc(
+            jax.device_put(rng_keys, device),
+            jax.device_put(data_chunk[..., 0], device),
+            jax.device_put(data_chunk[..., 1], device),
+        )
 
         for j in range(min(chunk_end, n_data) - i):
             x = {k: v[j] for k, v in traces.items()}
