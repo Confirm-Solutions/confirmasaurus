@@ -14,11 +14,11 @@ jupyter:
 
 Things to explore/do here:
 
-- [x] make some slice plots of the function that we are interpolating. how noisy is it currently?
+- [x] make some slice plots of the function that we are interpolating. how noisy is it currently? how quickly does it change?
 - [x] jax interpolation. without jax interpolation, everything is for naught because it'll be slow.
-- [ ] unit tests for jax interpolation. this is simple since we can just compare against scipy.
-- [ ] real code!! not just a janky example.
-- [ ] unstructured interpolation grids that are higher density in regions where that's necessary. We could start by dividing the domain into just a few hyper-triangles and then divide only those triangles where the edge midpts/center are substantially different from the existing vertices. This might be necessary fairly early because it seems like the function we're interpolating can have dramatic changes in value with respect to the input space.
+- [x] unit tests for jax interpolation. this is simple since we can just compare against scipy.
+- [x] real code!! not just a janky example.
+- [ ] unstructured interpolation grids that are higher density in regions where that's necessary. We could start by dividing the domain into just a few hyper-triangles and then divide only those triangles where the edge midpts/center are substantially different from the existing vertices.
 
 ```python
 import outlaw.nb_util as nb_util
