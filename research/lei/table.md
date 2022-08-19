@@ -202,7 +202,8 @@ interpn(yi_range, values, y_test[:1])
 ```
 
 ```python
-N = int(1e6) // y_test.shape[0]
+N = int(1e6)
+y_test = np.array([[14, 14, 11, 11]])
 y_test = np.tile(y_test, (N, 1))
 ```
 

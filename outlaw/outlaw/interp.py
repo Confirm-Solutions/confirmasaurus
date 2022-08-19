@@ -4,6 +4,50 @@ import jax
 import jax.numpy as jnp
 
 
+@jax.jit
+@partial(jax.vmap, in_axes=(None, None, 0))
+def interpn(points, values, xi):
+    """
+    A JAX reimplementation of scipy.interpolate.interpn. Most of the input
+    validity checks have been removed, so make sure your inputs are correct or
+    go implement those checks yourself.
+
+    In addition, the keyword arguments are:
+    - `method="linear"`
+    - `bounds_error=False`
+    - `fill_value=None`
+
+    The scipy source is here:
+    https://github.com/scipy/scipy/blob/651a9b717deb68adde9416072c1e1d5aa14a58a1/scipy/interpolate/_rgi.py#L445-L614
+
+    The original docstring from scipy:
+    Multidimensional interpolation on regular or rectilinear grids.
+
+    Strictly speaking, not all regular grids are supported - this function
+    works on *rectilinear* grids, that is, a rectangular grid with even or
+    uneven spacing.
+
+    Args:
+        points : tuple of ndarray of float, with shapes (m1, ), ..., (mn, )
+            The points defining the regular grid in n dimensions. The points in
+            each dimension (i.e. every elements of the points tuple) must be
+            strictly ascending or descending.
+        values : array_like, shape (m1, ..., mn, ...)
+            The data on the regular grid in n dimensions. Complex data can be
+            acceptable.
+        xi : ndarray of shape (..., ndim)
+            The coordinates to sample the gridded data at
+
+    Returns:
+        values_x : ndarray, shape xi.shape[:-1] + values.shape[ndim:]
+            Interpolated values at input coordinates.
+    """
+
+    grid = tuple([jnp.asarray(p) for p in points])
+    indices, norm_distances = _find_indices(grid, xi)
+    return _evaluate_linear(grid, values, indices, norm_distances)
+
+
 # This code is copied from scipy.interpolate.interpn and modified for working with JAX.
 def _find_indices(grid, xi):
 
@@ -29,38 +73,33 @@ def _find_indices(grid, xi):
 
 
 def _evaluate_linear(grid, values, indices, norm_distances):
-    lr_grid = jnp.meshgrid(
-        *[jnp.array([0, 1]) for i in range(len(grid))], indexing="ij"
-    )
+    d = len(grid)
+    # Construct the unit d-dimensional cube.
+    unit_cube = jnp.meshgrid(*[jnp.array([0, 1]) for i in range(d)], indexing="ij")
 
-    hypercube_indices = [
-        jnp.array([indices[i], indices[i] + 1])[lr_grid[i]] for i in range(len(grid))
+    # Choose the left or right index for each corner of the hypercube. these
+    # are 1D indices which get used in will later be used to construct the ND
+    # indices of each corner.
+    hypercube_dim_indices = [
+        jnp.array([indices[i], indices[i] + 1])[unit_cube[i]] for i in range(d)
     ]
-    hypercube_weights = [
-        jnp.array([1 - norm_distances[i], norm_distances[i]])[lr_grid[i]]
-        for i in range(len(grid))
-    ]
-
-    hypercube_indices_ravel = jnp.stack(hypercube_indices, axis=-1).reshape(
-        (-1, len(grid))
-    )
-    hypercube_weights_ravel = jnp.stack(hypercube_weights, axis=-1).reshape(
-        (-1, len(grid))
-    )
-    hypercube_flat_idx = jnp.ravel_multi_index(
-        hypercube_indices_ravel.T,
-        [grid[i].shape[0] for i in range(len(grid))],
+    # the final indices will be the unraveled ND indices produced from the 1D
+    # indices above.
+    hypercube_indices = jnp.ravel_multi_index(
+        [hypercube_dim_indices[i].flatten() for i in range(d)],
+        [grid[i].shape[0] for i in range(d)],
         mode="clip",
     )
-    values_ravel = values.ravel()
-    return (
-        values_ravel[hypercube_flat_idx] * hypercube_weights_ravel.prod(axis=-1)
-    ).sum()
 
+    # the weights for the left and right sides of each 1D interval.
+    # norm_distance is the normalized distance from the left edge so the weight
+    # will be (1 - norm_distance) for the left edge
+    hypercube_dim_weights = [
+        jnp.array([1 - norm_distances[i], norm_distances[i]])[unit_cube[i]]
+        for i in range(d)
+    ]
+    # the final weights will be the product of the weights for each dimension
+    hypercube_weights = jnp.prod(jnp.array(hypercube_dim_weights), axis=0).ravel()
 
-@jax.jit
-@partial(jax.vmap, in_axes=(None, None, 0))
-def interpn(points, values, xi):
-    grid = tuple([jnp.asarray(p) for p in points])
-    indices, norm_distances = _find_indices(grid, xi)
-    return _evaluate_linear(grid, values, indices, norm_distances)
+    # finally, select the values to interpolate and multiply by the weights.
+    return (values.ravel()[hypercube_indices] * hypercube_weights).sum()
