@@ -1,0 +1,2 @@
+#!/bin/bash
+docker build --progress=plain -t test_smalldevimage -f Dockerfile ../.. 
