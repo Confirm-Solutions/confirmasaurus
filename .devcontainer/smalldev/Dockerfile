@@ -18,6 +18,11 @@ RUN ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
 COPY environment*.yml /tmp/conda-tmp/
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
+#
+# BUG: the install here does not work correctly when launched inside docker
+# from an M1 Mac because it's running Linux on an "aarch64" architecture and
+# the PyPI packages from JAX are not properly set up.
+#
 RUN mamba env update -n base -f /tmp/conda-tmp/environment.yml \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
