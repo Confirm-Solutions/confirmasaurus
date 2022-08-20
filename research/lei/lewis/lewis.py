@@ -1,5 +1,3 @@
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,42 +9,73 @@ import outlaw.inla as inla
 import outlaw.quad as quad
 
 
+"""
+The following class implements the Lei example.
+See research/lei/lei.ipynb for the description.
+
+We define concepts used in the code:
+
+- `data in canonical form`:
+    `data` is of shape (n_arms, 2)
+    where n_arms is the number of arms in the trial and each row is a (y, n)
+    pair for the corresponding arm index.
+    The first row always corresponds to the control arm.
+
+- `n configuration`:
+    A valid sequence of `n` parameters in `data`
+    that is observable at any point in the trial.
+
+- `cached table`:
+    A cached table is assumed to be many table of values
+    row-stacked in the same order as a list of n configurations.
+"""
+
+
 class Lewis45:
     def __init__(
         self,
         n_arms: int,
         n_stage_1: int,
         n_stage_2: int,
-        n_interims: int,
-        n_add_per_interim: int,
-        futility_threshold: float,
-        pps_threshold_lower: float,
-        pps_threshold_upper: float,
+        n_stage_1_interims: int,
+        n_stage_1_add_per_interim: int,
+        n_stage_2_add_per_interim: int,
+        stage_1_futility_threshold: float,
+        stage_1_efficacy_threshold: float,
+        stage_2_futility_threshold: float,
+        stage_2_efficacy_threshold: float,
+        inter_stage_futility_threshold: float,
         posterior_difference_threshold: float,
         rejection_threshold: float,
-        sig2_int=quad.log_gauss_rule(15, 1e-6, 1e3),
+        sig2_int=quad.log_gauss_rule(15, 2e-6, 1e3),
         n_pr_sims: int = 100,
         n_sig2_sim: int = 100,
-        batch_size: int = 2**16,
         dtype=jnp.float64,
+        cache_tables=False,
     ):
         """
         Constructs an object to run the Lei example.
 
         acronyms:
+        - "pd" == "Posterior difference (between treatment and control arms)"
+        - "pr_best" == "(Posterior) probability of best arm"
         - "pps" == "Posterior probability of success"
 
         Parameters:
         -----------
+        n_arms:         number of arms.
         n_stage_1:      number of patients to enroll at stage 1 for each arm.
-        n_interims:     number of interims.
-        n_add_per_interim:      number of total patients to
-                                add per interim.
+        n_stage_2:      number of patients to enroll at stage 2 for each arm.
+        n_stage_1_interims:     number of interims in stage 1.
+        n_stage_1_add_per_interim:      number of total patients to
+                                        add per interim in stage 1.
+        n_stage_2_add_per_interim:      number of patients to
+                                        add in stage 2 interim to control
+                                        and the selected treatment arms.
         futility_threshold:     probability cut-off to decide
                                 futility for treatment arms.
                                 If P(arm_i best | data) < futility_threshold,
                                 declare arm_i as futile.
-        n_stage_2:              number of patients to add for stage 2 for each arm.
         pps_threshold_lower:    threshold for checking futility:
                                 PPS < pps_threshold_lower <=> futility.
         pps_threshold_upper:    threshold for checking efficacy:
@@ -63,11 +92,14 @@ class Lewis45:
         self.n_arms = n_arms
         self.n_stage_1 = n_stage_1
         self.n_stage_2 = n_stage_2
-        self.n_interims = n_interims
-        self.n_add_per_interim = n_add_per_interim
-        self.futility_threshold = futility_threshold
-        self.pps_threshold_lower = pps_threshold_lower
-        self.pps_threshold_upper = pps_threshold_upper
+        self.n_stage_1_interims = n_stage_1_interims
+        self.n_stage_1_add_per_interim = n_stage_1_add_per_interim
+        self.n_stage_2_add_per_interim = n_stage_2_add_per_interim
+        self.stage_1_futility_threshold = stage_1_futility_threshold
+        self.stage_1_efficacy_threshold = stage_1_efficacy_threshold
+        self.stage_2_futility_threshold = stage_2_futility_threshold
+        self.stage_2_efficacy_threshold = stage_2_efficacy_threshold
+        self.inter_stage_futility_threshold = inter_stage_futility_threshold
         self.posterior_difference_threshold = posterior_difference_threshold
         self.rejection_threshold = rejection_threshold
         self.n_pr_sims = n_pr_sims
@@ -92,12 +124,15 @@ class Lewis45:
         # n configuration information
         (
             self.n_configs_max_mask,
-            self.n_configs_ph2,
-            self.n_configs_ph3,
-            self.hashes_ph2,
-            self.hashes_ph3,
-            self.offsets_ph2,
-            self.offsets_ph3,
+            self.n_configs_pr_best_pps_1,
+            self.hashes_pr_best_pps_1,
+            self.offsets_pr_best_pps_1,
+            self.n_configs_pps_2,
+            self.hashes_pps_2,
+            self.offsets_pps_2,
+            self.n_configs_pd,
+            self.hashes_pd,
+            self.offsets_pd,
         ) = self.n_configs_setting__()
 
         # diff_matrix[i]^T p = p[i+1] - p[0]
@@ -110,34 +145,78 @@ class Lewis45:
         self.order = jnp.arange(0, self.n_arms, dtype=int)
 
         # posterior difference tables for every possible combination of n
-        self.posterior_difference_table = None
+        self.pr_best_table = None
+        self.pps_1_table = None
+        self.pps_2_table = None
+        self.pd_table = None
 
-        # TODO add more tables
+        if cache_tables:
+            self.cache_posterior_difference_table()
+            self.cache_pr_best_pps_1_table()
+            self.cache_pps_2_table()
 
     # ===============================================
     # Table caching logic
     # ===============================================
 
-    def hash__(self, y, n, hashes, offsets):
+    def hash__(self, data, hashes, offsets):
         """
-        Hashes (y, n) such that the resulting integer is an index into
-        one of the cached tables where the value corresponds
-        to the input (y, n).
+        Hashes `data` to return an index into a cached table
+        whose table value corresponds to some function value
+        using `data` as its input.
+        We assume that `data` is in canonical form.
+
+        Parameters:
+        -----------
+        data:   data in canonical form.
+        hashes: list of sorted (increasing) hashes
+                corresponding to a set of n configurations.
+                Assumes that hashes was created using self.hash_n__().
+                hashes[i] is the hash of the ith n configuration.
+        offsets:    list of offsets into any cached tables corresponding
+                    to the set of n configurations, i.e.
+                    offsets[i] is the offset into a cached table
+                    for the ith n configuration corresponding to hashes[i].
         """
-        n_hash = self.hash_n__(n)
+        y = data[:, 0]
+        n = data[:, 1]
+
+        # we use the facts that:
+        # - arms that are not dropped always have
+        #   n value at least as large as those that were dropped.
+        # - arms that are not dropped all have the same n values.
+        # This means a stable sort will always:
+        # - keep the first row in-place
+        # - only the treatment rows will be sorted
+        n_order = jnp.flip(n.shape[0] - 1 - jnp.argsort(jnp.flip(n), kind="stable"))
+        n_sorted = n[n_order]
+        y_sorted = y[n_order]
+        n_hash = self.hash_n__(n_sorted)
         idx = jnp.searchsorted(hashes, n_hash)
         n_offset = offsets[idx]
-        y_index = y[-1] + jnp.sum(jnp.flip(y[:-1]) * jnp.cumprod(n + 1)[:-1])
-        return y_index + n_offset
+
+        # this indexing works because tabling data is generated with this assumption.
+        # y_sorted = [a, b, c] => corresponds to
+        # relative index a*(n[-1]+1)*(n[-2]+1) + b*(n[-1]+1) + c.
+        y_index = y_sorted[-1] + jnp.sum(
+            jnp.flip(y_sorted[:-1]) * jnp.cumprod(jnp.flip(n_sorted[1:] + 1))
+        )
+        return y_index + n_offset, n_order
 
     def hash_n_internal__(self, n, mask):
-        return jnp.sum(mask * jnp.sort(n))
+        """
+        Hashes the n configuration with a given mask.
+
+        Parameters:
+        -----------
+        mask:   a mask to weigh `n` such that the weighted sum
+                is unique for each n configuration.
+                This should be guaranteed using self.n_configs_max_mask.
+        n:      n configuration sorted in decreasing order.
+        """
+        return jnp.sum(mask * n)
 
     def hash_n__(self, n):
-        """
-        Hashes n such that the resulting integer is a unique integer
-        for any given possible n configuration.
-        """
         return self.hash_n_internal__(n, self.n_configs_max_mask)
 
     def make_n_configs__(self):
@@ -151,30 +230,32 @@ class Lewis45:
 
         def internal(n_arr, n_add, n_interims, n_drop):
             n_arms = n_arr.shape[-1]
-            out = np.empty((0, n_arms), dtype=int)
+            out_all_ph2 = np.empty((0, n_arms), dtype=int)
 
             if n_interims <= 0:
-                return n_arr
+                return out_all_ph2
 
             n_arr_new = np.copy(n_arr)
             for n_drop_new in range(n_drop, n_arms - 1):
                 n_arr_incr = n_add // (n_arms - n_drop_new)
                 n_arr_new[n_drop_new:] += n_arr_incr
-                rest = internal(n_arr_new, n_add, n_interims - 1, n_drop_new)
-                out = np.vstack(
+                rest_all_ph2 = internal(n_arr_new, n_add, n_interims - 1, n_drop_new)
+                out_all_ph2 = np.vstack(
                     (
-                        out,
+                        out_all_ph2,
                         n_arr_new,
-                        rest,
+                        rest_all_ph2,
                     )
                 )
                 n_arr_new[n_drop_new:] -= n_arr_incr
 
-            return out
+            return out_all_ph2
 
         # make array of all n configurations
         n_arr = np.full(self.n_arms, self.n_stage_1, dtype=int)
-        n_configs_ph2 = internal(n_arr, self.n_add_per_interim, self.n_interims, 0)
+        n_configs_ph2 = internal(
+            n_arr, self.n_stage_1_add_per_interim, self.n_stage_1_interims, 0
+        )
         n_configs_ph2 = np.vstack(
             (
                 n_arr,
@@ -182,10 +263,18 @@ class Lewis45:
             )
         )
         n_configs_ph2 = np.unique(n_configs_ph2, axis=0)
-        n_configs_ph3 = np.copy(n_configs_ph2)
-        n_configs_ph3[:, -2:] += +self.n_stage_2
 
-        return n_configs_ph2, n_configs_ph3
+        n_configs_ph2 = np.fliplr(n_configs_ph2)
+
+        n_configs_ph3 = np.copy(n_configs_ph2)
+        n_configs_ph3[:, :2] += self.n_stage_2
+
+        n_configs_pr_best_pps_1 = n_configs_ph2
+        n_configs_pps_2 = n_configs_ph3
+        n_configs_pd = np.copy(n_configs_ph3)
+        n_configs_pd[:, :2] += self.n_stage_2_add_per_interim
+
+        return n_configs_pr_best_pps_1, n_configs_pps_2, n_configs_pd
 
     def n_configs_setting__(self):
         """
@@ -204,46 +293,34 @@ class Lewis45:
                     that corresponds to the beginning of the table
                     for a given `n` configuration.
         """
-        n_configs_ph2, n_configs_ph3 = self.make_n_configs__()
+        (
+            n_configs_pr_best_pps_1,
+            n_configs_pps_2,
+            n_configs_pd,
+        ) = self.make_n_configs__()
 
-        n_configs_max = jnp.max(n_configs_ph3)
+        n_configs_max = jnp.max(n_configs_pd)
         n_configs_max_mask = n_configs_max ** jnp.arange(0, self.n_arms)
         n_configs_max_mask = n_configs_max_mask.astype(int)
 
-        hashes_ph2 = jnp.array(
-            [self.hash_n_internal__(ns, n_configs_max_mask) for ns in n_configs_ph2]
-        )
-        hashes_ph3 = jnp.array(
-            [self.hash_n_internal__(ns, n_configs_max_mask) for ns in n_configs_ph3]
-        )
-
-        # sort the hashes and re-order
-        hashes_ph2_order = jnp.argsort(hashes_ph2)
-        n_configs_ph2 = n_configs_ph2[hashes_ph2_order]
-        hashes_ph2 = hashes_ph2[hashes_ph2_order]
-
-        hashes_ph3_order = jnp.argsort(hashes_ph3)
-        n_configs_ph3 = n_configs_ph3[hashes_ph3_order]
-        hashes_ph3 = hashes_ph3[hashes_ph3_order]
-
-        # compute offsets
-        sizes_ph2 = jnp.array([0] + [jnp.prod(ns + 1) for ns in n_configs_ph2])
-        offsets_ph2 = jnp.cumsum(sizes_ph2)[:-1]
-
-        sizes_ph3 = jnp.array([0] + [jnp.prod(ns + 1) for ns in n_configs_ph3])
-        offsets_ph3 = jnp.cumsum(sizes_ph3)[:-1]
+        def settings(n_configs):
+            hashes = jnp.array(
+                [self.hash_n_internal__(ns, n_configs_max_mask) for ns in n_configs]
+            )
+            hashes_order = jnp.argsort(hashes)
+            n_configs = n_configs[hashes_order]
+            hashes = hashes[hashes_order]
+            sizes = jnp.array([0] + [jnp.prod(ns + 1) for ns in n_configs])
+            offsets = jnp.cumsum(sizes)[:-1]
+            return n_configs, hashes, offsets
 
         return (
             n_configs_max_mask,
-            n_configs_ph2,
-            n_configs_ph3,
-            hashes_ph2,
-            hashes_ph3,
-            offsets_ph2,
-            offsets_ph3,
+            *settings(n_configs_pr_best_pps_1),
+            *settings(n_configs_pps_2),
+            *settings(n_configs_pd),
         )
 
-    @partial(jax.jit, static_argnums=(0,))
     def table_data__(self, ns, coords):
         """
         Creates a data array used to construct internal tables.
@@ -282,19 +359,34 @@ class Lewis45:
 
         internal_jit = jax.jit(internal)
         tup_tables = tuple(
-            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_ph3
+            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_pd
         )
         return jnp.row_stack(tup_tables)
 
-    def pr_best_pps_table__(self, key, batch_size):
+    def cache_posterior_difference_table(self, batch_size):
+        self.pd_table = self.posterior_difference_table__(batch_size)
+
+    def pr_best_pps_1_table__(self, key, batch_size):
         unifs = jax.random.uniform(
             key=key,
-            shape=(self.n_pr_sims, self.n_stage_2, self.n_arms),
+            shape=(
+                self.n_pr_sims,
+                self.n_stage_2 + self.n_stage_2_add_per_interim,
+                self.n_arms,
+            ),
         )
         _, key = jax.random.split(key)
+        unifs_sig2 = jax.random.uniform(
+            key=key,
+            shape=(self.n_pr_sims,),
+        )
+        _, key = jax.random.split(key)
+        normals = jax.random.normal(key, shape=(self.n_pr_sims, self.n_arms))
 
         def internal(data):
-            return jax.vmap(self.pr_best_pps, in_axes=(0, None, None))(data, key, unifs)
+            return jax.vmap(self.pr_best_pps_1, in_axes=(0, None, None, None))(
+                data, normals, unifs_sig2, unifs
+            )
 
         def process_batch__(ns, f, batch_size):
             f_batched = batch.batch_all(
@@ -319,34 +411,102 @@ class Lewis45:
 
         internal_jit = jax.jit(internal)
         tup_tables = tuple(
-            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_ph3
+            process_batch__(ns, internal_jit, batch_size)
+            for ns in self.n_configs_pr_best_pps_1
         )
         pr_best_tables = tuple(t[0] for t in tup_tables)
         pps_tables = tuple(t[1] for t in tup_tables)
         return jnp.row_stack(pr_best_tables), jnp.row_stack(pps_tables)
 
+    def cache_pr_best_pps_1_table(self, key, batch_size):
+        (
+            self.pr_best_table,
+            self.pps_1_table,
+        ) = self.pr_best_pps_1_table__(key, batch_size)
+
+    def pps_2_table__(self, key, batch_size):
+        unifs = jax.random.uniform(
+            key=key,
+            shape=(
+                self.n_pr_sims,
+                self.n_stage_2_add_per_interim,
+                self.n_arms,
+            ),
+        )
+        _, key = jax.random.split(key)
+        unifs_sig2 = jax.random.uniform(
+            key=key,
+            shape=(self.n_pr_sims,),
+        )
+        _, key = jax.random.split(key)
+        normals = jax.random.normal(
+            key=key,
+            shape=(self.n_pr_sims, self.n_arms),
+        )
+
+        def internal(data):
+            return jax.vmap(self.pps_2, in_axes=(0, None, None, None))(
+                data, normals, unifs_sig2, unifs
+            )
+
+        def process_batch__(ns, f, batch_size):
+            f_batched = batch.batch_all(
+                f,
+                batch_size,
+                in_axes=(0,),
+            )
+            outs, n_padded = f_batched(
+                self.table_data__(
+                    ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij")
+                )
+            )
+            out = jnp.row_stack(outs)
+            return out[:(-n_padded)] if n_padded > 0 else out
+
+        internal_jit = jax.jit(internal)
+        tup_tables = tuple(
+            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_pps_2
+        )
+        return jnp.row_stack(tup_tables)
+
+    def cache_pps_2_table(self, key, batch_size):
+        self.pps_2_table = self.pps_2_table__(key, batch_size)
+
     def get_posterior_difference__(self, data):
-        y = data[:, 0]
-        n = data[:, 1]
-        return self.posterior_difference_table[
-            self.hash__(y, n, self.hashes_ph3, self.offsets_ph3)
-        ]
+        h, n_order = self.hash__(data, self.hashes_pd, self.offsets_pd)
+        n_order_inverse = jnp.argsort(n_order)[1:] - 1
+        return self.pd_table[h][n_order_inverse]
+
+    def get_pr_best_pps_1__(self, data):
+        h, n_order = self.hash__(
+            data, self.hashes_pr_best_pps_1, self.offsets_pr_best_pps_1
+        )
+        n_order_inverse = jnp.argsort(n_order)[1:] - 1
+        return (
+            self.pr_best_table[h][n_order_inverse],
+            self.pps_1_table[h][n_order_inverse],
+        )
+
+    def get_pps_2__(self, data):
+        h, n_order = self.hash__(data, self.hashes_pps_2, self.offsets_pps_2)
+        n_order_inverse = jnp.argsort(n_order)[1:] - 1
+        return self.pps_2_table[h][n_order_inverse]
 
     # ===============================================
     # Core routines for computing Bayesian quantities
     # ===============================================
 
-    def sample_posterior_sigma_sq(self, post, key):
+    def sample_posterior_sigma_sq(self, post, unifs):
         """
         Samples from p(sigma^2 | data) given by the density
         (up to a constant), post.
+        Assumes that post is computed on the grid self.sig2_sim in the same order.
         The sampling is approximate as it samples from the discrete
         measure defined by normalizing the histogram given by post.
         """
         dFx = post[:-1] * self.dsig2_sim
         Fx = jnp.cumsum(dFx)
         Fx /= Fx[-1]
-        unifs = jax.random.uniform(key=key, shape=(self.n_pr_sims,))
         i_star = jnp.searchsorted(Fx, unifs)
         return i_star + 1
 
@@ -412,9 +572,11 @@ class Lewis45:
         iters:  number of iterations.
         """
         n_arms, _ = data.shape
-        p_pinned = dict(sig2=self.sig2_sim, theta=None)
-        logpost, x_max, hess, iters = jax.jit(self.custom_ops_sim.laplace_logpost)(
-            np.zeros((len(self.sig2_sim), n_arms)), p_pinned, data
+        sig2 = self.sig2_sim
+        n_sig2 = sig2.shape[0]
+        p_pinned = dict(sig2=sig2, theta=None)
+        logpost, x_max, hess, iters = self.custom_ops_sim.laplace_logpost(
+            np.zeros((n_sig2, n_arms), dtype=self.dtype), p_pinned, data
         )
         max_logpost = jnp.max(logpost)
         max_post = jnp.exp(max_logpost)
@@ -440,7 +602,7 @@ class Lewis45:
             loc = self.diff_matrix @ mean
             # var = [..., qi^T C qi, ..., ] where qi = self.diff_matrix[i]
             var = jnp.sum((self.diff_matrix @ cov) * self.diff_matrix, axis=-1)
-            scale = jnp.sqrt(var)
+            scale = jnp.sqrt(jnp.maximum(var, 0))
             normal_term = jax.scipy.stats.norm.cdf(
                 self.posterior_difference_threshold, loc=loc, scale=scale
             )
@@ -455,59 +617,26 @@ class Lewis45:
         where x is of shape (..., d).
         """
         x_argmax = jnp.argmax(x, axis=-1)
-        compute_best = jax.vmap(lambda i: jnp.where(self.order == i, 1, 0))
+        compute_best = jax.vmap(lambda i: self.order == i)
         return jnp.mean(compute_best(x_argmax), axis=0)
-        # TODO: move this else-where
-        # return jnp.where(non_futile_idx == 0, jnp.nan, pr_best_out)
-
-    def pr_best_pps(self, data, key, unifs):
-        # compute p(sigma^2 | y, n), mode, hessian for simulation
-        # p(sigma^2 | y, n) is up to a constant
-        post, x_max, hess, _ = self.posterior_sigma_sq_sim(data)
-
-        # compute covariance of theta | data, sigma^2 for each value of self.sig2_sim.
-        cov = self.hessian_to_covariance(hess)
-
-        # sample from p(sigma^2 | data) by getting the indices of self.sig2_sim.
-        i_star = self.sample_posterior_sigma_sq(post, key)
-
-        # sample theta from p(theta | data, sigma^2) given each sigma^2 from i_star.
-        mean_sub = x_max[i_star]
-        cov_sub = cov[i_star]
-        _, key = jax.random.split(key)
-        thetas = jax.random.multivariate_normal(key, mean_sub, cov_sub)
-
-        # compute pr(best arm == i | data) for each i = 1,..., d-1.
-        pr_best_out = self.pr_best(thetas)[1:]
-
-        # compute pps(arm i | data) for each i = 1,..., d-1.
-        _, key = jax.random.split(key)
-        pps_out = self.pps(data, thetas, unifs)
-
-        return pr_best_out, pps_out
 
     def pps(self, data, thetas, unifs):
         # estimate P(A_i | y, n, theta_0, theta_i)
-        def simulate_Ai(data, arm, binoms):
-            # add n_stage_2 number of patients to each
-            # of the control and selected treatment arms.
-            n_arr = jnp.full_like(binoms, self.n_stage_2)
-            new_data = jnp.stack((binoms, n_arr), axis=-1)
+        def simulate_Ai(data, arm, new_data):
             new_data = jnp.where(
                 self.diff_matrix[arm].reshape((new_data.shape[0], -1)), new_data, 0
             )
             # pool outcomes for each arm
             data = data + new_data
 
-            return (
-                self.get_posterior_difference__(data)[arm + 1]
-                < self.rejection_threshold
-            )
+            return self.get_posterior_difference__(data)[arm] < self.rejection_threshold
 
         # compute p from logit space
         p_samples = jax.scipy.special.expit(thetas)
         berns = unifs < p_samples[:, None]
         binoms = jnp.sum(berns, axis=1)
+        n_arr = jnp.full_like(binoms, unifs.shape[1])
+        new_data = jnp.stack((binoms, n_arr), axis=-1)
 
         simulate_Ai_vmapped = jax.vmap(
             jax.vmap(simulate_Ai, in_axes=(None, 0, None)),
@@ -516,13 +645,46 @@ class Lewis45:
         Ai_indicators = simulate_Ai_vmapped(
             data,
             self.order[:-1],
-            binoms,
+            new_data,
         )
         out = jnp.mean(Ai_indicators, axis=0)
         return out
 
+    def pr_best_pps_common(self, data, normals, unifs):
+        # compute p(sigma^2 | y, n), mode, hessian for simulation
+        # p(sigma^2 | y, n) is up to a constant
+        post, x_max, hess, _ = self.posterior_sigma_sq_sim(data)
+
+        # compute covariance of theta | data, sigma^2 for each value of self.sig2_sim.
+        cov = self.hessian_to_covariance(hess)
+        chol = jnp.linalg.cholesky(cov)
+
+        # sample from p(sigma^2 | data) by getting the indices of self.sig2_sim.
+        i_star = self.sample_posterior_sigma_sq(post, unifs)
+
+        # sample theta from p(theta | data, sigma^2) given each sigma^2 from i_star.
+        mean_sub = x_max[i_star]
+        chol_sub = chol[i_star]
+        thetas = (
+            jax.vmap(lambda chol, n: chol @ n, in_axes=(0, 0))(chol_sub, normals)
+            + mean_sub
+        )
+
+        return thetas
+
+    def pr_best_pps_1(self, data, normals, unifs_sig2, unifs):
+        thetas = self.pr_best_pps_common(data, normals, unifs_sig2)
+        pr_best_out = self.pr_best(thetas)[1:]
+        pps_out = self.pps(data, thetas, unifs)
+        return pr_best_out, pps_out
+
+    def pps_2(self, data, normals, unifs_sig2, unifs):
+        thetas = self.pr_best_pps_common(data, normals, unifs_sig2)
+        pps_out = self.pps(data, thetas, unifs)
+        return pps_out
+
     # ===========
-    # TODO
+    # Trial Logic
     # ===========
 
     def stage_1(self, p, key):
@@ -553,9 +715,10 @@ class Lewis45:
 
         n_arms = self.n_arms
         n_stage_1 = self.n_stage_1
-        n_interims = self.n_interims
-        n_add_per_interim = self.n_add_per_interim
-        futility_threshold = self.futility_threshold
+        n_interims = self.n_stage_1_interims
+        n_add_per_interim = self.n_stage_1_add_per_interim
+        futility_threshold = self.stage_1_futility_threshold
+        efficacy_threshold = self.stage_1_efficacy_threshold
 
         # create initial data
         n_arr = jnp.full(shape=n_arms, fill_value=n_stage_1)
@@ -563,66 +726,89 @@ class Lewis45:
         data = jnp.stack((data, n_arr), axis=-1)
 
         # auxiliary variables
-        non_futile_idx = jnp.ones(n_arms, dtype=bool)
-        _, key = jax.random.split(key)
-        pr_best = self.compute_pr_best(data, non_futile_idx, key)
-        order = jnp.arange(0, len(non_futile_idx))
+        non_dropped_idx = jnp.ones(n_arms - 1, dtype=bool)
+        pr_best, pps = self.get_pr_best_pps_1__(data)
 
         # Stage 1:
         def body_func(args):
-            i, _, data, _, non_futile_idx, pr_best, key = args
-            # get non-futile arm indices (offset by 1 because of control arm)
-            # force control arm to be non-futile
-            non_futile_idx = (
-                jnp.where(order == 0, True, pr_best >= futility_threshold)
-                * non_futile_idx
-            )
+            i, _, _, data, _, non_dropped_idx, pr_best, pps, key = args
 
-            # if no non-futile treatment arms, terminate trial
-            # else if exactly 1 non-futile arm, terminate stage 1 by choosing that arm.
-            # TODO: include the control and remove + 1 at line 600
-            n_non_futile = jnp.sum(non_futile_idx[1:])
+            # get next non-dropped indices
+            non_dropped_idx = (pr_best >= futility_threshold) * non_dropped_idx
+            n_non_dropped = jnp.sum(non_dropped_idx)
 
-            # TODO: if n_non_futile == 0, early exits.
+            # check for futility
+            early_exit_futility = n_non_dropped == 0
 
-            # TODO: check PPS for all treatment arms
-            # if PPS is > threshold, break early and don't add the new samples.
+            # check for efficacy
+            n_effective = jnp.sum(pps > efficacy_threshold)
+            early_exit_efficacy = n_effective > 0
 
-            # evenly distribute the next patients across non-futile arms
+            # evenly distribute the next patients across non-dropped arms
+            # only if we are not early stopping stage 1.
             # Note: for simplicity, we remove the remainder patients.
-            # remainder = n_add_per_interim % n_arms
-            n_new = jnp.where(
-                non_futile_idx, n_add_per_interim // (n_non_futile + 1), 0
+            do_add = jnp.logical_not(early_exit_futility | early_exit_efficacy)
+            add_idx = jnp.concatenate(
+                (jnp.array(True)[None], non_dropped_idx), dtype=bool
             )
+            add_idx = add_idx * do_add
+            n_new = jnp.where(add_idx, n_add_per_interim // (n_non_dropped + 1), 0)
             _, key = jax.random.split(key)
             y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
             data = data + jnp.stack((y_new, n_new), axis=-1)
 
-            # compute probability of best for each arm that are non-futile
-            pr_best = self.compute_pr_best(data, non_futile_idx, key)
+            pr_best, pps = self.get_pr_best_pps_1__(data)
 
             return (
                 i + 1,
+                early_exit_futility,
+                early_exit_efficacy,
                 data,
-                n_non_futile,
-                non_futile_idx,
+                n_non_dropped,
+                non_dropped_idx,
                 pr_best,
+                pps,
                 key,
             )
 
-        _, _, data, n_non_futile, non_futile_idx, pr_best, key = jax.lax.while_loop(
-            lambda tup: (tup[0] < n_interims),
+        (
+            _,
+            early_exit_futility,
+            _,
+            data,
+            _,
+            non_dropped_idx,
+            _,
+            pps,
+            key,
+        ) = jax.lax.while_loop(
+            lambda tup: (tup[0] < n_interims) & jnp.logical_not(tup[1] | tup[2]),
             body_func,
-            (0, data, n_arms, non_futile_idx, pr_best, key),
+            (
+                0,
+                False,
+                False,
+                data,
+                non_dropped_idx.shape[0],
+                non_dropped_idx,
+                pr_best,
+                pps,
+                key,
+            ),
         )
 
-        return data, n_non_futile, non_futile_idx, pr_best, key
+        return (
+            early_exit_futility,
+            data,
+            non_dropped_idx,
+            pps,
+            key,
+        )
 
     def stage_2(
         self,
         data,
-        non_futile_idx,
-        pr_best,
+        best_arm,
         p,
         key,
     ):
@@ -632,10 +818,7 @@ class Lewis45:
         Parameters:
         -----------
         data:   simulated binomial data as in lei_stage_1 output.
-        non_futile_idx:         a boolean vector indicating which arm is non-futile.
-        pr_best:                a vector of probability of each arm being best.
-                                Assume to be only well-defined
-                                whenever non_futile_idx is True.
+        non_dropped_idx:        a boolean vector indicating which arm is non-futile.
         p:                      simulation grid-point.
         key:                    jax PRNG key.
 
@@ -644,46 +827,42 @@ class Lewis45:
         0 if no rejection, otherwise 1.
         """
         n_stage_2 = self.n_stage_2
-        pps_threshold_lower = self.pps_threshold_lower
-        pps_threshold_upper = self.pps_threshold_upper
-        posterior_difference_threshold = self.posterior_difference_threshold
+        n_stage_2_add_per_interim = self.n_stage_2_add_per_interim
+        pps_threshold_lower = self.stage_2_futility_threshold
+        pps_threshold_upper = self.stage_2_efficacy_threshold
         rejection_threshold = self.rejection_threshold
 
-        # TODO: move this logic to single_sim(). Check along with pps.
-        # select best treatment arm based on probability of each arm being best
-        # since non_futile_idx always treats control arm (index 0) as non-futile,
-        # we read past it.
-        pr_best_subset = jnp.where(non_futile_idx[1:], pr_best[1:], 0)
-        best_arm = jnp.argmax(pr_best_subset) + 1
-
-        # TODO: make sure that at this point, non_futile_idx contains exactly 2 1's.
-        # - one in control
-        # - one in treatment
+        non_dropped_idx = (self.order == 0) | (self.order == best_arm)
 
         # add n_stage_2 number of patients to each
         # of the control and selected treatment arms.
-        n_new = jnp.where(non_futile_idx, n_stage_2, 0)
-        _, key = jax.random.split(key)
+        n_new = jnp.where(non_dropped_idx, n_stage_2, 0)
         y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
-
-        # pool outcomes for each arm
         data = data + jnp.stack((y_new, n_new), axis=-1)
 
-        pps = self.compute_pps(data)
+        pps = self.get_pps_2__(data)[best_arm - 1]
 
-        # check early-stop based on futility (lower) or efficacy (upper)
-        early_stop = (pps < pps_threshold_lower) | (pps > pps_threshold_upper)
+        # interim: check early-stop based on futility (lower) or efficacy (upper)
+        early_exit_futility = pps < pps_threshold_lower
+        early_exit_efficacy = pps > pps_threshold_upper
+        early_exit = early_exit_futility | early_exit_efficacy
+        early_exit_out = jnp.logical_not(early_exit_futility) | early_exit_efficacy
 
-        # TODO: if early stop bc of futility, return False. For efficacy, return True.
-        return jax.lax.cond(
-            early_stop,
-            lambda: False,
-            lambda: (
-                self.posterior_difference(
-                    data, best_arm, posterior_difference_threshold
-                )
+        _, key = jax.random.split(key)
+
+        def final_analysis(data):
+            n_new = jnp.where(non_dropped_idx, n_stage_2_add_per_interim, 0)
+            y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
+            data = data + jnp.stack((y_new, n_new), axis=-1)
+            return (
+                self.get_posterior_difference__(data)[best_arm - 1]
                 < rejection_threshold
-            ),
+            )
+
+        return jax.lax.cond(
+            early_exit,
+            lambda: early_exit_out,
+            lambda: final_analysis(data),
         )
 
     def single_sim(self, p, key):
@@ -695,27 +874,36 @@ class Lewis45:
         p:      simulation grid-point.
         key:    jax PRNG key.
         """
-        # temporary fix: binomial sampling requires this if n parameter
+        # TODO: temporary fix: binomial sampling requires this if n parameter
         # cannot be constant folded and p == 0 in some entries.
-        p_no_zeros = jnp.where(p == 0, 1e-5, p)
+        p_clipped = jnp.where(p == 0, 1e-5, p)
+        p_clipped = jnp.where(p_clipped == 1, 1 - 1e-5, p_clipped)
 
         # Stage 1:
-        data, n_non_futile, non_futile_idx, pr_best, key = self.stage_1(
-            p=p_no_zeros,
+        (early_exit_futility, data, non_dropped_idx, pps, key,) = self.stage_1(
+            p=p_clipped,
             key=key,
         )
 
+        # if early-exited because of efficacy,
+        # pick the best arm based on PPS along with control.
+        # otherwise, pick the best arm based on pr_best along with control.
+        best_arm_info = jnp.where(non_dropped_idx, pps, -1)
+        best_arm = jnp.argmax(best_arm_info) + 1
+        _, key = jax.random.split(key)
+
+        early_exit = early_exit_futility | (
+            pps[best_arm - 1] < self.inter_stage_futility_threshold
+        )
+
         # Stage 2 only if no early termination based on futility
-        # TODO: if early-exited because of PPS, pick the best arm based on PPS
-        # along with control and move to stage 2.
         return jax.lax.cond(
-            n_non_futile == 0,
+            early_exit,
             lambda: False,
             lambda: self.stage_2(
                 data=data,
-                non_futile_idx=non_futile_idx,
-                pr_best=pr_best,
-                p=p_no_zeros,
+                best_arm=best_arm,
+                p=p_clipped,
                 key=key,
             ),
         )

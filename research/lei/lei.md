@@ -31,7 +31,7 @@ import numpyro.distributions as dist
 from functools import partial
 from itertools import combinations
 
-import lewis
+from lewis import lewis
 from lewis import batch
 ```
 
@@ -437,25 +437,34 @@ plt.show()
 
 ```python
 %%time
-key = jax.random.PRNGKey(0)
 params = {
     "n_arms" : 3,
-    "n_stage_1" : 10,
+    "n_stage_1" : 20,
     "n_stage_2" : 10,
-    "n_interims" : 3,
-    "n_add_per_interim" : 4,
-    "futility_threshold" : 0.1,
-    "pps_threshold_lower" : 0.1,
-    "pps_threshold_upper" : 0.9,
+    "n_stage_1_interims" : 2,
+    "n_stage_1_add_per_interim" : 4,
+    "n_stage_2_add_per_interim" : 4,
+    "stage_1_futility_threshold" : 0.1,
+    "stage_1_efficacy_threshold" : 0.9,
+    "stage_2_futility_threshold" : 0.1,
+    "stage_2_efficacy_threshold" : 0.9,
+    "inter_stage_futility_threshold" : 0.8,
     "posterior_difference_threshold" : 0.05,
     "rejection_threshold" : 0.05,
     "n_pr_sims" : 100,
     "n_sig2_sim" : 20,
-    "batch_size" : 2**10,
 }
 lei_obj = lewis.Lewis45(**params)
-p = jnp.array([0.5] * params['n_arms'])
-#grid_points = jnp.array([p] * n_grid_points)
+```
+
+```python
+batch_size = 2**10
+p = jnp.array([0.5] + [0.9] * (params['n_arms']-1))
+key = jax.random.PRNGKey(0)
+n_sims = 1000
+keys = jax.random.split(key, num=n_sims)
+n_grid_points = 2
+grid_points = jnp.array([p] * n_grid_points)
 ```
 
 ```python
@@ -472,33 +481,69 @@ def generate_data(n, p, key, n_sims=-1):
 ```
 
 ```python
-%%time 
-n = jnp.array([params['n_stage_1']]*params['n_arms']) 
-n_data = 10
-data = generate_data(n, p, key, n_data)
-sim_keys = jax.random.split(key, num=n_data)
+%%time
+lei_obj.cache_posterior_difference_table(batch_size=batch_size)
+lei_obj.pd_table
 ```
 
 ```python
 %%time
-#rejections = jax.jit(lei_obj.single_sim)(p, key)
-#rejections = jax.jit(lei_obj.simulate_point)(p, keys)
-#rejections = jax.jit(lei_obj.simulate)(grid_points, keys)
-#jnp.mean(rejections, axis=-1)
-```
-
-```python
-lei_obj.n_configs_setting__()
+lei_obj.cache_pr_best_pps_1_table(key, batch_size=batch_size)
+lei_obj.pr_best_table.shape, lei_obj.pps_1_table.shape
 ```
 
 ```python
 %%time
-pd = lei_obj.posterior_difference_table__(batch_size=params['batch_size'])
-pd.shape
+lei_obj.cache_pps_2_table(key, batch_size=batch_size)
+lei_obj.pps_2_table.shape
 ```
 
 ```python
 %%time
-pr_best, pps = lei_obj.pr_best_pps_table__(key, batch_size=params['batch_size'])
-pr_best.shape, pps.shape
+stage_1_jit = jax.jit(lei_obj.stage_1)
+stage_2_jit = jax.jit(lei_obj.stage_2)
+single_sim_jit = jax.jit(lei_obj.single_sim)
+simulate_point_jit = jax.jit(lei_obj.simulate_point)
+```
+
+```python
+%%time
+rejs = simulate_point_jit(p, keys)
+```
+
+```python
+jnp.mean(rejs)
+```
+
+```python
+n_arr = lei_obj.n_configs_pd[-1]
+
+def foo(key):
+    out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
+    _, key = jax.random.split(key)
+    out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
+    _, key = jax.random.split(key)
+    out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
+    return out
+    
+foos = jax.vmap(foo, in_axes=(0,))
+foos_jit = jax.jit(foos)
+```
+
+```python
+%%time
+foos(keys)
+```
+
+```python
+def foo(p, key):
+    return lei_obj.stage_1(p, key)
+
+foo_jit = jax.jit(jax.vmap(foo, in_axes=(None,0)))
+#data = generate_data(lei_obj.n_configs_pd[0], p, key, n_sims=1000)
+```
+
+```python
+%%time
+foo_jit(p, keys)
 ```
