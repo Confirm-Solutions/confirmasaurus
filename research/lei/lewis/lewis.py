@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
 from lewis import batch
 
 import outlaw.berry as berry
@@ -28,6 +27,19 @@ We define concepts used in the code:
 - `cached table`:
     A cached table is assumed to be many table of values
     row-stacked in the same order as a list of n configurations.
+
+- `pd`:
+    Posterior difference (between treatment and control arms):
+        P(p_i - p_0 < t | y, n)
+- `pr_best`:
+    Posterior probability of best arm:
+        P(p_i = max_{j} p_j | y, n)
+- `pps`:
+    Posterior probability of success:
+        P(Reject at stage 2 with all remaining
+          patients added to control and selected arm |
+            y, n,
+            selected arm = i)
 """
 
 
@@ -49,17 +61,13 @@ class Lewis45:
         rejection_threshold: float,
         sig2_int=quad.log_gauss_rule(15, 2e-6, 1e3),
         n_pr_sims: int = 100,
-        n_sig2_sim: int = 100,
+        n_sig2_sim: int = 20,
         dtype=jnp.float64,
         cache_tables=False,
+        **kwargs,
     ):
         """
         Constructs an object to run the Lei example.
-
-        acronyms:
-        - "pd" == "Posterior difference (between treatment and control arms)"
-        - "pr_best" == "(Posterior) probability of best arm"
-        - "pps" == "Posterior probability of success"
 
         Parameters:
         -----------
@@ -150,10 +158,18 @@ class Lewis45:
         self.pps_2_table = None
         self.pd_table = None
 
+        # cache jitted internal functions
+        self.posterior_difference_table_internal_jit__ = None
+        self.pr_best_pps_1_internal_jit__ = None
+        self.pps_2_internal_jit__ = None
+
         if cache_tables:
-            self.cache_posterior_difference_table()
-            self.cache_pr_best_pps_1_table()
-            self.cache_pps_2_table()
+            self.cache_posterior_difference_table(batch_size=kwargs["batch_size"])
+            self.cache_pr_best_pps_1_table(
+                key=kwargs["key"], batch_size=kwargs["batch_size"]
+            )
+            _, key = jax.random.split(kwargs["key"])
+            self.cache_pps_2_table(key=key, batch_size=kwargs["batch_size"])
 
     # ===============================================
     # Table caching logic
@@ -357,9 +373,15 @@ class Lewis45:
             out = jnp.row_stack(outs)
             return out[:(-n_padded)] if n_padded > 0 else out
 
-        internal_jit = jax.jit(internal)
+        # if called for the first time, register jitted function
+        if self.posterior_difference_table_internal_jit__ is None:
+            self.posterior_difference_table_internal_jit__ = jax.jit(internal)
+
         tup_tables = tuple(
-            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_pd
+            process_batch__(
+                ns, self.posterior_difference_table_internal_jit__, batch_size
+            )
+            for ns in self.n_configs_pd
         )
         return jnp.row_stack(tup_tables)
 
@@ -409,9 +431,12 @@ class Lewis45:
                 else (pr_best_out, pps_outs)
             )
 
-        internal_jit = jax.jit(internal)
+        # if called for the first time, register jitted function
+        if self.pr_best_pps_1_internal_jit__ is None:
+            self.pr_best_pps_1_internal_jit__ = jax.jit(internal)
+
         tup_tables = tuple(
-            process_batch__(ns, internal_jit, batch_size)
+            process_batch__(ns, self.pr_best_pps_1_internal_jit__, batch_size)
             for ns in self.n_configs_pr_best_pps_1
         )
         pr_best_tables = tuple(t[0] for t in tup_tables)
@@ -463,9 +488,13 @@ class Lewis45:
             out = jnp.row_stack(outs)
             return out[:(-n_padded)] if n_padded > 0 else out
 
-        internal_jit = jax.jit(internal)
+        # if called for the first time, register jitted function
+        if self.pps_2_internal_jit__ is None:
+            self.pps_2_internal_jit__ = jax.jit(internal)
+
         tup_tables = tuple(
-            process_batch__(ns, internal_jit, batch_size) for ns in self.n_configs_pps_2
+            process_batch__(ns, self.pps_2_internal_jit__, batch_size)
+            for ns in self.n_configs_pps_2
         )
         return jnp.row_stack(tup_tables)
 
@@ -687,18 +716,36 @@ class Lewis45:
     # Trial Logic
     # ===========
 
-    def stage_1(self, p, key):
+    def unifs_shape(self):
+        """
+        Helper function that returns the necessary shape of
+        uniform draws for a single simulation to ensure enough Binomial
+        samples are guaranteed.
+        """
+        n_max = (
+            self.n_stage_1
+            + self.n_stage_1_interims * self.n_stage_1_add_per_interim
+            + self.n_stage_2
+            + self.n_stage_2_add_per_interim
+        )
+        return (n_max, self.n_arms)
+
+    def stage_1(self, berns, berns_order, berns_start=0):
         """
         Runs a single simulation of Stage 1 of the Lei example.
 
         Parameters:
         -----------
-        p:      simulation grid-point.
-        key:    jax PRNG key.
+        berns:      a 2-D array of Bernoulli(p) draws of shape (n, d) where
+                    n is the max number of patients to enroll
+                    and d is the total number of arms.
+        berns_order:            result of calling jnp.arange(0, berns.shape[0]).
+                                It is made an argument to be able to reuse this array.
+        berns_start:            starting row position into berns to begin accumulation.
 
         Returns:
         --------
-        data, n_non_futile, non_futile_idx, pr_best, key
+        data, n_non_futile, non_futile_idx, pr_best, berns_start
 
         data:           (number of arms, 2) where column 0 is the
                         simulated binomial data for each arm
@@ -710,10 +757,11 @@ class Lewis45:
                         being the best arm for each arm.
                         It is set to jnp.nan if the arm was dropped for
                         futility or if the arm is control (index 0).
-        key:            last PRNG key used.
+        berns_start:    the next starting position to accumulate berns.
         """
 
-        n_arms = self.n_arms
+        # aliases
+        n_arms = berns.shape[1]
         n_stage_1 = self.n_stage_1
         n_interims = self.n_stage_1_interims
         n_add_per_interim = self.n_stage_1_add_per_interim
@@ -721,9 +769,16 @@ class Lewis45:
         efficacy_threshold = self.stage_1_efficacy_threshold
 
         # create initial data
-        n_arr = jnp.full(shape=n_arms, fill_value=n_stage_1)
-        data = dist.Binomial(total_count=n_arr, probs=p).sample(key)
-        data = jnp.stack((data, n_arr), axis=-1)
+        berns_end = berns_start + n_stage_1
+        n = jnp.full(shape=n_arms, fill_value=n_stage_1)
+        berns_subset = jnp.where(
+            ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
+            berns,
+            0,
+        )
+        y = jnp.sum(berns_subset, axis=0)
+        data = jnp.stack((y, n), axis=-1)
+        berns_start = berns_end
 
         # auxiliary variables
         non_dropped_idx = jnp.ones(n_arms - 1, dtype=bool)
@@ -731,7 +786,17 @@ class Lewis45:
 
         # Stage 1:
         def body_func(args):
-            i, _, _, data, _, non_dropped_idx, pr_best, pps, key = args
+            (
+                i,
+                _,
+                _,
+                data,
+                _,
+                non_dropped_idx,
+                pr_best,
+                pps,
+                berns_start,
+            ) = args
 
             # get next non-dropped indices
             non_dropped_idx = (pr_best >= futility_threshold) * non_dropped_idx
@@ -752,10 +817,19 @@ class Lewis45:
                 (jnp.array(True)[None], non_dropped_idx), dtype=bool
             )
             add_idx = add_idx * do_add
-            n_new = jnp.where(add_idx, n_add_per_interim // (n_non_dropped + 1), 0)
-            _, key = jax.random.split(key)
-            y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
-            data = data + jnp.stack((y_new, n_new), axis=-1)
+            n_new_per_arm = n_add_per_interim // (n_non_dropped + 1)
+            n_new = jnp.full(shape=n_arms, fill_value=n_new_per_arm)
+            berns_end = berns_start + n_new_per_arm
+            berns_subset = jnp.where(
+                ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
+                berns,
+                0,
+            )
+            y_new = jnp.sum(berns_subset, axis=0)
+            data_new = jnp.stack((y_new, n_new), axis=-1)
+            data_new = jnp.where(add_idx[:, None], data_new, 0)
+            data = data + data_new
+            berns_start = berns_end
 
             pr_best, pps = self.get_pr_best_pps_1__(data)
 
@@ -768,7 +842,7 @@ class Lewis45:
                 non_dropped_idx,
                 pr_best,
                 pps,
-                key,
+                berns_start,
             )
 
         (
@@ -780,7 +854,7 @@ class Lewis45:
             non_dropped_idx,
             _,
             pps,
-            key,
+            berns_start,
         ) = jax.lax.while_loop(
             lambda tup: (tup[0] < n_interims) & jnp.logical_not(tup[1] | tup[2]),
             body_func,
@@ -793,7 +867,7 @@ class Lewis45:
                 non_dropped_idx,
                 pr_best,
                 pps,
-                key,
+                berns_start,
             ),
         )
 
@@ -802,30 +876,36 @@ class Lewis45:
             data,
             non_dropped_idx,
             pps,
-            key,
+            berns_start,
         )
 
     def stage_2(
         self,
         data,
         best_arm,
-        p,
-        key,
+        berns,
+        berns_order,
+        berns_start,
     ):
         """
         Runs a single simulation of stage 2 of the Lei example.
 
         Parameters:
         -----------
-        data:   simulated binomial data as in lei_stage_1 output.
-        non_dropped_idx:        a boolean vector indicating which arm is non-futile.
-        p:                      simulation grid-point.
-        key:                    jax PRNG key.
+        data:                   data in canonical form.
+        best_arm:               treatment arm index that is chosen for stage 2.
+        berns:                  a 2-D array of Bernoulli(p) draws of shape (n, d)
+                                where n is the max number of patients and
+                                d is the number of arms.
+        berns_order:            result of calling jnp.arange(0, berns.shape[0]).
+                                It is made an argument to be able to reuse this array.
+        berns_start:            start row position into berns to start accumulation.
 
         Returns:
         --------
         0 if no rejection, otherwise 1.
         """
+        n_arms = berns.shape[1]
         n_stage_2 = self.n_stage_2
         n_stage_2_add_per_interim = self.n_stage_2_add_per_interim
         pps_threshold_lower = self.stage_2_futility_threshold
@@ -836,9 +916,18 @@ class Lewis45:
 
         # add n_stage_2 number of patients to each
         # of the control and selected treatment arms.
-        n_new = jnp.where(non_dropped_idx, n_stage_2, 0)
-        y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
-        data = data + jnp.stack((y_new, n_new), axis=-1)
+        berns_end = berns_start + n_stage_2
+        n_new = jnp.full(shape=n_arms, fill_value=n_stage_2)
+        berns_subset = jnp.where(
+            ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
+            berns,
+            0,
+        )
+        y_new = jnp.sum(berns_subset, axis=0)
+        data_new = jnp.stack((y_new, n_new), axis=-1)
+        data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
+        data = data + data_new
+        berns_start = berns_end
 
         pps = self.get_pps_2__(data)[best_arm - 1]
 
@@ -848,12 +937,19 @@ class Lewis45:
         early_exit = early_exit_futility | early_exit_efficacy
         early_exit_out = jnp.logical_not(early_exit_futility) | early_exit_efficacy
 
-        _, key = jax.random.split(key)
-
-        def final_analysis(data):
-            n_new = jnp.where(non_dropped_idx, n_stage_2_add_per_interim, 0)
-            y_new = dist.Binomial(total_count=n_new, probs=p).sample(key)
-            data = data + jnp.stack((y_new, n_new), axis=-1)
+        def final_analysis(data, berns_start):
+            berns_end = n_stage_2_add_per_interim
+            n_new = jnp.full(shape=n_arms, fill_value=n_stage_2_add_per_interim)
+            berns_subset = jnp.where(
+                ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
+                berns,
+                0,
+            )
+            y_new = jnp.sum(berns_subset, axis=0)
+            data_new = jnp.stack((y_new, n_new), axis=-1)
+            data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
+            data = data + data_new
+            berns_start = berns_end
             return (
                 self.get_posterior_difference__(data)[best_arm - 1]
                 < rejection_threshold
@@ -862,27 +958,27 @@ class Lewis45:
         return jax.lax.cond(
             early_exit,
             lambda: early_exit_out,
-            lambda: final_analysis(data),
+            lambda: final_analysis(data, berns_start),
         )
 
-    def single_sim(self, p, key):
+    def simulate(self, p, unifs, unifs_order):
         """
         Runs a single simulation of both stage 1 and stage 2.
 
         Parameters:
         -----------
-        p:      simulation grid-point.
-        key:    jax PRNG key.
+        p:          simulation grid-point.
+        unifs:      a 2-D array of uniform draws of shape (n, d) where
+                    n is the max number of patients to enroll
+                    and d is the total number of arms.
         """
-        # TODO: temporary fix: binomial sampling requires this if n parameter
-        # cannot be constant folded and p == 0 in some entries.
-        p_clipped = jnp.where(p == 0, 1e-5, p)
-        p_clipped = jnp.where(p_clipped == 1, 1 - 1e-5, p_clipped)
+        # construct bernoulli draws
+        berns = unifs < p[None]
 
         # Stage 1:
-        (early_exit_futility, data, non_dropped_idx, pps, key,) = self.stage_1(
-            p=p_clipped,
-            key=key,
+        (early_exit_futility, data, non_dropped_idx, pps, berns_start) = self.stage_1(
+            berns=berns,
+            berns_order=unifs_order,
         )
 
         # if early-exited because of efficacy,
@@ -890,7 +986,6 @@ class Lewis45:
         # otherwise, pick the best arm based on pr_best along with control.
         best_arm_info = jnp.where(non_dropped_idx, pps, -1)
         best_arm = jnp.argmax(best_arm_info) + 1
-        _, key = jax.random.split(key)
 
         early_exit = early_exit_futility | (
             pps[best_arm - 1] < self.inter_stage_futility_threshold
@@ -903,15 +998,8 @@ class Lewis45:
             lambda: self.stage_2(
                 data=data,
                 best_arm=best_arm,
-                p=p_clipped,
-                key=key,
+                berns=berns,
+                berns_order=unifs_order,
+                berns_start=berns_start,
             ),
         )
-
-    def simulate_point(self, p, keys):
-        single_sim_vmapped = jax.vmap(self.single_sim, in_axes=(None, 0))
-        return single_sim_vmapped(p, keys)
-
-    def simulate(self, grid_points, keys):
-        simulate_point_vmapped = jax.vmap(self.simulate_point, in_axes=(0, None))
-        return simulate_point_vmapped(grid_points, keys)

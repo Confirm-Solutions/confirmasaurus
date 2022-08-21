@@ -451,20 +451,23 @@ params = {
     "inter_stage_futility_threshold" : 0.8,
     "posterior_difference_threshold" : 0.05,
     "rejection_threshold" : 0.05,
-    "n_pr_sims" : 100,
-    "n_sig2_sim" : 20,
+    "key" : jax.random.PRNGKey(0),
+    "batch_size" : int(2**16),
+    "cache_tables" : False,
 }
 lei_obj = lewis.Lewis45(**params)
 ```
 
 ```python
-batch_size = 2**10
+batch_size = 2**16
 p = jnp.array([0.5] + [0.9] * (params['n_arms']-1))
 key = jax.random.PRNGKey(0)
 n_sims = 1000
 keys = jax.random.split(key, num=n_sims)
 n_grid_points = 2
 grid_points = jnp.array([p] * n_grid_points)
+n_pr_sims = 100
+n_sig2_sim = 20
 ```
 
 ```python
@@ -501,49 +504,100 @@ lei_obj.pps_2_table.shape
 ```python
 %%time
 stage_1_jit = jax.jit(lei_obj.stage_1)
-stage_2_jit = jax.jit(lei_obj.stage_2)
-single_sim_jit = jax.jit(lei_obj.single_sim)
-simulate_point_jit = jax.jit(lei_obj.simulate_point)
+simulate_jit = jax.jit(lei_obj.simulate)
+
+unifs = jax.random.uniform(key=key, shape=lei_obj.unifs_shape())
+unifs_order = jnp.arange(0, unifs.shape[0])
 ```
 
 ```python
 %%time
-rejs = simulate_point_jit(p, keys)
+rejs = simulate_jit(p, unifs, unifs_order)
 ```
 
 ```python
 jnp.mean(rejs)
 ```
 
-```python
-n_arr = lei_obj.n_configs_pd[-1]
+# Sandbox
 
-def foo(key):
-    out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
-    _, key = jax.random.split(key)
-    out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
-    _, key = jax.random.split(key)
+```python
+n_arr = jnp.full(4, 300)
+p = 0.5 * jnp.ones(4)
+bench_keys = jax.random.split(key, num=1000000)
+def bench_binom(key):
     out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
     return out
     
-foos = jax.vmap(foo, in_axes=(0,))
-foos_jit = jax.jit(foos)
+n_max = int(jnp.max(n_arr))
+unifs = jax.random.uniform(key=key, shape=(n_max, len(n_arr)))
+order = jnp.arange(0, n_max)
+def bench_binom_2(key, n_arr):
+    subset = ((order >= n_arr[0]-200) & (order < n_arr[1]-100))[:, None]
+    berns = jnp.where(subset, unifs < p[None], False)
+    return jnp.sum(berns, axis=0)
+    
+bench_binom = jax.vmap(bench_binom, in_axes=(0,))
+bench_binom_jit = jax.jit(bench_binom)
+bench_binom_2 = jax.vmap(bench_binom_2, in_axes=(0, None))
+bench_binom_2_jit = jax.jit(bench_binom_2)
 ```
 
 ```python
 %%time
-foos(keys)
-```
-
-```python
-def foo(p, key):
-    return lei_obj.stage_1(p, key)
-
-foo_jit = jax.jit(jax.vmap(foo, in_axes=(None,0)))
-#data = generate_data(lei_obj.n_configs_pd[0], p, key, n_sims=1000)
+bench_binom_jit(bench_keys)
 ```
 
 ```python
 %%time
-foo_jit(p, keys)
+bench_binom_2_jit(bench_keys, n_arr)
+```
+
+```python
+from lewis.cartesian_batcher import CartesianBatcher
+
+cb = CartesianBatcher(
+    lower=-1,
+    upper=1,
+    n_batches=3,
+    batch_size=20,
+    n_arms=params['n_arms'],
+)
+
+indices = cb.batch_indices()
+```
+
+```python
+def each_sim(key, batcher):
+    unifs = jax.random.uniform(key, shape=lei_obj.unifs_shape())
+    unifs_order =jnp.arange(0, unifs.shape[0])
+    grid_1d = jax.scipy.special.expit(batcher.grid_1d)
+    indices = batcher.batch_indices()
+    return jax.vmap(
+        lambda idx: jax.vmap(lambda p: lei_obj.simulate(p, unifs, unifs_order), in_axes=(0,))(batcher.batch(idx)),
+        in_axes=(0,)
+    )(indices).flatten()
+    
+def each_sim_vmap(key, batcher):
+    return jax.vmap(each_sim, in_axes=(0, None))(keys, batcher)
+
+@partial(jax.jit, static_argnums=(1,))
+def sim_batch(keys, batcher):
+    return jnp.sum(each_sim_vmap(keys, batcher), axis=0)
+    
+def simulate_all(keys, batcher, batch_size):
+    f = lewis.batch.batch_all(sim_batch, batch_size, in_axes=(0, None))
+    outs, n_padded = f(keys, batcher)
+    out = jnp.row_stack(outs)
+    out = out[:-n_padded] if n_padded > 0 else out
+    return jnp.sum(out, axis=0) 
+    
+keys = jax.random.split(key, num=20)
+each_sim_jit = jax.jit(each_sim, static_argnums=(1,))
+each_sim_vmap_jit = jax.jit(each_sim_vmap, static_argnums=(1,))
+```
+
+```python
+%%time
+sim_batch(keys, cb)
 ```

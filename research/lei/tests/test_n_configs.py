@@ -9,14 +9,13 @@ default_params = {
     "n_stage_1_interims": 3,
     "n_stage_1_add_per_interim": 4,
     "n_stage_2_add_per_interim": 4,
-    "futility_threshold": 0.1,
-    "pps_threshold_lower": 0.1,
-    "pps_threshold_upper": 0.9,
+    "stage_1_futility_threshold": 0.1,
+    "stage_2_futility_threshold": 0.1,
+    "stage_1_efficacy_threshold": 0.9,
+    "stage_2_efficacy_threshold": 0.9,
+    "inter_stage_futility_threshold": 0.8,
     "posterior_difference_threshold": 0.05,
     "rejection_threshold": 0.05,
-    "n_pr_sims": 100,
-    "n_sig2_sim": 20,
-    "batch_size": 2**10,
 }
 
 
@@ -36,10 +35,10 @@ def make_expected(
     n_stage_2,
     n_stage_2_add_per_interim,
 ):
-    n_configs_pps_2_expected = n_configs_pr_best_pps_1_expected
-    n_configs_pps_2_expected[:, -2:] += n_stage_2
-    n_configs_pd_expected = n_configs_pps_2_expected
-    n_configs_pd_expected[:, -2:] += n_stage_2_add_per_interim
+    n_configs_pps_2_expected = np.copy(n_configs_pr_best_pps_1_expected)
+    n_configs_pps_2_expected[:, :2] += n_stage_2
+    n_configs_pd_expected = np.copy(n_configs_pps_2_expected)
+    n_configs_pd_expected[:, :2] += n_stage_2_add_per_interim
     expected = (
         n_configs_pr_best_pps_1_expected,
         n_configs_pps_2_expected,
@@ -93,7 +92,7 @@ def test_3_arms_1_interim():
         [
             [10, 10, 10],
             [11, 11, 11],
-            [10, 12, 12],
+            [12, 12, 10],
         ]
     )
     expected = make_expected(
@@ -123,10 +122,10 @@ def test_3_arms_2_interim():
         [
             [5, 5, 5],
             [7, 7, 7],
-            [5, 8, 8],
+            [8, 8, 5],
             [9, 9, 9],
-            [7, 10, 10],
-            [5, 11, 11],
+            [10, 10, 7],
+            [11, 11, 5],
         ]
     )
     expected = make_expected(
@@ -184,8 +183,8 @@ def test_4_arms_1_interim():
         [
             [10, 10, 10, 10],
             [11, 11, 11, 11],
-            [10, 11, 11, 11],
-            [10, 10, 12, 12],
+            [11, 11, 11, 10],
+            [12, 12, 10, 10],
         ]
     )
     expected = make_expected(
@@ -215,14 +214,14 @@ def test_4_arms_2_interim():
         [
             [10, 10, 10, 10],
             [11, 11, 11, 11],
-            [10, 11, 11, 11],
-            [10, 10, 12, 12],
+            [11, 11, 11, 10],
+            [12, 12, 10, 10],
             [12, 12, 12, 12],
-            [11, 12, 12, 12],
-            [11, 11, 13, 13],
-            [10, 12, 12, 12],
-            [10, 11, 13, 13],
-            [10, 10, 14, 14],
+            [12, 12, 12, 11],
+            [13, 13, 11, 11],
+            [12, 12, 12, 10],
+            [13, 13, 11, 10],
+            [14, 14, 10, 10],
         ]
     )
     expected = make_expected(

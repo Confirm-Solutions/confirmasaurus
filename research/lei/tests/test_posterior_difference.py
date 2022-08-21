@@ -16,8 +16,6 @@ default_params = {
     "inter_stage_futility_threshold": 0.8,
     "posterior_difference_threshold": 0.05,
     "rejection_threshold": 0.05,
-    "n_pr_sims": 100,
-    "n_sig2_sim": 20,
 }
 
 
