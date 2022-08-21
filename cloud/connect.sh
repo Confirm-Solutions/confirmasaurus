@@ -11,4 +11,4 @@ eval `ssh-agent -s`
 ssh-add - <<< "${AWS_KEY_AWS_KEY_PAIR}"
 
 echo -e "\n Connecting to: $USER@$URL \n"
-ssh "$USER@$URL" 
+ssh -A "$USER@$URL" 
