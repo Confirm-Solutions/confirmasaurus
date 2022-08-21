@@ -971,6 +971,8 @@ class Lewis45:
         unifs:      a 2-D array of uniform draws of shape (n, d) where
                     n is the max number of patients to enroll
                     and d is the total number of arms.
+        unifs_order:            result of calling jnp.arange(0, unifs.shape[0]).
+                                It is made an argument to be able to reuse this array.
         """
         # construct bernoulli draws
         berns = unifs < p[None]
