@@ -13,12 +13,20 @@ provider "aws" {
   region = "us-east-1"
 }
 
-resource "aws_instance" "app_server" {
+locals {
+  vars = {
+    image_name = var.image_name
+  }
+}
+
+
+resource "aws_instance" "app" {
   ami           = var.ami
   instance_type = "t2.xlarge"
-  key_name      = var.key-name
+  key_name      = var.key_name
 
   tags = {
     Name = "confirmasaurus"
   }
+  user_data = templatefile("init.sh", local.vars)
 }

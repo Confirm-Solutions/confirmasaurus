@@ -43,3 +43,5 @@ venv
 
 # Cloud and AWS stuff
 .terraform
+.terraform.*
+terraform.*
