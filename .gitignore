@@ -40,3 +40,6 @@ __pycache__
 # Codespaces
 oryx-build-commands.txt
 venv
+
+# Cloud and AWS stuff
+.terraform
