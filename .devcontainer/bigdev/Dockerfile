@@ -20,7 +20,6 @@ FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
 
 COPY --from=mambaforge_upstream /opt /opt/
 
-# Copy library scripts to execute
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     PATH=/opt/conda/bin:$PATH
@@ -166,6 +165,11 @@ COPY environment*.yml /tmp/conda-tmp/
 RUN mamba create -n sagemath -y sage \
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
+#
+# BUG: the install here does not work correctly when launched inside docker
+# from an M1 Mac because it's running Linux on an "aarch64" architecture and
+# the PyPI packages from JAX are not properly set up.
+#
 # NOTE: installing g++ gcc binutils through conda results in conda activate
 # being slightly slow. this is weird and kind of a bummer.
     && mamba env update -n base -f /tmp/conda-tmp/environment.yml \
