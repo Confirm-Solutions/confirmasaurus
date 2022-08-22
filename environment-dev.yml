@@ -1,10 +1,10 @@
 channels:
   - conda-forge
 dependencies:
-  - seaborn
   - line_profiler
   - sympy
   - pandas
   - cython
   - radian
+  - openjdk<17
   - bazel
