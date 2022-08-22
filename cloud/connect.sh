@@ -15,5 +15,4 @@ USER="ec2-user" # for use with amazon linux
 echo -e "\n Connecting to: $USER@$URL \n"
 ssh -A "$USER@$URL" 
 
-
 # docker run -it --gpus all --network host -v `pwd`:/workspaces/confirmasaurus smalldev ls /workspaces/confirmasaurus

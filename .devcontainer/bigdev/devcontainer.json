@@ -1,9 +1,9 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
-  "name": "Compact but still useful devcontainer",
+  "name": "Big useful dev container",
   "build": {
-    "context": "..",
-    "dockerfile": "./smalldev/Dockerfile"
+    "context": "../..",
+    "dockerfile": "Dockerfile"
   },
   // Configure tool-specific properties.
   "customizations": {
@@ -13,7 +13,8 @@
       // if settings should also be applied to anyone checking out the
       // repo locally, put them in .vscode/settings.json instead
       "settings": {
-        "python.defaultInterpreterPath": "/opt/conda/bin/python"
+        "python.defaultInterpreterPath": "/opt/conda/bin/python",
+        "r.rterm.linux": "radian"
       },
       // Add the IDs of extensions you want installed when the container is created.
       "extensions": [
@@ -21,7 +22,11 @@
         "ms-python.vscode-pylance",
         "ms-toolsai.jupyter",
         "ms-toolsai.jupyter-renderers",
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
         "njpwerner.autodocstring",
+        "james-yu.latex-workshop",
+        "reditorsupport.r",
         "eamodio.gitlens"
       ]
     },
