@@ -44,7 +44,7 @@ resource "aws_iam_instance_profile" "test_profile" {
 
 resource "aws_instance" "app" {
   ami                  = var.ami
-  instance_type        = "t2.xlarge"
+  instance_type        = var.instance_type
   key_name             = var.key_name
   iam_instance_profile = aws_iam_instance_profile.test_profile.name
 

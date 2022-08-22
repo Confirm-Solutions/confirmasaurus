@@ -16,3 +16,9 @@ variable "image_name" {
   default     = "smalldev:latest"
   description = "Name of the docker image on ECR to use."
 }
+
+variable "instance_type" {
+  type        = string
+  default     = "t2.xlarge"
+  description = "description"
+}
