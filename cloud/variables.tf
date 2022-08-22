@@ -1,6 +1,7 @@
 variable "ami" {
   type        = string
-  default     = "ami-090fa75af13c156b4" # default ami
+  default     = "ami-090fa75af13c156b4" # default amazon linux ami
+  # default     = "ami-052efd3df9dad4825" # ubuntu 22.04 lts
   description = "AMI for the instance"
 }
 

@@ -56,7 +56,7 @@ resource "aws_instance" "app" {
   tags = {
     Name = "confirmasaurus"
   }
-  user_data = templatefile("init.sh", local.vars)
+  user_data = templatefile("init_amzn_linux.sh", local.vars)
 }
 
 output "ec2instance" {

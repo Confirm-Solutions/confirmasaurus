@@ -1,0 +1,9 @@
+version: '2'
+services:
+  web:
+    image: smalldev
+    ports:
+     - "8888:8888"
+     - "2222:22" # for ssh directly inside the container.
+    volumes:
+     - ../../:/workspaces/
