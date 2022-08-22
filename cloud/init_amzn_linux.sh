@@ -7,10 +7,10 @@
 sudo yum install -y docker jq
 sudo service docker start
 sudo usermod -a -G docker ec2-user
-sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
 
-# This is not needed anymore now that we're using Remote-Containers.
+# Everything below here is not needed anymore now that we're using Remote-Containers.
+# sudo curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+# sudo chmod +x /usr/local/bin/docker-compose
 # # https://stackoverflow.com/questions/51597492/how-to-get-aws-account-number-id-based-on-ec2-instance-which-is-hosted-in-amazo
 # export ACCOUNT=$(aws sts get-caller-identity | jq -r .Account)
 

@@ -18,3 +18,5 @@ ENV TF_VERSION="1.2.7"
 RUN curl "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" -o "terraform.zip" \
   && unzip terraform.zip \
   && mv terraform /usr/local/bin
+
+LABEL org.opencontainers.image.source https://github.com/Confirm-Solutions/confirmasaurus

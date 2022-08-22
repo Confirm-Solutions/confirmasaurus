@@ -184,3 +184,5 @@ RUN mamba create -n sagemath -y sage \
 # I've commented this out because I don't know if we should force everyone to
 # use zsh.
 # RUN usermod -s /bin/zsh root
+
+LABEL org.opencontainers.image.source https://github.com/Confirm-Solutions/confirmasaurus
