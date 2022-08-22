@@ -1,9 +1,9 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
-  "name": "Big useful dev container",
+  "name": "bigdev",
   "build": {
     "context": "../..",
-    "dockerfile": "Dockerfile"
+    "dockerfile": "../../cloud/bigdev/Dockerfile"
   },
   // Configure tool-specific properties.
   "customizations": {

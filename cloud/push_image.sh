@@ -9,7 +9,7 @@
 # docker push "$ACCOUNT".dkr.ecr.us-east-1.amazonaws.com/smalldev:latest
 
 # Github ghcr instructions:
-
+# TODO: push from github actions instead.
 echo $GITHUB_TOKEN | docker login ghcr.io -u tbenthompson --password-stdin
-docker tag smalldev ghcr.io/Confirm-Solutions/smalldev:latest
+docker tag smalldev ghcr.io/confirm-solutions/smalldev:latest
 docker push ghcr.io/confirm-solutions/smalldev:latest

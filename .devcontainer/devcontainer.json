@@ -1,6 +1,6 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
-  "name": "Compact but still useful devcontainer",
+  "name": "smalldev",
   "image": "ghcr.io/confirm-solutions/smalldev:latest",
 
   // "build": {
