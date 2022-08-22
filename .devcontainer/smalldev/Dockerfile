@@ -71,4 +71,4 @@ RUN mamba env update -n base -f /tmp/conda-tmp/environment.yml \
     && mamba clean --all --yes \
     && pip cache purge
 
-LABEL org.opencontainers.image.source="https://github.com/Confirm-Solutions/confirmasaurus"
+LABEL org.opencontainers.image.source https://github.com/Confirm-Solutions/confirmasaurus
