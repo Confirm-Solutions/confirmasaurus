@@ -10,6 +10,16 @@
   //   "args": { "VARIANT": "ubuntu-22.04" }
   // },
 
+  "customizations": {
+    "codespaces": {
+      "repositories": {
+        "Confirm-Solutions/imprint": {
+          "permissions": "write-all"
+        }
+      }
+    }
+  },
+
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
 
