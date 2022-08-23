@@ -232,36 +232,3 @@ def test_4_arms_2_interim():
 
     # tests
     run_n_configs_test(actual, expected)
-
-
-def test_3_arms_2_interms_settings():
-    # re-setting parameters to make it clear which parameters affect this function.
-    default_params["n_arms"] = 3
-    default_params["n_stage_1"] = 5
-    default_params["n_stage_2"] = 15
-    default_params["n_stage_1_interims"] = 2
-    default_params["n_stage_1_add_per_interim"] = 7
-    default_params["n_stage_2_add_per_interim"] = 4
-
-    lewis_obj = lewis.Lewis45(**default_params)
-    (
-        n_configs_max_mask,
-        _,
-        hashes_pr_best_pps_1,
-        _,
-        _,
-        hashes_pps_2,
-        _,
-        _,
-        hashes_pd,
-        _,
-    ) = lewis_obj.n_configs_setting__()
-
-    # expected values
-    n_configs_max_mask_expected = np.array([1, 30, 30**2])
-
-    # tests
-    assert np.array_equal(n_configs_max_mask, n_configs_max_mask_expected)
-    assert np.unique(hashes_pr_best_pps_1).shape == hashes_pr_best_pps_1.shape
-    assert np.unique(hashes_pps_2).shape == hashes_pps_2.shape
-    assert np.unique(hashes_pd).shape == hashes_pd.shape

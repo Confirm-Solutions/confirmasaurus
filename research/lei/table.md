@@ -31,7 +31,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
-import lewis
+from lewis import lewis
 ```
 
 ```python

@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from lewis import batch
+from lewis.lookup_table import LookupTable
 
 import outlaw.berry as berry
 import outlaw.inla as inla
@@ -60,8 +61,7 @@ class Lewis45:
         posterior_difference_threshold: float,
         rejection_threshold: float,
         sig2_int=quad.log_gauss_rule(15, 2e-6, 1e3),
-        n_pr_sims: int = 100,
-        n_sig2_sim: int = 20,
+        n_sig2_sims: int = 20,
         dtype=jnp.float64,
         cache_tables=False,
         **kwargs,
@@ -110,7 +110,6 @@ class Lewis45:
         self.inter_stage_futility_threshold = inter_stage_futility_threshold
         self.posterior_difference_threshold = posterior_difference_threshold
         self.rejection_threshold = rejection_threshold
-        self.n_pr_sims = n_pr_sims
         self.dtype = dtype
 
         # sig2 for quadrature integration
@@ -122,7 +121,7 @@ class Lewis45:
         )
 
         # sig2 for simulation
-        self.sig2_sim = 10 ** jnp.linspace(-6, 3, n_sig2_sim, dtype=self.dtype)
+        self.sig2_sim = 10 ** jnp.linspace(-6, 3, n_sig2_sims, dtype=self.dtype)
         self.dsig2_sim = jnp.diff(self.sig2_sim)
         self.custom_ops_sim = berry.optimized(self.sig2_sim, n_arms=self.n_arms).config(
             opt_tol=1e-3
@@ -131,17 +130,10 @@ class Lewis45:
         ## cache
         # n configuration information
         (
-            self.n_configs_max_mask,
             self.n_configs_pr_best_pps_1,
-            self.hashes_pr_best_pps_1,
-            self.offsets_pr_best_pps_1,
             self.n_configs_pps_2,
-            self.hashes_pps_2,
-            self.offsets_pps_2,
             self.n_configs_pd,
-            self.hashes_pd,
-            self.offsets_pd,
-        ) = self.n_configs_setting__()
+        ) = self.make_n_configs__()
 
         # diff_matrix[i]^T p = p[i+1] - p[0]
         self.diff_matrix = np.zeros((self.n_arms - 1, self.n_arms))
@@ -152,51 +144,33 @@ class Lewis45:
         # order of arms used for auxiliary computations
         self.order = jnp.arange(0, self.n_arms, dtype=int)
 
-        # posterior difference tables for every possible combination of n
-        self.pr_best_table = None
-        self.pps_1_table = None
-        self.pps_2_table = None
-        self.pd_table = None
-
         # cache jitted internal functions
         self.posterior_difference_table_internal_jit__ = None
         self.pr_best_pps_1_internal_jit__ = None
         self.pps_2_internal_jit__ = None
 
+        # posterior difference tables for every possible combination of n
         if cache_tables:
-            self.cache_posterior_difference_table(batch_size=kwargs["batch_size"])
-            self.cache_pr_best_pps_1_table(
-                key=kwargs["key"], batch_size=kwargs["batch_size"]
+            self.pd_table = self.posterior_difference_table__(
+                batch_size=kwargs["batch_size"]
+            )
+            self.pr_best_pps_1_table = self.pr_best_pps_1_table__(
+                key=kwargs["key"],
+                n_pr_sims=kwargs["n_pr_sims"],
+                batch_size=kwargs["batch_size"],
             )
             _, key = jax.random.split(kwargs["key"])
-            self.cache_pps_2_table(key=key, batch_size=kwargs["batch_size"])
+            self.pps_2_table = self.pps_2_table__(
+                key=kwargs["key"],
+                n_pr_sims=kwargs["n_pr_sims"],
+                batch_size=kwargs["batch_size"],
+            )
 
     # ===============================================
     # Table caching logic
     # ===============================================
 
-    def hash__(self, data, hashes, offsets):
-        """
-        Hashes `data` to return an index into a cached table
-        whose table value corresponds to some function value
-        using `data` as its input.
-        We assume that `data` is in canonical form.
-
-        Parameters:
-        -----------
-        data:   data in canonical form.
-        hashes: list of sorted (increasing) hashes
-                corresponding to a set of n configurations.
-                Assumes that hashes was created using self.hash_n__().
-                hashes[i] is the hash of the ith n configuration.
-        offsets:    list of offsets into any cached tables corresponding
-                    to the set of n configurations, i.e.
-                    offsets[i] is the offset into a cached table
-                    for the ith n configuration corresponding to hashes[i].
-        """
-        y = data[:, 0]
-        n = data[:, 1]
-
+    def make_canonical__(self, data):
         # we use the facts that:
         # - arms that are not dropped always have
         #   n value at least as large as those that were dropped.
@@ -204,36 +178,12 @@ class Lewis45:
         # This means a stable sort will always:
         # - keep the first row in-place
         # - only the treatment rows will be sorted
+        n = data[:, 1]
         n_order = jnp.flip(n.shape[0] - 1 - jnp.argsort(jnp.flip(n), kind="stable"))
-        n_sorted = n[n_order]
-        y_sorted = y[n_order]
-        n_hash = self.hash_n__(n_sorted)
-        idx = jnp.searchsorted(hashes, n_hash)
-        n_offset = offsets[idx]
-
-        # this indexing works because tabling data is generated with this assumption.
-        # y_sorted = [a, b, c] => corresponds to
-        # relative index a*(n[-1]+1)*(n[-2]+1) + b*(n[-1]+1) + c.
-        y_index = y_sorted[-1] + jnp.sum(
-            jnp.flip(y_sorted[:-1]) * jnp.cumprod(jnp.flip(n_sorted[1:] + 1))
-        )
-        return y_index + n_offset, n_order
-
-    def hash_n_internal__(self, n, mask):
-        """
-        Hashes the n configuration with a given mask.
-
-        Parameters:
-        -----------
-        mask:   a mask to weigh `n` such that the weighted sum
-                is unique for each n configuration.
-                This should be guaranteed using self.n_configs_max_mask.
-        n:      n configuration sorted in decreasing order.
-        """
-        return jnp.sum(mask * n)
-
-    def hash_n__(self, n):
-        return self.hash_n_internal__(n, self.n_configs_max_mask)
+        data = data[n_order]
+        data = jnp.stack((data[:, 0], data[:, 1] + 1), axis=-1)
+        n_order_inverse = jnp.argsort(n_order)[1:] - 1
+        return data, n_order_inverse
 
     def make_n_configs__(self):
         """
@@ -292,51 +242,6 @@ class Lewis45:
 
         return n_configs_pr_best_pps_1, n_configs_pps_2, n_configs_pd
 
-    def n_configs_setting__(self):
-        """
-        Returns all necessary information regarding `n` configurations.
-
-        Returns:
-        --------
-        n_configs_max_mask, n_configs, hashes, offsets
-
-        n_configs_max_mask: mask of basis values to induce
-                            unique hash of n configurations.
-        n_configs:  an array of `n` configurations.
-        hashes:     a 1-D vector containing the hashes of each `n` configuration.
-                    in the same order as in n_configs.
-        offsets:    a 1-D vector containing the offsets into a cache table
-                    that corresponds to the beginning of the table
-                    for a given `n` configuration.
-        """
-        (
-            n_configs_pr_best_pps_1,
-            n_configs_pps_2,
-            n_configs_pd,
-        ) = self.make_n_configs__()
-
-        n_configs_max = jnp.max(n_configs_pd)
-        n_configs_max_mask = n_configs_max ** jnp.arange(0, self.n_arms)
-        n_configs_max_mask = n_configs_max_mask.astype(int)
-
-        def settings(n_configs):
-            hashes = jnp.array(
-                [self.hash_n_internal__(ns, n_configs_max_mask) for ns in n_configs]
-            )
-            hashes_order = jnp.argsort(hashes)
-            n_configs = n_configs[hashes_order]
-            hashes = hashes[hashes_order]
-            sizes = jnp.array([0] + [jnp.prod(ns + 1) for ns in n_configs])
-            offsets = jnp.cumsum(sizes)[:-1]
-            return n_configs, hashes, offsets
-
-        return (
-            n_configs_max_mask,
-            *settings(n_configs_pr_best_pps_1),
-            *settings(n_configs_pps_2),
-            *settings(n_configs_pd),
-        )
-
     def table_data__(self, ns, coords):
         """
         Creates a data array used to construct internal tables.
@@ -383,16 +288,13 @@ class Lewis45:
             )
             for ns in self.n_configs_pd
         )
-        return jnp.row_stack(tup_tables)
+        return LookupTable(self.n_configs_pd + 1, tup_tables)
 
-    def cache_posterior_difference_table(self, batch_size):
-        self.pd_table = self.posterior_difference_table__(batch_size)
-
-    def pr_best_pps_1_table__(self, key, batch_size):
+    def pr_best_pps_1_table__(self, key, n_pr_sims, batch_size):
         unifs = jax.random.uniform(
             key=key,
             shape=(
-                self.n_pr_sims,
+                n_pr_sims,
                 self.n_stage_2 + self.n_stage_2_add_per_interim,
                 self.n_arms,
             ),
@@ -400,10 +302,10 @@ class Lewis45:
         _, key = jax.random.split(key)
         unifs_sig2 = jax.random.uniform(
             key=key,
-            shape=(self.n_pr_sims,),
+            shape=(n_pr_sims,),
         )
         _, key = jax.random.split(key)
-        normals = jax.random.normal(key, shape=(self.n_pr_sims, self.n_arms))
+        normals = jax.random.normal(key, shape=(n_pr_sims, self.n_arms))
 
         def internal(data):
             return jax.vmap(self.pr_best_pps_1, in_axes=(0, None, None, None))(
@@ -441,19 +343,15 @@ class Lewis45:
         )
         pr_best_tables = tuple(t[0] for t in tup_tables)
         pps_tables = tuple(t[1] for t in tup_tables)
-        return jnp.row_stack(pr_best_tables), jnp.row_stack(pps_tables)
+        return LookupTable(
+            self.n_configs_pr_best_pps_1 + 1, (pr_best_tables, pps_tables)
+        )
 
-    def cache_pr_best_pps_1_table(self, key, batch_size):
-        (
-            self.pr_best_table,
-            self.pps_1_table,
-        ) = self.pr_best_pps_1_table__(key, batch_size)
-
-    def pps_2_table__(self, key, batch_size):
+    def pps_2_table__(self, key, n_pr_sims, batch_size):
         unifs = jax.random.uniform(
             key=key,
             shape=(
-                self.n_pr_sims,
+                n_pr_sims,
                 self.n_stage_2_add_per_interim,
                 self.n_arms,
             ),
@@ -461,12 +359,12 @@ class Lewis45:
         _, key = jax.random.split(key)
         unifs_sig2 = jax.random.uniform(
             key=key,
-            shape=(self.n_pr_sims,),
+            shape=(n_pr_sims,),
         )
         _, key = jax.random.split(key)
         normals = jax.random.normal(
             key=key,
-            shape=(self.n_pr_sims, self.n_arms),
+            shape=(n_pr_sims, self.n_arms),
         )
 
         def internal(data):
@@ -496,30 +394,20 @@ class Lewis45:
             process_batch__(ns, self.pps_2_internal_jit__, batch_size)
             for ns in self.n_configs_pps_2
         )
-        return jnp.row_stack(tup_tables)
-
-    def cache_pps_2_table(self, key, batch_size):
-        self.pps_2_table = self.pps_2_table__(key, batch_size)
+        return LookupTable(self.n_configs_pps_2 + 1, tup_tables)
 
     def get_posterior_difference__(self, data):
-        h, n_order = self.hash__(data, self.hashes_pd, self.offsets_pd)
-        n_order_inverse = jnp.argsort(n_order)[1:] - 1
-        return self.pd_table[h][n_order_inverse]
+        data, n_order_inverse = self.make_canonical__(data)
+        return self.pd_table.at(data)[0][n_order_inverse]
 
     def get_pr_best_pps_1__(self, data):
-        h, n_order = self.hash__(
-            data, self.hashes_pr_best_pps_1, self.offsets_pr_best_pps_1
-        )
-        n_order_inverse = jnp.argsort(n_order)[1:] - 1
-        return (
-            self.pr_best_table[h][n_order_inverse],
-            self.pps_1_table[h][n_order_inverse],
-        )
+        data, n_order_inverse = self.make_canonical__(data)
+        outs = self.pr_best_pps_1_table.at(data)
+        return tuple(out[n_order_inverse] for out in outs)
 
     def get_pps_2__(self, data):
-        h, n_order = self.hash__(data, self.hashes_pps_2, self.offsets_pps_2)
-        n_order_inverse = jnp.argsort(n_order)[1:] - 1
-        return self.pps_2_table[h][n_order_inverse]
+        data, n_order_inverse = self.make_canonical__(data)
+        return self.pps_2_table.at(data)[0][n_order_inverse]
 
     # ===============================================
     # Core routines for computing Bayesian quantities

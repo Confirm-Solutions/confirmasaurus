@@ -20,7 +20,7 @@ default_params = {
     "batch_size": 2**16,
     "key": jax.random.PRNGKey(1),
     "n_pr_sims": 100,
-    "n_sig2_sim": 20,
+    "n_sig2_sims": 20,
     "cache_tables": True,
 }
 

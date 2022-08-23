@@ -452,6 +452,8 @@ params = {
     "posterior_difference_threshold" : 0.05,
     "rejection_threshold" : 0.05,
     "key" : jax.random.PRNGKey(0),
+    "n_pr_sims" : 100,
+    "n_sig2_sims" : 20,
     "batch_size" : int(2**16),
     "cache_tables" : False,
 }
@@ -485,72 +487,28 @@ def generate_data(n, p, key, n_sims=-1):
 
 ```python
 %%time
-lei_obj.cache_posterior_difference_table(batch_size=batch_size)
+lei_obj.pd_table = lei_obj.posterior_difference_table__(batch_size=batch_size)
 lei_obj.pd_table
 ```
 
 ```python
 %%time
-lei_obj.cache_pr_best_pps_1_table(key, batch_size=batch_size)
-lei_obj.pr_best_table.shape, lei_obj.pps_1_table.shape
+lei_obj.pr_best_pps_1_table = lei_obj.pr_best_pps_1_table__(
+    key, 
+    n_pr_sims,
+    batch_size=batch_size
+)
+lei_obj.pr_best_pps_1_table
 ```
 
 ```python
 %%time
-lei_obj.cache_pps_2_table(key, batch_size=batch_size)
-lei_obj.pps_2_table.shape
-```
-
-```python
-%%time
-stage_1_jit = jax.jit(lei_obj.stage_1)
-simulate_jit = jax.jit(lei_obj.simulate)
-
-unifs = jax.random.uniform(key=key, shape=lei_obj.unifs_shape())
-unifs_order = jnp.arange(0, unifs.shape[0])
-```
-
-```python
-%%time
-rejs = simulate_jit(p, unifs, unifs_order)
-```
-
-```python
-jnp.mean(rejs)
-```
-
-# Sandbox
-
-```python
-n_arr = jnp.full(4, 300)
-p = 0.5 * jnp.ones(4)
-bench_keys = jax.random.split(key, num=1000000)
-def bench_binom(key):
-    out = dist.Binomial(total_count=n_arr, probs=p).sample(key)
-    return out
-    
-n_max = int(jnp.max(n_arr))
-unifs = jax.random.uniform(key=key, shape=(n_max, len(n_arr)))
-order = jnp.arange(0, n_max)
-def bench_binom_2(key, n_arr):
-    subset = ((order >= n_arr[0]-200) & (order < n_arr[1]-100))[:, None]
-    berns = jnp.where(subset, unifs < p[None], False)
-    return jnp.sum(berns, axis=0)
-    
-bench_binom = jax.vmap(bench_binom, in_axes=(0,))
-bench_binom_jit = jax.jit(bench_binom)
-bench_binom_2 = jax.vmap(bench_binom_2, in_axes=(0, None))
-bench_binom_2_jit = jax.jit(bench_binom_2)
-```
-
-```python
-%%time
-bench_binom_jit(bench_keys)
-```
-
-```python
-%%time
-bench_binom_2_jit(bench_keys, n_arr)
+lei_obj.pps_2_table = lei_obj.pps_2_table__(
+    key, 
+    n_pr_sims,
+    batch_size=batch_size,
+)
+lei_obj.pps_2_table
 ```
 
 ```python
@@ -560,7 +518,7 @@ cb = CartesianBatcher(
     lower=-1,
     upper=1,
     n_batches=3,
-    batch_size=20,
+    batch_size=10,
     n_arms=params['n_arms'],
 )
 
@@ -568,17 +526,22 @@ indices = cb.batch_indices()
 ```
 
 ```python
+def simulate_vmap(i, batcher, unifs, unifs_order):
+    return jax.vmap(lei_obj.simulate, in_axes=(0, None, None))(
+        batcher.batch(i), unifs, unifs_order,
+    )
+    
 def each_sim(key, batcher):
     unifs = jax.random.uniform(key, shape=lei_obj.unifs_shape())
     unifs_order =jnp.arange(0, unifs.shape[0])
     grid_1d = jax.scipy.special.expit(batcher.grid_1d)
     indices = batcher.batch_indices()
     return jax.vmap(
-        lambda idx: jax.vmap(lambda p: lei_obj.simulate(p, unifs, unifs_order), in_axes=(0,))(batcher.batch(idx)),
-        in_axes=(0,)
-    )(indices).flatten()
+        simulate_vmap,
+        in_axes=(0, None, None, None)
+    )(indices, batcher, unifs, unifs_order).flatten()
     
-def each_sim_vmap(key, batcher):
+def each_sim_vmap(keys, batcher):
     return jax.vmap(each_sim, in_axes=(0, None))(keys, batcher)
 
 @partial(jax.jit, static_argnums=(1,))
@@ -599,5 +562,34 @@ each_sim_vmap_jit = jax.jit(each_sim_vmap, static_argnums=(1,))
 
 ```python
 %%time
-sim_batch(keys, cb)
+#each_sim_jit(key, cb)
+each_sim_vmap_jit(keys, cb)
+#sim_batch(keys, cb)
+```
+
+# Sandbox
+
+```python
+from lewis.lookup_table import LookupTable, HashableArrayWrapper
+
+n_configs = jnp.array([
+    [1, 2, 3],
+    [10, 2, 1],
+])
+tables = tuple(
+    jnp.arange(0, jnp.prod(ns+1)).reshape((-1, 1))
+    for ns in n_configs
+)
+
+table = LookupTable(n_configs, tables)
+```
+
+```python
+dict = {}
+
+@partial(jax.jit, static_argnums=(0,))
+def foo(n):
+    dict[n] = 1
+
+foo(HashableArrayWrapper(n_configs[0], table.n_configs_max_mask))
 ```

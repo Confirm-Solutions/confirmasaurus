@@ -21,7 +21,7 @@ default_params = {
 
 def test_get_posterior_difference():
     lewis_obj = lewis.Lewis45(**default_params)
-    lewis_obj.cache_posterior_difference_table(int(2**16))
+    lewis_obj.pd_table = lewis_obj.posterior_difference_table__(batch_size=int(2**16))
     n = lewis_obj.n_configs_pd[2]
     y = jnp.array([5, 1, 2])
     data = jnp.stack((y, n), axis=-1)

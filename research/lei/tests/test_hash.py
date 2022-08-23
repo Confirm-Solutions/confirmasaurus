@@ -1,6 +1,7 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
-from lewis import lewis
+from lewis.lookup_table import LookupTable
 
 
 default_params = {
@@ -34,6 +35,17 @@ def test_stable_sort_2():
     assert jnp.array_equal(order, expected)
 
 
+def test_hash_undo():
+    n = jnp.array([12, 5, 5, 12])
+    n_order = jnp.flip(n.shape[0] - 1 - jnp.argsort(jnp.flip(n), kind="stable"))
+
+    # test if this piece of code gives us the correct undoing
+    actual = jnp.argsort(n_order)
+    expected = jnp.array([0, 2, 3, 1])
+
+    assert jnp.array_equal(actual, expected)
+
+
 def test_y_to_index():
     n = np.array([5, 5, 5, 2])
     max_idx = np.prod(n + 1)
@@ -55,33 +67,18 @@ def test_y_to_index():
 
 
 def test_hash():
-    default_params["n_arms"] = 4
-    lewis_obj = lewis.Lewis45(**default_params)
     n = jnp.array([12, 5, 5, 12])
-    assert jnp.array_equal(jnp.flip(jnp.sort(n)), lewis_obj.n_configs_pd[-1])
-
+    dims = n + 1
+    values = jnp.arange(0, jnp.prod(dims))[:, None]
+    table = LookupTable(dims[None], values)
     y = jnp.array([5, 1, 0, 10])
-    data = jnp.stack((y, n), axis=-1)
-    actual, _ = lewis_obj.hash__(data, lewis_obj.hashes_pd, lewis_obj.offsets_pd)
 
-    y_index = 2706
-    expected = lewis_obj.offsets_pd[-1] + y_index
+    # tests if the at function is jit-able also.
+    @jax.jit
+    def internal():
+        data = jnp.stack((y, dims), axis=-1)
+        return table.at(data)[0].squeeze()
 
-    assert jnp.array_equal(actual, expected)
-
-
-def test_hash_undo():
-    default_params["n_arms"] = 4
-    lewis_obj = lewis.Lewis45(**default_params)
-    n = jnp.array([12, 5, 5, 12])
-    assert jnp.array_equal(jnp.flip(jnp.sort(n)), lewis_obj.n_configs_pd[-1])
-
-    y = jnp.array([5, 1, 0, 10])
-    data = jnp.stack((y, n), axis=-1)
-    _, n_order = lewis_obj.hash__(data, lewis_obj.hashes_pd, lewis_obj.offsets_pd)
-
-    # test if this piece of code gives us the correct undoing
-    actual = jnp.argsort(n_order)
-    expected = jnp.array([0, 2, 3, 1])
-
+    actual = internal()
+    expected = 2428
     assert jnp.array_equal(actual, expected)
