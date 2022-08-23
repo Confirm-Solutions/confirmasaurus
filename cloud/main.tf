@@ -56,9 +56,17 @@ resource "aws_instance" "app" {
   tags = {
     Name = "confirmasaurus"
   }
+  
+#   these two links explain how to use user data to install things on the instance:
+# - https://klotzandrew.com/blog/deploy-an-ec2-to-run-docker-with-terraform
+# - https://awstip.com/to-set-up-docker-container-inside-ec2-instance-with-terraform-3af5d53e54ba
   user_data = templatefile("init_amzn_linux.sh", local.vars)
 }
 
 output "ec2instance" {
   value = aws_instance.app.public_dns
+}
+
+output "id" {
+  value = aws_instance.app.id 
 }
