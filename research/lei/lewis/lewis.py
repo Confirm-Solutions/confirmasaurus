@@ -161,7 +161,7 @@ class Lewis45:
             )
             _, key = jax.random.split(kwargs["key"])
             self.pps_2_table = self.pps_2_table__(
-                key=kwargs["key"],
+                key=key,
                 n_pr_sims=kwargs["n_pr_sims"],
                 batch_size=kwargs["batch_size"],
             )
@@ -826,7 +826,7 @@ class Lewis45:
         early_exit_out = jnp.logical_not(early_exit_futility) | early_exit_efficacy
 
         def final_analysis(data, berns_start):
-            berns_end = n_stage_2_add_per_interim
+            berns_end = berns_start + n_stage_2_add_per_interim
             n_new = jnp.full(shape=n_arms, fill_value=n_stage_2_add_per_interim)
             berns_subset = jnp.where(
                 ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],

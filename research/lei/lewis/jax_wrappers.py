@@ -5,8 +5,7 @@ class ArraySlice0:
     def __init__(self, a, start, end):
         self.array = a
         self.start = start
-        self.end = end
-        self.size = self.end - self.start
+        self.end = end  # TODO: unused
 
     def __getitem__(self, index):
         return self.array[self.start + index]
