@@ -51,6 +51,9 @@ def setup_nb(text_size_ratio=0.75, pretty=True, autoreload=True):
     plt.rcParams["figure.facecolor"] = (1.0, 1.0, 1.0, 1.0)
     plt.rcParams["savefig.transparent"] = False
     plt.rcParams["image.cmap"] = "plasma"
+    # Use the same font for latex and non-latex text
+    plt.rcParams["mathtext.fontset"] = "cm"
+    plt.rcParams["font.family"] = "STIXGeneral"
     scale_text(factor=text_size_ratio)
     np.set_printoptions(edgeitems=10, linewidth=100)
 

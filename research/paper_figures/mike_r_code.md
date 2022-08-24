@@ -85,6 +85,10 @@ for(i in 2:npoints){
   lines(x = mu[i] + stepsize*penalized_sequence, y = penalized_bound)
 }
 
+```
+
+```R vscode={"languageId": "r"}
+
 
 ########################################
 
@@ -117,6 +121,9 @@ lines(x = temp_mu, y = pow_temp_mu, lty = 3, col = "red")
 #abline(a = .025,b =0)
 
 
+```
+
+```R vscode={"languageId": "r"}
 #Graphic 4: Confidence Intervals for the First Derivative
 set.seed(150)
 npoints = 3
@@ -162,6 +169,9 @@ for(i in 1:npoints){
 temp_mu = seq(-1,0, length.out = npoints*100)
 pow_temp_mu = 1 - pnorm(- temp_mu + 1.96)
 lines(x = temp_mu, y = pow_temp_mu, lty = 3, col = "black")
+```
+
+```R vscode={"languageId": "r"}
 
 # Graphic 5: pushing down critical value
 
