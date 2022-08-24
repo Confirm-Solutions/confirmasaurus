@@ -23,3 +23,16 @@ def test_against_scipy():
             grid, values, xi, method="linear", bounds_error=False, fill_value=None
         )
         np.testing.assert_allclose(result, scipy_result)
+
+
+def test_against_scipy_multi_value():
+    for i in range(3):
+        np.random.seed(10)
+        grid = [np.sort(np.random.uniform(size=10)) for _ in range(2)]
+        values = np.random.uniform(size=(10, 10, 3))
+        xi = np.random.uniform(size=(10, 2))
+        result = interpn(grid, values, xi)
+        scipy_result = scipy.interpolate.interpn(
+            grid, values, xi, method="linear", bounds_error=False, fill_value=None
+        )
+        np.testing.assert_allclose(result, scipy_result)

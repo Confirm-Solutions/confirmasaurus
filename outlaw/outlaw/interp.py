@@ -1,11 +1,6 @@
-from functools import partial
-
-import jax
 import jax.numpy as jnp
 
 
-@jax.jit
-@partial(jax.vmap, in_axes=(None, None, 0))
 def interpn(points, values, xi):
     """
     A JAX reimplementation of scipy.interpolate.interpn. Most of the input
@@ -85,21 +80,19 @@ def _evaluate_linear(grid, values, indices, norm_distances):
     ]
     # the final indices will be the unraveled ND indices produced from the 1D
     # indices above.
-    hypercube_indices = jnp.ravel_multi_index(
-        [hypercube_dim_indices[i].flatten() for i in range(d)],
-        [grid[i].shape[0] for i in range(d)],
-        mode="clip",
-    )
+    hypercube_indices = tuple(hypercube_dim_indices[i].flatten() for i in range(d))
 
     # the weights for the left and right sides of each 1D interval.
     # norm_distance is the normalized distance from the left edge so the weight
     # will be (1 - norm_distance) for the left edge
-    hypercube_dim_weights = [
-        jnp.array([1 - norm_distances[i], norm_distances[i]])[unit_cube[i]]
-        for i in range(d)
-    ]
+    hypercube_dim_weights = jnp.array(
+        [
+            jnp.array([1 - norm_distances[i], norm_distances[i]])[unit_cube[i]]
+            for i in range(d)
+        ]
+    )
     # the final weights will be the product of the weights for each dimension
-    hypercube_weights = jnp.prod(jnp.array(hypercube_dim_weights), axis=0).ravel()
+    hypercube_weights = jnp.prod(hypercube_dim_weights, axis=0).ravel()
 
     # finally, select the values to interpolate and multiply by the weights.
-    return (values.ravel()[hypercube_indices] * hypercube_weights).sum()
+    return hypercube_weights @ values[hypercube_indices]
