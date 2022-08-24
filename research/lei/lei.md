@@ -517,8 +517,8 @@ from lewis.cartesian_batcher import CartesianBatcher
 cb = CartesianBatcher(
     lower=-1,
     upper=1,
-    n_batches=3,
-    batch_size=10,
+    n_batches=4,
+    batch_size=14,
     n_arms=params['n_arms'],
 )
 
@@ -563,8 +563,9 @@ each_sim_vmap_jit = jax.jit(each_sim_vmap, static_argnums=(1,))
 ```python
 %%time
 #each_sim_jit(key, cb)
-each_sim_vmap_jit(keys, cb)
+out = each_sim_vmap_jit(keys, cb)
 #sim_batch(keys, cb)
+jnp.sum(out)
 ```
 
 # Sandbox
