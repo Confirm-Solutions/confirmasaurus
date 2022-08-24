@@ -569,26 +569,40 @@ jnp.mean(out)
 # Sandbox
 
 ```python
-from lewis.lookup_table import LookupTable, HashableArrayWrapper
+from outlaw import interp
 
-n_configs = jnp.array([
-    [1, 2, 3],
-    [10, 2, 1],
+grid = np.array([[0, 1], [0, 1]])
+values = np.array([[0, 1], [2, 3]])
+xi = np.array([0.5, 0.5])
+
+grid = tuple(jnp.asarray(g) for g in grid)
+
+d = len(grid)
+indices, norm_distances = interp._find_indices(grid, xi)
+
+# Construct the unit d-dimensional cube.
+unit_cube = jnp.meshgrid(*[jnp.array([0, 1]) for i in range(d)], indexing="ij")
+
+# Choose the left or right index for each corner of the hypercube. these
+# are 1D indices which get used in will later be used to construct the ND
+# indices of each corner.
+hypercube_dim_indices = [
+    jnp.array([indices[i], indices[i] + 1])[unit_cube[i]] for i in range(d)
+]
+# the final indices will be the unraveled ND indices produced from the 1D
+# indices above.
+hypercube_indices = tuple(hypercube_dim_indices[i].flatten() for i in range(d))
+
+# the weights for the left and right sides of each 1D interval.
+# norm_distance is the normalized distance from the left edge so the weight
+# will be (1 - norm_distance) for the left edge
+hypercube_dim_weights = jnp.array([
+    jnp.array([1 - norm_distances[i], norm_distances[i]])[unit_cube[i]]
+    for i in range(d)
 ])
-tables = tuple(
-    jnp.arange(0, jnp.prod(ns+1)).reshape((-1, 1))
-    for ns in n_configs
-)
+# the final weights will be the product of the weights for each dimension
+hypercube_weights = jnp.prod(hypercube_dim_weights, axis=0).ravel()
 
-table = LookupTable(n_configs, tables)
-```
-
-```python
-dict = {}
-
-@partial(jax.jit, static_argnums=(0,))
-def foo(n):
-    dict[n] = 1
-
-foo(HashableArrayWrapper(n_configs[0], table.n_configs_max_mask))
+# finally, select the values to interpolate and multiply by the weights.
+(values[hypercube_indices] * hypercube_weights).sum()
 ```
