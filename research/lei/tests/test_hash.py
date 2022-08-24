@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from lewis.lookup_table import LookupTable
+from lewis.table import LookupTable
 
 
 default_params = {

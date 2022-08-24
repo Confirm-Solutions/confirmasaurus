@@ -1,8 +1,9 @@
 import jax.numpy as jnp
 import lewis.jax_wrappers as jwp
+from lewis.table.base import BaseTable
 
 
-class LookupTable:
+class LookupTable(BaseTable):
     def __init__(
         self,
         n_sizes,
@@ -30,45 +31,32 @@ class LookupTable:
                     0 <= y < n_sizes, where the first index increments slowest
                     and the last index increments fastest.
         """
+        super().__init__(n_sizes)
+
         # force tables to be a tuple of (tuple of sub-tables)
         if not isinstance(tables, tuple):
             tables = ((tables,),)
         if not isinstance(tables[0], tuple):
             tables = (tables,)
 
-        n_arms = n_sizes.shape[-1]
-        n_sizes_max = jnp.max(n_sizes) + 1
-        n_sizes_max_mask = n_sizes_max ** jnp.arange(0, n_arms)
-        self.n_sizes_max_mask = n_sizes_max_mask.astype(int)
-
-        hashes = jnp.array([self.hash_n__(ns) for ns in n_sizes])
-        hashes_order = jnp.argsort(hashes)
-        n_sizes = n_sizes[hashes_order]
-        self.hashes = hashes[hashes_order]
+        tables_reordered = tuple(self.hash_ordered(sub_tables) for sub_tables in tables)
         self.tables = tuple(
-            jnp.row_stack((sub_tables[i] for i in hashes_order))
-            for sub_tables in tables
+            jnp.row_stack(sub_tables) for sub_tables in tables_reordered
         )
+
+        # reorder based on hash order
+        n_sizes = n_sizes[self.hashes_order]
+
+        # compute offsets corresponding to each n_size
         sizes = jnp.array([0] + [jnp.prod(ns) for ns in n_sizes])
         sizes_cumsum = jnp.cumsum(sizes)
         self.offsets = sizes_cumsum[:-1]
         self.sizes = sizes[1:]
 
-    def hash_n__(self, n):
-        """
-        Hashes the n configuration with a given mask.
-
-        Parameters:
-        -----------
-        n:      n configuration sorted in decreasing order.
-        """
-        return jnp.sum(n * self.n_sizes_max_mask)
-
     def at(self, data):
         index = data[:, 0]
         n = data[:, 1]
-        n_hash = self.hash_n__(n)
-        idx = jnp.searchsorted(self.hashes, n_hash)
+        idx = self.search(n)
         offset = self.offsets[idx]
         size = self.sizes[idx]
         slices = tuple(jwp.slice0(t, offset, offset + size) for t in self.tables)

@@ -487,7 +487,7 @@ def generate_data(n, p, key, n_sims=-1):
 
 ```python
 %%time
-lei_obj.pd_table = lei_obj.posterior_difference_table__(batch_size=batch_size)
+lei_obj.pd_table = lei_obj.posterior_difference_table__(batch_size=batch_size, n_points=None)
 lei_obj.pd_table
 ```
 
@@ -569,40 +569,15 @@ jnp.mean(out)
 # Sandbox
 
 ```python
-from outlaw import interp
+n_config = jnp.array([10, 13])
+n_points = 4
+n = n_config + 1
+idx = 1
+```
 
-grid = np.array([[0, 1], [0, 1]])
-values = np.array([[0, 1], [2, 3]])
-xi = np.array([0.5, 0.5])
-
-grid = tuple(jnp.asarray(g) for g in grid)
-
-d = len(grid)
-indices, norm_distances = interp._find_indices(grid, xi)
-
-# Construct the unit d-dimensional cube.
-unit_cube = jnp.meshgrid(*[jnp.array([0, 1]) for i in range(d)], indexing="ij")
-
-# Choose the left or right index for each corner of the hypercube. these
-# are 1D indices which get used in will later be used to construct the ND
-# indices of each corner.
-hypercube_dim_indices = [
-    jnp.array([indices[i], indices[i] + 1])[unit_cube[i]] for i in range(d)
-]
-# the final indices will be the unraveled ND indices produced from the 1D
-# indices above.
-hypercube_indices = tuple(hypercube_dim_indices[i].flatten() for i in range(d))
-
-# the weights for the left and right sides of each 1D interval.
-# norm_distance is the normalized distance from the left edge so the weight
-# will be (1 - norm_distance) for the left edge
-hypercube_dim_weights = jnp.array([
-    jnp.array([1 - norm_distances[i], norm_distances[i]])[unit_cube[i]]
-    for i in range(d)
-])
-# the final weights will be the product of the weights for each dimension
-hypercube_weights = jnp.prod(hypercube_dim_weights, axis=0).ravel()
-
-# finally, select the values to interpolate and multiply by the weights.
-(values[hypercube_indices] * hypercube_weights).sum()
+```python
+n_points_clip = jnp.minimum(jnp.min(n), n_points)
+steps = (n - 1) // (n_points_clip - 1)
+n_no_end = steps * (n_points_clip - 1)
+jnp.concatenate((jnp.arange(n_no_end[idx], step=steps[idx]), n[idx][None]-1))
 ```

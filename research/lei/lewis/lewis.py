@@ -1,8 +1,10 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 from lewis import batch
-from lewis.lookup_table import LookupTable
+from lewis.table import LookupTable
 
 import outlaw.berry as berry
 import outlaw.inla as inla
@@ -260,20 +262,56 @@ class Lewis45:
         data = jnp.stack((data, n_arr), axis=-1)
         return data
 
-    def posterior_difference_table__(self, batch_size):
+    def make_grid__(self, n, n_points):
+        """
+        Creates a 2-D array of shape (d, n_points)
+        where d is n.shape[0].
+        Each row is a 1-D gridding of points for each entry of n
+        by creating evenly-spaced gridding from [0, n[i]).
+        The gridding always includes 0 and n[i]-1.
+        If n_points is greater than the min(n) it is clipped to be min(n).
+        """
+        n_points_clip = jnp.minimum(jnp.min(n), n_points)
+        steps = (n - 1) // (n_points_clip - 1)
+        n_no_end = steps * (n_points_clip - 1)
+        return jnp.array(
+            [
+                jnp.concatenate(
+                    (jnp.arange(n_no_end[idx], step=steps[idx]), n[idx][None] - 1)
+                )
+                for idx in range(len(n))
+            ]
+        )
+
+    def posterior_difference_table__(
+        self,
+        batch_size,
+        n_points=None,
+    ):
         def internal(data):
             return jax.vmap(self.posterior_difference, in_axes=(0,))(data)
 
-        def process_batch__(ns, f, batch_size):
+        if n_points:
+            grid = jax.vmap(self.make_grid__, in_axes=(0, None))(
+                self.n_configs_pd, n_points
+            )
+
+        def process_batch__(i, f, batch_size):
             f_batched = batch.batch_all(
                 f,
                 batch_size,
                 in_axes=(0,),
             )
-            outs, n_padded = f_batched(
-                self.table_data__(
-                    ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij")
+
+            if n_points:
+                meshgrid = jnp.meshgrid(*grid[i], indexing="ij")
+            else:
+                meshgrid = jnp.meshgrid(
+                    *(jnp.arange(0, n + 1) for n in self.n_configs_pd[i]), indexing="ij"
                 )
+
+            outs, n_padded = f_batched(
+                self.table_data__(self.n_configs_pd[i], meshgrid)
             )
             out = jnp.row_stack(outs)
             return out[:(-n_padded)] if n_padded > 0 else out
@@ -284,11 +322,15 @@ class Lewis45:
 
         tup_tables = tuple(
             process_batch__(
-                ns, self.posterior_difference_table_internal_jit__, batch_size
+                i, self.posterior_difference_table_internal_jit__, batch_size
             )
-            for ns in self.n_configs_pd
+            for i in range(self.n_configs_pd.shape[0])
         )
-        return LookupTable(self.n_configs_pd + 1, tup_tables)
+
+        if n_points:
+            return None  # LinearInterpTable(grid, tup_tables)
+        else:
+            return LookupTable(self.n_configs_pd + 1, tup_tables)
 
     def pr_best_pps_1_table__(self, key, n_pr_sims, batch_size):
         unifs = jax.random.uniform(
@@ -618,6 +660,21 @@ class Lewis45:
         )
         return (n_max, self.n_arms)
 
+    def sample(self, berns, berns_order, berns_start, n_new_per_arm):
+        berns_end = berns_start + n_new_per_arm
+        berns_subset = jnp.where(
+            ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
+            berns,
+            0,
+        )
+        n_new = jnp.full(shape=self.n_arms, fill_value=n_new_per_arm)
+        y_new = jnp.sum(berns_subset, axis=0)
+        data_new = jnp.stack((y_new, n_new), axis=-1)
+        return (
+            data_new,
+            berns_end,
+        )
+
     def stage_1(self, berns, berns_order, berns_start=0):
         """
         Runs a single simulation of Stage 1 of the Lei example.
@@ -657,16 +714,12 @@ class Lewis45:
         efficacy_threshold = self.stage_1_efficacy_threshold
 
         # create initial data
-        berns_end = berns_start + n_stage_1
-        n = jnp.full(shape=n_arms, fill_value=n_stage_1)
-        berns_subset = jnp.where(
-            ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
-            berns,
-            0,
+        data, berns_start = self.sample(
+            berns=berns,
+            berns_order=berns_order,
+            berns_start=berns_start,
+            n_new_per_arm=n_stage_1,
         )
-        y = jnp.sum(berns_subset, axis=0)
-        data = jnp.stack((y, n), axis=-1)
-        berns_start = berns_end
 
         # auxiliary variables
         non_dropped_idx = jnp.ones(n_arms - 1, dtype=bool)
@@ -706,18 +759,13 @@ class Lewis45:
             )
             add_idx = add_idx * do_add
             n_new_per_arm = n_add_per_interim // (n_non_dropped + 1)
-            n_new = jnp.full(shape=n_arms, fill_value=n_new_per_arm)
-            berns_end = berns_start + n_new_per_arm
-            berns_subset = jnp.where(
-                ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
-                berns,
-                0,
+            data_new, berns_start = self.sample(
+                berns=berns,
+                berns_order=berns_order,
+                berns_start=berns_start,
+                n_new_per_arm=n_new_per_arm,
             )
-            y_new = jnp.sum(berns_subset, axis=0)
-            data_new = jnp.stack((y_new, n_new), axis=-1)
             data_new = jnp.where(add_idx[:, None], data_new, 0)
-            data = data + data_new
-            berns_start = berns_end
 
             pr_best, pps = self.get_pr_best_pps_1__(data)
 
@@ -793,7 +841,6 @@ class Lewis45:
         --------
         0 if no rejection, otherwise 1.
         """
-        n_arms = berns.shape[1]
         n_stage_2 = self.n_stage_2
         n_stage_2_add_per_interim = self.n_stage_2_add_per_interim
         pps_threshold_lower = self.stage_2_futility_threshold
@@ -804,18 +851,14 @@ class Lewis45:
 
         # add n_stage_2 number of patients to each
         # of the control and selected treatment arms.
-        berns_end = berns_start + n_stage_2
-        n_new = jnp.full(shape=n_arms, fill_value=n_stage_2)
-        berns_subset = jnp.where(
-            ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
-            berns,
-            0,
+        data_new, berns_start = self.sample(
+            berns=berns,
+            berns_order=berns_order,
+            berns_start=berns_start,
+            n_new_per_arm=n_stage_2,
         )
-        y_new = jnp.sum(berns_subset, axis=0)
-        data_new = jnp.stack((y_new, n_new), axis=-1)
         data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
         data = data + data_new
-        berns_start = berns_end
 
         pps = self.get_pps_2__(data)[best_arm - 1]
 
@@ -826,18 +869,14 @@ class Lewis45:
         early_exit_out = jnp.logical_not(early_exit_futility) | early_exit_efficacy
 
         def final_analysis(data, berns_start):
-            berns_end = berns_start + n_stage_2_add_per_interim
-            n_new = jnp.full(shape=n_arms, fill_value=n_stage_2_add_per_interim)
-            berns_subset = jnp.where(
-                ((berns_order >= berns_start) & (berns_order < berns_end))[:, None],
-                berns,
-                0,
+            data_new, berns_start = self.sample(
+                berns=berns,
+                berns_order=berns_order,
+                berns_start=berns_start,
+                n_new_per_arm=n_stage_2_add_per_interim,
             )
-            y_new = jnp.sum(berns_subset, axis=0)
-            data_new = jnp.stack((y_new, n_new), axis=-1)
             data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
             data = data + data_new
-            berns_start = berns_end
             return (
                 self.get_posterior_difference__(data)[best_arm - 1]
                 < rejection_threshold
