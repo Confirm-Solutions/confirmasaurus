@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('base')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -16,7 +16,6 @@ jupyter:
 import berrylib.util as util
 
 util.setup_nb()
-
 ```
 
 ```python
@@ -32,16 +31,26 @@ import berrylib.grid as berrylibgrid
 
 import jax
 # set to cpu or gpu to run on a specific device.
-jax.config.update('jax_platform_name', 'gpu')
+# jax.config.update('jax_platform_name', 'gpu')
 ```
 
 ```python
-name = "berry2d"
-n_arms = 2
 n_arm_samples = 35
 seed = 10
-n_theta_1d = 64
-sim_size = 10000
+
+# name = "berry4d"
+# n_arms = 4
+# n_theta_1d = 64
+# sim_size = 500000
+# theta_min = -3.5
+# theta_max = 1.0
+
+name = "berry3d"
+n_arms = 3
+n_theta_1d = 24
+sim_size = 30000
+theta_min = -2.8
+theta_max = -1.2
 ```
 
 ```python
@@ -56,7 +65,7 @@ sim_size = 10000
 null_hypos = [
     berrylibgrid.HyperPlane(-np.identity(n_arms)[i], -logit(0.1)) for i in range(n_arms)
 ]
-theta1d = [np.linspace(-3.5, 1.0, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)]
+theta1d = [np.linspace(theta_min, theta_max, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)]
 theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
 radii = np.empty(theta.shape)
 for i in range(theta.shape[1]):
@@ -87,7 +96,7 @@ chunk_size = 5000
 n_chunks = int(np.ceil(theta_tiles.shape[0] / chunk_size))
 
 device = jax.devices('cpu')[0]
-for i in range(2):
+for i in range(n_chunks):
     start = i * chunk_size
     end = (i + 1) * chunk_size
     end = min(end, theta_tiles.shape[0])
@@ -96,6 +105,29 @@ for i in range(2):
         g.null_truth[start:end],
         samples
     )
+```
+
+```python
+corners = g.vertices
+c_flat = corners.reshape((-1, 2))
+tile_radii = g.radii[g.grid_pt_idx]
+sim_sizes = np.full(g.n_tiles, sim_size)
+total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
+    theta_tiles,
+    tile_radii,
+    corners,
+    sim_sizes,
+    n_arm_samples,
+    typeI_sum,
+    typeI_score,
+)
+bound_components = (total, d0, d0u, d1w, d1uw, d2uw)
+```
+
+```python
+grid_components = (theta, theta_tiles, tile_radii, corners, g.null_truth)
+sim_components = (sim_sizes, typeI_sum, typeI_score)
+np.save(f"output_{name}.npy", (grid_components, sim_components, bound_components))
 ```
 
 ```python
@@ -150,8 +182,6 @@ plt.show()
 ```
 
 ```python
-corners = g.vertices
-c_flat = corners.reshape((-1, 2))
 plt.scatter(c_flat[:, 0], c_flat[:, 1], c="k")
 plt.scatter(theta[:, 0], theta[:, 1], c="m")
 plt.hlines(logit(0.1), -4, 2, "r")
@@ -159,22 +189,6 @@ plt.vlines(logit(0.1), -4, 2, "r")
 plt.xlim(np.min(theta[:, 0]) - 0.2, np.max(theta[:, 0]) + 0.2)
 plt.ylim(np.min(theta[:, 1]) - 0.2, np.max(theta[:, 1]) + 0.2)
 plt.show()
-
-```
-
-```python
-%%time
-tile_radii = g.radii[g.grid_pt_idx]
-sim_sizes = np.full(g.n_tiles, sim_size)
-total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
-    theta_tiles,
-    tile_radii,
-    corners,
-    sim_sizes,
-    n_arm_samples,
-    typeI_sum,
-    typeI_score,
-)
 
 ```
 

@@ -134,7 +134,7 @@ def lookup_rejection(table, y, n_arm_samples=35):
 def upper_bound(
     theta_tiles,
     tile_radii,
-    corners,
+    eval_pts,
     sim_sizes,
     n_arm_samples,
     typeI_sum,
@@ -144,67 +144,57 @@ def upper_bound(
 ):
     """
     Compute the Imprint upper bound after simulations have been run.
+
+    Note that normally eval_pts is a 3D array of shape:
+    (n_tiles, n_corners_per_tile, n_arms)
+
+    But, if you want to evaluate the bound for specific points that are not the
+    corners, you can pass in a 3D array like:
+    (n_tiles, 1, n_arms)
     """
     p_tiles = scipy.special.expit(theta_tiles)
-    v_diff = corners - theta_tiles[:, None]
+    v_diff = eval_pts - theta_tiles[:, None]
     v_sq = v_diff**2
 
     #
     # Step 1. 0th order terms.
     #
     # monte carlo estimate of type I error at each theta.
-    d0 = typeI_sum / sim_sizes
-    # clopper-pearson upper bound in beta form.
-    d0u_factor = 1.0 - delta * delta_prop_0to1
-    d0u = scipy.stats.beta.ppf(d0u_factor, typeI_sum + 1, sim_sizes - typeI_sum) - d0
-    # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
-    # because there is no way to go higher than 1.0
-    d0u = np.where(np.isnan(d0u), 0, d0u)
+    d0, d0u = zero_order_bound(typeI_sum, sim_sizes, delta, delta_prop_0to1)
 
     #
     # Step 2. 1st order terms.
     #
     # Monte carlo estimate of gradient of type I error at the grid points
     # then dot product with the vector from the center to the corner.
-    d1 = ((typeI_score / sim_sizes[:, None])[:, None] * v_diff).sum(axis=-1)
-    d1u_factor = np.sqrt(1 / ((1 - delta_prop_0to1) * delta) - 1.0)
-    covar_quadform = (
-        n_arm_samples * v_sq * p_tiles[:, None] * (1 - p_tiles[:, None])
-    ).sum(axis=-1)
-    # Upper bound on d1!
-    d1u = np.sqrt(covar_quadform) * (d1u_factor / np.sqrt(sim_sizes)[:, None])
+    d1, d1u = first_order_bound(
+        p_tiles,
+        v_diff,
+        v_sq,
+        typeI_score,
+        sim_sizes,
+        n_arm_samples,
+        delta,
+        delta_prop_0to1,
+    )
 
     #
     # Step 3. 2nd order terms.
     #
-    n_corners = corners.shape[1]
-
-    p_lower = np.tile(
-        scipy.special.expit(theta_tiles - tile_radii)[:, None], (1, n_corners, 1)
-    )
-    p_upper = np.tile(
-        scipy.special.expit(theta_tiles + tile_radii)[:, None], (1, n_corners, 1)
-    )
-
-    special = (p_lower <= 0.5) & (0.5 <= p_upper)
-    max_p = np.where(np.abs(p_upper - 0.5) < np.abs(p_lower - 0.5), p_upper, p_lower)
-    hess_comp = np.where(special, 0.25 * v_sq, (max_p * (1 - max_p) * v_sq))
-
-    hessian_quadform_bound = hess_comp.sum(axis=-1) * n_arm_samples
-    d2u = 0.5 * hessian_quadform_bound
+    d2u = second_order_bound(v_sq, theta_tiles, tile_radii, n_arm_samples)
 
     #
-    # Step 4. Identify the corners with the highest upper bound.
+    # Step 4. Identify the eval_pts with the highest upper bound.
     #
 
-    # The total of the bound component that varies between corners.
+    # The total of the bound component that varies between eval_pts.
     total_var = d1u + d2u + d1
     total_var = np.where(np.isnan(total_var), 0, total_var)
-    worst_corner = total_var.argmax(axis=1)
+    worst_eval_pt = total_var.argmax(axis=1)
     ti = np.arange(d1.shape[0])
-    d1w = d1[ti, worst_corner]
-    d1uw = d1u[ti, worst_corner]
-    d2uw = d2u[ti, worst_corner]
+    d1w = d1[ti, worst_eval_pt]
+    d1uw = d1u[ti, worst_eval_pt]
+    d2uw = d2u[ti, worst_eval_pt]
 
     #
     # Step 5. Compute the total bound and return it
@@ -212,3 +202,45 @@ def upper_bound(
     total_bound = d0 + d0u + d1w + d1uw + d2uw
 
     return total_bound, d0, d0u, d1w, d1uw, d2uw
+
+
+def zero_order_bound(typeI_sum, sim_sizes, delta, delta_prop_0to1):
+    d0 = typeI_sum / sim_sizes
+    # clopper-pearson upper bound in beta form.
+    d0u_factor = 1.0 - delta * delta_prop_0to1
+    d0u = scipy.stats.beta.ppf(d0u_factor, typeI_sum + 1, sim_sizes - typeI_sum) - d0
+    # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
+    # because there is no way to go higher than 1.0
+    d0u = np.where(np.isnan(d0u), 0, d0u)
+    return d0, d0u
+
+
+def first_order_bound(
+    p_tiles, v_diff, v_sq, typeI_score, sim_sizes, n_arm_samples, delta, delta_prop_0to1
+):
+    d1 = ((typeI_score / sim_sizes[:, None])[:, None] * v_diff).sum(axis=-1)
+    d1u_factor = np.sqrt(1 / ((1 - delta_prop_0to1) * delta) - 1.0)
+    covar_quadform = (
+        n_arm_samples * v_sq * p_tiles[:, None] * (1 - p_tiles[:, None])
+    ).sum(axis=-1)
+    # Upper bound on d1!
+    d1u = np.sqrt(covar_quadform) * (d1u_factor / np.sqrt(sim_sizes)[:, None])
+    return d1, d1u
+
+
+def second_order_bound(v_sq, theta_tiles, tile_radii, n_arm_samples):
+    n_eval_per_tile = v_sq.shape[1]
+
+    p_lower = np.tile(
+        scipy.special.expit(theta_tiles - tile_radii)[:, None], (1, n_eval_per_tile, 1)
+    )
+    p_upper = np.tile(
+        scipy.special.expit(theta_tiles + tile_radii)[:, None], (1, n_eval_per_tile, 1)
+    )
+    special = (p_lower <= 0.5) & (0.5 <= p_upper)
+    max_p = np.where(np.abs(p_upper - 0.5) < np.abs(p_lower - 0.5), p_upper, p_lower)
+    hess_comp = np.where(special, 0.25 * v_sq, (max_p * (1 - max_p) * v_sq))
+
+    hessian_quadform_bound = hess_comp.sum(axis=-1) * n_arm_samples
+    d2u = 0.5 * hessian_quadform_bound
+    return d2u
