@@ -487,7 +487,10 @@ def generate_data(n, p, key, n_sims=-1):
 
 ```python
 %%time
-lei_obj.pd_table = lei_obj.posterior_difference_table__(batch_size=batch_size, n_points=None)
+lei_obj.pd_table = lei_obj.posterior_difference_table__(
+    batch_size=batch_size,
+    n_points=20, 
+)
 lei_obj.pd_table
 ```
 
@@ -496,7 +499,8 @@ lei_obj.pd_table
 lei_obj.pr_best_pps_1_table = lei_obj.pr_best_pps_1_table__(
     key, 
     n_pr_sims,
-    batch_size=batch_size
+    batch_size=batch_size,
+    n_points=20,
 )
 lei_obj.pr_best_pps_1_table
 ```
@@ -507,6 +511,7 @@ lei_obj.pps_2_table = lei_obj.pps_2_table__(
     key, 
     n_pr_sims,
     batch_size=batch_size,
+    n_points=20,
 )
 lei_obj.pps_2_table
 ```
@@ -567,17 +572,3 @@ jnp.mean(out)
 ```
 
 # Sandbox
-
-```python
-n_config = jnp.array([10, 13])
-n_points = 4
-n = n_config + 1
-idx = 1
-```
-
-```python
-n_points_clip = jnp.minimum(jnp.min(n), n_points)
-steps = (n - 1) // (n_points_clip - 1)
-n_no_end = steps * (n_points_clip - 1)
-jnp.concatenate((jnp.arange(n_no_end[idx], step=steps[idx]), n[idx][None]-1))
-```
