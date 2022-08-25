@@ -1,9 +1,8 @@
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 from lewis import batch
+from lewis.table import LinearInterpTable
 from lewis.table import LookupTable
 
 import outlaw.berry as berry
@@ -262,7 +261,7 @@ class Lewis45:
         data = jnp.stack((data, n_arr), axis=-1)
         return data
 
-    def make_grid__(self, n, n_points):
+    def make_grid__(self, ns, n_points):
         """
         Creates a 2-D array of shape (d, n_points)
         where d is n.shape[0].
@@ -271,17 +270,21 @@ class Lewis45:
         The gridding always includes 0 and n[i]-1.
         If n_points is greater than the min(n) it is clipped to be min(n).
         """
-        n_points_clip = jnp.minimum(jnp.min(n), n_points)
-        steps = (n - 1) // (n_points_clip - 1)
-        n_no_end = steps * (n_points_clip - 1)
-        return jnp.array(
-            [
-                jnp.concatenate(
-                    (jnp.arange(n_no_end[idx], step=steps[idx]), n[idx][None] - 1)
-                )
-                for idx in range(len(n))
-            ]
-        )
+
+        def internal(n):
+            n_points_clip = jnp.minimum(jnp.min(n), n_points)
+            steps = (n - 1) // (n_points_clip - 1)
+            n_no_end = steps * (n_points_clip - 1)
+            return jnp.array(
+                [
+                    jnp.concatenate(
+                        (jnp.arange(n_no_end[idx], step=steps[idx]), n[idx][None] - 1)
+                    )
+                    for idx in range(len(n))
+                ]
+            )
+
+        return jnp.array([internal(n) for n in ns])
 
     def posterior_difference_table__(
         self,
@@ -292,9 +295,7 @@ class Lewis45:
             return jax.vmap(self.posterior_difference, in_axes=(0,))(data)
 
         if n_points:
-            grid = jax.vmap(self.make_grid__, in_axes=(0, None))(
-                self.n_configs_pd, n_points
-            )
+            grid = self.make_grid__(self.n_configs_pd, n_points)
 
         def process_batch__(i, f, batch_size):
             f_batched = batch.batch_all(
@@ -328,11 +329,16 @@ class Lewis45:
         )
 
         if n_points:
-            return None  # LinearInterpTable(grid, tup_tables)
+            return LinearInterpTable(
+                self.n_configs_pd + 1,
+                grid,
+                jnp.array(tup_tables),
+            )
+
         else:
             return LookupTable(self.n_configs_pd + 1, tup_tables)
 
-    def pr_best_pps_1_table__(self, key, n_pr_sims, batch_size):
+    def pr_best_pps_1_table__(self, key, n_pr_sims, batch_size, n_points=None):
         unifs = jax.random.uniform(
             key=key,
             shape=(
@@ -349,21 +355,31 @@ class Lewis45:
         _, key = jax.random.split(key)
         normals = jax.random.normal(key, shape=(n_pr_sims, self.n_arms))
 
+        if n_points:
+            grid = self.make_grid__(self.n_configs_pr_best_pps_1, n_points)
+
         def internal(data):
             return jax.vmap(self.pr_best_pps_1, in_axes=(0, None, None, None))(
                 data, normals, unifs_sig2, unifs
             )
 
-        def process_batch__(ns, f, batch_size):
+        def process_batch__(i, f, batch_size):
             f_batched = batch.batch_all(
                 f,
                 batch_size,
                 in_axes=(0,),
             )
-            outs, n_padded = f_batched(
-                self.table_data__(
-                    ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij")
+
+            if n_points:
+                meshgrid = jnp.meshgrid(*grid[i], indexing="ij")
+            else:
+                meshgrid = jnp.meshgrid(
+                    *(jnp.arange(0, n + 1) for n in self.n_configs_pr_best_pps_1[i]),
+                    indexing="ij",
                 )
+
+            outs, n_padded = f_batched(
+                self.table_data__(self.n_configs_pr_best_pps_1[i], meshgrid)
             )
             pr_best_outs = tuple(t[0] for t in outs)
             pps_outs = tuple(t[1] for t in outs)
@@ -380,16 +396,23 @@ class Lewis45:
             self.pr_best_pps_1_internal_jit__ = jax.jit(internal)
 
         tup_tables = tuple(
-            process_batch__(ns, self.pr_best_pps_1_internal_jit__, batch_size)
-            for ns in self.n_configs_pr_best_pps_1
+            process_batch__(i, self.pr_best_pps_1_internal_jit__, batch_size)
+            for i in range(self.n_configs_pr_best_pps_1.shape[0])
         )
         pr_best_tables = tuple(t[0] for t in tup_tables)
         pps_tables = tuple(t[1] for t in tup_tables)
-        return LookupTable(
-            self.n_configs_pr_best_pps_1 + 1, (pr_best_tables, pps_tables)
-        )
+        if n_points:
+            return LinearInterpTable(
+                self.n_configs_pr_best_pps_1 + 1,
+                grid,
+                (jnp.array(pr_best_tables), jnp.array(pps_tables)),
+            )
+        else:
+            return LookupTable(
+                self.n_configs_pr_best_pps_1 + 1, (pr_best_tables, pps_tables)
+            )
 
-    def pps_2_table__(self, key, n_pr_sims, batch_size):
+    def pps_2_table__(self, key, n_pr_sims, batch_size, n_points=None):
         unifs = jax.random.uniform(
             key=key,
             shape=(
@@ -409,21 +432,31 @@ class Lewis45:
             shape=(n_pr_sims, self.n_arms),
         )
 
+        if n_points:
+            grid = self.make_grid__(self.n_configs_pps_2, n_points)
+
         def internal(data):
             return jax.vmap(self.pps_2, in_axes=(0, None, None, None))(
                 data, normals, unifs_sig2, unifs
             )
 
-        def process_batch__(ns, f, batch_size):
+        def process_batch__(i, f, batch_size):
             f_batched = batch.batch_all(
                 f,
                 batch_size,
                 in_axes=(0,),
             )
-            outs, n_padded = f_batched(
-                self.table_data__(
-                    ns, jnp.meshgrid(*(jnp.arange(0, n + 1) for n in ns), indexing="ij")
+
+            if n_points:
+                meshgrid = jnp.meshgrid(*grid[i], indexing="ij")
+            else:
+                meshgrid = jnp.meshgrid(
+                    *(jnp.arange(0, n + 1) for n in self.n_configs_pps_2[i]),
+                    indexing="ij",
                 )
+
+            outs, n_padded = f_batched(
+                self.table_data__(self.n_configs_pps_2[i], meshgrid)
             )
             out = jnp.row_stack(outs)
             return out[:(-n_padded)] if n_padded > 0 else out
@@ -433,10 +466,17 @@ class Lewis45:
             self.pps_2_internal_jit__ = jax.jit(internal)
 
         tup_tables = tuple(
-            process_batch__(ns, self.pps_2_internal_jit__, batch_size)
-            for ns in self.n_configs_pps_2
+            process_batch__(i, self.pps_2_internal_jit__, batch_size)
+            for i in range(self.n_configs_pps_2.shape[0])
         )
-        return LookupTable(self.n_configs_pps_2 + 1, tup_tables)
+        if n_points:
+            return LinearInterpTable(
+                self.n_configs_pps_2 + 1,
+                grid,
+                jnp.array(tup_tables),
+            )
+        else:
+            return LookupTable(self.n_configs_pps_2 + 1, tup_tables)
 
     def get_posterior_difference__(self, data):
         data, n_order_inverse = self.make_canonical__(data)
@@ -766,6 +806,7 @@ class Lewis45:
                 n_new_per_arm=n_new_per_arm,
             )
             data_new = jnp.where(add_idx[:, None], data_new, 0)
+            data = data + data_new
 
             pr_best, pps = self.get_pr_best_pps_1__(data)
 
