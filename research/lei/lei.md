@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.5 ('base')
     language: python
     name: python3
 ---
@@ -439,22 +439,22 @@ plt.show()
 %%time
 params = {
     "n_arms" : 3,
-    "n_stage_1" : 20,
-    "n_stage_2" : 10,
+    "n_stage_1" : 200,
+    "n_stage_2" : 100,
     "n_stage_1_interims" : 2,
-    "n_stage_1_add_per_interim" : 4,
-    "n_stage_2_add_per_interim" : 4,
-    "stage_1_futility_threshold" : 0.1,
-    "stage_1_efficacy_threshold" : 0.9,
-    "stage_2_futility_threshold" : 0.1,
-    "stage_2_efficacy_threshold" : 0.9,
-    "inter_stage_futility_threshold" : 0.8,
-    "posterior_difference_threshold" : 0.05,
-    "rejection_threshold" : 0.05,
+    "n_stage_1_add_per_interim" : 100,
+    "n_stage_2_add_per_interim" : 100,
+    "stage_1_futility_threshold" : 0.15,
+    "stage_1_efficacy_threshold" : 0.7,
+    "stage_2_futility_threshold" : 0.2,
+    "stage_2_efficacy_threshold" : 0.95,
+    "inter_stage_futility_threshold" : 0.6,
+    "posterior_difference_threshold" : 0,
+    "rejection_threshold" : 0.1,
     "key" : jax.random.PRNGKey(0),
     "n_pr_sims" : 100,
     "n_sig2_sims" : 20,
-    "batch_size" : int(2**16),
+    "batch_size" : int(2**20),
     "cache_tables" : False,
 }
 lei_obj = lewis.Lewis45(**params)
@@ -519,7 +519,7 @@ lei_obj.pps_2_table
 ```python
 from lewis.cartesian_batcher import CartesianBatcher
 
-cb = CartesianBatcher(
+grid_cb = CartesianBatcher(
     lower=-1,
     upper=1,
     n_batches=4,
@@ -527,48 +527,84 @@ cb = CartesianBatcher(
     n_arms=params['n_arms'],
 )
 
-indices = cb.batch_indices()
+key = jax.random.PRNGKey(0)
+n_sim_batches = 1
+sim_batch_size = 20
+
 ```
 
 ```python
-def simulate_vmap(i, batcher, unifs, unifs_order):
-    return jax.vmap(lei_obj.simulate, in_axes=(0, None, None))(
-        batcher.batch(i), unifs, unifs_order,
-    )
-    
-def each_sim(key, batcher):
-    unifs = jax.random.uniform(key, shape=lei_obj.unifs_shape())
-    unifs_order =jnp.arange(0, unifs.shape[0])
-    grid_1d = jax.scipy.special.expit(batcher.grid_1d)
-    indices = batcher.batch_indices()
-    return jax.vmap(
-        simulate_vmap,
-        in_axes=(0, None, None, None)
-    )(indices, batcher, unifs, unifs_order).flatten()
-    
-def each_sim_vmap(keys, batcher):
-    return jax.vmap(each_sim, in_axes=(0, None))(keys, batcher)
+class LeiSimulator:
+    def __init__(
+        self,
+        lei_obj,
+        grid_batcher,
+        reduce_func,
+        reduce_func_all,
+    ):
+        self.lei_obj = lei_obj
+        self.unifs_shape = self.lei_obj.unifs_shape()
+        self.unifs_order = jnp.arange(0, self.unifs_shape[0])
+        self.grid_batcher = grid_batcher
+        self.reduce_func = reduce_func
+        self.reduce_func_all = reduce_func_all
+        self.simulate_batch_sim_batch_grid_jit = jax.jit(
+            self.simulate_batch_sim_batch_grid)
 
-@partial(jax.jit, static_argnums=(1,))
-def sim_batch(keys, batcher):
-    return jnp.sum(each_sim_vmap(keys, batcher), axis=0)
+    def f_batch_sim_batch_grid(self, p_batch, unifs_batch, unifs_order):
+        return jax.vmap(
+            jax.vmap(
+                self.lei_obj.simulate, 
+                in_axes=(0, None, None),
+            ),
+            in_axes=(None, 0, None),
+        )(p_batch, unifs_batch, unifs_order)
+
+    def simulate_batch_sim_batch_grid(
+        self, index, unifs
+    ):
+        theta_batch = self.grid_batcher.batch(index)
+        p_batch = jax.scipy.special.expit(theta_batch)
+        rejs = self.f_batch_sim_batch_grid(
+            p_batch, unifs, self.unifs_order
+        )
+        return rejs
     
-def simulate_all(keys, batcher, batch_size):
-    f = lewis.batch.batch_all(sim_batch, batch_size, in_axes=(0, None))
-    outs, n_padded = f(keys, batcher)
-    out = jnp.row_stack(outs)
-    out = out[:-n_padded] if n_padded > 0 else out
-    return jnp.sum(out, axis=0) 
-    
-keys = jax.random.split(key, num=20)
-each_sim_jit = jax.jit(each_sim, static_argnums=(1,))
-each_sim_vmap_jit = jax.jit(each_sim_vmap, static_argnums=(1,))
+    def simulate_batch_sim(
+        self, key, indices
+    ):
+        unifs = jax.random.uniform(key=key, shape=(sim_batch_size,) + self.unifs_shape)
+        rejs = jnp.concatenate(
+            [self.simulate_batch_sim_batch_grid_jit(index, unifs) for index in indices],
+            axis=-1,
+        )
+        rejs_reduced = self.reduce_func(rejs)
+        return rejs_reduced
+        
+    def simulate(self, key, n_sim_batches, sim_batch_size):
+        keys = jax.random.split(key, num=n_sim_batches)
+        indices = self.grid_batcher.batch_indices()
+        return self.reduce_func_all(
+            jnp.array(
+                [self.simulate_batch_sim(key, indices) for key in keys]
+            )
+        )
+        
+simulator = LeiSimulator(
+    lei_obj=lei_obj,
+    grid_batcher=grid_cb,
+    reduce_func=lambda x: jnp.sum(x, axis=0),
+    reduce_func_all=lambda x: jnp.sum(x, axis=0) / (n_sim_batches * sim_batch_size),
+)
 ```
 
 ```python
 %%time
-out = each_sim_vmap_jit(keys, cb)
-jnp.mean(out)
+simulator.simulate(
+    key=key,
+    n_sim_batches=n_sim_batches,
+    sim_batch_size=sim_batch_size,
+)
 ```
 
 # Sandbox
