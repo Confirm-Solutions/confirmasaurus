@@ -1,2 +1,0 @@
-#!/bin/bash
-docker build --progress=plain -t test_devimage -f Dockerfile ../.. && ./test test_devimage

@@ -1,0 +1,9 @@
+#!/bin/bash
+if [ $# -eq 0 ]
+  then
+    echo "Image id required as the first argument."
+    exit
+fi
+DOCKER_CMD="docker run -it --gpus all $1"
+$DOCKER_CMD nvidia-smi
+$DOCKER_CMD python -c 'import jax; assert(jax.default_backend() == "gpu"); print("JAX GPU works.")'
