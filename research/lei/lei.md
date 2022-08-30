@@ -529,8 +529,7 @@ grid_cb = CartesianBatcher(
 
 key = jax.random.PRNGKey(0)
 n_sim_batches = 1
-sim_batch_size = 20
-
+sim_batch_size = 1000
 ```
 
 ```python
@@ -608,3 +607,44 @@ simulator.simulate(
 ```
 
 # Sandbox
+
+```python
+from berrylib import grid
+from pyimprint.grid import Gridder
+import numpy as np
+```
+
+```python
+def make_cartesian_gridpts(size, lower, upper):
+    # make initial 1d grid
+    theta_grids = (
+        Gridder.make_grid(size, lower[i], upper[i]) for i in range(len(lower))
+    )
+    coords = np.meshgrid(*theta_grids)
+    grid = np.concatenate([c.flatten().reshape(-1, 1) for c in coords], axis=1)
+
+    # make corresponding radius
+    radius = np.array([Gridder.radius(size, lower[i], upper[i]) for i in range(len(lower))])
+    radii = np.full((grid.shape[0], len(radius)), radius)
+
+    return grid, radius
+```
+
+```python
+n_theta_1d = 16
+sim_size = 10
+n_arms = 3
+theta, radii = make_cartesian_gridpts(
+    n_theta_1d, np.full(n_arms, -1.0), np.full(n_arms, 1.0), 
+)
+null_hypos = [
+    grid.HyperPlane([-1, 1, 0], 0),
+    grid.HyperPlane([-1, 0, 1], 0),
+]
+radii
+#g = grid.build_grid(theta, radii, null_hypos)
+```
+
+```python
+theta
+```
