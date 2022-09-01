@@ -70,3 +70,12 @@ output:
 - [can you precompile a JAX function before running it the first time?](https://github.com/google/jax/discussions/11600)
   - yes, and maybe you should do it inside a separate thread so that the main thread can continue doing whatever it is doing!
 - [conditionals based on lax.cond will evaluate lazily, while conditionals based on lax.switch will evaluate every branch regardless of the condition.](https://github.com/google/jax/discussions/11153)
+- [A small library for creating and manipulating custom JAX Pytree classes](https://cgarciae.github.io/treeo/)
+- [fast lookup tables in jax](https://github.com/google/jax/discussions/10475)
+- [np.interp in jax](https://github.com/google/jax/issues/3860) - note that we also have an interpnd implementation!
+- [scan vs while_loop](https://github.com/google/jax/discussions/3850)
+- [higher order derivatives via taylor series!](https://jax.readthedocs.io/en/latest/jax.experimental.jet.html)
+- [extending jax with a custom C++ or CUDA operation](https://github.com/dfm/extending-jax)
+- [experimental sparse support](https://jax.readthedocs.io/en/latest/jax.experimental.sparse.html)
+- [an issue about implementing scipy.spatial](https://github.com/google/jax/issues/9235)
+  - An interesting question: Would it be possible to implement a JAX KDTree?? What restrictions would make it possible? What modifications could be made so that it works well?
