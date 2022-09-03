@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.5 ('base')
     language: python
     name: python3
 ---
@@ -52,12 +52,26 @@ seed = 10
 # theta_min = -2.8
 # theta_max = -1.2
 
-name = "berry3d_hi"
+# name = "berry3d_hi"
+# n_arms = 3
+# n_theta_1d = 64
+# sim_size = 50000
+# theta_min = -3.5
+# theta_max = 1.0
+
+# name = "berry3d_hi2"
+# n_arms = 3
+# n_theta_1d = 64
+# sim_size = 500000
+# theta_min = -3.5
+# theta_max = 1.0
+
+name = "berry3d_hi3"
 n_arms = 3
-n_theta_1d = 64
-sim_size = 50000
+n_theta_1d = 100
+sim_size = 500000
 theta_min = -3.5
-theta_max = -1.0
+theta_max = 1.0
 ```
 
 ```python
@@ -90,28 +104,36 @@ rejection_table = binomial.build_rejection_table(n_arms, n_arm_samples, fi.rejec
 ```
 
 ```python
-%%time
 np.random.seed(seed)
-samples = np.random.uniform(size=(sim_size, n_arm_samples, n_arms))
 accumulator = binomial.binomial_accumulator(lambda data: binomial.lookup_rejection(rejection_table, data[...,0]))
 
 # Chunking improves performance dramatically for larger tile counts:
 # ~6x for a 64^3 grid
-typeI_sum = np.empty(theta_tiles.shape[0])
-typeI_score = np.empty((theta_tiles.shape[0], n_arms))
-chunk_size = 5000
-n_chunks = int(np.ceil(theta_tiles.shape[0] / chunk_size))
+typeI_sum = np.zeros(theta_tiles.shape[0])
+typeI_score = np.zeros((theta_tiles.shape[0], n_arms))
+gridpt_chunk_size = 5000
+n_gridpt_chunks = int(np.ceil(theta_tiles.shape[0] / gridpt_chunk_size))
+sim_chunk_size = 50000
+n_sim_chunks = sim_size // sim_chunk_size
+assert(sim_size % sim_chunk_size == 0)
+n_sim_chunks, n_gridpt_chunks
+```
 
-device = jax.devices('cpu')[0]
-for i in range(n_chunks):
-    start = i * chunk_size
-    end = (i + 1) * chunk_size
-    end = min(end, theta_tiles.shape[0])
-    typeI_sum[start:end], typeI_score[start:end] = accumulator(
-        theta_tiles[start:end],
-        g.null_truth[start:end],
-        samples
-    )
+```python
+%%time
+for j in range(n_sim_chunks):
+    samples = np.random.uniform(size=(sim_chunk_size, n_arm_samples, n_arms))
+    for i in range(n_gridpt_chunks):
+        gridpt_start = i * gridpt_chunk_size
+        gridpt_end = (i + 1) * gridpt_chunk_size
+        gridpt_end = min(gridpt_end, theta_tiles.shape[0])
+        sum_chunk, score_chunk = accumulator(
+            theta_tiles[gridpt_start:gridpt_end],
+            g.null_truth[gridpt_start:gridpt_end],
+            samples
+        )
+        typeI_sum[gridpt_start:gridpt_end] += sum_chunk
+        typeI_score[gridpt_start:gridpt_end] += score_chunk
 ```
 
 ```python
@@ -134,7 +156,15 @@ bound_components = (total, d0, d0u, d1w, d1uw, d2uw)
 ```python
 grid_components = (theta, theta_tiles, tile_radii, corners, g.null_truth)
 sim_components = (sim_sizes, typeI_sum, typeI_score)
-np.save(f"output_{name}.npy", (grid_components, sim_components, bound_components))
+np.save(f"output_{name}.npy", np.array([grid_components, sim_components, bound_components], dtype=object))
+```
+
+```python
+!du -hs *
+```
+
+```python
+plt.rcParams['text.usetex'] = False
 ```
 
 ```python
