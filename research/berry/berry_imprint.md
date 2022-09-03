@@ -45,12 +45,19 @@ seed = 10
 # theta_min = -3.5
 # theta_max = 1.0
 
-name = "berry3d"
+# name = "berry3d"
+# n_arms = 3
+# n_theta_1d = 24
+# sim_size = 30000
+# theta_min = -2.8
+# theta_max = -1.2
+
+name = "berry3d_hi"
 n_arms = 3
-n_theta_1d = 24
-sim_size = 30000
-theta_min = -2.8
-theta_max = -1.2
+n_theta_1d = 64
+sim_size = 50000
+theta_min = -3.5
+theta_max = -1.0
 ```
 
 ```python

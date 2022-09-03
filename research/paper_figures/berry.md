@@ -256,6 +256,7 @@ plt.subplot(2,2,3)
 fig3()
 plt.subplot(2,2,4)
 fig4()
+
 plt.show()
 ```
 
