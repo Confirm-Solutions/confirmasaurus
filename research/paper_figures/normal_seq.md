@@ -84,8 +84,13 @@ def fig1(include_ptwise_error, **kwargs):
         plot_power_pts(mu, power, error, CI)
     else:
         plot_power_pts(mu, power)
-    plt.plot(mu_dense10, pow_dense10, 'r:')
-    plt.plot(mu_dense01, pow_dense01, 'r:')
+    plt.plot(mu_dense10, pow_dense10, 'r:', linewidth=3)
+    plt.plot(mu_dense01, pow_dense01, 'r:', linewidth=3)
+    
+    mu_bad = np.append(mu, [-1.1, -1.0, -0.9, -0.8, -0.5, 0.0])
+    power_bad = np.append(power, [0.01, 0.01, 0.01, 0.01, 0.03, 0.04])
+    interp_f = scipy.interpolate.interp1d(mu_bad, power_bad, kind='cubic')
+    plt.plot(mu_dense10, interp_f(mu_dense10), 'b:', linewidth=1)
     set_domain(**kwargs)
 fig1(False)
 plt.show()
@@ -215,7 +220,7 @@ def gradient_bounds(npoints, nsims, include_ptwise_error=False):
 ```
 
 ```python
-def fig3(include_ptwise_error, **kwargs):
+def fig3(include_ptwise_error, include_quadratic, **kwargs):
     npoints = 2
     (
         mu,
@@ -227,6 +232,18 @@ def fig3(include_ptwise_error, **kwargs):
         grad_bound,
         grad_bound_low,
     ) = gradient_bounds(2, int(1e6), include_ptwise_error=include_ptwise_error)
+
+    if include_quadratic:
+        mu, power, stepsize, bound_xs2, penalized_bound, penalized_bound_low = build_bounds(npts=npoints, nsims=int(1e6))
+        # arbitrary adjustment to get the two curves to line up
+        # eventually we should use real imprint for all these figures so that
+        # we don't have to do this
+        penalized_bound[0] -= 0.0014
+        penalized_bound[1] -= 0.001
+        full_xs = np.concatenate(bound_xs2)
+        full_bound = np.concatenate(penalized_bound)
+        filter = (full_xs > -0.8) | (full_bound < 0.025)
+        plt.plot(full_xs[filter], full_bound[filter], 'k:', linewidth=1)
     for i in range(npoints):
         plt.fill_between(
             bound_xs[i], grad_bound_low[i], grad_bound[i], color="b", alpha=0.2
@@ -236,11 +253,12 @@ def fig3(include_ptwise_error, **kwargs):
     set_domain(**kwargs)
 
 
-fig3(False)
+fig3(False, False)
 plt.show()
-fig3(True)
+fig3(True, False)
 plt.show()
-
+fig3(True, True)
+plt.show()
 ```
 
 ```python
@@ -253,10 +271,10 @@ plt.subplot(2,2,1)
 fig1(True, skipx=True)
 plt.text(-1, 0.026, "$\mathbf{A}$", fontsize=16)
 plt.subplot(2,2,2)
-fig3(False, skipx=True, skipy=True)
+fig3(False, False, skipx=True, skipy=True)
 plt.text(-1, 0.026, "$\mathbf{B}$", fontsize=16)
 plt.subplot(2,2,3)
-fig3(True)
+fig3(True, True)
 plt.text(-1, 0.026, "$\mathbf{C}$", fontsize=16)
 plt.subplot(2,2,4)
 fig2(skipy=True)
