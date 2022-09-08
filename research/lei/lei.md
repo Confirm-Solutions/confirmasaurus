@@ -671,11 +671,16 @@ bound_components = np.array([
 ```
 
 ```python
-t2 = np.unique(theta_tiles[:, 2])[4]
+t2_uniques = np.unique(theta_tiles[:, 2])
+t2 = t2_uniques[15]
 selection = (theta_tiles[:, 2] == t2)
 
 np.savetxt('P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
 np.savetxt('B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+```
+
+```python
+t2_uniques
 ```
 
 # Sandbox
