@@ -1,0 +1,15 @@
+name: confirm
+channels:
+  - conda-forge
+dependencies:
+  # essentials
+  - python
+  - setuptools
+  - numpy
+  - scipy
+  - matplotlib
+  - pip
+  - pip:
+      - -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+      - "jax[cuda]"
+      - "numpyro[cuda]"
