@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('base')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -33,6 +33,9 @@ from itertools import combinations
 
 from lewis import lewis
 from lewis import batch
+from berrylib import grid
+from lewis import grid as lewgrid
+from berrylib import binomial
 ```
 
 # Lei Example
@@ -462,34 +465,17 @@ lei_obj = lewis.Lewis45(**params)
 
 ```python
 batch_size = 2**16
-p = jnp.array([0.5] + [0.9] * (params['n_arms']-1))
 key = jax.random.PRNGKey(0)
-n_sims = 1000
-keys = jax.random.split(key, num=n_sims)
-n_grid_points = 2
-grid_points = jnp.array([p] * n_grid_points)
+n_points = 20
 n_pr_sims = 100
 n_sig2_sim = 20
-```
-
-```python
-@partial(jax.jit, static_argnums=(3,))
-def generate_data(n, p, key, n_sims=-1):
-    if n_sims == -1:
-        y = dist.Binomial(n, p).sample(key)
-        data = jnp.stack((y, n), axis=-1)
-    else:
-        y = dist.Binomial(n, p).sample(key, (n_sims,))
-        n_full = jnp.full_like(y, n)
-        data = jnp.stack((y, n_full), axis=-1)
-    return data
 ```
 
 ```python
 %%time
 lei_obj.pd_table = lei_obj.posterior_difference_table__(
     batch_size=batch_size,
-    n_points=20, 
+    n_points=n_points, 
 )
 lei_obj.pd_table
 ```
@@ -500,36 +486,53 @@ lei_obj.pr_best_pps_1_table = lei_obj.pr_best_pps_1_table__(
     key, 
     n_pr_sims,
     batch_size=batch_size,
-    n_points=20,
+    n_points=n_points,
 )
 lei_obj.pr_best_pps_1_table
 ```
 
 ```python
 %%time
+_, key = jax.random.split(key)
 lei_obj.pps_2_table = lei_obj.pps_2_table__(
     key, 
     n_pr_sims,
     batch_size=batch_size,
-    n_points=20,
+    n_points=n_points,
 )
 lei_obj.pps_2_table
 ```
 
 ```python
-from lewis.cartesian_batcher import CartesianBatcher
-
-grid_cb = CartesianBatcher(
-    lower=-1,
-    upper=1,
-    n_batches=4,
-    batch_size=16,
-    n_arms=params['n_arms'],
+n_arms = params['n_arms']
+size = 32
+lower = np.full(n_arms, -1)
+upper = np.full(n_arms, 1)
+thetas, radii = lewgrid.make_cartesian_grid_range(
+    size=size,
+    lower=lower,
+    upper=upper,
+) 
+null_hypos = [
+    grid.HyperPlane([1, -1, 0], 0),
+    grid.HyperPlane([1, 0, -1], 0)
+]
+gr = grid.build_grid(
+    thetas=thetas,
+    radii=radii,
+    null_hypos=null_hypos,
 )
+gr = grid.prune(gr)
+```
 
-key = jax.random.PRNGKey(0)
+```python
+theta_tiles = gr.thetas[gr.grid_pt_idx]
+null_truths = gr.null_truth.astype(bool)
+grid_batch_size = 4096
 n_sim_batches = 1
-sim_batch_size = 1000
+sim_batch_size = 100
+
+p_tiles = jax.scipy.special.expit(theta_tiles)
 ```
 
 ```python
@@ -537,114 +540,142 @@ class LeiSimulator:
     def __init__(
         self,
         lei_obj,
-        grid_batcher,
-        reduce_func,
-        reduce_func_all,
+        p_tiles,
+        null_truths,
+        grid_batch_size,
+        reduce_func=None,
+        reduce_func_all=None,
     ):
         self.lei_obj = lei_obj
         self.unifs_shape = self.lei_obj.unifs_shape()
         self.unifs_order = jnp.arange(0, self.unifs_shape[0])
-        self.grid_batcher = grid_batcher
-        self.reduce_func = reduce_func
-        self.reduce_func_all = reduce_func_all
-        self.simulate_batch_sim_batch_grid_jit = jax.jit(
-            self.simulate_batch_sim_batch_grid)
+        self.p_tiles = p_tiles
+        self.null_truths = null_truths
+        self.grid_batch_size = grid_batch_size
 
-    def f_batch_sim_batch_grid(self, p_batch, unifs_batch, unifs_order):
+        self.reduce_func = (
+            lambda x: jnp.sum(x, axis=0) if not reduce_func else reduce_func
+        )
+        self.reduce_func_all = (
+            lambda x: jnp.sum(x, axis=0) if not reduce_func_all else reduce_func_all
+        )
+
+        self.f_batch_sim_batch_grid_jit = jax.jit(self.f_batch_sim_batch_grid)
+        self.batch_all = batch.batch_all(
+            self.f_batch_sim_batch_grid_jit,
+            batch_size=self.grid_batch_size,
+            in_axes=(0, 0, None, None),
+        )
+
+    def f_batch_sim_batch_grid(self, p_batch, null_batch, unifs_batch, unifs_order):
         return jax.vmap(
             jax.vmap(
-                self.lei_obj.simulate, 
-                in_axes=(0, None, None),
+                self.lei_obj.simulate,
+                in_axes=(0, 0, None, None),
             ),
-            in_axes=(None, 0, None),
-        )(p_batch, unifs_batch, unifs_order)
+            in_axes=(None, None, 0, None),
+        )(p_batch, null_batch, unifs_batch, unifs_order)
 
-    def simulate_batch_sim_batch_grid(
-        self, index, unifs
-    ):
-        theta_batch = self.grid_batcher.batch(index)
-        p_batch = jax.scipy.special.expit(theta_batch)
-        rejs = self.f_batch_sim_batch_grid(
-            p_batch, unifs, self.unifs_order
-        )
-        return rejs
-    
-    def simulate_batch_sim(
-        self, key, indices
-    ):
+    def simulate_batch_sim(self, sim_batch_size, key):
         unifs = jax.random.uniform(key=key, shape=(sim_batch_size,) + self.unifs_shape)
-        rejs = jnp.concatenate(
-            [self.simulate_batch_sim_batch_grid_jit(index, unifs) for index in indices],
-            axis=-1,
+        rejs_scores, n_padded = self.batch_all(
+            self.p_tiles, self.null_truths, unifs, self.unifs_order
+        )
+        rejs, scores = tuple(
+            jnp.concatenate(
+                tuple(x[i] for x in rejs_scores),
+                axis=1,
+            )
+            for i in range(2)
+        )
+        rejs, scores = (
+            (rejs[:, :-n_padded], scores[:, :-n_padded, :])
+            if n_padded
+            else (rejs, scores)
         )
         rejs_reduced = self.reduce_func(rejs)
-        return rejs_reduced
-        
-    def simulate(self, key, n_sim_batches, sim_batch_size):
+        scores_reduced = self.reduce_func(scores)
+        return rejs_reduced, scores_reduced
+
+    def simulate(
+        self,
+        key,
+        n_sim_batches,
+        sim_batch_size,
+    ):
         keys = jax.random.split(key, num=n_sim_batches)
-        indices = self.grid_batcher.batch_indices()
-        return self.reduce_func_all(
-            jnp.array(
-                [self.simulate_batch_sim(key, indices) for key in keys]
-            )
+        out = [self.simulate_batch_sim(sim_batch_size, key) for key in keys]
+        return (
+            self.reduce_func_all(jnp.array([x[0] for x in out])),
+            self.reduce_func_all(jnp.array([x[1] for x in out])),
         )
-        
+
+
 simulator = LeiSimulator(
     lei_obj=lei_obj,
-    grid_batcher=grid_cb,
-    reduce_func=lambda x: jnp.sum(x, axis=0),
-    reduce_func_all=lambda x: jnp.sum(x, axis=0) / (n_sim_batches * sim_batch_size),
+    p_tiles=p_tiles,
+    null_truths=null_truths,
+    grid_batch_size=grid_batch_size,
 )
+
 ```
 
 ```python
 %%time
-simulator.simulate(
+typeI_sum, typeI_score = simulator.simulate(
     key=key,
     n_sim_batches=n_sim_batches,
     sim_batch_size=sim_batch_size,
 )
 ```
 
-# Sandbox
-
 ```python
-from berrylib import grid
-from pyimprint.grid import Gridder
-import numpy as np
+sim_size = sim_batch_size * n_sim_batches
+
+plt.figure(figsize=(8,4), constrained_layout=True)
+for i, t2_idx in enumerate([4, 8]):
+    t2 = np.unique(theta_tiles[:, 2])[t2_idx]
+    selection = (theta_tiles[:,2] == t2)
+
+    plt.subplot(1,2,i+1)
+    plt.title(f'slice: $\\theta_2 \\approx$ {t2:.1f}')
+    plt.scatter(theta_tiles[selection,0], theta_tiles[selection,1], c=typeI_sum[selection]/sim_size, s=90)
+    cbar = plt.colorbar()
+    plt.xlabel(r'$\theta_0$')
+    plt.ylabel(r'$\theta_1$')
+    cbar.set_label('Simulated fraction of Type I errors')
+plt.show()
 ```
 
 ```python
-def make_cartesian_gridpts(size, lower, upper):
-    # make initial 1d grid
-    theta_grids = (
-        Gridder.make_grid(size, lower[i], upper[i]) for i in range(len(lower))
-    )
-    coords = np.meshgrid(*theta_grids)
-    grid = np.concatenate([c.flatten().reshape(-1, 1) for c in coords], axis=1)
-
-    # make corresponding radius
-    radius = np.array([Gridder.radius(size, lower[i], upper[i]) for i in range(len(lower))])
-    radii = np.full((grid.shape[0], len(radius)), radius)
-
-    return grid, radius
-```
-
-```python
-n_theta_1d = 16
-sim_size = 10
-n_arms = 3
-theta, radii = make_cartesian_gridpts(
-    n_theta_1d, np.full(n_arms, -1.0), np.full(n_arms, 1.0), 
+tile_radii = gr.radii[gr.grid_pt_idx]
+sim_sizes = np.full(gr.n_tiles, sim_size)
+n_arm_samples = lei_obj.unifs_shape()[0]
+total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
+    theta_tiles,
+    tile_radii,
+    gr.vertices,
+    sim_sizes,
+    n_arm_samples,
+    typeI_sum,
+    typeI_score,
 )
-null_hypos = [
-    grid.HyperPlane([-1, 1, 0], 0),
-    grid.HyperPlane([-1, 0, 1], 0),
-]
-radii
-#g = grid.build_grid(theta, radii, null_hypos)
+bound_components = np.array([
+    d0,
+    d0u,
+    d1w,
+    d1uw,
+    d2uw,
+    total,
+]).T
 ```
 
 ```python
-theta
+t2 = np.unique(theta_tiles[:, 2])[4]
+selection = (theta_tiles[:, 2] == t2)
+
+np.savetxt('P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
+np.savetxt('B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
 ```
+
+# Sandbox

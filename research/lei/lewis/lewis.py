@@ -715,6 +715,9 @@ class Lewis45:
             berns_end,
         )
 
+    def score(self, data, p):
+        return data[:, 0] - data[:, 1] * p
+
     def stage_1(self, berns, berns_order, berns_start=0):
         """
         Runs a single simulation of Stage 1 of the Lei example.
@@ -918,18 +921,19 @@ class Lewis45:
             )
             data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
             data = data + data_new
-            return (
+            rej = (
                 self.get_posterior_difference__(data)[best_arm - 1]
                 < rejection_threshold
             )
+            return (rej, data)
 
         return jax.lax.cond(
             early_exit,
-            lambda: early_exit_out,
+            lambda: (early_exit_out, data),
             lambda: final_analysis(data, berns_start),
         )
 
-    def simulate(self, p, unifs, unifs_order):
+    def simulate(self, p, null_truths, unifs, unifs_order):
         """
         Runs a single simulation of both stage 1 and stage 2.
 
@@ -961,15 +965,31 @@ class Lewis45:
             pps[best_arm - 1] < self.inter_stage_futility_threshold
         )
 
-        # Stage 2 only if no early termination based on futility
-        return jax.lax.cond(
-            early_exit,
-            lambda: False,
-            lambda: self.stage_2(
+        def stage_2_wrap(
+            null_truths, data, p, best_arm, berns, unifs_order, berns_start
+        ):
+            rej, data = self.stage_2(
                 data=data,
                 best_arm=best_arm,
                 berns=berns,
                 berns_order=unifs_order,
+                berns_start=berns_start,
+            )
+            false_rej = rej * null_truths[best_arm - 1]
+            score = self.score(data, p) * false_rej
+            return (false_rej, score)
+
+        # Stage 2 only if no early termination based on futility
+        return jax.lax.cond(
+            early_exit,
+            lambda: (False, jnp.zeros(self.n_arms)),
+            lambda: stage_2_wrap(
+                null_truths=null_truths,
+                data=data,
+                p=p,
+                best_arm=best_arm,
+                berns=berns,
+                unifs_order=unifs_order,
                 berns_start=berns_start,
             ),
         )

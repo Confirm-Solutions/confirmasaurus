@@ -64,12 +64,13 @@ def test_stage_2():
     berns_start = 3
 
     # actual stage 2
-    rej = lewis_obj.stage_2(data, best_arm, berns, berns_order, berns_start)
+    rej, _ = lewis_obj.stage_2(data, best_arm, berns, berns_order, berns_start)
 
     # test
     assert jnp.array_equal(rej, False)
 
 
 def test_inter_stage():
-    rej = lewis_obj.simulate(p, unifs, berns_order)
+    null_truths = jnp.zeros(default_params["n_arms"] - 1, dtype=bool)
+    rej, _ = lewis_obj.simulate(p, null_truths, unifs, berns_order)
     assert jnp.array_equal(rej, False)
