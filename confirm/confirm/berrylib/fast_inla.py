@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Callable
 
-import berrylib.util as util
+import confirm.berrylib.util as util
 import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.linalg
 import scipy.stats
-from berrylib.fast_math import jax_fast_invert
+from confirm.berrylib.fast_math import jax_fast_invert
 from jax.config import config
 from scipy.special import logit
 

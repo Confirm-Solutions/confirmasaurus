@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython import get_ipython
 
 # this let's me leave in the "@profile" lines when I'm not running
 # line_profiler.
@@ -122,6 +121,7 @@ def integrate_multidim(f, axes, quad_rules):
 
 ### Tools for setting up nice Jupyter notebooks.
 def magic(text):
+    from IPython import get_ipython
     ipy = get_ipython()
     if ipy is not None:
         ipy.magic(text)

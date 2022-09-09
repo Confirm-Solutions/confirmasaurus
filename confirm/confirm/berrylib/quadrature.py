@@ -53,7 +53,7 @@ The procedure here is as follows:
 7. Don't forget to multiply the quadrature weights by the determinant of the
     jacobian of the transformation.
 """
-import berrylib.util as util
+import confirm.berrylib.util as util
 import numpy as np
 
 

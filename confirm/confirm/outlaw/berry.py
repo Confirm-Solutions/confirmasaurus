@@ -6,7 +6,7 @@ import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
 
-import outlaw.inla as inla
+from . import inla as inla
 
 mu_0 = -1.34
 mu_sig2 = 100.0
