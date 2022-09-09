@@ -2,7 +2,7 @@
 // https://github.com/microsoft/vscode-dev-containers/tree/v0.238.1/containers/ubuntu
 {
   "name": "clouddev",
-  "image": "ghcr.io/confirm-solutions/clouddev:latest",
+  "image": "ghcr.io/confirm-solutions/clouddev:main",
   // "build": {
   //   "dockerfile": "../../cloud/clouddev/Dockerfile",
   //   // Update 'VARIANT' to pick an Ubuntu version: jammy / ubuntu-22.04, focal / ubuntu-20.04, bionic /ubuntu-18.04

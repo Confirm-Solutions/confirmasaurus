@@ -61,6 +61,30 @@ output:
 10
 ```
 
+### Useful Lazy-Evaluation Technique
+
+It may be useful sometimes to force lazy-evaluation of JAX expressions (see [example](https://github.com/Confirm-Solutions/confirmasaurus/blob/cc197fceb543e04b01f3f5d8d70dfa4102a86ad5/research/lei/lewis/jax_wrappers.py)).
+In the example file, we see a class `ArraySlice0`, which represents a sliced array along axis 0.
+Though the restriction to axis 0 is unnecessary, it leads to simpler code and is sufficient for our applications.
+The purpose of this class is to allow for _dynamic_ slicing.
+JAX cannot jit `a[i:j]` where `i, j` are non-static.
+However, although the slicing cannot be jit-ed, if we only rely on the sliced array _through other operations_
+such as `__getitem__` and if those operations can be jit-ed, we can lazily evaluate the slice
+by fusing it with these other operations.
+
+So, the following is not jit-able:
+```python
+def f(x, y):
+    y = y[x[0]:x[1]]
+    return y[0]
+```
+However, the following _is_ jit-able:
+```python
+def f(x, y):
+    y = ArraySlice0(y, x[0], x[1])
+    return y[0]
+```
+
 ### Links that go into deep JAX details:
 
 - [Hashing a Jax.DeviceArray](https://github.com/google/jax/issues/4572#issuecomment-709809897)
@@ -70,3 +94,12 @@ output:
 - [can you precompile a JAX function before running it the first time?](https://github.com/google/jax/discussions/11600)
   - yes, and maybe you should do it inside a separate thread so that the main thread can continue doing whatever it is doing!
 - [conditionals based on lax.cond will evaluate lazily, while conditionals based on lax.switch will evaluate every branch regardless of the condition.](https://github.com/google/jax/discussions/11153)
+- [A small library for creating and manipulating custom JAX Pytree classes](https://cgarciae.github.io/treeo/)
+- [fast lookup tables in jax](https://github.com/google/jax/discussions/10475)
+- [np.interp in jax](https://github.com/google/jax/issues/3860) - note that we also have an interpnd implementation!
+- [scan vs while_loop](https://github.com/google/jax/discussions/3850)
+- [higher order derivatives via taylor series!](https://jax.readthedocs.io/en/latest/jax.experimental.jet.html)
+- [extending jax with a custom C++ or CUDA operation](https://github.com/dfm/extending-jax)
+- [experimental sparse support](https://jax.readthedocs.io/en/latest/jax.experimental.sparse.html)
+- [an issue about implementing scipy.spatial](https://github.com/google/jax/issues/9235)
+  - An interesting question: Would it be possible to implement a JAX KDTree?? What restrictions would make it possible? What modifications could be made so that it works well?
