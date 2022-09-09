@@ -54,6 +54,7 @@
     "source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"
   ],
   "runArgs": [
+    "--gpus=all",
     "--cap-add=SYS_PTRACE",
     "--security-opt",
     "seccomp=unconfined",

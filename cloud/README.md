@@ -75,7 +75,7 @@ Then, to run:
 4. Next, run the `./setup_remotedev.sh` script. This sets the remote EC2 instance as your docker context. Now all docker commands will be running remotely!! The script will also log in to ghcr.io on the instance. For this to work correctly, you need to have the `$GITHUB_TOKEN` and `$GITHUB_USER` environment variables set. [Follow the directions here to create a `$GITHUB_TOKEN` personal access token (PAT) if you haven't before.](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) Finally, the script will pull the `smalldev` docker image.
 5. Now, we're going to set up the remote machine as a devcontainer using the **Remote-Containers extension**. Run the VSCode command "Remote-Containers: Clone Repository in Container Volume...". Then, select the Github repo you want to use: `Confirm-Solutions/confirmasaurus`.
 6. This will launch the `smalldev` devcontainer/docker image and after a minute or two of building the container, you'll be dropped into a lovely development environment!
-7. When you're done, close the VSCode window, then `terraform destroy` if you want to delete the infrastructure. Alternatively, you can `aws ec2 stop-instances --instance-ids $( terraform output --raw id )` to stop the running instance. Later the same command but with `start-instances` instead of `stop-instances` will work to restart the instance.
+7. When you're done, close the VSCode window, then `terraform destroy` if you want to delete the infrastructure. Alternatively, you can `aws ec2 stop-instances --instance-ids $( terraform output --raw id )` to stop the running instance. Later the same command but with `start-instances` instead of `stop-instances` will work to restart the instance. (note: the `terraform destroy` seems to take a long time for some P instances!)
 
 TL;DR:
 
@@ -85,9 +85,11 @@ cd cloud
 terraform init
 terraform workspace new name_your_workspace
 terraform apply
+# STOP and wait about two minutes for the docker install on the EC2 instance to
+# complete
 ./setup_remotedev.sh
-## Connect with VSCode Remote Containers...
-## Destroy your infrastructure!
+# Connect with VSCode Remote Containers...
+# Destroy your infrastructure!
 terraform destroy
 docker context use default
 ```
