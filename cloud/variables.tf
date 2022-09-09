@@ -1,6 +1,10 @@
 variable "ami" {
   type        = string
-  default     = "ami-0853175484e1b2c5e" # amazon linux 2 with nvidia drivers
+  # default     = "ami-090fa75af13c156b4" # default amazon linux ami
+
+  # amazon linux 2 with nvidia drivers. Not using this because it has an
+  # old-ish version of cuda.
+  default     = "ami-0853175484e1b2c5e"
   description = "AMI for the instance"
 }
 
