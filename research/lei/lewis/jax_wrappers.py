@@ -46,9 +46,3 @@ def reshape0(a, shape):
     shape:      new shape of array along axis 0.
     """
     return ArrayReshape0(a, shape)
-
-
-def reshape_slice0(a, start, index, shape):
-    mask = jnp.flip(jnp.cumprod(jnp.flip(shape[1:])))
-    i = index[-1] + jnp.sum(mask * index[:-1])
-    return a[start + i]

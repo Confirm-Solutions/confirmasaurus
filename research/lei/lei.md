@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.5 ('base')
     language: python
     name: python3
 ---
@@ -441,7 +441,7 @@ plt.show()
 ```python
 %%time
 params = {
-    "n_arms" : 3,
+    "n_arms" : 4,
     "n_stage_1" : 200,
     "n_stage_2" : 100,
     "n_stage_1_interims" : 2,
@@ -464,7 +464,7 @@ lei_obj = lewis.Lewis45(**params)
 ```
 
 ```python
-batch_size = 2**16
+batch_size = 2**12
 key = jax.random.PRNGKey(0)
 n_points = 20
 n_pr_sims = 100
@@ -513,9 +513,13 @@ thetas, radii = lewgrid.make_cartesian_grid_range(
     lower=lower,
     upper=upper,
 ) 
+ns = np.concatenate(
+    [np.ones(n_arms-1)[:, None], -np.eye(n_arms-1)],
+    axis=-1,
+)
 null_hypos = [
-    grid.HyperPlane([1, -1, 0], 0),
-    grid.HyperPlane([1, 0, -1], 0)
+    grid.HyperPlane(n, 0)
+    for n in ns
 ]
 gr = grid.build_grid(
     thetas=thetas,
@@ -528,8 +532,8 @@ gr = grid.prune(gr)
 ```python
 theta_tiles = gr.thetas[gr.grid_pt_idx]
 null_truths = gr.null_truth.astype(bool)
-grid_batch_size = 4096
-n_sim_batches = 1
+grid_batch_size = int(2**12)
+n_sim_batches = 200
 sim_batch_size = 100
 
 p_tiles = jax.scipy.special.expit(theta_tiles)
@@ -548,16 +552,16 @@ class LeiSimulator:
     ):
         self.lei_obj = lei_obj
         self.unifs_shape = self.lei_obj.unifs_shape()
-        self.unifs_order = jnp.arange(0, self.unifs_shape[0])
+        self.unifs_order = np.arange(0, self.unifs_shape[0])
         self.p_tiles = p_tiles
         self.null_truths = null_truths
         self.grid_batch_size = grid_batch_size
 
         self.reduce_func = (
-            lambda x: jnp.sum(x, axis=0) if not reduce_func else reduce_func
+            lambda x: np.sum(x, axis=0) if not reduce_func else reduce_func
         )
         self.reduce_func_all = (
-            lambda x: jnp.sum(x, axis=0) if not reduce_func_all else reduce_func_all
+            lambda x: np.sum(x, axis=0) if not reduce_func_all else reduce_func_all
         )
 
         self.f_batch_sim_batch_grid_jit = jax.jit(self.f_batch_sim_batch_grid)
@@ -582,7 +586,7 @@ class LeiSimulator:
             self.p_tiles, self.null_truths, unifs, self.unifs_order
         )
         rejs, scores = tuple(
-            jnp.concatenate(
+            np.concatenate(
                 tuple(x[i] for x in rejs_scores),
                 axis=1,
             )
@@ -606,8 +610,8 @@ class LeiSimulator:
         keys = jax.random.split(key, num=n_sim_batches)
         out = [self.simulate_batch_sim(sim_batch_size, key) for key in keys]
         return (
-            self.reduce_func_all(jnp.array([x[0] for x in out])),
-            self.reduce_func_all(jnp.array([x[1] for x in out])),
+            self.reduce_func_all(np.array([x[0] for x in out])),
+            self.reduce_func_all(np.array([x[1] for x in out])),
         )
 
 
@@ -650,7 +654,12 @@ plt.show()
 ```python
 tile_radii = gr.radii[gr.grid_pt_idx]
 sim_sizes = np.full(gr.n_tiles, sim_size)
-n_arm_samples = lei_obj.unifs_shape()[0]
+n_arm_samples = (
+    params['n_stage_1'] +
+    params['n_stage_1_add_per_interim'] // 2 * params['n_stage_1_interims'] + 
+    params['n_stage_2'] +
+    params['n_stage_2_add_per_interim'] // 2
+)
 total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
     theta_tiles,
     tile_radii,
@@ -672,15 +681,17 @@ bound_components = np.array([
 
 ```python
 t2_uniques = np.unique(theta_tiles[:, 2])
-t2 = t2_uniques[15]
-selection = (theta_tiles[:, 2] == t2)
+t3_uniques = np.unique(theta_tiles[:, 3])
+t2 = t2_uniques[8]
+t3 = t3_uniques[8]
+selection = (theta_tiles[:, 2] == t2) & (theta_tiles[:, 3] == t3)
 
 np.savetxt('P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
 np.savetxt('B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
 ```
 
 ```python
-t2_uniques
+t2_uniques[8], t3_uniques[8]
 ```
 
 # Sandbox
