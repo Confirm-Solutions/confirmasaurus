@@ -19,34 +19,34 @@ locals {
   }
 }
 
-resource "aws_iam_role" "ec2_role" {
-  name               = "ec2_role"
+resource "aws_iam_role" "main" {
+  name               = "main-${terraform.workspace}"
   assume_role_policy = file("assumerolepolicy.json")
 }
 
-resource "aws_iam_policy" "policy" {
-  name        = "test-policy"
-  description = "A test policy"
+resource "aws_iam_policy" "main" {
+  name        = "main-${terraform.workspace}"
+  description = "IAM policy for individual devenvironments."
   policy      = file("iampolicy.json")
 }
 
-resource "aws_iam_policy_attachment" "test-attach" {
-  name       = "test-attachment"
-  roles      = ["${aws_iam_role.ec2_role.name}"]
-  policy_arn = aws_iam_policy.policy.arn
+resource "aws_iam_policy_attachment" "main" {
+  name       = "main-${terraform.workspace}"
+  roles      = ["${aws_iam_role.main.name}"]
+  policy_arn = aws_iam_policy.main.arn
 }
 
-resource "aws_iam_instance_profile" "test_profile" {
-  name = "test_profile"
-  role = aws_iam_role.ec2_role.name
+resource "aws_iam_instance_profile" "main" {
+  name = "main-${terraform.workspace}"
+  role = aws_iam_role.main.name
 }
 
 
-resource "aws_instance" "app" {
+resource "aws_instance" "main" {
   ami                  = var.ami
   instance_type        = var.instance_type
   key_name             = var.key_name
-  iam_instance_profile = aws_iam_instance_profile.test_profile.name
+  iam_instance_profile = aws_iam_instance_profile.main.name
 
   root_block_device {
     volume_size = 40
@@ -57,16 +57,19 @@ resource "aws_instance" "app" {
     Name = "confirmasaurus"
   }
   
-#   these two links explain how to use user data to install things on the instance:
+# Here, we are using user_data to run an install script that will be the first
+# command run on the new instance.
+#   these two links explain how to use user data to install things on the
+#   instance:
 # - https://klotzandrew.com/blog/deploy-an-ec2-to-run-docker-with-terraform
 # - https://awstip.com/to-set-up-docker-container-inside-ec2-instance-with-terraform-3af5d53e54ba
   user_data = templatefile("init_amzn_linux.sh", local.vars)
 }
 
 output "ec2instance" {
-  value = aws_instance.app.public_dns
+  value = aws_instance.main.public_dns
 }
 
 output "id" {
-  value = aws_instance.app.id 
+  value = aws_instance.main.id 
 }
