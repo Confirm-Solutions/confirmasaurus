@@ -23,8 +23,9 @@ import scipy.special
 import confirm.mini_imprint.grid as berrylibgrid
 import confirm.mini_imprint.binomial as binomial
 
-grid_info, sim_info, bound_info = np.load("output_berry3d_hi3.npy", allow_pickle=True)
+# grid_info, sim_info, bound_info = np.load("output_berry3d_hi3.npy", allow_pickle=True)
 # grid_info, sim_info, bound_info = np.load("../../output_berry3d_0_1000.npy", allow_pickle=True)
+grid_info, sim_info, bound_info = np.load("output_berry4d_0_1000000.npy", allow_pickle=True)
 
 (theta, theta_tiles, tile_radii, corners, null_truth) = grid_info
 (sim_sizes, typeI_sum, typeI_score) = sim_info

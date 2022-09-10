@@ -181,8 +181,9 @@ RUN mamba create -n sagemath -y sage \
     # means you can run R in Jupyter!
     && R -e "IRkernel::installspec()"
 
-# I've commented this out because I don't know if we should force everyone to
-# use zsh.
-# RUN usermod -s /bin/zsh root
+# Install AWS CLI V2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+  && unzip awscliv2.zip \
+  && sudo ./aws/install
 
 LABEL org.opencontainers.image.source https://github.com/Confirm-Solutions/confirmasaurus

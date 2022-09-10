@@ -71,5 +71,10 @@ RUN mamba env update -n base -f /tmp/conda-tmp/environment.yml \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge
+    
+# Install AWS CLI V2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+  && unzip awscliv2.zip \
+  && sudo ./aws/install
 
 LABEL org.opencontainers.image.source https://github.com/Confirm-Solutions/confirmasaurus
