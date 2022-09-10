@@ -62,6 +62,15 @@ Actually launching some infrastructure-as-code.
 6. Congratulations, you've launched an EC2 instance! At this point, you can either destroy the instance or go to another section and make use of the instance.
 7. Run `terraform destroy` to destroy your instance and supporting infrastructure.
 
+Go to the [VSCode Remote-Containers](#using-vscode-remote-containers) section to start a development instance. Or [launch a non-interactive job](#launching-a-non-interactive-job).
+
+## Our data on AWS
+
+We have some S3 Buckets. These contain various important data:
+
+- `imprint-dump` - each subfolder here should contain the output of a model run.
+- `
+
 ## Using VSCode Remote-Containers
 
 I recommend this as the first point of attack for running on AWS. In the future, we should jobs as individual ephemeral docker containers on something like AWS Elastic Container Service, but this is a starting point. Install:
@@ -123,11 +132,21 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 - Or, you can build a multi-architecture image using something like `docker buildx build --platform linux/amd64,linux/arm64 -t company/image_name .`
 - Or, you can build images in the `clouddev` devcontainer/docker image.
 
+**Stopping and restarting an EC2 dev instance used by Remote-Containers without terminating the instance**
+
+- Terminate the instance using the AWS CLI or the Console
+- Restart the instance using the AWS CLI or the Console
+- `terraform apply` to update the terraform outputs (the public ipv4 DNS url will have changed)
+- you might need to start docker... `./connect.sh` then `sudo systemctl start docker`. We could integrate this step into `./setup_remotedev.sh`.
+- `./setup_remotedev.sh` to re-initalize the remote machine
+- Open the docker sidebar in VSCode, start the relevant stopped container.
+- Then, run the VSCode command "Remote-Containers: Attach to running container".
+- Once the container has launched, open the existing workspace folder inside the remote docker container. Probably `/workspaces/confirmasaurus`.
+
 **Handy tools:**
 
 - the Docker extension and "Remote Explorer" panels in VSCode are very helpful. Explore them!
 - Run "close remote connection" to end the session
-- to reconnect: in the docker panel, start the container, then "attach to running container", then open an existing folder.
 - `terraform -install-autocomplete` will install terraform autocompletion into your shell.
 
 **Accessing AWS from Codespaces:**
