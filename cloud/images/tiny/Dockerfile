@@ -16,7 +16,7 @@ RUN ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo "conda activate base" >> ~/.bashrc
 
 RUN mamba install --yes --freeze-installed \
-        numpy scipy matplotlib pip \
+        typer numpy scipy matplotlib pip \
     && pip install \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
           "jax[cuda]" \
