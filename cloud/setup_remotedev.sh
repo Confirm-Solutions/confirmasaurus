@@ -14,4 +14,4 @@ docker context create remotedev \
 docker context use remotedev
 
 docker login ghcr.io -u "$GITHUB_USER" -p "$GITHUB_TOKEN"
-docker pull ghcr.io/confirm-solutions/smalldev:latest
+docker pull ghcr.io/confirm-solutions/smalldev:main

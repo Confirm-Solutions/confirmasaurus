@@ -48,17 +48,19 @@ Installing and configuring your tools:
 
 1. Get the AWS login info and the AWS private key from Ben. Try the AWS login info and go look at the EC2 console. Put the private key it in your `.ssh/` folder and call it `aws-key-pair.pem` and then run `chmod 400 ~/.ssh/aws-key-pair.pem; ssh-add ~/.ssh/aws-key-pair.pem`. The `chmod` command sets the key to be read-only for your user and inaccessible to other users.
 2. [Install the AWS CLI](https://aws.amazon.com/cli/).
-3. Get the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the ["Security Credentials" dropdown on the upper right corner of the AWS dashboard](https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials). Then run `aws configure` and set the key, key id and region. (Note: I've used `us-east-1` as the region. Some things might require extra setup in other regions? I'm not sure.)
+3. Get the `AWS_ACCESS_KEY_ID` and from the ["Security Credentials" dropdown on the upper right corner of the AWS dashboard](https://us-east-1.console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials). Get the `AWS_SECRET_ACCESS_KEY` from Ben. Then run `aws configure` and set the key, key id and region. (Note: I've used `us-east-1` as the region. Some things might require extra setup in other regions? I'm not sure.)
 4. [Install `terraform` from this link.](https://learn.hashicorp.com/tutorials/terraform/install-cli)
 5. [Install docker locally from this link.](https://docs.docker.com/engine/install/)
 
 Actually launching some infrastructure-as-code.
 
-1. Go into the `cloud/` folder (everything terraform-related will probably need to be run from this folder) and run `terraform init`.
-2. Then, `terraform apply`. This launches the EC2 instance and supporting infra. Go take a look at the AWS console and see your instance. The instance will automatically install docker as specified by `main.tf` and `init_amzn_linux.sh`.
-3. From the `cloud/` folder and run `./connect.sh`. This simple script grabs the public DNS/IP of the EC2 instance and then connects to it using ssh-agent forwarding so that all your local ssh keys are still available. Agent forwarding is useful for GitHub access and AWS CLI access.
-4. Congratulations, you've launched an EC2 instance! At this point, you can either destroy the instance or go to another section and make use of the instance.
-5. Run `terraform destroy` to destroy your instance and supporting infrastructure.
+1. Go into the `cloud/` folder (everything terraform-related will probably need to be run from this folder).
+2. Run `terraform init`. This will initialize your terraform state. Terraform will track the state of remote resources.
+3. Then, `terraform workspace new name_your_workspace`. This will create a private workspace so that your resources don't have name conflicts with other folks.
+4. Then, `terraform apply`. This launches the EC2 instance and supporting infra. Go take a look at the AWS console and see your instance. The instance will automatically install docker as specified by `main.tf` and `init_amzn_linux.sh`.
+5. From the `cloud/` folder and run `./connect.sh`. This simple script grabs the public DNS/IP of the EC2 instance and then connects to it using ssh-agent forwarding so that all your local ssh keys are still available. Agent forwarding is useful for GitHub access and AWS CLI access.
+6. Congratulations, you've launched an EC2 instance! At this point, you can either destroy the instance or go to another section and make use of the instance.
+7. Run `terraform destroy` to destroy your instance and supporting infrastructure.
 
 ## Using VSCode Remote-Containers
 
@@ -73,17 +75,21 @@ Then, to run:
 4. Next, run the `./setup_remotedev.sh` script. This sets the remote EC2 instance as your docker context. Now all docker commands will be running remotely!! The script will also log in to ghcr.io on the instance. For this to work correctly, you need to have the `$GITHUB_TOKEN` and `$GITHUB_USER` environment variables set. [Follow the directions here to create a `$GITHUB_TOKEN` personal access token (PAT) if you haven't before.](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) Finally, the script will pull the `smalldev` docker image.
 5. Now, we're going to set up the remote machine as a devcontainer using the **Remote-Containers extension**. Run the VSCode command "Remote-Containers: Clone Repository in Container Volume...". Then, select the Github repo you want to use: `Confirm-Solutions/confirmasaurus`.
 6. This will launch the `smalldev` devcontainer/docker image and after a minute or two of building the container, you'll be dropped into a lovely development environment!
-7. When you're done, close the VSCode window, then `terraform destroy` if you want to delete the infrastructure. Alternatively, you can `aws ec2 stop-instances --instance-ids $( terraform output --raw id )` to stop the running instance. Later the same command but with `start-instances` instead of `stop-instances` will work to restart the instance.
+7. When you're done, close the VSCode window, then `terraform destroy` if you want to delete the infrastructure. Alternatively, you can `aws ec2 stop-instances --instance-ids $( terraform output --raw id )` to stop the running instance. Later the same command but with `start-instances` instead of `stop-instances` will work to restart the instance. (note: the `terraform destroy` seems to take a long time for some P instances!)
 
 TL;DR:
 
 ```
 ## Launch your infrastructure and set up your connection:
 cd cloud
+terraform init
+terraform workspace new name_your_workspace
 terraform apply
+# STOP and wait about two minutes for the docker install on the EC2 instance to
+# complete
 ./setup_remotedev.sh
-## Connect with VSCode Remote Containers...
-## Destroy your infrastructure!
+# Connect with VSCode Remote Containers...
+# Destroy your infrastructure!
 terraform destroy
 docker context use default
 ```
@@ -122,6 +128,7 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 - the Docker extension and "Remote Explorer" panels in VSCode are very helpful. Explore them!
 - Run "close remote connection" to end the session
 - to reconnect: in the docker panel, start the container, then "attach to running container", then open an existing folder.
+- `terraform -install-autocomplete` will install terraform autocompletion into your shell.
 
 **Accessing AWS from Codespaces:**
 
