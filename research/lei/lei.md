@@ -18,6 +18,7 @@ jupyter:
 ```
 
 ```python
+import os
 import outlaw
 import outlaw.berry as berry
 import outlaw.quad as quad
@@ -533,7 +534,7 @@ gr = grid.prune(gr)
 theta_tiles = gr.thetas[gr.grid_pt_idx]
 null_truths = gr.null_truth.astype(bool)
 grid_batch_size = int(2**12)
-n_sim_batches = 200
+n_sim_batches = 1000
 sim_batch_size = 100
 
 p_tiles = jax.scipy.special.expit(theta_tiles)
@@ -580,7 +581,9 @@ class LeiSimulator:
             in_axes=(None, None, 0, None),
         )(p_batch, null_batch, unifs_batch, unifs_order)
 
-    def simulate_batch_sim(self, sim_batch_size, key):
+    def simulate_batch_sim(self, sim_batch_size, i, key):
+        start = time.perf_counter()
+
         unifs = jax.random.uniform(key=key, shape=(sim_batch_size,) + self.unifs_shape)
         rejs_scores, n_padded = self.batch_all(
             self.p_tiles, self.null_truths, unifs, self.unifs_order
@@ -599,6 +602,10 @@ class LeiSimulator:
         )
         rejs_reduced = self.reduce_func(rejs)
         scores_reduced = self.reduce_func(scores)
+
+        end = time.perf_counter()
+        elapsed_time = (end-start)
+        print(f"Batch {i}: {elapsed_time:.03f}s")
         return rejs_reduced, scores_reduced
 
     def simulate(
@@ -608,7 +615,7 @@ class LeiSimulator:
         sim_batch_size,
     ):
         keys = jax.random.split(key, num=n_sim_batches)
-        out = [self.simulate_batch_sim(sim_batch_size, key) for key in keys]
+        out = [self.simulate_batch_sim(sim_batch_size, i, key) for i, key in enumerate(keys)]
         return (
             self.reduce_func_all(np.array([x[0] for x in out])),
             self.reduce_func_all(np.array([x[1] for x in out])),
@@ -626,11 +633,18 @@ simulator = LeiSimulator(
 
 ```python
 %%time
+key = jax.random.PRNGKey(10)
 typeI_sum, typeI_score = simulator.simulate(
     key=key,
     n_sim_batches=n_sim_batches,
     sim_batch_size=sim_batch_size,
 )
+```
+
+```python
+os.makedirs("output_lei4d2", exist_ok=True)
+np.savetxt("output_lei4d2/typeI_sum.csv", typeI_sum, fmt="%s", delimiter=",")
+np.savetxt("output_lei4d2/typeI_score.csv", typeI_score, fmt="%s", delimiter=",")
 ```
 
 ```python
@@ -686,8 +700,8 @@ t2 = t2_uniques[8]
 t3 = t3_uniques[8]
 selection = (theta_tiles[:, 2] == t2) & (theta_tiles[:, 3] == t3)
 
-np.savetxt('P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
-np.savetxt('B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+np.savetxt('output_lei4d2/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
+np.savetxt('output_lei4d2/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
 ```
 
 ```python
