@@ -13,22 +13,22 @@ jupyter:
 ---
 
 ```python
-import outlaw.nb_util
+import confirm.outlaw.nb_util
 
-outlaw.nb_util.setup_nb()
+confirm.outlaw.nb_util.setup_nb()
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.spatial
 import scipy.special
-import berrylib.grid as berrylibgrid
-import berrylib.binomial
+import confirm.mini_imprint.grid as berrylibgrid
+import confirm.mini_imprint.binomial as binomial
 
 grid_info, sim_info, bound_info = np.load("output_berry3d_hi3.npy", allow_pickle=True)
+# grid_info, sim_info, bound_info = np.load("../../output_berry3d_0_1000.npy", allow_pickle=True)
 
 (theta, theta_tiles, tile_radii, corners, null_truth) = grid_info
 (sim_sizes, typeI_sum, typeI_score) = sim_info
 (total_gp, d0_gp, d0u_gp, d1w_gp, d1uw_gp, d2uw_gp) = bound_info
-
 ```
 
 ```python
@@ -57,7 +57,7 @@ def eval_bound(eval_pts):
     # assert(np.all((null_truth[tile_idx] == eval_null).all(axis=1)))
     reduced_tile_idx = tile_idx[tile_idx != -1]
 
-    out_arrs = berrylib.binomial.upper_bound(
+    out_arrs = binomial.upper_bound(
         theta_tiles[reduced_tile_idx],
         tile_radii[reduced_tile_idx],
         eval_pts[tile_idx != -1, None, :],

@@ -5,6 +5,11 @@ from typing import List
 
 import numpy as np
 
+# TODO: corners should be a sparse matrix. that would reduce memory pressure.
+# TODO: filter the whole set of grid points to check for intersection, move the
+# ones that need to be split to the end, then do splitting. This would be much
+# faster because it would ignore the grid points that don't need to be split.
+
 
 @dataclass
 class HyperPlane:

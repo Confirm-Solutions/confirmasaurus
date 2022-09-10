@@ -27,6 +27,7 @@ __pycache__
 *.pkl
 *.lprof
 *.prof
+*.npy
 
 # c++ extensions built in place within the source tree.
 *.so 

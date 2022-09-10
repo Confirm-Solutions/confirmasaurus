@@ -13,7 +13,7 @@ jupyter:
 ---
 
 ```python
-import berrylib.util as util
+import confirm.berrylib.util as util
 
 util.setup_nb()
 ```
@@ -25,9 +25,9 @@ import numpy as np
 import jax.numpy as jnp
 import warnings
 # import pyimprint.grid as grid
-import berrylib.fast_inla as fast_inla
-import berrylib.binomial as binomial
-import berrylib.grid as berrylibgrid
+import confirm.berrylib.fast_inla as fast_inla
+import confirm.mini_imprint.binomial as binomial
+import confirm.mini_imprint.grid as grid
 
 import jax
 # set to cpu or gpu to run on a specific device.
@@ -84,14 +84,14 @@ theta_max = 1.0
 # n = [0, 0, -1, 0]
 # c = -logit(0.1)
 null_hypos = [
-    berrylibgrid.HyperPlane(-np.identity(n_arms)[i], -logit(0.1)) for i in range(n_arms)
+    grid.HyperPlane(-np.identity(n_arms)[i], -logit(0.1)) for i in range(n_arms)
 ]
 theta1d = [np.linspace(theta_min, theta_max, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)]
 theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
 radii = np.empty(theta.shape)
 for i in range(theta.shape[1]):
     radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
-g = berrylibgrid.prune(berrylibgrid.build_grid(theta, radii, null_hypos))
+g = grid.prune(grid.build_grid(theta, radii, null_hypos))
 
 theta = g.thetas
 theta_tiles = g.thetas[g.grid_pt_idx]
