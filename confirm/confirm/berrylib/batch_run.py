@@ -98,9 +98,9 @@ def accumulate(config, grid_output):
         samples = np.random.uniform(
             size=(config["sim_batch_size"], config["n_arm_samples"], n_arms)
         )
+        logger.info(f"beginning sim batch {j}")
+        start = time.time()
         for i in range(0, n_gridpt_batches):
-            logger.info(f"beginning batch (sim = {j}, grid = {i})")
-            start = time.time()
             gridpt_start = i * config["gridpt_batch_size"]
             gridpt_end = (i + 1) * config["gridpt_batch_size"]
             gridpt_end = min(gridpt_end, theta_tiles.shape[0])
@@ -111,7 +111,7 @@ def accumulate(config, grid_output):
             )
             typeI_sum[gridpt_start:gridpt_end] += sum_batch
             typeI_score[gridpt_start:gridpt_end] += score_batch
-            logger.info(f"finished batch, took {time.time() - start:.2f}s")
+        logger.info(f"finished sim batch, took {time.time() - start:.2f}s")
 
     sim_sizes = np.full(theta_tiles.shape[0], config["sim_size"])
 
