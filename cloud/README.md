@@ -148,6 +148,8 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 - the Docker extension and "Remote Explorer" panels in VSCode are very helpful. Explore them!
 - Run "close remote connection" to end the session
 - `terraform -install-autocomplete` will install terraform autocompletion into your shell.
+- [`infracost` is a handy tool for estimating prices](https://www.infracost.io/docs/)
+- [terraformer](https://github.com/GoogleCloudPlatform/terraformer) seems like a handy tools for converting existing infrastructure into code.
 
 **Accessing AWS from Codespaces:**
 

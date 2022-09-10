@@ -1,15 +1,16 @@
 from dataclasses import dataclass
 from typing import Callable
 
-import confirm.berrylib.util as util
 import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.linalg
 import scipy.stats
-from confirm.berrylib.fast_math import jax_fast_invert
 from jax.config import config
 from scipy.special import logit
+
+import confirm.berrylib.util as util
+from confirm.berrylib.fast_math import jax_fast_invert
 
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
@@ -319,7 +320,7 @@ class FastINLA:
         """
         import cppimport
 
-        ext = cppimport.imp("berrylib.fast_inla_ext")
+        ext = cppimport.imp("confirm.berrylib.fast_inla_ext")
         sigma2_post = np.empty((data.shape[0], self.sigma2_n))
         exceedances = np.empty((data.shape[0], self.n_arms))
         theta_max = np.empty((data.shape[0], self.sigma2_n, self.n_arms))

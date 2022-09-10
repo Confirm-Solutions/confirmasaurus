@@ -1,6 +1,6 @@
 import numpy as np
 
-import outlaw.quad as quad
+import confirm.outlaw.quad as quad
 
 
 def gen_f(scale):

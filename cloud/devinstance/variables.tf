@@ -22,7 +22,7 @@ variable "image_name" {
 
 variable "instance_type" {
   type        = string
-  # default     = "t2.xlarge"
-  default     = "p3.2xlarge"
+  default     = "t2.xlarge"
+  # default     = "p3.2xlarge"
   description = "description"
 }

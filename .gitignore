@@ -30,6 +30,7 @@ __pycache__
 *.npy
 
 # c++ extensions built in place within the source tree.
+.rendered.*.cpp
 *.so 
 
 # bazel outputs

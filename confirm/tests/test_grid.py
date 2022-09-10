@@ -2,11 +2,12 @@ import time
 
 import numpy as np
 import pytest
-from berrylib.grid import build_grid
-from berrylib.grid import get_edges
-from berrylib.grid import HyperPlane
-from berrylib.grid import prune
 from numpy import nan
+
+from confirm.mini_imprint.grid import build_grid
+from confirm.mini_imprint.grid import get_edges
+from confirm.mini_imprint.grid import HyperPlane
+from confirm.mini_imprint.grid import prune
 
 
 def normalize(n):

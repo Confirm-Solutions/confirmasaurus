@@ -6,7 +6,7 @@ app = typer.Typer()
 
 
 @app.command()
-def main(begin: int = 0, end: int = None):
+def onebatch(begin: int = 0, end: int = None):
     config = dict(
         n_arm_samples=35,
         seed=10,
@@ -22,6 +22,16 @@ def main(begin: int = 0, end: int = None):
         gridpt_batch_end=end,
     )
     batch_run.main(config)
+
+
+@app.command()
+def main():
+    for i in range(4, 17):
+        print(i, i + 1)
+        size = 1000000
+        begin = i * size
+        end = (i + 1) * size
+        onebatch(begin, end)
 
 
 if __name__ == "__main__":

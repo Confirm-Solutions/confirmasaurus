@@ -1,12 +1,13 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from berrylib.fast_math import jax_fast_invert
-from berrylib.fast_math import jax_faster_inv
-from berrylib.fast_math import jax_faster_inv_diag
-from berrylib.fast_math import jax_faster_inv_product
-from berrylib.fast_math import jax_faster_log_det
-from berrylib.fast_math import log_normal_pdf
+
+from confirm.berrylib.fast_math import jax_fast_invert
+from confirm.berrylib.fast_math import jax_faster_inv
+from confirm.berrylib.fast_math import jax_faster_inv_diag
+from confirm.berrylib.fast_math import jax_faster_inv_product
+from confirm.berrylib.fast_math import jax_faster_log_det
+from confirm.berrylib.fast_math import log_normal_pdf
 
 
 def test_faster_linalg():
