@@ -61,6 +61,30 @@ output:
 10
 ```
 
+### Useful Lazy-Evaluation Technique
+
+It may be useful sometimes to force lazy-evaluation of JAX expressions (see [example](https://github.com/Confirm-Solutions/confirmasaurus/blob/cc197fceb543e04b01f3f5d8d70dfa4102a86ad5/research/lei/lewis/jax_wrappers.py)).
+In the example file, we see a class `ArraySlice0`, which represents a sliced array along axis 0.
+Though the restriction to axis 0 is unnecessary, it leads to simpler code and is sufficient for our applications.
+The purpose of this class is to allow for _dynamic_ slicing.
+JAX cannot jit `a[i:j]` where `i, j` are non-static.
+However, although the slicing cannot be jit-ed, if we only rely on the sliced array _through other operations_
+such as `__getitem__` and if those operations can be jit-ed, we can lazily evaluate the slice
+by fusing it with these other operations.
+
+So, the following is not jit-able:
+```python
+def f(x, y):
+    y = y[x[0]:x[1]]
+    return y[0]
+```
+However, the following _is_ jit-able:
+```python
+def f(x, y):
+    y = ArraySlice0(y, x[0], x[1])
+    return y[0]
+```
+
 ### Links that go into deep JAX details:
 
 - [Hashing a Jax.DeviceArray](https://github.com/google/jax/issues/4572#issuecomment-709809897)
