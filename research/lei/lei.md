@@ -534,7 +534,7 @@ gr = grid.prune(gr)
 theta_tiles = gr.thetas[gr.grid_pt_idx]
 null_truths = gr.null_truth.astype(bool)
 grid_batch_size = int(2**12)
-n_sim_batches = 2
+n_sim_batches = 1000
 sim_batch_size = 100
 
 p_tiles = jax.scipy.special.expit(theta_tiles)
@@ -549,7 +549,6 @@ class LeiSimulator:
         null_truths,
         grid_batch_size,
         reduce_func=None,
-        reduce_func_all=None,
     ):
         self.lei_obj = lei_obj
         self.unifs_shape = self.lei_obj.unifs_shape()
@@ -560,9 +559,6 @@ class LeiSimulator:
 
         self.reduce_func = (
             lambda x: np.sum(x, axis=0) if not reduce_func else reduce_func
-        )
-        self.reduce_func_all = (
-            lambda x: np.sum(x, axis=0) if not reduce_func_all else reduce_func_all
         )
 
         self.f_batch_sim_batch_grid_jit = jax.jit(self.f_batch_sim_batch_grid)
