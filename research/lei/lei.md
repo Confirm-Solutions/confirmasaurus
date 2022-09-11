@@ -568,6 +568,9 @@ class LeiSimulator:
             in_axes=(0, 0, None, None),
         )
 
+        self.typeI_sum = None
+        self.typeI_score = None
+
     def f_batch_sim_batch_grid(self, p_batch, null_batch, unifs_batch, unifs_order):
         return jax.vmap(
             jax.vmap(
@@ -611,13 +614,13 @@ class LeiSimulator:
         sim_batch_size,
     ):
         keys = jax.random.split(key, num=n_sim_batches)
-        typeI_sum = np.zeros(self.p_tiles.shape[0])
-        typeI_score = np.zeros(self.p_tiles.shape)
+        self.typeI_sum = np.zeros(self.p_tiles.shape[0])
+        self.typeI_score = np.zeros(self.p_tiles.shape)
         for i, key in enumerate(keys):
             out = self.simulate_batch_sim(sim_batch_size, i, key)
-            typeI_sum += out[0]
-            typeI_score += out[1]
-        return typeI_sum, typeI_score
+            self.typeI_sum += out[0]
+            self.typeI_score += out[1]
+        return self.typeI_sum, self.typeI_score
 
 
 simulator = LeiSimulator(
