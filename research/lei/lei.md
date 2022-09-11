@@ -534,7 +534,7 @@ gr = grid.prune(gr)
 theta_tiles = gr.thetas[gr.grid_pt_idx]
 null_truths = gr.null_truth.astype(bool)
 grid_batch_size = int(2**12)
-n_sim_batches = 1000
+n_sim_batches = 2
 sim_batch_size = 100
 
 p_tiles = jax.scipy.special.expit(theta_tiles)
@@ -615,11 +615,13 @@ class LeiSimulator:
         sim_batch_size,
     ):
         keys = jax.random.split(key, num=n_sim_batches)
-        out = [self.simulate_batch_sim(sim_batch_size, i, key) for i, key in enumerate(keys)]
-        return (
-            self.reduce_func_all(np.array([x[0] for x in out])),
-            self.reduce_func_all(np.array([x[1] for x in out])),
-        )
+        typeI_sum = np.zeros(self.p_tiles.shape[0])
+        typeI_score = np.zeros(self.p_tiles.shape)
+        for i, key in enumerate(keys):
+            out = self.simulate_batch_sim(sim_batch_size, i, key)
+            typeI_sum += out[0]
+            typeI_score += out[1]
+        return typeI_sum, typeI_score
 
 
 simulator = LeiSimulator(
@@ -633,7 +635,7 @@ simulator = LeiSimulator(
 
 ```python
 %%time
-key = jax.random.PRNGKey(10)
+key = jax.random.PRNGKey(2)
 typeI_sum, typeI_score = simulator.simulate(
     key=key,
     n_sim_batches=n_sim_batches,
@@ -642,9 +644,9 @@ typeI_sum, typeI_score = simulator.simulate(
 ```
 
 ```python
-os.makedirs("output_lei4d2", exist_ok=True)
-np.savetxt("output_lei4d2/typeI_sum.csv", typeI_sum, fmt="%s", delimiter=",")
-np.savetxt("output_lei4d2/typeI_score.csv", typeI_score, fmt="%s", delimiter=",")
+os.makedirs("output_lei4d", exist_ok=True)
+np.savetxt("output_lei4d/typeI_sum.csv", typeI_sum, fmt="%s", delimiter=",")
+np.savetxt("output_lei4d/typeI_score.csv", typeI_score, fmt="%s", delimiter=",")
 ```
 
 ```python
@@ -700,8 +702,8 @@ t2 = t2_uniques[8]
 t3 = t3_uniques[8]
 selection = (theta_tiles[:, 2] == t2) & (theta_tiles[:, 3] == t3)
 
-np.savetxt('output_lei4d2/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
-np.savetxt('output_lei4d2/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+np.savetxt('output_lei4d/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
+np.savetxt('output_lei4d/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
 ```
 
 ```python
