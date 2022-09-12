@@ -12,8 +12,10 @@ jupyter:
     name: python3
 ---
 
+## Creating the 4 panel z-test figure!
+
 ```python
-import outlaw.nb_util as nb_util
+import confirm.outlaw.nb_util as nb_util
 nb_util.setup_nb()
 import numpy as np
 import matplotlib.pyplot as plt

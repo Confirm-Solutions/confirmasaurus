@@ -1,3 +1,6 @@
+"""
+The driver script for the 4D berry code that ran to produce our 2022 paper.
+"""
 import typer
 
 import confirm.berrylib.batch_run as batch_run

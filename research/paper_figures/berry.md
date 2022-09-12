@@ -12,6 +12,10 @@ jupyter:
     name: python3
 ---
 
+## Creating the 4 panel Berry figure!
+
+To run this code, make sure you've downloaded the relevant berry output files from S3.
+
 ```python
 import confirm.outlaw.nb_util
 

@@ -69,7 +69,8 @@ Go to the [VSCode Remote-Containers](#using-vscode-remote-containers) section to
 We have some S3 Buckets. These contain various important data:
 
 - `imprint-dump` - each subfolder here should contain the output of a model run.
-- `
+- `aws-cloudtrail-logs-644171722153-2d03f9cb` - AWS access/management logs of everything we've done.
+- `s3-access-logs-111222` - S3 access logs
 
 ## Using VSCode Remote-Containers
 

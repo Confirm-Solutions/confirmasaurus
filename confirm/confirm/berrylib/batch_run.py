@@ -1,3 +1,8 @@
+"""
+Running a subset of the Berry grid. This goes end-to-end and builds the grid,
+accumulates simulations, and then builds the upper bounds. See main() for the
+summary.
+"""
 import logging
 import sys
 import time
@@ -28,6 +33,25 @@ def setup_logging():
 logger = logging.getLogger(__name__)
 
 # TODO add tests for the batching to check equality with unbatched?
+
+
+def main(config):
+    from rich import print as rich_print
+
+    rich_print("Running Berry model with config:")
+    rich_print(config)
+    setup_logging()
+
+    grid_output, begin, end = build_grid(config)
+    sim_output = accumulate(config, grid_output)
+    bound_output = build_upper_bounds(config, grid_output, sim_output)
+
+    out_filename = f"output_{config['name']}_{begin}_{end}.npy"
+    logger.info(f"saving output to {out_filename}")
+    np.save(
+        out_filename,
+        np.array([grid_output, sim_output, bound_output], dtype=object),
+    )
 
 
 def build_grid(config):
@@ -155,25 +179,6 @@ def cli_main(
     gridpt_batch_end: int = None,
 ):
     main(locals())
-
-
-def main(config):
-    from rich import print as rich_print
-
-    rich_print("Running Berry model with config:")
-    rich_print(config)
-    setup_logging()
-
-    grid_output, begin, end = build_grid(config)
-    sim_output = accumulate(config, grid_output)
-    bound_output = build_upper_bounds(config, grid_output, sim_output)
-
-    out_filename = f"output_{config['name']}_{begin}_{end}.npy"
-    logger.info(f"saving output to {out_filename}")
-    np.save(
-        out_filename,
-        np.array([grid_output, sim_output, bound_output], dtype=object),
-    )
 
 
 if __name__ == "__main__":
