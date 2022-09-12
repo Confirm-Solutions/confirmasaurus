@@ -25,8 +25,31 @@ import confirm.mini_imprint.binomial as binomial
 
 # grid_info, sim_info, bound_info = np.load("output_berry3d_hi3.npy", allow_pickle=True)
 # grid_info, sim_info, bound_info = np.load("../../output_berry3d_0_1000.npy", allow_pickle=True)
-grid_info, sim_info, bound_info = np.load("output_berry4d_0_1000000.npy", allow_pickle=True)
+```
 
+```python
+info_sets = []
+max_gp = 16777216
+for i in range(17):
+    begin = i * 1000000
+    end = min(max_gp, (i + 1) * 1000000)
+    path = f"output_berry4d_{begin}_{end}.npy"
+    batch_infos = np.load(path, allow_pickle=True)
+    for j, info in enumerate(batch_infos):
+        if j >= len(info_sets):
+            info_sets.append([])
+        for k, arr in enumerate(info):
+            if k >= len(info_sets[j]):
+                info_sets[j].append([])
+            info_sets[j][k].append(arr)
+for i, info in enumerate(info_sets):
+    for j, arr in enumerate(info):
+        info_sets[i][j] = np.concatenate(arr)
+
+grid_info, sim_info, bound_info = info_sets
+```
+
+```python
 (theta, theta_tiles, tile_radii, corners, null_truth) = grid_info
 (sim_sizes, typeI_sum, typeI_score) = sim_info
 (total_gp, d0_gp, d0u_gp, d1w_gp, d1uw_gp, d2uw_gp) = bound_info
@@ -80,7 +103,6 @@ def eval_bound(eval_pts):
 theta_range = (-3.5, 1.0, 10)
 typeI_range = (0, np.max(typeI_sum / sim_sizes))
 typeI_range, theta_range
-
 ```
 
 ```python
@@ -115,25 +137,27 @@ def set_domain(cbar_target, skipx=False, skipy=False, cbar=True, cbar_label=True
 
 def fig1(cmap=None, n_contours=11, **kwargs):
     t0 = scipy.special.logit(0.1) - 0.001
-    n1 = 500
+    n1 = 72
     n2 = n1
     t1 = np.linspace(*theta_range[:2], n1)
     t2 = np.linspace(*theta_range[:2], n2)
     t12 = np.stack(np.meshgrid(t1, t2, indexing="ij"), axis=-1)
-    eval_pts = np.concatenate([np.full((n1, n2, 1), t0), t12], axis=-1)
+    unplotted = np.full((n1, n2, 1), t0)
+    eval_pts = np.concatenate([unplotted] * (n_arms - 2) + [t12], axis=-1)
     eval_pts = eval_pts.reshape((-1, n_arms))
 
     bound = eval_bound(eval_pts)
 
-    eval_pts_3d = eval_pts.reshape((n1, n2, 3))
-    simple_slice(eval_pts_3d, bound, **kwargs)
+    eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
+    simple_slice(eval_pts_2d, bound, **kwargs)
+    return eval_pts_2d
 
 
-def simple_slice(eval_pts_3d, bound, cmap=None, n_contours=12, **kwargs):
-    n1, n2 = eval_pts_3d.shape[:2]
+def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
+    n1, n2 = eval_pts_2d.shape[:2]
 
-    x = eval_pts_3d[:, :, 1]
-    y = eval_pts_3d[:, :, 2]
+    x = eval_pts_2d[:, :, n_arms - 2]
+    y = eval_pts_2d[:, :, n_arms - 1]
     z = bound[0].reshape((n1, n2))
     levels = np.linspace(*typeI_range, n_contours) * 100
 
@@ -151,10 +175,8 @@ def simple_slice(eval_pts_3d, bound, cmap=None, n_contours=12, **kwargs):
     set_domain(cbar_target, **kwargs)
     return cbar_target
 
-
-fig1()
+ev = fig1()
 plt.show()
-
 ```
 
 ```python
@@ -163,55 +185,52 @@ max_theta = theta_tiles[np.argmax(total_gp), :]
 
 def fig2(cmap=None, n_contours=11, **kwargs):
     t0 = max_theta[0]
-    n1 = 500
+    n1 = 150
     n2 = n1
     t1 = np.linspace(*theta_range[:2], n1)
     t2 = np.linspace(*theta_range[:2], n2)
     t12 = np.stack(np.meshgrid(t1, t2, indexing="ij"), axis=-1)
-    eval_pts = np.concatenate([np.full((n1, n2, 1), t0), t12], axis=-1)
+    unplotted = np.full((n1, n2, 1), t0)
+    eval_pts = np.concatenate([unplotted] * (n_arms - 2) + [t12], axis=-1)
     eval_pts = eval_pts.reshape((-1, n_arms))
 
     bound = eval_bound(eval_pts)
 
-    eval_pts_3d = eval_pts.reshape((n1, n2, 3))
-    simple_slice(eval_pts_3d, bound, **kwargs)
+    eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
+    simple_slice(eval_pts_2d, bound, **kwargs)
 
 
 fig2()
 plt.show()
-
 ```
 
 ```python
-def fig3_data():
-    t2_unique = np.unique(theta_tiles[:, 2])
-    t1t2_pts = []
-    worst_bound = []
-    worst_theta = []
-    for t1 in t2_unique:
-        for t2 in t2_unique:
-            select = (theta_tiles[:, 1] == t1) & (theta_tiles[:, 2] == t2)
-            worst_idx = np.argmax(total_gp[select])
-            worst_theta.append(theta_tiles[select][worst_idx])
-            t1t2_pts.append((t1, t2))
-            worst_bound.append(total_gp[select][worst_idx])
+def get_worst(tile_centers, pts, axes, tol):
+    tree12 = scipy.spatial.cKDTree(tile_centers[:, axes])
+    nearby = tree12.query_ball_point(pts, tol)
+    worst_theta = np.empty((len(nearby), n_arms))
+    worst_bound = np.empty(len(nearby))
+    for i in range(len(nearby)):
+        select = np.array(nearby[i])
+        if select.shape[0] == 0:
+            print(i)
+        worst_idx = np.argmax(total_gp[select])
+        worst_theta[i] = theta_tiles[select[worst_idx]]
+        worst_bound[i] = total_gp[select[worst_idx]]
+    return worst_bound, worst_theta
+```
 
-    grid_shape = t2_unique.shape[0], t2_unique.shape[0]
-    t1t2_pts = np.array(t1t2_pts).reshape((*grid_shape, 2))
-    worst_bound = np.array(worst_bound).reshape(grid_shape)
-    worst_theta = np.array(worst_theta).reshape((*grid_shape, 3))
-    return t1t2_pts, worst_bound, worst_theta
-
-
-fig3_t1t2_pts, fig3_worst_bound, fig3_worst_theta = fig3_data()
-
+```python
+t2_unique = np.unique(theta_tiles[:, 2])
+fig3_t12_grid = np.stack(np.meshgrid(t2_unique, t2_unique, indexing="ij"), axis=-1)
+fig3_t12_pts = fig3_t12_grid.reshape((-1, 2))
+fig3_worst_bound, fig3_worst_theta = get_worst(theta_tiles, fig3_t12_pts, (1, 2), 1e-10)
 
 def fig3(**kwargs):
-
     cbar_target = plt.pcolor(
-        fig3_t1t2_pts[..., 0],
-        fig3_t1t2_pts[..., 1],
-        fig3_worst_bound,
+        fig3_t12_grid[..., 0],
+        fig3_t12_grid[..., 1],
+        fig3_worst_bound.reshape(fig3_t12_grid.shape[:2]),
         vmin=typeI_range[0],
         vmax=typeI_range[1],
     )
@@ -221,7 +240,6 @@ def fig3(**kwargs):
 fig3()
 plt.show()
 # cbar_target = plt.tripcolor(t1t2_pts[...,0].ravel(), t1t2_pts[...,1].ravel(), worst_bound.ravel())
-
 ```
 
 ```python
@@ -237,30 +255,31 @@ u2_ordering = np.argsort(u2s)
 u2dist = np.append(True, np.diff(u2s[u2_ordering]))
 u2_unique = u2s[u2_ordering[u2dist > 1e-10]]
 
+u1u2_grid = np.stack(np.meshgrid(u1_unique, u2_unique, indexing="ij"), axis=-1)
+u1u2_pts = u1u2_grid.reshape((-1, 2))
+
+u_tile_centers = np.stack((u1s, u2s), axis=-1)
 ```
 
 ```python
 u1u2_pts = []
-worst_bound = []
-for u1v in u1_unique:
-    # TODO: SHOULD NOT USE EQUALITY!!
-    u1_select = np.abs(u1s - u1v) < 1e-10
-    for u2v in np.unique(u2s[u1_select]):
-        select = u1_select & (u2s == u2v)
-        worst_idx = np.argmax(total_gp[select])
-        worst_theta = theta_tiles[select][worst_idx]
-        u1u2_pts.append((u1v, u2v))
-        worst_bound.append(total_gp[select][worst_idx])
+u1_tree = scipy.spatial.cKDTree(u1s.reshape((-1, 1)))
+u1_select = u1_tree.query_ball_point(u1_unique.reshape((-1, 1)), 1e-10)
+for i in range(len(u1_select)):
+    for u2v in np.unique(u2s[u1_select[i]]):
+        u1u2_pts.append((u1_unique[i], u2v))
 u1u2_pts = np.array(u1u2_pts)
-worst_bound = np.array(worst_bound)
+```
 
+```python
+u_worst_bound, u_worst_theta = get_worst(u_tile_centers, u1u2_pts, (0,1), 1e-10)
 ```
 
 ```python
 def fig4(cbar=True, skipx=False, skipy=False):
     x = u1u2_pts[..., 0]
     y = u1u2_pts[..., 1]
-    z = worst_bound
+    z = u_worst_bound
     levels = np.linspace(*typeI_range, 12) * 100
     # cbar_target = plt.tripcolor(x, y, z * 100)
     cbar_target = plt.tricontourf(x, y, z * 100, levels=levels, extend="both")
@@ -333,5 +352,4 @@ plt.text(-3.5, 3.25, "$\mathbf{D}$", fontsize=16)
 cbar = fig.colorbar(cbar_target, ax=axes.ravel().tolist(), label="\% Type I error upper bound")
 
 plt.show()
-
 ```
