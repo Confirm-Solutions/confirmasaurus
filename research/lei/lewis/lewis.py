@@ -692,12 +692,10 @@ class Lewis45:
         uniform draws for a single simulation to ensure enough Binomial
         samples are guaranteed.
         """
-        n_max = (
-            self.n_stage_1
-            + self.n_stage_1_interims * self.n_stage_1_add_per_interim
-            + self.n_stage_2
-            + self.n_stage_2_add_per_interim
-        )
+        # the n-configs used to compute posterior difference
+        # means that we've reached the very end of the simulation
+        # so it's sufficient to find the max n among these n-configs.
+        n_max = jnp.max(self.n_configs_pd)
         return (n_max, self.n_arms)
 
     def sample(self, berns, berns_order, berns_start, n_new_per_arm):

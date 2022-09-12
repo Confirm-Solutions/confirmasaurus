@@ -443,7 +443,7 @@ plt.show()
 %%time
 params = {
     "n_arms" : 4,
-    "n_stage_1" : 200,
+    "n_stage_1" : 50,
     "n_stage_2" : 100,
     "n_stage_1_interims" : 2,
     "n_stage_1_add_per_interim" : 100,
@@ -454,7 +454,7 @@ params = {
     "stage_2_efficacy_threshold" : 0.95,
     "inter_stage_futility_threshold" : 0.6,
     "posterior_difference_threshold" : 0,
-    "rejection_threshold" : 0.1,
+    "rejection_threshold" : 0.05,
     "key" : jax.random.PRNGKey(0),
     "n_pr_sims" : 100,
     "n_sig2_sims" : 20,
@@ -506,7 +506,7 @@ lei_obj.pps_2_table
 
 ```python
 n_arms = params['n_arms']
-size = 32
+size = 52
 lower = np.full(n_arms, -1)
 upper = np.full(n_arms, 1)
 thetas, radii = lewgrid.make_cartesian_grid_range(
@@ -534,8 +534,8 @@ gr = grid.prune(gr)
 theta_tiles = gr.thetas[gr.grid_pt_idx]
 null_truths = gr.null_truth.astype(bool)
 grid_batch_size = int(2**12)
-n_sim_batches = 1000
-sim_batch_size = 100
+n_sim_batches = 500
+sim_batch_size = 50
 
 p_tiles = jax.scipy.special.expit(theta_tiles)
 ```
@@ -634,7 +634,7 @@ simulator = LeiSimulator(
 
 ```python
 %%time
-key = jax.random.PRNGKey(2)
+key = jax.random.PRNGKey(3)
 typeI_sum, typeI_score = simulator.simulate(
     key=key,
     n_sim_batches=n_sim_batches,
@@ -643,9 +643,9 @@ typeI_sum, typeI_score = simulator.simulate(
 ```
 
 ```python
-os.makedirs("output_lei4d", exist_ok=True)
-np.savetxt("output_lei4d/typeI_sum.csv", typeI_sum, fmt="%s", delimiter=",")
-np.savetxt("output_lei4d/typeI_score.csv", typeI_score, fmt="%s", delimiter=",")
+os.makedirs("output_lei4d2", exist_ok=True)
+np.savetxt("output_lei4d2/typeI_sum.csv", typeI_sum, fmt="%s", delimiter=",")
+np.savetxt("output_lei4d2/typeI_score.csv", typeI_score, fmt="%s", delimiter=",")
 ```
 
 ```python
