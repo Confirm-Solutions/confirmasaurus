@@ -18,6 +18,7 @@ jupyter:
 ```
 
 ```python
+import os
 import outlaw
 import outlaw.berry as berry
 import outlaw.quad as quad
@@ -442,7 +443,7 @@ plt.show()
 %%time
 params = {
     "n_arms" : 4,
-    "n_stage_1" : 200,
+    "n_stage_1" : 50,
     "n_stage_2" : 100,
     "n_stage_1_interims" : 2,
     "n_stage_1_add_per_interim" : 100,
@@ -453,7 +454,7 @@ params = {
     "stage_2_efficacy_threshold" : 0.95,
     "inter_stage_futility_threshold" : 0.6,
     "posterior_difference_threshold" : 0,
-    "rejection_threshold" : 0.1,
+    "rejection_threshold" : 0.05,
     "key" : jax.random.PRNGKey(0),
     "n_pr_sims" : 100,
     "n_sig2_sims" : 20,
@@ -505,7 +506,7 @@ lei_obj.pps_2_table
 
 ```python
 n_arms = params['n_arms']
-size = 32
+size = 52
 lower = np.full(n_arms, -1)
 upper = np.full(n_arms, 1)
 thetas, radii = lewgrid.make_cartesian_grid_range(
@@ -533,8 +534,8 @@ gr = grid.prune(gr)
 theta_tiles = gr.thetas[gr.grid_pt_idx]
 null_truths = gr.null_truth.astype(bool)
 grid_batch_size = int(2**12)
-n_sim_batches = 200
-sim_batch_size = 100
+n_sim_batches = 500
+sim_batch_size = 50
 
 p_tiles = jax.scipy.special.expit(theta_tiles)
 ```
@@ -548,7 +549,6 @@ class LeiSimulator:
         null_truths,
         grid_batch_size,
         reduce_func=None,
-        reduce_func_all=None,
     ):
         self.lei_obj = lei_obj
         self.unifs_shape = self.lei_obj.unifs_shape()
@@ -560,9 +560,6 @@ class LeiSimulator:
         self.reduce_func = (
             lambda x: np.sum(x, axis=0) if not reduce_func else reduce_func
         )
-        self.reduce_func_all = (
-            lambda x: np.sum(x, axis=0) if not reduce_func_all else reduce_func_all
-        )
 
         self.f_batch_sim_batch_grid_jit = jax.jit(self.f_batch_sim_batch_grid)
         self.batch_all = batch.batch_all(
@@ -570,6 +567,9 @@ class LeiSimulator:
             batch_size=self.grid_batch_size,
             in_axes=(0, 0, None, None),
         )
+
+        self.typeI_sum = None
+        self.typeI_score = None
 
     def f_batch_sim_batch_grid(self, p_batch, null_batch, unifs_batch, unifs_order):
         return jax.vmap(
@@ -580,7 +580,9 @@ class LeiSimulator:
             in_axes=(None, None, 0, None),
         )(p_batch, null_batch, unifs_batch, unifs_order)
 
-    def simulate_batch_sim(self, sim_batch_size, key):
+    def simulate_batch_sim(self, sim_batch_size, i, key):
+        start = time.perf_counter()
+
         unifs = jax.random.uniform(key=key, shape=(sim_batch_size,) + self.unifs_shape)
         rejs_scores, n_padded = self.batch_all(
             self.p_tiles, self.null_truths, unifs, self.unifs_order
@@ -599,6 +601,10 @@ class LeiSimulator:
         )
         rejs_reduced = self.reduce_func(rejs)
         scores_reduced = self.reduce_func(scores)
+
+        end = time.perf_counter()
+        elapsed_time = (end-start)
+        print(f"Batch {i}: {elapsed_time:.03f}s")
         return rejs_reduced, scores_reduced
 
     def simulate(
@@ -608,11 +614,13 @@ class LeiSimulator:
         sim_batch_size,
     ):
         keys = jax.random.split(key, num=n_sim_batches)
-        out = [self.simulate_batch_sim(sim_batch_size, key) for key in keys]
-        return (
-            self.reduce_func_all(np.array([x[0] for x in out])),
-            self.reduce_func_all(np.array([x[1] for x in out])),
-        )
+        self.typeI_sum = np.zeros(self.p_tiles.shape[0])
+        self.typeI_score = np.zeros(self.p_tiles.shape)
+        for i, key in enumerate(keys):
+            out = self.simulate_batch_sim(sim_batch_size, i, key)
+            self.typeI_sum += out[0]
+            self.typeI_score += out[1]
+        return self.typeI_sum, self.typeI_score
 
 
 simulator = LeiSimulator(
@@ -626,11 +634,18 @@ simulator = LeiSimulator(
 
 ```python
 %%time
+key = jax.random.PRNGKey(3)
 typeI_sum, typeI_score = simulator.simulate(
     key=key,
     n_sim_batches=n_sim_batches,
     sim_batch_size=sim_batch_size,
 )
+```
+
+```python
+os.makedirs("output_lei4d2", exist_ok=True)
+np.savetxt("output_lei4d2/typeI_sum.csv", typeI_sum, fmt="%s", delimiter=",")
+np.savetxt("output_lei4d2/typeI_score.csv", typeI_score, fmt="%s", delimiter=",")
 ```
 
 ```python
@@ -686,8 +701,8 @@ t2 = t2_uniques[8]
 t3 = t3_uniques[8]
 selection = (theta_tiles[:, 2] == t2) & (theta_tiles[:, 3] == t3)
 
-np.savetxt('P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
-np.savetxt('B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+np.savetxt('output_lei4d/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
+np.savetxt('output_lei4d/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
 ```
 
 ```python
