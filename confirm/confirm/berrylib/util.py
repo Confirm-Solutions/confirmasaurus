@@ -122,6 +122,7 @@ def integrate_multidim(f, axes, quad_rules):
 ### Tools for setting up nice Jupyter notebooks.
 def magic(text):
     from IPython import get_ipython
+
     ipy = get_ipython()
     if ipy is not None:
         ipy.magic(text)

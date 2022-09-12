@@ -53,8 +53,9 @@ The procedure here is as follows:
 7. Don't forget to multiply the quadrature weights by the determinant of the
     jacobian of the transformation.
 """
-import confirm.berrylib.util as util
 import numpy as np
+
+import confirm.berrylib.util as util
 
 
 def build_grid(
