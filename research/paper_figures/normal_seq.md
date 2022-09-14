@@ -15,8 +15,8 @@ jupyter:
 ## Creating the 4 panel z-test figure!
 
 ```python
-import confirm.outlaw.nb_util as nb_util
-nb_util.setup_nb()
+# import confirm.outlaw.nb_util as nb_util
+# nb_util.setup_nb()
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats
@@ -101,12 +101,12 @@ plt.show()
 ```
 
 ```python
-def build_bounds(npts=None, mu=None, nsims=None):
-    mu, power, stepsize = calc_power(npts=npts, mu=mu)
+def build_bounds(npts=None, mu=None, nsims=None, z_thresh=1.96):
+    mu, power, stepsize = calc_power(npts=npts, mu=mu, z_thresh=z_thresh)
     npts = mu.shape[0]
 
     mu_plus_eps = mu + epsilon
-    pow_plus_eps = 1 - pnorm(-mu_plus_eps + 1.96)
+    pow_plus_eps = 1 - pnorm(-mu_plus_eps + z_thresh)
 
     np.random.seed(9)
     # pow_rand = (
@@ -132,6 +132,10 @@ def build_bounds(npts=None, mu=None, nsims=None):
     bound_xs = []
     for i in range(npts):
         penalized_bound.append(
+            # TBT: this seems like the important part! 0th, 1st, 2nd order
+            # terms. there is no kink in the 1st order term because it's
+            # linear. but it should be abs(penalized_sequeunce) instead, I
+            # think?
             pow_rand[i]
             + pow_derivative_rand[i] * stepsize * penalized_sequence
             + (1 / 2) * (stepsize**2) * (penalized_sequence) ** 2
@@ -184,6 +188,9 @@ plt.show()
 
 ```python
 def gradient_bounds(npoints, nsims, include_ptwise_error=False):
+    """
+    Compute purely gradient "triangular" bounds.
+    """
     mu, power, stepsize = calc_power(npoints)
     mu_plus_eps = mu + epsilon
     pow_plus_eps = 1 - pnorm(-mu_plus_eps + qnorm(0.975))
@@ -237,11 +244,11 @@ def fig3(include_ptwise_error, include_quadratic, **kwargs):
 
     if include_quadratic:
         mu, power, stepsize, bound_xs2, penalized_bound, penalized_bound_low = build_bounds(npts=npoints, nsims=int(1e6))
-        # arbitrary adjustment to get the two curves to line up
-        # eventually we should use real imprint for all these figures so that
-        # we don't have to do this
-        penalized_bound[0] -= 0.0014
-        penalized_bound[1] -= 0.001
+        ### MIKE: this is the spot that you were referencing!
+        ### MIKE: this is the spot that you were referencing!
+        ### MIKE: this is the spot that you were referencing!
+        ### MIKE: this is the spot that you were referencing!
+        ### MIKE: this is the spot that you were referencing!
         full_xs = np.concatenate(bound_xs2)
         full_bound = np.concatenate(penalized_bound)
         filter = (full_xs > -0.8) | (full_bound < 0.025)
@@ -255,10 +262,10 @@ def fig3(include_ptwise_error, include_quadratic, **kwargs):
     set_domain(**kwargs)
 
 
-fig3(False, False)
-plt.show()
-fig3(True, False)
-plt.show()
+# fig3(False, False)
+# plt.show()
+# fig3(True, False)
+# plt.show()
 fig3(True, True)
 plt.show()
 ```
@@ -281,6 +288,39 @@ plt.text(-1, 0.026, "$\mathbf{C}$", fontsize=16)
 plt.subplot(2,2,4)
 fig2(skipy=True)
 t = plt.text(-1, 0.026, "$\mathbf{D}$", fontsize=16)
+plt.savefig('ztest-four-panels.pdf', bbox_inches='tight')
+plt.show()
+```
+
+```python
+def fig5(z_thresh, **kwargs):
+    npts = [9]
+    nsims = [int(1e6)]
+    linestyle = ['k-']
+    for j in range(len(npts)):
+        P = npts[j]
+        label = f'({P}, $10^5$)' if j < 3 else f'({P}, $10^6$)'
+        S = nsims[j]
+        mu, power, stepsize, bound_xs, penalized_bound, penalized_bound_low = build_bounds(z_thresh=z_thresh, npts=P, nsims=int(S))
+        full_xs = np.concatenate(bound_xs)
+        full_bound = np.concatenate(penalized_bound)
+        full_bound_low = np.concatenate(penalized_bound_low)
+        filter = (full_xs > -0.8) | (full_bound < 0.025)
+        plt.plot(full_xs[filter], full_bound[filter], linestyle[j], label=label)
+        plt.plot(full_xs[filter], full_bound_low[filter], linestyle[j], label=label)
+    
+    mu_dense10, pow_dense10, _ = calc_power(100, a=-1.02, b=0, z_thresh=z_thresh)
+    plt.plot(mu_dense10, pow_dense10, 'r:')
+    set_domain(**kwargs)
+
+fig5(1.96)
+plt.title('Z-Test Power Confidence Bands', fontsize=12)
+plt.savefig('power-ztest.pdf', bbox_inches='tight')
+plt.show()
+
+fig5(2.02)
+plt.title('CSE-Tuned Z-Test Power Confidence Bands', fontsize=12)
+plt.savefig('tuned-ztest.pdf', bbox_inches='tight')
 plt.show()
 ```
 

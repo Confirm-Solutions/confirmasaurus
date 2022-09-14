@@ -355,5 +355,10 @@ plt.text(-3.5, 3.25, "$\mathbf{D}$", fontsize=16)
 
 cbar = fig.colorbar(cbar_target, ax=axes.ravel().tolist(), label="\% Type I error upper bound")
 
+plt.savefig("berry_fig.pdf", dpi=300)
 plt.show()
+```
+
+```python
+
 ```
