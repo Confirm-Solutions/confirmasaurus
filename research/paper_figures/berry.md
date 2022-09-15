@@ -111,7 +111,6 @@ typeI_range, theta_range
 
 ```python
 typeI_range = (0, 0.55)
-
 ```
 
 ```python
@@ -177,10 +176,39 @@ def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
         extend="both",
     )
     set_domain(cbar_target, **kwargs)
+    plt.scatter([-2.2], [-0.9], s=50, marker='>', facecolors='none', edgecolors='k')
+    plt.scatter([-1.1], [-1.1], s=50, marker='*', facecolors='none', edgecolors='k')
     return cbar_target
 
 ev = fig1()
 plt.show()
+```
+
+```python
+scenarios = np.array([
+    [0.05, 0.05, 0.1, 0.2],
+    [0.2, 0.2, 0.3, 0.4],
+    [0.2, 0.2, 0.2, 0.5],
+    [0.15, 0.15, 0.2, 0.3],
+    [0.05, 0.05, 0.1, 0.4],
+    [0.05, 0.05, 0.3, 0.4],
+])
+p0 = np.array(
+    [0.05, 0.05, 0.1, 0.2]
+)  # rate of response below this is the null hypothesis
+p1 = np.array(
+    [0.2, 0.2, 0.3, 0.4]
+)  # rate of response above this is the alternative hypothesis.
+```
+
+```python
+np.log(scenarios / (1 - scenarios)) - np.log(p1 / (1 - p1))
+```
+
+```python
+S = np.log(0.1 / (1 - 0.1))
+p1 = np.log(0.1 / (1 - 0.1))
+S - p1
 ```
 
 ```python
@@ -355,7 +383,7 @@ plt.text(-3.5, 3.25, "$\mathbf{D}$", fontsize=16)
 
 cbar = fig.colorbar(cbar_target, ax=axes.ravel().tolist(), label="\% Type I error upper bound")
 
-plt.savefig("berry_fig.pdf", dpi=300)
+plt.savefig("berry_fig.pdf", bbox_inches='tight')
 plt.show()
 ```
 
