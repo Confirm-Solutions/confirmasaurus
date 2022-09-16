@@ -37,14 +37,18 @@ holderp = 1.2
 holderq = 1.0 / (1 - 1.0 / holderp)
 
 # numerical integral to compute E[ |grad g|^q]^(1/q)
+# need to compute for the worst t in the "tile". seems like the integral
+# increases with t increasing, so I've chosen t=-1.1
 xs = jnp.arange(n + 1).astype(jnp.float64)
-eggq = jnp.abs(dg_vmap(t, xs)) ** holderq
-C = sum(eggq * scipy.stats.binom.pmf(xs, n, p)) ** (1 / holderq)
+tmax = -1.1
+pmax = jax.scipy.special.expit(tmax)
+eggq = jnp.abs(dg_vmap(tmax, xs)) ** holderq
+C = sum(eggq * scipy.stats.binom.pmf(xs, n, pmax)) ** (1 / holderq)
 C
 ```
 
 ```python
-f0 = 0.001
+f0 = 0.025
 dt = 0.5
 t_path = np.linspace(t, t + dt, 100)
 def derivs(t, y):
@@ -61,10 +65,11 @@ classical = f0 + grad_bound * (t_path - t) + 0.5 * hess_bound * (t_path - t) ** 
 
 ```python
 plt.plot([t], [f0], 'ko')
-plt.plot(t_path, solution['y'][0,:], 'b-')
-plt.plot(t_path, classical, 'r--')
+plt.plot(t_path, solution['y'][0,:], 'b-', label='holder-ode')
+plt.plot(t_path, classical, 'r--', label='classical')
 plt.xlabel(r'$\theta$')
 plt.ylabel('type I error')
+plt.legend()
 plt.show()
 ```
 
