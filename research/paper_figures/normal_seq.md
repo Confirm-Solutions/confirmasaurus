@@ -55,7 +55,7 @@ The test we'll be checking is `z > z_thresh`. For `z_thresh` equal to approximat
 ```python
 z_thresh = -jax.scipy.stats.norm.ppf(0.025)
 true_err = lambda mu: 1 - jax.scipy.stats.norm.cdf(-mu + z_thresh)
-true_err(0)
+true_err(0), z_thresh
 ```
 
 Using JAX, we can compute the true gradient and hessian for this error function:
@@ -76,7 +76,8 @@ work well for more complex designs. And with just 10,000 simulations, the match 
 # simulating the rejection/type I error
 nsims = 100000
 samples = np.random.normal(mu[:,None], 1, size=(mu.shape[0], nsims,))
-typeI_sum = np.sum(samples > z_thresh, axis=-1)
+reject = samples > z_thresh
+typeI_sum = np.sum(reject, axis=-1)
 typeI_est = typeI_sum / nsims
 typeI_est, true_err(mu)
 ```
@@ -114,7 +115,7 @@ $$
 This estimated gradient is also quite close to the true gradient!
 
 ```python
-grad_est = np.sum((samples > z_thresh) * (samples - mu[:, None]), axis=-1) / nsims
+grad_est = np.sum(reject * (samples - mu[:, None]), axis=-1) / nsims
 true_gradient(mu), grad_est
 ```
 
@@ -122,6 +123,7 @@ We can also construct a Clopper-Pearson confidence interval on the Type I Error 
 
 ```python
 typeI_CI = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum) - typeI_est
+typeI_CI
 ```
 
 And for the gradient term, we can construct a confidence interval using Chebyshev's inequality. 
@@ -166,7 +168,7 @@ cantelli = np.sqrt(1 / nsims * (1 / delta - 1))
 grad_est, chebyshev, cantelli
 ```
 
-Finally, also from exponential family theory, we can upper bound the hessian for the Type I Error for this test. The Type I Error must satisfy $|f''| \leq 1$ uniformly.
+Finally, also from exponential family theory, we can upper bound the hessian for the Type I Error for this test. The Type I Error must satisfy $|f''| \leq Var[X] = 1$ uniformly.
 
 In fact, we can use numerical optimization to show that this bound is loose. But, for a fully general bound, the bound is sufficient. 
 
@@ -176,8 +178,17 @@ In fact, we can use numerical optimization to show that this bound is loose. But
 # and occurs at N(x = 1, mu = 0, sig = 1) because x * np.exp(-0.5 * x ** 2) is
 # maximized at x = 1
 hess_bound_true = -scipy.optimize.minimize(lambda x: -true_second(x), 0).fun
-hess_bound = 1.0
-hess_bound_true, hess_bound
+
+# we can check the variance explicitly. note that the variance won't change
+# with different values of mu because the whole integrand is just translated by
+# mu.
+explicit_integral = scipy.integrate.quad(
+    lambda x: scipy.stats.norm.pdf(x, 0) * (x - 0) ** 2, 
+    -10, 
+    10
+)
+hess_bound = explicit_integral[0]
+hess_bound_true, explicit_integral
 ```
 
 To demonstrate all this, we'll make three plots:
@@ -275,7 +286,7 @@ def ztest(npts=2, a=-1, b=0, z_thresh=z_thresh_default, delta=0.01, nsims=10000,
     grad_est = np.sum((samples > z_thresh) * (samples - mu[:, None]), axis=-1) / nsims
 
     typeI_CI = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum) - typeI_est
-    grad_bound = np.sqrt((1 / delta - 1) / nsims)
+    grad_CI = np.sqrt((1 / delta) / nsims)
     hess_bound = 1.0
     
     if x is None:
@@ -284,14 +295,14 @@ def ztest(npts=2, a=-1, b=0, z_thresh=z_thresh_default, delta=0.01, nsims=10000,
 
     v = x - mu[closest_mu_idx]
     grad_bounds = np.array([
-        v * (grad_est[closest_mu_idx] + grad_bound),
-        v * (grad_est[closest_mu_idx] - grad_bound)
+        v * (grad_est[closest_mu_idx] + grad_CI),
+        v * (grad_est[closest_mu_idx] - grad_CI)
     ])
     max_1st_order = np.max(grad_bounds, axis=0)
     min_1st_order = np.min(grad_bounds, axis=0)
 
     # NOTE: min_2nd_order = -max_2nd_order
-    max_2nd_order = 0.5 * hess_bound * (x - mu[closest_mu_idx]) ** 2
+    max_2nd_order = 0.5 * hess_bound * v ** 2
 
     full_max_bound = (typeI_est + typeI_CI)[closest_mu_idx] + max_1st_order + max_2nd_order
     full_min_bound = (typeI_est - typeI_CI)[closest_mu_idx] + min_1st_order - max_2nd_order
@@ -302,7 +313,7 @@ def ztest(npts=2, a=-1, b=0, z_thresh=z_thresh_default, delta=0.01, nsims=10000,
         typeI_est=typeI_est, 
         typeI_CI=typeI_CI, 
         grad_est=grad_est, 
-        grad_bound=grad_bound, 
+        grad_bound=grad_CI, 
         hess_bound=hess_bound,
         closest_mu_idx=closest_mu_idx,
         max_1st_order=max_1st_order,
@@ -548,8 +559,76 @@ plt.title("Z-Test Power Confidence Bands", fontsize=12)
 plt.savefig("power-ztest.pdf", bbox_inches="tight")
 plt.show()
 
-fig5(2.03, 12)
-plt.title("CSE-Tuned Z-Test Power Confidence Bands", fontsize=12)
+# fig5(2.04, 12)
+# plt.title("CSE-Tuned Z-Test Power Confidence Bands", fontsize=12)
+# plt.savefig("tuned-ztest.pdf", bbox_inches="tight")
+# plt.show()
+```
+
+```python
+linestyle = ["k-"]
+x = np.linspace(-1, 0, 1000)
+for j, z_thresh in enumerate(np.linspace(1.96, 2.08, 4)):
+    pick = z_thresh == 2.04
+    z = ztest(z_thresh=z_thresh, npts=9, nsims=int(1e5), delta=0.01, x=x, seed=12)
+
+    for i in range(len(z["mu"])):
+        select = z["closest_mu_idx"] == i
+        plt.plot(
+            x[select],
+            z["full_max_bound"][select],
+            alpha=1.0 if pick else 0.2,
+            color="k" if pick else ["r", "b", "g", "m"][j],
+        )
+        # skip the lower bound
+        # plt.plot(x[select], z['full_min_bound'][select], alpha = 1.0 if pick else 0.3, color = "k" if pick else None)
+mu_dense10 = np.linspace(-1, 0, 100)
+pow_dense10 = true_err(mu_dense10, 2.04)
+plt.plot(mu_dense10, pow_dense10, "r:", linewidth=3)
+
+set_domain()
 plt.savefig("tuned-ztest.pdf", bbox_inches="tight")
+plt.show()
+```
+
+```python
+mu_dense10[-1], pow_dense10[-1]
+```
+
+```python
+import numpy as np
+x = np.array([0.0])
+npts = [5, 10, 20, 40, 80]
+nsims = [2500, 10000, 40000, 90000, 160000, 250000, 360000]
+bound0 = np.empty((len(npts), len(nsims)))
+for i, P in enumerate(npts):
+    for j, S in enumerate(nsims):
+        z = ztest(z_thresh=1.96, npts = int(P), nsims=int(S), delta=0.01, x = x, seed=12)
+        bound0[i, j] = z['full_max_bound'][0]
+```
+
+```python
+z = ztest(z_thresh=1.96, npts = 200, nsims=int(1e6), delta=0.01, x = x, seed=12)
+z['full_max_bound'][0] - 0.025
+```
+
+```python
+styles = ['k-', 'k:', 'k-.', 'k--', 'k-', 'k:']
+for i in range(len(npts)):
+    plt.plot(np.sqrt(nsims), bound0[i, :] - 0.025, styles[i], label = f'{npts[i]:.0f} points')
+plt.legend(fontsize=12)
+plt.ylim([0, 0.016])
+plt.ylabel('Cost in \% of Type I Error')
+yticks = np.linspace(0, 0.016, 9)
+plt.yticks(
+    yticks,
+    labels=[f"{(yv * 100):.1f}" for yv in yticks],
+    rotation=45,
+    ha="right",
+)
+plt.xticks(np.sqrt(nsims), rotation=45)
+plt.gca().set_xticklabels([f'{x:.1e}' for x in nsims])
+plt.xlabel('$N$')
+plt.savefig("z-test-cost.pdf", bbox_inches="tight")
 plt.show()
 ```
