@@ -132,8 +132,7 @@ analytical = (t_path * C / holderq + R) ** holderq
 grad_est = np.sum(reject * (samples - n * p)) / nsims
 
 covar = n * p * (1 - p)
-cantelli = np.sqrt(1 / nsims * (1 / delta - 1))
-grad_bound = np.sqrt(covar) * cantelli
+grad_bound = np.sqrt(covar / nsims * (1 / delta - 1))
 
 # use pmax for a worst case hessian bound.
 hess_bound = n * pmax * (1 - pmax)
@@ -178,7 +177,7 @@ classical_cell_size = (t_path[classical_idx] - t)
 t_path[holder_idx], t_path[classical_idx], holder_cell_size, classical_cell_size
 ```
 
-The ratio of cell sizes. This is the ratio of the number of cells that would be required if we switched to using holder in regions of low T1E.
+The ratio of cell sizes. This is a guess at the ratio of the number of cells that would be required if we switched to using holder in regions of comparably low T1E. This corresponds to a reduction of 500x in the number of tiles required for a 4D problem with low T1E.
 
 ```python
 holder_cell_size / classical_cell_size
