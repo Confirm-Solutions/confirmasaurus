@@ -32,10 +32,10 @@ At = lambda t: -n * jnp.log(1 - jax.scipy.special.expit(t))
 g = lambda t, x: t * x - At(t)
 dg = jax.grad(g)
 dg_vmap = jax.vmap(dg, in_axes=(None, 0))
+dgg_vmap = jax.vmap(jax.grad(dg), in_axes=(None, 0))
 
 holderp = 1.2
-holderq = 6.0
-# holderq = 1.0 / (1 - 1.0 / holderp)
+holderq = 1.0 / (1 - 1.0 / holderp)
 ```
 
 ### The constant term
@@ -62,8 +62,9 @@ def C_wiki(p):
 # at the edge of the tile to get a maximum value.
 tmax = -1.1
 pmax = jax.scipy.special.expit(tmax)
-C = C_wiki(pmax)
-C_numerical(tmax, pmax), C_wiki(pmax)
+# C = C_wiki(pmax)
+C = C_numerical(tmax, pmax)
+# C_numerical(tmax, pmax), C_wiki(pmax)
 ```
 
 ### Is the constant term monotonic? 
@@ -126,13 +127,20 @@ R = f0 ** (1/holderq) - t * C / holderq
 analytical = (t_path * C / holderq + R) ** holderq
 ```
 
+```python
+C, analytical[-1]
+```
+
 ### Classical bound
 
 ```python
+delta_prop_0to1 = 0.5
+typeI_CI_classic = scipy.stats.beta.ppf(1 - (delta * delta_prop_0to1), typeI_sum + 1, nsims - typeI_sum) - typeI_est
+
 grad_est = np.sum(reject * (samples - n * p)) / nsims
 
 covar = n * p * (1 - p)
-grad_bound = np.sqrt(covar / nsims * (1 / delta - 1))
+grad_bound = np.sqrt(covar / nsims * (1 / ((1 - delta_prop_0to1) * delta) - 1))
 
 # use pmax for a worst case hessian bound.
 hess_bound = n * pmax * (1 - pmax)
@@ -145,7 +153,33 @@ grad_est + grad_bound, C * f0 ** (1 / holderp)
 ```
 
 ```python
-classical = f0 + (grad_est + grad_bound) * (t_path - t) + 0.5 * hess_bound * (t_path - t) ** 2
+classical = typeI_est + typeI_CI_classic + (grad_est + grad_bound) * (t_path - t) + 0.5 * hess_bound * (t_path - t) ** 2
+```
+
+### Second order Holder-ODI.
+
+
+```python
+f1 = min(C * f0 ** (1/holderp), grad_est + grad_bound)
+holderp2 = 1.2
+holderq2 = 1.0 / (1 - 1.0 / holderp2)
+def C2_numerical(t, p):
+    xs = jnp.arange(n + 1).astype(jnp.float64)
+    integrand = jnp.abs(dg_vmap(t, xs) ** 2 + dgg_vmap(t, xs)) ** holderq2
+    return sum(integrand * scipy.stats.binom.pmf(xs, n, p)) ** (1 / holderq2)
+C2 = C2_numerical(tmax, pmax)
+ts2 = np.linspace(-10, 10, 100)
+cs2 = [C2_numerical(t, jax.scipy.special.expit(t)) for t in ts]
+# plt.plot(ts2, cs2)
+# plt.show()
+def derivs2(_, y):
+    cur_f = y[0]
+    fp = y[1]
+    fpp = C2 * cur_f ** (1 / holderp2)
+    return [fp, fpp]
+result2 = scipy.integrate.solve_ivp(derivs2, (t, t+dt), [f0, f1], t_eval=t_path, rtol=1e-10, atol=1e-10)
+holderode2 = result2['y'][0]
+# holderode2
 ```
 
 ## Comparing bounds
@@ -154,10 +188,15 @@ classical = f0 + (grad_est + grad_bound) * (t_path - t) + 0.5 * hess_bound * (t_
 plt.plot([t], [f0], 'ko')
 plt.plot(t_path, analytical, 'b-', label='holder-ode')
 plt.plot(t_path, classical, 'r--', label='classical')
+# plt.plot(t_path, holderode2, 'k--', label='holder-ode2')
 plt.xlabel(r'$\theta$')
 plt.ylabel('type I error')
 plt.legend()
 plt.show()
+```
+
+```python
+1 - scipy.stats.binom.cdf(thresh - 1, n, scipy.special.expit(-1.0))
 ```
 
 Computing the bound at the upper edge of the tile.
