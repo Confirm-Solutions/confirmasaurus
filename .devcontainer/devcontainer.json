@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
   "name": "smalldev",
-  "image": "ghcr.io/confirm-solutions/smalldev:main",
+  "image": "ghcr.io/confirm-solutions/smalldev",
 
   // "build": {
   //   "context": "..",
