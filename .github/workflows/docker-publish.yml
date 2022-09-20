@@ -55,7 +55,6 @@ jobs:
         uses: docker/metadata-action@v4
         with:
           images: |
-            confirm-solutions/${{ matrix.NAME }}
             ${{ env.REGISTRY }}/confirm-solutions/${{ matrix.NAME }}
           tags: |
             # set latest tag for default branch
