@@ -23,10 +23,10 @@ jupyter:
 import jax
 import os
 import numpy as np
-from berrylib import grid
-from lewis import grid as lewgrid
-from lewis import lewis
-from berrylib import binomial
+from confirm.mini_imprint import grid
+from confirm.lewislib import grid as lewgrid
+from confirm.lewislib import lewis
+from confirm.berrylib import binomial
 ```
 
 ```python

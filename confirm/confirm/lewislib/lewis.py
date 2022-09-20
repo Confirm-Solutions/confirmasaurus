@@ -1,13 +1,13 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from lewis import batch
-from lewis.table import LinearInterpTable
-from lewis.table import LookupTable
 
-import outlaw.berry as berry
-import outlaw.inla as inla
-import outlaw.quad as quad
+import confirm.outlaw.berry as berry
+import confirm.outlaw.inla as inla
+import confirm.outlaw.quad as quad
+from confirm.lewislib import batch
+from confirm.lewislib.table import LinearInterpTable
+from confirm.lewislib.table import LookupTable
 
 
 """

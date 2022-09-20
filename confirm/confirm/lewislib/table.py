@@ -1,7 +1,7 @@
 import jax.numpy as jnp
-import lewis.jax_wrappers as jwp
 
-from outlaw.interp import interpn
+import confirm.lewislib.jax_wrappers as jwp
+from confirm.outlaw.interp import interpn
 
 
 class BaseTable:
