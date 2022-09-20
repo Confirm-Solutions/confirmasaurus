@@ -207,7 +207,7 @@ def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
     set_domain(cbar_target, **kwargs)
     return cbar_target
 
-ev = fig1(include_discussion_pts=False, include_berry_pts=True)
+ev = fig1(include_discussion_pts=True, include_berry_pts=False)
 plt.show()
 ```
 
@@ -391,8 +391,4 @@ cbar = fig.colorbar(cbar_target, ax=axes.ravel().tolist(), label="\% Type I erro
 
 plt.savefig("berry_fig.pdf", bbox_inches='tight')
 plt.show()
-```
-
-```python
-
 ```
