@@ -16,7 +16,7 @@ We have three docker images at the moment:
   - Latex and markdown and a lot more.
   - Sagemath
 
-There are subfolders in the [cloud folder](./) for each of these images that include the [Dockerfile](./smalldev/Dockerfile). Some of the subfolders have `./build` and `./test` scripts that run the build and check that the expected capabilities are available.
+There are subfolders in the [cloud/images folder](./images) for each of these images that include the [Dockerfile](./images/smalldev/Dockerfile). Some of the subfolders have `./build` and `./test` scripts that run the build and check that the expected capabilities are available.
 
 Then, there are [`.devcontainer.json`](../.devcontainer/devcontainer.json) as well for each of these images. This allows you to launch the images in either Codespaces or the VSCode Remote-Containers extension.
 
@@ -54,13 +54,23 @@ Installing and configuring your tools:
 
 Actually launching some infrastructure-as-code.
 
-1. Go into the `cloud/` folder (everything terraform-related will probably need to be run from this folder).
+1. Go into the `cloud/devinstance` folder (everything terraform-related will probably need to be run from this folder).
 2. Run `terraform init`. This will initialize your terraform state. Terraform will track the state of remote resources.
 3. Then, `terraform workspace new name_your_workspace`. This will create a private workspace so that your resources don't have name conflicts with other folks.
 4. Then, `terraform apply`. This launches the EC2 instance and supporting infra. Go take a look at the AWS console and see your instance. The instance will automatically install docker as specified by `main.tf` and `init_amzn_linux.sh`.
-5. From the `cloud/` folder and run `./connect.sh`. This simple script grabs the public DNS/IP of the EC2 instance and then connects to it using ssh-agent forwarding so that all your local ssh keys are still available. Agent forwarding is useful for GitHub access and AWS CLI access.
+5. From the `cloud/devinstance` folder and run `./connect.sh`. This simple script grabs the public DNS/IP of the EC2 instance and then connects to it using ssh-agent forwarding so that all your local ssh keys are still available. Agent forwarding is useful for GitHub access and AWS CLI access.
 6. Congratulations, you've launched an EC2 instance! At this point, you can either destroy the instance or go to another section and make use of the instance.
 7. Run `terraform destroy` to destroy your instance and supporting infrastructure.
+
+Go to the [VSCode Remote-Containers](#using-vscode-remote-containers) section to start a development instance. Or [launch a non-interactive job](#launching-a-non-interactive-job).
+
+## Our data on AWS
+
+We have some S3 Buckets. These contain various important data:
+
+- `imprint-dump` - each subfolder here should contain the output of a model run.
+- `aws-cloudtrail-logs-644171722153-2d03f9cb` - AWS access/management logs of everything we've done.
+- `s3-access-logs-111222` - S3 access logs
 
 ## Using VSCode Remote-Containers
 
@@ -81,7 +91,7 @@ TL;DR:
 
 ```
 ## Launch your infrastructure and set up your connection:
-cd cloud
+cd cloud/devinstance
 terraform init
 terraform workspace new name_your_workspace
 terraform apply
@@ -108,7 +118,7 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 **Pulling from AWS ECR from an EC2 instance:**
 
 - this should work by default because the terraform configuration sets up an IAM role and policy for the EC2 instance that has full access to both EC2 and ECR.
-- See the [iampolicy.json](iampolicy.json) file.
+- See the [devinstance/iampolicy.json](devinstance/iampolicy.json) file.
 
 **Installing dotfiles:**
 
@@ -123,12 +133,24 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 - Or, you can build a multi-architecture image using something like `docker buildx build --platform linux/amd64,linux/arm64 -t company/image_name .`
 - Or, you can build images in the `clouddev` devcontainer/docker image.
 
+**Stopping and restarting an EC2 dev instance used by Remote-Containers without terminating the instance**
+
+- Terminate the instance using the AWS CLI or the Console
+- Restart the instance using the AWS CLI or the Console
+- `terraform apply` to update the terraform outputs (the public ipv4 DNS url will have changed)
+- you might need to start docker... `./connect.sh` then `sudo systemctl start docker`. We could integrate this step into `./setup_remotedev.sh`.
+- `./setup_remotedev.sh` to re-initalize the remote machine
+- Open the docker sidebar in VSCode, start the relevant stopped container.
+- Then, run the VSCode command "Remote-Containers: Attach to running container".
+- Once the container has launched, open the existing workspace folder inside the remote docker container. Probably `/workspaces/confirmasaurus`.
+
 **Handy tools:**
 
 - the Docker extension and "Remote Explorer" panels in VSCode are very helpful. Explore them!
 - Run "close remote connection" to end the session
-- to reconnect: in the docker panel, start the container, then "attach to running container", then open an existing folder.
 - `terraform -install-autocomplete` will install terraform autocompletion into your shell.
+- [`infracost` is a handy tool for estimating prices](https://www.infracost.io/docs/)
+- [terraformer](https://github.com/GoogleCloudPlatform/terraformer) seems like a handy tools for converting existing infrastructure into code.
 
 **Accessing AWS from Codespaces:**
 

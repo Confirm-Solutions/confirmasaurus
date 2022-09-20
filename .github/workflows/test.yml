@@ -2,22 +2,21 @@ name: Test
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
+    types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
-      - 'anarchy/**'
-      - '**.ipynb'
-      - '**.md'
+      - "anarchy/**"
+      - "**.ipynb"
+      - "**.md"
   push:
     branches:
-      - main 
+      - main
     paths-ignore:
-      - 'anarchy/**'
-      - '**.ipynb'
-      - '**.md'
+      - "anarchy/**"
+      - "**.ipynb"
+      - "**.md"
 jobs:
   test:
+    if: github.event.pull_request.draft == false
     timeout-minutes: 15
     strategy:
       fail-fast: false

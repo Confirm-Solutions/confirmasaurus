@@ -14,7 +14,7 @@ pushd imprint || exit
 popd || exit
 
 # List the internal packages that should be available here.
-for PKG in ./outlaw ./research/berry ./imprint/python
+for PKG in ./confirm ./imprint/python
 do
     [ -d "$PKG" ] && echo -e "\nDirectory $PKG exists. Installing... \n" && pip install --no-deps -e "$PKG"
 done
