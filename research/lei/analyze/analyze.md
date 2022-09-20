@@ -26,7 +26,7 @@ import numpy as np
 from confirm.mini_imprint import grid
 from confirm.lewislib import grid as lewgrid
 from confirm.lewislib import lewis
-from confirm.berrylib import binomial
+from confirm.mini_imprint import binomial
 ```
 
 ```python
