@@ -114,6 +114,30 @@ typeI_range = (0, 0.55)
 ```
 
 ```python
+from scipy.special import logit
+scenarios = np.array([
+    [0.05, 0.05, 0.1, 0.2], # Null
+    # [0.2, 0.2, 0.3, 0.4], # Alternative
+    # [0.2, 0.2, 0.2, 0.5], # One in the middle
+    # [0.15, 0.15, 0.2, 0.3], # All in the middle
+    [0.05, 0.05, 0.1, 0.4], # One Nugget
+    [0.05, 0.05, 0.3, 0.4], # 2 Null, 2 Alt
+])
+p0 = np.array(
+    [0.05, 0.05, 0.1, 0.2]
+)  # rate of response below this is the null hypothesis
+p1 = np.array(
+    [0.2, 0.2, 0.3, 0.4]
+)  # rate of response above this is the alternative hypothesis.
+
+scenarios_t = logit(scenarios) - logit(p1)
+thresh = logit(p0) - logit(p1)
+delta_theta = scenarios_t - thresh
+mapped_theta = delta_theta + logit(0.1)
+mapped_theta
+```
+
+```python
 def set_domain(cbar_target, skipx=False, skipy=False, cbar=True, cbar_label=True):
     if cbar:
         cbar = plt.colorbar(cbar_target)
@@ -138,7 +162,7 @@ def set_domain(cbar_target, skipx=False, skipy=False, cbar=True, cbar_label=True
     plt.axhline(y=scipy.special.logit(0.1), color="k", linestyle="-")
 
 
-def fig1(cmap=None, n_contours=11, **kwargs):
+def fig1(include_discussion_pts=True, include_berry_pts=False, cmap=None, n_contours=11, **kwargs):
     t0 = scipy.special.logit(0.1) - 0.001
     n1 = 72
     n2 = n1
@@ -153,6 +177,11 @@ def fig1(cmap=None, n_contours=11, **kwargs):
 
     eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
     simple_slice(eval_pts_2d, bound, **kwargs)
+    if include_discussion_pts: 
+        plt.scatter([-2.2], [-0.9], s=50, marker='>', facecolors='none', edgecolors='k')
+        plt.scatter([-1.1], [-1.1], s=50, marker='*', facecolors='none', edgecolors='k')
+    if include_berry_pts:
+        plt.scatter(mapped_theta[:,-2], mapped_theta[:, -1], s=50, marker='o', facecolors='none', edgecolors='k')
     return eval_pts_2d
 
 
@@ -176,33 +205,10 @@ def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
         extend="both",
     )
     set_domain(cbar_target, **kwargs)
-    plt.scatter([-2.2], [-0.9], s=50, marker='>', facecolors='none', edgecolors='k')
-    plt.scatter([-1.1], [-1.1], s=50, marker='*', facecolors='none', edgecolors='k')
     return cbar_target
 
-ev = fig1()
+ev = fig1(include_discussion_pts=False, include_berry_pts=True)
 plt.show()
-```
-
-```python
-scenarios = np.array([
-    [0.05, 0.05, 0.1, 0.2],
-    [0.2, 0.2, 0.3, 0.4],
-    [0.2, 0.2, 0.2, 0.5],
-    [0.15, 0.15, 0.2, 0.3],
-    [0.05, 0.05, 0.1, 0.4],
-    [0.05, 0.05, 0.3, 0.4],
-])
-p0 = np.array(
-    [0.05, 0.05, 0.1, 0.2]
-)  # rate of response below this is the null hypothesis
-p1 = np.array(
-    [0.2, 0.2, 0.3, 0.4]
-)  # rate of response above this is the alternative hypothesis.
-```
-
-```python
-np.log(scenarios / (1 - scenarios)) - np.log(p1 / (1 - p1))
 ```
 
 ```python
