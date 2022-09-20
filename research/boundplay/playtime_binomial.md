@@ -123,12 +123,7 @@ f0 = typeI_est + typeI_CI
 dt = tmax - t
 t_path = np.linspace(t, t + dt, 100)
 
-R = f0 ** (1/holderq) - t * C / holderq
-analytical = (t_path * C / holderq + R) ** holderq
-```
-
-```python
-C, analytical[-1]
+analytical = ((t_path - t) * C / holderq + f0 ** (1 / holderq)) ** holderq
 ```
 
 ### Classical bound

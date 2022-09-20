@@ -249,11 +249,14 @@ def second_order_bound(v_sq, theta_tiles, tile_radii, n_arm_samples):
     return d2u
 
 
-def build_odi_constant_func(q: int):
+def _build_odi_constant_func(q: int):
     """
-    Construct an evaluator for the integration constant of the Holder ODI:
+    Construct an evaluator for the 1D integration constant of the Holder ODI:
 
     E[||grad log p_theta (X)||^q]
+
+    This is specialized to the binomial case and would need to be re-derived
+    for another model.
 
     Args:
         q: The moment to compute. Must be an integer greater than 1.
@@ -268,20 +271,16 @@ def build_odi_constant_func(q: int):
     return sp.lambdify(lambdify_args, central_moment, "numpy")
 
 
-def calc_Cqpp(
+def _calc_Cqpp(
     theta_tiles, tile_corners, n_arm_samples: int, holderq: int, C_f: Callable
 ):
     """
     Calculate C_q^{''} from the paper for a tile.
 
-    Args:
-        theta_tiles: numpy array containing tile simulation points with shape:
-            (n_tiles, n_arms)
-        tile_corners: numpy array containing tile corners with shape:
-            (n_tiles, n_corners_per_tile, n_arms)
-        n_arm_samples: number of samples per arm, Binomial n parameter
-        holderq: Holder exponent, q in C_q^{''}
-        C_f: function to calculate E[||grad log p_theta (X)||^q] in 1D
+    See holder_odi_bound for more details on the arguments.
+
+    This function is mostly model-independent. The part that would need to
+    change is the identification of sign changes.
     """
 
     # NOTE: code to calculate roots symbolically:
@@ -302,9 +301,10 @@ def calc_Cqpp(
 
     holderp = 1 / (1 - 1.0 / holderq)
     sup_v = np.max(
-        np.sum(np.abs(tile_corners - theta_tiles) ** holderp, axis=2), axis=1
+        np.sum(np.abs(tile_corners - theta_tiles[:, None]) ** holderp, axis=2)
+        ** (1.0 / holderp),
+        axis=1,
     )
-    print(sup_v)
 
     tile_corners_p = scipy.special.expit(tile_corners)
 
@@ -322,15 +322,31 @@ def calc_Cqpp(
 
     # finally, sum across the arms to compute the full multidimensional moment
     # expectation
-    sup_moment = np.sum(C_max, axis=-1)
+    sup_moment = np.sum(C_max, axis=-1) ** (1 / holderq)
 
     # Cq'' from the paper:
-    return sup_v * sup_moment ** (1 / holderq)
+    return sup_v * sup_moment
 
 
 def holder_odi_bound(
     typeI_bound, theta_tiles, tile_corners, n_arm_samples: int, holderq: int
 ):
-    C_f = build_odi_constant_func(holderq)
-    Cqpp = calc_Cqpp(theta_tiles, tile_corners, n_arm_samples, holderq, C_f)
+    """
+    Compute the Holder-ODI on Type I Error. See the paper for mathematical
+    details.
+
+    Args:
+        typeI_bound: the type I error bound at the simulation points.
+        theta_tiles: numpy array containing tile simulation points with shape:
+            (n_tiles, n_arms)
+        tile_corners: numpy array containing tile corners with shape:
+            (n_tiles, n_corners_per_tile, n_arms)
+        n_arm_samples: number of samples per arm, Binomial n parameter
+        holderq: Holder exponent, q in C_q^{''}
+
+    Returns:
+        The Holder ODI type I error bound for each tile.
+    """
+    C_f = _build_odi_constant_func(holderq)
+    Cqpp = _calc_Cqpp(theta_tiles, tile_corners, n_arm_samples, holderq, C_f)
     return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq
