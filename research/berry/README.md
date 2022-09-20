@@ -20,6 +20,8 @@
   - running parallel accumulation using both jax and multiprocessing.
 - berry_marginal_playground.ipynb:
   - Tools for making inla, mcmc and quadrature plots of 1) arm marginals, 2) arm densities given sigma^2, 3) hyperparameter posteriors.
+- exact_typeI.ipynb:
+  - Exploring the error surface when we use the entire space of possible datasets instead of simulating. This is fairly small because 36^4 is only a little over a million.
 
 **Notebooks mostly just for development**: somewhat more inscrutable.
 
@@ -27,10 +29,13 @@
   - exploring the domain of integration.
   - developing the eigenvector approach.
   - tools for exploring a slice of the quadrature grid.
+- alex_jaxinla.ipynb: junk code alex used to work on some of the numerical stability work.
+- sage_analytical.ipynb: junk code exploring what parts of the Berry model can be analytically integrated.
 
 # berrylib
 
-berrylib is a collection of the support code for the above notebooks. 
+berrylib is a collection of the support code for the above notebooks.
+
 - `constants.py`: the Berry Figure 1 and 2 datasets.
 - `binomial.py`: binomial imprint framework accumulation and lookup table construction.
 - `fast_inla.py`: JAX, numpy and C++ implementations of INLA for the Berry problem.
