@@ -301,7 +301,14 @@ def _calc_Cqpp(
 
     holderp = 1 / (1 - 1.0 / holderq)
     sup_v = np.max(
-        np.sum(np.abs(tile_corners - theta_tiles[:, None]) ** holderp, axis=2)
+        np.sum(
+            np.where(
+                np.isnan(tile_corners),
+                0,
+                np.abs(tile_corners - theta_tiles[:, None]) ** holderp,
+            ),
+            axis=2,
+        )
         ** (1.0 / holderp),
         axis=1,
     )
@@ -310,7 +317,11 @@ def _calc_Cqpp(
 
     # NOTE: we are assuming that we know the supremum occurs at a corner or at
     # p=0.5. This might not be true for other models or for q > 16.
-    C_corners = C_f(n_arm_samples, tile_corners_p)
+    C_corners = np.where(
+        np.isnan(tile_corners_p),
+        0,
+        C_f(n_arm_samples, tile_corners_p),
+    )
 
     # maximum per dimension over the corners of the tile
     C_max = np.max(C_corners, axis=1)

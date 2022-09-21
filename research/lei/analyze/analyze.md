@@ -110,12 +110,32 @@ typeI_score += np.loadtxt(os.path.join(output_dir, 'typeI_score.csv'), delimiter
 ```
 
 ```python
-typeI_sum / sim_size, typeI_score / sim_size
+delta = 0.025
+n_arm_samples = int(lei_obj.unifs_shape()[0])
+tile_corners = gr.vertices
 ```
 
 ```python
-# construct upper bound
-n_arm_samples = lei_obj.unifs_shape()[0]
+# construct Holder upper bound
+d0, d0u = binomial.zero_order_bound(
+    typeI_sum=typeI_sum, 
+    sim_sizes=sim_sizes, 
+    delta=delta, 
+    delta_prop_0to1=1,
+)
+typeI_bound = d0 + d0u
+
+total_holder = binomial.holder_odi_bound(
+    typeI_bound=typeI_bound, 
+    theta_tiles=theta_tiles,
+    tile_corners=tile_corners,
+    n_arm_samples=n_arm_samples, 
+    holderq=16,
+)
+```
+
+```python
+# construct classical upper bound
 total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
     theta_tiles,
     tile_radii,
@@ -125,6 +145,12 @@ total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
     typeI_sum,
     typeI_score,
 )
+```
+
+```python
+# prepare bound components
+
+# classical
 bound_components = np.array([
     d0,
     d0u,
@@ -132,6 +158,17 @@ bound_components = np.array([
     d1uw,
     d2uw,
     total,
+]).T
+
+# holder
+dummy = np.zeros_like(d0)
+bound_components_holder = np.array([
+    d0,
+    d0u,
+    dummy,
+    dummy,
+    dummy,
+    total_holder,
 ]).T
 ```
 
@@ -155,4 +192,5 @@ if not os.path.exists(bound_dir):
 
 np.savetxt(f'{bound_dir}/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
 np.savetxt(f'{bound_dir}/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+np.savetxt(f'{bound_dir}/B_lei_holder.csv', bound_components_holder[selection, :], fmt="%s", delimiter=",")
 ```

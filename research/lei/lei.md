@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('base')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -19,24 +19,24 @@ jupyter:
 
 ```python
 import os
-import outlaw
-import outlaw.berry as berry
-import outlaw.quad as quad
+import confirm.outlaw
+import confirm.outlaw.berry as berry
+import confirm.outlaw.quad as quad
 import numpy as np
 import jax.numpy as jnp
 import jax
 import time
-import outlaw.inla as inla
+import confirm.outlaw.inla as inla
 import matplotlib.pyplot as plt
 import numpyro.distributions as dist
 from functools import partial
 from itertools import combinations
 
-from lewis import lewis
-from lewis import batch
-from berrylib import grid
-from lewis import grid as lewgrid
-from berrylib import binomial
+from confirm.lewislib import lewis
+from confirm.lewislib import batch
+from confirm.mini_imprint import grid
+from confirm.lewislib import grid as lewgrid
+from confirm.mini_imprint import binomial
 ```
 
 # Lei Example
