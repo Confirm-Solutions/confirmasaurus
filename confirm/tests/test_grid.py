@@ -24,9 +24,14 @@ def simple_grid():
 
 def test_cartesian_gridpts():
     theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [2, 2])
+    g = grid.build_grid(theta, radii)
+    np.testing.assert_allclose(g.vertices[0], [[0, 0], [0, -1], [-1, 0], [-1, -1]])
+    np.testing.assert_allclose(g.vertices[1], [[1, 0], [1, -1], [0, 0], [0, -1]])
+
     null_hypos = [grid.HyperPlane(-np.identity(2)[i], -0.1) for i in range(2)]
     g = grid.build_grid(theta, radii, null_hypos)
-    print(g.vertices)
+    np.testing.assert_allclose(g.vertices[0], [[0, 0], [0, -1], [-1, 0], [-1, -1]])
+    # np.testing.assert_allclose(g.vertices[1], [[1, 0], [1, -1], [0, 0], [0, -1]])
 
 
 def test_edge_vecs():
@@ -37,24 +42,24 @@ def test_edge_vecs():
 
 def test_tile_split(simple_grid):
     g = simple_grid
-    np.testing.assert_allclose(g.grid_pt_idx, [0, 0, 0, 0, 1, 2, 3, 3])
-    np.testing.assert_allclose(g.is_regular, [0, 0, 0, 0, 1, 1, 0, 0])
+    np.testing.assert_allclose(g.grid_pt_idx, [1, 2, 3, 3, 0, 0, 0, 0])
+    np.testing.assert_allclose(g.is_regular, [1, 1, 0, 0, 0, 0, 0, 0])
     np.testing.assert_allclose(
         g.null_truth,
-        np.array([[1, 1], [1, 0], [0, 1], [0, 0], [0, 1], [1, 1], [1, 1], [0, 1]]),
+        np.array([[0, 1], [1, 1], [1, 1], [0, 1], [1, 1], [1, 0], [0, 1], [0, 0]]),
     )
     np.testing.assert_allclose(
         g.vertices,
         np.array(
             [
-                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, 1.0]],
-                [[0.0, -1.0], [0.0, -1.0], [1.0, 0.0], [1.0, 0.0]],
+                [[0.0, 1.0], [0.0, 0.0], [-1.0, 1.0], [-1.0, 0.0]],
+                [[1.0, 0.0], [1.0, -1.0], [0.0, 0.0], [0.0, -1.0]],
                 [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [nan, nan]],
                 [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [nan, nan]],
+                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
+                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
+                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
+                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
             ]
         ),
     )
@@ -63,23 +68,23 @@ def test_tile_split(simple_grid):
 def test_tile_prune(simple_grid):
     g = simple_grid
     gp = grid.prune(g)
-    np.testing.assert_allclose(gp.grid_pt_idx, [0, 0, 0, 1, 2, 3, 3])
-    np.testing.assert_allclose(gp.is_regular, [0, 0, 0, 1, 1, 0, 0])
+    np.testing.assert_allclose(gp.grid_pt_idx, [1, 2, 3, 3, 0, 0, 0])
+    np.testing.assert_allclose(gp.is_regular, [1, 1, 0, 0, 0, 0, 0])
     np.testing.assert_allclose(
         gp.null_truth,
-        np.array([[1, 1], [1, 0], [0, 1], [0, 1], [1, 1], [1, 1], [0, 1]]),
+        np.array([[0, 1], [1, 1], [1, 1], [0, 1], [1, 1], [1, 0], [0, 1]]),
     )
     np.testing.assert_allclose(
         gp.vertices,
         np.array(
             [
+                [[0.0, 1.0], [0.0, 0.0], [-1.0, 1.0], [-1.0, 0.0]],
+                [[1.0, 0.0], [1.0, -1.0], [0.0, 0.0], [0.0, -1.0]],
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [nan, nan]],
+                [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [nan, nan]],
                 [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
                 [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
                 [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, 1.0]],
-                [[0.0, -1.0], [0.0, -1.0], [1.0, 0.0], [1.0, 0.0]],
-                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [nan, nan]],
-                [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [nan, nan]],
             ]
         ),
     )
@@ -148,7 +153,7 @@ def test_refine():
     # TODO: do a single gridpt, manual case.
 
 
-n_arms = 3
+n_arms = 4
 n_theta_1d = 48
 
 
@@ -199,5 +204,5 @@ if __name__ == "__main__":
     # Runtimes:
     # py_grid: [0.4465768337249756, 0.40291690826416016, 0.3762087821960449]
     # cpp_grid: [4.8662269115448, 4.6366658210754395, 4.647104024887085]6
-    print("py_grid:", benchmark(py_grid))
-    print("cpp_grid:", benchmark(cpp_grid))
+    print("py_grid:", benchmark(py_grid, iter=1))
+    # print("cpp_grid:", benchmark(cpp_grid))

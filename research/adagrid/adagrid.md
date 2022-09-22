@@ -72,15 +72,40 @@ import matplotlib as mpl
 ```
 
 ```python
-theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [2, 2])
+
+```
+
+```python
+thetas = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]])
+radii = np.full_like(thetas, 0.5)
+def normalize(n):
+    return n / np.linalg.norm(n)
+hypos = [
+    grid.HyperPlane(normalize(np.array([1, -1])), 0),
+    grid.HyperPlane(normalize(np.array([1, 1])), -1),
+]
+g = grid.build_grid(thetas, radii, hypos)
+grid.plot_grid2d(g, hypos)
+```
+
+```python
+theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [3, 3])
 null_hypos = [grid.HyperPlane(-np.identity(2)[i], -0.1) for i in range(2)]
 g = grid.build_grid(theta, radii, null_hypos)
-rects = []
-for i in range(g.n_tiles):
-    xy = np.min(g.vertices[i], axis=-1)
-    width = np.max(g.vertices[i], axis=-1) - xy
-    rects.append(mpl.patches.Rectangle(xy, *width, facecolor=None))
-plt.gca().add_collection(mpl.patches.PathCollection(rects))
+grid.plot_grid2d(g)
+```
+
+```python
+g.vertices[1]
+```
+
+```python
+LL = np.arange(10)
+LL[LL.shape[0] - 5:]
+```
+
+```python
+10 - 5
 ```
 
 ```python
