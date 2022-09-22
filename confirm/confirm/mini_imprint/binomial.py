@@ -271,8 +271,39 @@ def _build_odi_constant_func(q: int):
     return sp.lambdify(lambdify_args, central_moment, "numpy")
 
 
+def _build_odi_constant_func_numerical(q: float):
+    """
+    Fully numerical integration constant evaluator. This can be useful for
+    non-integer q.
+
+    Args:
+        q: The moment to compute. Must be a float greater than 1.
+    """
+
+    def f(n, p):
+        if isinstance(p, float):
+            pf = np.array([p])
+        else:
+            pf = p.flatten()
+        xs = np.arange(n + 1).astype(np.float64)
+        eggq = np.abs(xs[None, :] - n * pf[:, None]) ** q
+        integrand = eggq * scipy.stats.binom.pmf(xs[None, :], n, pf[:, None])
+        out = np.sum(integrand, axis=-1)
+        if isinstance(p, float):
+            return out[0]
+        else:
+            return out.reshape(p.shape)
+
+    return f
+
+
 def _calc_Cqpp(
-    theta_tiles, tile_corners, n_arm_samples: int, holderq: int, C_f: Callable
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    C_f: Callable,
+    radius_ratio: float = 1.0,
 ):
     """
     Calculate C_q^{''} from the paper for a tile.
@@ -296,12 +327,19 @@ def _calc_Cqpp(
     # we know that the only derivative sign change is at 0.5 for q < 16
     # we know less about odd q because of the absolute value. so, for now, we
     # ban odd q and q > 16
-    if not isinstance(holderq, int) or holderq > 16 or holderq % 2 != 0:
-        raise ValueError("The q parameter must be an even integer less than 16.")
+    # if not isinstance(holderq, int) or holderq > 16 or holderq % 2 != 0:
+    #     raise ValueError("The q parameter must be an even integer less than 16.")
 
     holderp = 1 / (1 - 1.0 / holderq)
     sup_v = np.max(
-        np.sum(np.abs(tile_corners - theta_tiles[:, None]) ** holderp, axis=2)
+        np.sum(
+            np.where(
+                np.isnan(tile_corners),
+                0,
+                np.abs(radius_ratio * (tile_corners - theta_tiles[:, None])) ** holderp,
+            ),
+            axis=2,
+        )
         ** (1.0 / holderp),
         axis=1,
     )
@@ -310,7 +348,11 @@ def _calc_Cqpp(
 
     # NOTE: we are assuming that we know the supremum occurs at a corner or at
     # p=0.5. This might not be true for other models or for q > 16.
-    C_corners = C_f(n_arm_samples, tile_corners_p)
+    C_corners = np.where(
+        np.isnan(tile_corners_p),
+        0,
+        C_f(n_arm_samples, tile_corners_p),
+    )
 
     # maximum per dimension over the corners of the tile
     C_max = np.max(C_corners, axis=1)
@@ -329,7 +371,12 @@ def _calc_Cqpp(
 
 
 def holder_odi_bound(
-    typeI_bound, theta_tiles, tile_corners, n_arm_samples: int, holderq: int
+    typeI_bound,
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    radius_ratio: float = 1.0,
 ):
     """
     Compute the Holder-ODI on Type I Error. See the paper for mathematical
@@ -348,5 +395,12 @@ def holder_odi_bound(
         The Holder ODI type I error bound for each tile.
     """
     C_f = _build_odi_constant_func(holderq)
-    Cqpp = _calc_Cqpp(theta_tiles, tile_corners, n_arm_samples, holderq, C_f)
+    Cqpp = _calc_Cqpp(
+        theta_tiles,
+        tile_corners,
+        n_arm_samples,
+        holderq,
+        C_f,
+        radius_ratio=radius_ratio,
+    )
     return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq

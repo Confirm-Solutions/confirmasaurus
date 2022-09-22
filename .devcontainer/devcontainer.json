@@ -54,7 +54,6 @@
     "source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"
   ],
   "runArgs": [
-    "--gpus=all",
     "--env",
     "NVIDIA_DISABLE_REQUIRE=1",
     "--cap-add=SYS_PTRACE",

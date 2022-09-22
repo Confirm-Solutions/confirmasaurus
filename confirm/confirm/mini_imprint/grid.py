@@ -5,6 +5,7 @@ from typing import List
 
 import numpy as np
 
+# TODO: tests for concat and refine.
 # TODO: see improvement suggestsions at
 # https://github.com/Confirm-Solutions/confirmasaurus/issues/32
 # corners should be a sparse matrix. that would reduce memory pressure.
@@ -59,12 +60,32 @@ class Grid:
     def n_grid_pts(self):
         return self.thetas.shape[0]
 
+    @property
+    def theta_tiles(self):
+        return self.thetas[self.grid_pt_idx]
+
+    @property
+    def d(self):
+        return self.thetas.shape[-1]
+
+
+def concat_grids(g1: Grid, g2: Grid):
+    thetas = np.concatenate((g1.thetas, g2.thetas), axis=0)
+    radii = np.concatenate((g1.radii, g2.radii), axis=0)
+    vertices = np.concatenate((g1.vertices, g2.vertices), axis=0)
+    is_regular = np.concatenate((g1.is_regular, g2.is_regular), axis=0)
+    null_truth = np.concatenate((g1.null_truth, g2.null_truth), axis=0)
+    grid_pt_idx = np.concatenate(
+        (g1.grid_pt_idx, g2.grid_pt_idx + g1.n_grid_pts), axis=0
+    )
+    return Grid(thetas, radii, vertices, is_regular, null_truth, grid_pt_idx)
+
 
 def build_grid(
     thetas: np.ndarray, radii: np.ndarray, null_hypos: List[HyperPlane], debug=False
 ):
     """
-    Construct a Imprint grid from a set of grid point centers, radii and null
+    Construct an Imprint grid from a set of grid point centers, radii and null
     hypothesis.
     1. Initially, we construct simple hyperrectangle cells.
     2. Then, we split cells that are intersected by the null hypothesis boundaries.
@@ -265,6 +286,31 @@ def build_grid(
         return out
 
 
+def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
+    """
+    _summary_
+
+    Args:
+        theta_min: _description_
+        theta_max: _description_
+        n_theta_1d: _description_
+    """
+    theta_min = np.asarray(theta_min)
+    theta_max = np.asarray(theta_max)
+    n_theta_1d = np.asarray(n_theta_1d)
+
+    n_arms = theta_min.shape[0]
+    theta1d = [
+        np.linspace(theta_min[i], theta_max[i], 2 * n_theta_1d[i] + 1)[1::2]
+        for i in range(n_arms)
+    ]
+    theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
+    radii = np.empty(theta.shape)
+    for i in range(theta.shape[1]):
+        radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
+    return theta, radii
+
+
 def prune(g):
     """Remove tiles that are entirely within the alternative hypothesis space.
 
@@ -338,3 +384,28 @@ def get_edges(thetas, radii):
     edges[:, :, n_params:] *= 2 * radii[:, None, :]
     edges[:, :, :n_params] += thetas[:, None, :]
     return edges
+
+
+def refine_grid(g: Grid, refine_idxs: np.ndarray[int]):
+    refine_radii = g.radii[refine_idxs, None, :] * 0.5
+    new_thetas = (
+        g.thetas[refine_idxs, None, :]
+        + hypercube_vertices(g.d)[None, :, :] * refine_radii
+    )
+    new_radii = np.tile(refine_radii, (1, 2**g.d, 1))
+
+    keep_idxs = np.setdiff1d(np.arange(g.n_grid_pts), refine_idxs)
+    keep_tile_idxs = np.where(np.isin(g.grid_pt_idx, keep_idxs))[0]
+    _, keep_grid_pt_inverse = np.unique(
+        g.grid_pt_idx[keep_tile_idxs], return_inverse=True
+    )
+    unrefined_grid = Grid(
+        g.thetas[keep_idxs],
+        g.radii[keep_idxs],
+        g.vertices[keep_tile_idxs],
+        g.is_regular[keep_tile_idxs],
+        g.null_truth[keep_tile_idxs],
+        keep_grid_pt_inverse,
+    )
+
+    return new_thetas, new_radii, unrefined_grid, keep_tile_idxs
