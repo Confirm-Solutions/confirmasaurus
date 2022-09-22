@@ -2,7 +2,6 @@ channels:
   - conda-forge
 dependencies:
   - line_profiler
-  - sympy
   - pandas
   - cython
   - radian
