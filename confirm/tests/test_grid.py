@@ -131,11 +131,6 @@ def test_prune_twice_invariance(simple_grid):
     np.testing.assert_allclose(gp.grid_pt_idx, gpp.grid_pt_idx)
 
 
-def test_concat():
-    # TODO: two single gridpt tiles?
-    pass
-
-
 def test_refine():
     n_arms = 2
     theta, radii = grid.cartesian_gridpts(
@@ -154,7 +149,7 @@ def test_refine():
 
 
 n_arms = 4
-n_theta_1d = 48
+n_theta_1d = 32
 
 
 def py_grid():
@@ -180,7 +175,7 @@ def cpp_grid():
         # the normal should point towards the negative direction. but that also
         # means we need to negate the logit(0.1) offset
         n[i] = -1
-        null_hypos.append(grid.HyperPlane(n, -2))
+        null_hypos.append(grid.HyperPlane(n, 2))
 
     gr = grid.make_cartesian_grid_range(
         n_theta_1d, np.full(n_arms, -3.5), np.full(n_arms, 1.0), 1

@@ -72,7 +72,17 @@ import matplotlib as mpl
 ```
 
 ```python
+n_arms = 2
+n_theta_1d = 11
 
+null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], 2) for i in range(n_arms)]
+theta1d = [np.linspace(-3.5, 1.0, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)]
+theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
+radii = np.empty(theta.shape)
+for i in range(theta.shape[1]):
+    radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
+g = grid.prune(grid.build_grid(theta, radii, null_hypos))
+grid.plot_grid2d(g, null_hypos)
 ```
 
 ```python
