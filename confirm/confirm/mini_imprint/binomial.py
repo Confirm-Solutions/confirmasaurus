@@ -272,7 +272,12 @@ def _build_odi_constant_func(q: int):
 
 
 def _calc_Cqpp(
-    theta_tiles, tile_corners, n_arm_samples: int, holderq: int, C_f: Callable
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    C_f: Callable,
+    radius_ratio: float = 1.0,
 ):
     """
     Calculate C_q^{''} from the paper for a tile.
@@ -301,7 +306,14 @@ def _calc_Cqpp(
 
     holderp = 1 / (1 - 1.0 / holderq)
     sup_v = np.max(
-        np.sum(np.abs(tile_corners - theta_tiles[:, None]) ** holderp, axis=2)
+        np.sum(
+            np.where(
+                np.isnan(tile_corners),
+                0,
+                np.abs(radius_ratio * (tile_corners - theta_tiles[:, None])) ** holderp,
+            ),
+            axis=2,
+        )
         ** (1.0 / holderp),
         axis=1,
     )
@@ -310,7 +322,11 @@ def _calc_Cqpp(
 
     # NOTE: we are assuming that we know the supremum occurs at a corner or at
     # p=0.5. This might not be true for other models or for q > 16.
-    C_corners = C_f(n_arm_samples, tile_corners_p)
+    C_corners = np.where(
+        np.isnan(tile_corners_p),
+        0,
+        C_f(n_arm_samples, tile_corners_p),
+    )
 
     # maximum per dimension over the corners of the tile
     C_max = np.max(C_corners, axis=1)
@@ -329,7 +345,12 @@ def _calc_Cqpp(
 
 
 def holder_odi_bound(
-    typeI_bound, theta_tiles, tile_corners, n_arm_samples: int, holderq: int
+    typeI_bound,
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    radius_ratio: float = 1.0,
 ):
     """
     Compute the Holder-ODI on Type I Error. See the paper for mathematical
@@ -348,5 +369,12 @@ def holder_odi_bound(
         The Holder ODI type I error bound for each tile.
     """
     C_f = _build_odi_constant_func(holderq)
-    Cqpp = _calc_Cqpp(theta_tiles, tile_corners, n_arm_samples, holderq, C_f)
+    Cqpp = _calc_Cqpp(
+        theta_tiles,
+        tile_corners,
+        n_arm_samples,
+        holderq,
+        C_f,
+        radius_ratio=radius_ratio,
+    )
     return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq
