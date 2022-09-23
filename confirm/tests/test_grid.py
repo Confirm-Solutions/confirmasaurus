@@ -149,11 +149,11 @@ def test_refine():
 
 
 n_arms = 4
-n_theta_1d = 32
+n_theta_1d = 52
 
 
 def py_grid():
-    null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], -2) for i in range(n_arms)]
+    null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], 2) for i in range(n_arms)]
     theta1d = [np.linspace(-3.5, 1.0, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)]
     theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
     radii = np.empty(theta.shape)
@@ -200,4 +200,4 @@ if __name__ == "__main__":
     # py_grid: [0.4465768337249756, 0.40291690826416016, 0.3762087821960449]
     # cpp_grid: [4.8662269115448, 4.6366658210754395, 4.647104024887085]6
     print("py_grid:", benchmark(py_grid, iter=1))
-    # print("cpp_grid:", benchmark(cpp_grid))
+    print("cpp_grid:", benchmark(cpp_grid))

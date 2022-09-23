@@ -82,7 +82,7 @@ radii = np.empty(theta.shape)
 for i in range(theta.shape[1]):
     radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
 g = grid.prune(grid.build_grid(theta, radii, null_hypos))
-grid.plot_grid2d(g, null_hypos)
+grid.plot_grid2d(g)#, null_hypos)
 ```
 
 ```python
@@ -138,28 +138,30 @@ null_hypos = [
 theta, radii = grid.cartesian_gridpts(
     np.full(n_arms, theta_min), np.full(n_arms, theta_max), np.full(n_arms, n_theta_1d)
 )
-start_grid = grid.prune(grid.build_grid(theta, radii, null_hypos))
+g_raw = grid.build_grid(theta, radii)
+start_grid = grid.prune(grid.intersect_grid(g_raw, null_hypos))
 ```
 
 ```python
 seed = 10
-sim_size = 10000
+sim_size = 100000
 delta = 0.025
 ```
 
 ```python
 # stop adagrid whenever hob is below this
-target_bound = 0.1
+target_bound = 0.02
 
 # if we can't get below 0.1, refine until the edges are less than 20% above the
 # sim pt
-target_grid_rel_bound = 0.2
+target_grid_rel_bound = 0.1
+
 # if we can't get below 0.1, refine until the edges are less than 20% above the
 # sim pt
 target_sim_rel_bound = 0.2
 N_max = int(2e5)
 
-iter_max = 5
+iter_max = 9
 
 ```
 
@@ -173,9 +175,17 @@ def dots_plot(g, typeI_upper_bound, hob):
     plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=typeI_upper_bound, s=10)
     plt.colorbar()
     plt.show()
+
+def dots_plot2(g, typeI_upper_bound, hob):
+    plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=hob, s=10)
+    plt.colorbar()
 ```
 
 ```python
+# TODO: don't recompute for unrefined.
+# TODO: refine n_sims too! 
+# TODO: why is this slow??
+plt.subplots(3, 3, figsize=(10, 10.0), constrained_layout=True)
 new_grid = start_grid
 unrefined_grid = None
 for ada_i in range(iter_max):
@@ -188,41 +198,52 @@ for ada_i in range(iter_max):
     else:
         g = new_grid
         typeI_sum = new_typeI_sum
+    print(ada_i, new_grid.n_tiles, g.n_tiles)
+    typeI_sum, _ = chunked_simulate(g, sim_size)
 
     typeI_est, typeI_CI = binomial.zero_order_bound(typeI_sum, sim_size, delta, 1.0)
     typeI_upper_bound = typeI_est + typeI_CI
-
-    hob = binomial.holder_odi_bound(
-        typeI_upper_bound, g.theta_tiles, g.vertices, n_arm_samples, 6
-    )
-    dots_plot(g, typeI_upper_bound, hob)
-    if ada_i == iter_max - 1:
-        break
-
-    need_more_sims = typeI_upper_bound > target_bound
     typeI_lower_bound = scipy.stats.beta.ppf(
         1 - delta, typeI_sum, sim_size - typeI_sum + 1
     )
     typeI_lower_bound = np.where(np.isnan(typeI_lower_bound), 0, typeI_lower_bound)
+
+    hob_upper = binomial.holder_odi_bound(
+        typeI_upper_bound, g.theta_tiles, g.vertices, n_arm_samples, 6
+    )
+    hob_lower = 1 - binomial.holder_odi_bound(
+        1 - typeI_lower_bound, g.theta_tiles, g.vertices, n_arm_samples, 6
+    )
+    print(np.min(hob_upper), np.max(hob_lower))
+
+    plt.subplot(3,3,ada_i+1)
+    dots_plot2(g, typeI_upper_bound, hob_upper)
+    if ada_i == iter_max - 1:
+        break
+
+    need_more_sims = typeI_upper_bound > target_bound
     likely_to_fail = typeI_lower_bound > target_bound
     more_sims = (typeI_upper_bound > target_bound) & (target_bound > typeI_lower_bound)
 
-    need_refine = ((hob - typeI_upper_bound) / typeI_upper_bound > target_grid_rel_bound) & (
-        hob > target_bound
-    )
-    refine_tile_idxs = np.where(need_refine)
-    keep_tile_idxs = np.setdiff1d(np.arange(g.n_tiles), refine_tile_idxs[0])
+    # criterion = ((hob - typeI_upper_bound) / typeI_upper_bound > target_grid_rel_bound) & (
+    #     hob > target_bound
+    # )
+    criterion = hob_upper > np.max(hob_lower) - 0.01
+    refine_tile_idxs = np.where(criterion)
     if refine_tile_idxs[0].shape[0] == 0:
         print('done because no refinement')
         break
-    print(refine_tile_idxs[0].shape, keep_tile_idxs.shape[0])
 
-    (new_thetas, new_radii), unrefined_grid, keep_tile_idxs2 = grid.refine_grid(
-        g, g.grid_pt_idx[refine_tile_idxs], null_hypos
+    new_thetas, new_radii, unrefined_grid, keep_tile_idxs = grid.refine_grid(
+        g, g.grid_pt_idx[refine_tile_idxs]
     )
-    new_grid = grid.prune(grid.build_grid(new_thetas, new_radii))
-    np.testing.assert_allclose(keep_tile_idxs, keep_tile_idxs2)
+    new_grid = grid.prune(grid.build_grid(new_thetas, new_radii, null_hypos))
     unrefined_typeI_sum = typeI_sum[keep_tile_idxs]
+plt.show()
+```
+
+```python
+(4.5 / g.radii.min()) ** 2 / 21580
 ```
 
 ```python

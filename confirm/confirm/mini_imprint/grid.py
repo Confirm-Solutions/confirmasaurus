@@ -7,13 +7,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# TODO: tests for concat and refine.
-# TODO: see improvement suggestsions at
-# https://github.com/Confirm-Solutions/confirmasaurus/issues/32
-# corners should be a sparse matrix. that would reduce memory pressure.
-# TODO: filter the whole set of grid points to check for intersection, move the
-# ones that need to be split to the end, then do splitting. This would be much
-# faster because it would ignore the grid points that don't need to be split.
+# TODO: corners could be a sparse matrix. that would reduce memory pressure.
+# TODO: better comments on the splitting code
 
 
 @dataclass
@@ -156,10 +151,6 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
 eps = 1e-15
 
 
-def _rough_check_for_intersections():
-    pass
-
-
 @jax.jit
 def _precise_check_for_intersections(vertices, Hns, Hcs):
     n_tiles = vertices.shape[0]
@@ -210,7 +201,6 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
         # every vertex slot filled. unused vertex slots will contain nans.
         dist = g.vertices.dot(H.n) - H.c
 
-        # TODO: can we skip these three lines?
         is_null = ((dist >= 0) | np.isnan(dist)).all(axis=1)
 
         # 0 means alt true, 1 means null true
@@ -329,7 +319,10 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
             # To deal with this:
             # 1. We sort along the vertices axis. This has the effect of
             #    moving all the nan vertices to the end of the list.
-            split_vertices.sort(axis=1)
+            split_vertices = split_vertices[
+                np.arange(split_vertices.shape[0])[:, None],
+                np.argsort(np.sum(split_vertices, axis=-1), axis=-1),
+            ]
             # 2. Identify the maximum number of vertices of any tile and trim the
             #    array so that is the new vertex dimension size
             nonfinite_corners = (~np.isfinite(split_vertices)).all(axis=(0, 2))
@@ -511,8 +504,8 @@ def refine_grid(g: Grid, refine_idxs: np.ndarray[int]):
     new_thetas = (
         g.thetas[refine_idxs, None, :]
         + hypercube_vertices(g.d)[None, :, :] * refine_radii
-    )
-    new_radii = np.tile(refine_radii, (1, 2**g.d, 1))
+    ).reshape((-1, g.d))
+    new_radii = np.tile(refine_radii, (1, 2**g.d, 1)).reshape((-1, g.d))
 
     keep_idxs = np.setdiff1d(np.arange(g.n_grid_pts), refine_idxs)
     keep_tile_idxs = np.where(np.isin(g.grid_pt_idx, keep_idxs))[0]
