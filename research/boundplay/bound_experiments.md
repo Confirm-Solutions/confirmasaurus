@@ -91,26 +91,45 @@ def taylor(typeI_sum, typeI_score, n_arm_samples, nsims, t_path, delta=0.01, del
 def copt(a, p):
     return 1 / (1 + ((1-a)/a)**(1/(p-1)))
 
-def centered_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01, copt_f=copt):
+def centered_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01, copt_f=copt, c_constant=False):
     hq = 1 / (1 - 1 / hp)
     f0 = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum)
+    
+    c = [copt_f(f0, hp) if c_constant else None]
 
     def derivs(t, y):
         cur_f = y[0]
-        c = copt_f(cur_f, hp)
-        cur_Fc = cur_f * (1 - c) ** hp + (1 - cur_f) * c ** hp
+        if not c_constant:
+            c[0] = copt_f(cur_f, hp)
+        cur_Fc = cur_f * (1 - c[0]) ** hp + (1 - cur_f) * c[0] ** hp
         return C_numerical(n_arm_samples, t, hp, hq) * cur_Fc ** (1 / hp)
     
     t = t_path[0] 
     dt = t_path[-1] - t
     centeredode = scipy.integrate.solve_ivp(derivs, (t, t+dt), [f0], t_eval=t_path, rtol=1e-10, atol=1e-10)
     return centeredode['y'][0]
+
+def centered_analytical(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01):
+    assert(isinstance(hp, int))
+    assert(hp % 2 == 0)
+    hq = 1 / (1 - 1 / hp)
+    print(hp, hq)
+
+    f0 = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum)
+    centering = copt(f0, hp)
+    ks = np.arange(hp + 1)
+    A = (1 - centering) ** hp - centering ** hp
+    B = centering ** hp
+
+    C = np.array([C_numerical(n_arm_samples, t, hp, hq) for t in t_path])
+    R = (A * f0 + B) ** (1 / hq)
+    return ((((t_path - t_path[0]) * C * A / hq + R) ** hq) - B) / A
 ```
 
 ## Comparing bounds
 
 ```python
-def experiment(n, p, dt, nsims, thresh, hp, cp, hp_n=None, include_taylor=True):
+def experiment(n, p, dt, nsims, thresh, hp, cp, cp_c=None, hp_n=None, include_taylor=True):
     t = logit(p)
     t_path = np.linspace(t, t + dt, 200)
     true_err = 1 - scipy.stats.binom.cdf(thresh - 1, n, expit(t_path))
@@ -132,6 +151,12 @@ def experiment(n, p, dt, nsims, thresh, hp, cp, hp_n=None, include_taylor=True):
         cob = centered_odi(typeI_sum, n, nsims, t_path, cp)
         plt.plot(t_path, cob, 'k:', label=f'centered({cp})')
 
+    if cp_c is not None:
+        cobc = centered_analytical(typeI_sum, n, nsims, t_path, cp_c)
+        # cobc = centered_odi(typeI_sum, n, nsims, t_path, cp_c, c_constant=True)
+        plt.plot(t_path, cobc, 'm:', label=f'centered-const({cp_c})')
+    print(cobc - cob)
+
     plt.plot(t_path, true_err, 'k-', label='true')
     plt.xlabel(r'$\theta$')
     plt.ylabel('type I error')
@@ -139,19 +164,19 @@ def experiment(n, p, dt, nsims, thresh, hp, cp, hp_n=None, include_taylor=True):
 ```
 
 ```python
-experiment(50, 0.2, 0.2, 10000, 20, 1.2, 1.2)
+experiment(50, 0.2, 0.2, 10000, 20, 1.2, 1.2, cp_c=None)
 ```
 
 ```python
-experiment(50, 0.2, 0.05, 10000, 12, 2.0, 2.0)
+experiment(50, 0.2, 0.05, 10000, 12, 2.0, 2.0, cp_c=2)
 ```
 
 ```python
-experiment(50, 0.45, 0.05, 10000, 22, 2.0, 2.0)
+experiment(50, 0.45, 0.05, 10000, 22, 2.0, 2.0, cp_c=2)
 ```
 
 ```python
-experiment(50, 0.45, 0.05, 10000, 22, 8.0, 8.0)
+experiment(50, 0.45, 0.05, 10000, 22, 8.0, 8.0, cp_c=8)
 ```
 
 ```python
