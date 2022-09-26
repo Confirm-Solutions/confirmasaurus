@@ -1,8 +1,11 @@
+from typing import Callable
+
 import jax.numpy as jnp
 import jax.scipy.special
 import numpy as np
 import scipy.special
 import scipy.stats
+import sympy as sp
 
 
 def binomial_accumulator(rejection_fnc):
@@ -244,3 +247,134 @@ def second_order_bound(v_sq, theta_tiles, tile_radii, n_arm_samples):
     hessian_quadform_bound = hess_comp.sum(axis=-1) * n_arm_samples
     d2u = 0.5 * hessian_quadform_bound
     return d2u
+
+
+def _build_odi_constant_func(q: int):
+    """
+    Construct an evaluator for the 1D integration constant of the Holder ODI:
+
+    E[||grad log p_theta (X)||^q]
+
+    This is specialized to the binomial case and would need to be re-derived
+    for another model.
+
+    Args:
+        q: The moment to compute. Must be an integer greater than 1.
+    """
+    sp_p, sp_t, sp_n = sp.var("p, t, n")
+    binomial_mgf = (1 - sp_p + sp_p * sp.exp(sp_t)) ** sp_n
+    mean = sp.diff(binomial_mgf, sp_t).subs(sp_t, 0)
+    central_moment = (
+        sp.diff(sp.exp(-mean * sp_t) * binomial_mgf, sp_t, q).subs(sp_t, 0).simplify()
+    )
+    lambdify_args = [sp_n, sp_p]
+    return sp.lambdify(lambdify_args, central_moment, "numpy")
+
+
+def _calc_Cqpp(
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    C_f: Callable,
+    radius_ratio: float = 1.0,
+):
+    """
+    Calculate C_q^{''} from the paper for a tile.
+
+    See holder_odi_bound for more details on the arguments.
+
+    This function is mostly model-independent. The part that would need to
+    change is the identification of sign changes.
+    """
+
+    # NOTE: code to calculate roots symbolically:
+    # q = 6
+    # sp_p, sp_t, sp_n = sp.var("p, t, n")
+    # binomial_mgf = (1 - sp_p + sp_p * sp.exp(sp_t)) ** sp_n
+    # mean = sp.diff(binomial_mgf, sp_t).subs(sp_t, 0)
+    # central_moment = (
+    #     sp.diff(sp.exp(-mean * sp_t) * binomial_mgf, sp_t, q).subs(sp_t, 0).simplify()
+    # )
+    # rts = sp.roots(sp.Poly(sp.diff(central_moment.subs(n, 50))))
+
+    # we know that the only derivative sign change is at 0.5 for q < 16
+    # we know less about odd q because of the absolute value. so, for now, we
+    # ban odd q and q > 16
+    if not isinstance(holderq, int) or holderq > 16 or holderq % 2 != 0:
+        raise ValueError("The q parameter must be an even integer less than 16.")
+
+    holderp = 1 / (1 - 1.0 / holderq)
+    sup_v = np.max(
+        np.sum(
+            np.where(
+                np.isnan(tile_corners),
+                0,
+                np.abs(radius_ratio * (tile_corners - theta_tiles[:, None])) ** holderp,
+            ),
+            axis=2,
+        )
+        ** (1.0 / holderp),
+        axis=1,
+    )
+
+    tile_corners_p = scipy.special.expit(tile_corners)
+
+    # NOTE: we are assuming that we know the supremum occurs at a corner or at
+    # p=0.5. This might not be true for other models or for q > 16.
+    C_corners = np.where(
+        np.isnan(tile_corners_p),
+        0,
+        C_f(n_arm_samples, tile_corners_p),
+    )
+
+    # maximum per dimension over the corners of the tile
+    C_max = np.max(C_corners, axis=1)
+    # if the tile crosses p=0.5, we just set C_max equal to the value at 0.5
+    crosses05 = np.where(
+        np.any(tile_corners_p < 0.5, axis=1) & np.any(tile_corners_p > 0.5, axis=1)
+    )
+    C_max[crosses05] = C_f(n_arm_samples, 0.5)
+
+    # finally, sum across the arms to compute the full multidimensional moment
+    # expectation
+    sup_moment = np.sum(C_max, axis=-1) ** (1 / holderq)
+
+    # Cq'' from the paper:
+    return sup_v * sup_moment
+
+
+def holder_odi_bound(
+    typeI_bound,
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    radius_ratio: float = 1.0,
+):
+    """
+    Compute the Holder-ODI on Type I Error. See the paper for mathematical
+    details.
+
+    Args:
+        typeI_bound: the type I error bound at the simulation points.
+        theta_tiles: numpy array containing tile simulation points with shape:
+            (n_tiles, n_arms)
+        tile_corners: numpy array containing tile corners with shape:
+            (n_tiles, n_corners_per_tile, n_arms)
+        n_arm_samples: number of samples per arm, Binomial n parameter
+        holderq: Holder exponent, q in C_q^{''}
+
+    Returns:
+        The Holder ODI type I error bound for each tile.
+    """
+    C_f = _build_odi_constant_func(holderq)
+    Cqpp = _calc_Cqpp(
+        theta_tiles,
+        tile_corners,
+        n_arm_samples,
+        holderq,
+        C_f,
+        radius_ratio=radius_ratio,
+    )
+    return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq
