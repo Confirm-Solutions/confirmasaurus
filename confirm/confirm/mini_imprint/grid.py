@@ -6,12 +6,6 @@ from typing import List
 import numpy as np
 
 # TODO: tests for concat and refine.
-# TODO: see improvement suggestsions at
-# https://github.com/Confirm-Solutions/confirmasaurus/issues/32
-# corners should be a sparse matrix. that would reduce memory pressure.
-# TODO: filter the whole set of grid points to check for intersection, move the
-# ones that need to be split to the end, then do splitting. This would be much
-# faster because it would ignore the grid points that don't need to be split.
 
 
 @dataclass
@@ -151,7 +145,6 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
     plt.show()
 
 
-@profile
 def intersect_grid(g: Grid, H: HyperPlane):
     eps = 1e-15
     n_grid_pts, n_params = g.thetas.shape
@@ -318,7 +311,6 @@ def intersect_grid(g: Grid, H: HyperPlane):
     return concat_grids(g_keep, g_copy, g_split, shared_theta=True)
 
 
-@profile
 def build_grid(
     thetas: np.ndarray, radii: np.ndarray, null_hypos: List[HyperPlane] = []
 ):
@@ -333,19 +325,15 @@ def build_grid(
     bound tightness because very few cells are intersected by multiple
     hyperplanes.
 
-    Parameters
-    ----------
-    thetas
-        The centers of the hyperrectangle grid.
-    radii
-        The half-width of each hyperrectangle in each dimension.
-    null_hypos
-        A list of hyperplanes defining the boundary of the null hypothesis. The
-        normal vector of these hyperplanes point into the null domain.
+    Args:
+        thetas: The centers of the hyperrectangle grid.
+        radii: The half-width of each hyperrectangle in each dimension.
+        null_hypos: A list of hyperplanes defining the boundary of the null
+            hypothesis. The normal vector of these hyperplanes point into the null
+            domain.
 
 
     Returns
-    -------
         a Grid object
     """
     n_grid_pts, n_params = thetas.shape
@@ -368,12 +356,18 @@ def build_grid(
 
 def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
     """
-    _summary_
+    Produce a grid of points in the hyperrectangle defined by theta_min and
+    theta_max.
 
     Args:
-        theta_min: _description_
-        theta_max: _description_
-        n_theta_1d: _description_
+        theta_min: The minimum value of theta for each dimension.
+        theta_max: The maximum value of theta for each dimension.
+        n_theta_1d: The number of theta values to use in each dimension.
+
+    Returns:
+        theta: A 2D array of shape (n_grid_pts, n_params) containing the grid points.
+        radii: A 2D array of shape (n_grid_pts, n_params) containing the
+            half-width of each grid point in each dimension.
     """
     theta_min = np.asarray(theta_min)
     theta_max = np.asarray(theta_max)
@@ -394,13 +388,10 @@ def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
 def prune(g):
     """Remove tiles that are entirely within the alternative hypothesis space.
 
-    Parameters
-    ----------
-    g
-        the Grid object
+    Args:
+        g: the Grid object
 
-    Returns
-    -------
+    Returns:
         the pruned Grid object.
     """
     if g.null_truth.shape[1] == 0:
@@ -434,6 +425,13 @@ def hypercube_vertices(d):
         (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1),
         (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1)
     ]
+
+    Args:
+        d: the dimension
+
+    Returns:
+        a numpy array of shape (2**d, d) containing the vertices of the
+        hypercube.
     """
     return np.array(list(product((1, -1), repeat=d)))
 
@@ -445,8 +443,13 @@ def get_edges(thetas, radii):
     - edges[:, :, n_params:] are the edge vectors pointing from the start to
         the end of the edge
 
-    In total, the edges array has shape:
-    (n_grid_pts, number of hypercube vertices, 2*n_params)
+    Args:
+        thetas: the centers of the hyperrectangles
+        radii: the half-width of the hyperrectangles
+
+    Returns:
+        edges: an array as specified in the docstring shaped like
+             (n_grid_pts, number of hypercube vertices, 2*n_params)
     """
 
     n_params = thetas.shape[1]
@@ -467,6 +470,22 @@ def get_edges(thetas, radii):
 
 
 def refine_grid(g: Grid, refine_idxs: np.ndarray[int]):
+    """
+    Refine a grid by splitting the specified grid points. We split each grid
+    point in two along each dimension.
+
+    Note that we are not refining *tiles* here, but rather *grid points*.
+
+    Args:
+        g: the grid to refine
+        refine_idxs: the indices of the grid points to refine.
+
+    Returns:
+        new_thetas: the new grid points
+        new_radii: the radii for the new grid points.
+        unrefined_grid: the subset of the original grid that was not refined.
+        keep_tile_idxs: the indices of the tiles that were not refined.
+    """
     refine_radii = g.radii[refine_idxs, None, :] * 0.5
     new_thetas = (
         g.thetas[refine_idxs, None, :]
