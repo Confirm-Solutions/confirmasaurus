@@ -1,5 +1,6 @@
 import numpy as np
-from lewis import lewis
+
+from confirm.lewislib import lewis
 
 
 default_params = {
