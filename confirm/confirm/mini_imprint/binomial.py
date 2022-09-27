@@ -272,7 +272,12 @@ def _build_odi_constant_func(q: int):
 
 
 def _calc_Cqpp(
-    theta_tiles, tile_corners, n_arm_samples: int, holderq: int, C_f: Callable
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    C_f: Callable,
+    radius_ratio: float = 1.0,
 ):
     """
     Calculate C_q^{''} from the paper for a tile.
@@ -305,7 +310,7 @@ def _calc_Cqpp(
             np.where(
                 np.isnan(tile_corners),
                 0,
-                np.abs(tile_corners - theta_tiles[:, None]) ** holderp,
+                np.abs(radius_ratio * (tile_corners - theta_tiles[:, None])) ** holderp,
             ),
             axis=2,
         )
@@ -340,7 +345,12 @@ def _calc_Cqpp(
 
 
 def holder_odi_bound(
-    typeI_bound, theta_tiles, tile_corners, n_arm_samples: int, holderq: int
+    typeI_bound,
+    theta_tiles,
+    tile_corners,
+    n_arm_samples: int,
+    holderq: int,
+    radius_ratio: float = 1.0,
 ):
     """
     Compute the Holder-ODI on Type I Error. See the paper for mathematical
@@ -359,5 +369,12 @@ def holder_odi_bound(
         The Holder ODI type I error bound for each tile.
     """
     C_f = _build_odi_constant_func(holderq)
-    Cqpp = _calc_Cqpp(theta_tiles, tile_corners, n_arm_samples, holderq, C_f)
+    Cqpp = _calc_Cqpp(
+        theta_tiles,
+        tile_corners,
+        n_arm_samples,
+        holderq,
+        C_f,
+        radius_ratio=radius_ratio,
+    )
     return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq
