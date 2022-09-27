@@ -155,7 +155,6 @@ def experiment(n, p, dt, nsims, thresh, hp, cp, cp_c=None, hp_n=None, include_ta
         cobc = centered_analytical(typeI_sum, n, nsims, t_path, cp_c)
         # cobc = centered_odi(typeI_sum, n, nsims, t_path, cp_c, c_constant=True)
         plt.plot(t_path, cobc, 'm:', label=f'centered-const({cp_c})')
-    print(cobc - cob)
 
     plt.plot(t_path, true_err, 'k-', label='true')
     plt.xlabel(r'$\theta$')
@@ -176,7 +175,7 @@ experiment(50, 0.45, 0.05, 10000, 22, 2.0, 2.0, cp_c=2)
 ```
 
 ```python
-experiment(50, 0.45, 0.05, 10000, 22, 8.0, 8.0, cp_c=8)
+experiment(50, 0.45, 0.05, 10000, 22, 2.0, 8.0, cp_c=2)
 ```
 
 ```python
@@ -198,4 +197,10 @@ plt.show()
 
 ```python
 experiment(100, 0.02, 0.05, 100000, 8, 1.1, 1.1, 1.1, include_taylor=False)
+```
+
+```python
+for p in np.linspace(0, 1, 20)[1:-1]:
+    experiment(50, p, 0.05, 1000000, 22, None, 1.2 if p < 0.3 else 2.0)
+    plt.show()
 ```

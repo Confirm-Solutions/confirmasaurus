@@ -22,6 +22,7 @@ import scipy.stats
 from numpy import sqrt
 import jax
 import jax.numpy as jnp
+import numpyro.distributions as dist
 ```
 
 ```python
@@ -34,7 +35,7 @@ dg = jax.grad(g)
 dg_vmap = jax.vmap(dg, in_axes=(None, 0))
 dgg_vmap = jax.vmap(jax.grad(dg), in_axes=(None, 0))
 
-holderp = 3.0#1.2
+holderp = 1.2
 holderq = 1.0 / (1 - 1.0 / holderp)
 ```
 
@@ -43,28 +44,12 @@ holderq = 1.0 / (1 - 1.0 / holderp)
 Compute the constant term using both a numerical sum and using the 6th moment formula from wikipedia
 
 ```python
-import numpyro.distributions as dist
-t = -1.1
-q = 1.2
-p = jax.scipy.special.expit(t)
-xs = jnp.arange(n + 1).astype(jnp.float64)
-out2 = jnp.exp((1 / q) * jax.scipy.special.logsumexp(
-    q * jnp.log(jnp.abs(dg_vmap(t, xs)))
-    + dist.Binomial(n, p).log_prob(xs)
-))
-
-eggq = jnp.abs(dg_vmap(t, xs)) ** q
-binom_pmf = jnp.exp(dist.Binomial(n, p).log_prob(xs))
-sum(eggq * binom_pmf) ** (1 / q), out2, C_numerical(t, q)
-```
-
-```python
 # numerical integral to compute E[ |grad g|^q]^(1/q)
 # need to compute for the worst t in the "tile".
 # def C_numerical(t, q):
 #     p = jax.scipy.special.expit(t)
 #     xs = jnp.arange(n + 1).astype(jnp.float64)
-#     eggq = jnp.abs(dg_vmap(t, xs)) ** q
+#     eggq = jnp.abs(xs - n * p) ** q
 #     return sum(eggq * scipy.stats.binom.pmf(xs, n, p)) ** (1 / q)
     
 def C_numerical(t, q):
@@ -99,116 +84,16 @@ For even integer q: It's unimodal. Monotonic in [0, 0.5] and separately in [0.5,
 For q < 2: there are tons of micro peaks...
 
 ```python
-def plot_q_theta(q, domain=[-2.5,2.5], plot_deriv=True):
-    ts = np.linspace(*domain, 1000)
-    cs = jax.jit(jax.vmap(C_numerical, in_axes=(0, None)))(ts, q)
-    plt.title(f"q = {q}")
-    plt.plot(ts, cs, label="C")
-    if plot_deriv:
-        cgs = jax.jit(jax.vmap(jax.grad(C_numerical), in_axes=(0, None)))(ts, q)
-        plt.plot(ts, cgs, label="dC/dtheta")
-    plt.axhline(0, color='black')
-    plt.legend()
-    plt.xlabel(r"$\theta$")
-    return cs
-plot_q_theta(1.2)
-# plt.show()
-plot_q_theta(1.3)
-plt.show()
-```
-
-```python
-plot_q_theta(1.2, domain=[-0.3, -0.28])
-plt.show()
-```
-
-```python
-q = 1.2
-xs_all = jnp.arange(n + 1).astype(jnp.float64)
-plt.figure(figsize=(10,10))
-for t in np.linspace(-2, -0.2, 19):
-    domain = np.array([t - 0.1, t + 0.1])
-    pdomain = jax.scipy.special.expit(domain)
-    pworst = pdomain[np.argmax(np.abs(pdomain))]
-
-    bad_x_range = jnp.arange(int(np.ceil(n*pdomain[0])), int(np.floor(n*pdomain[1])) + 1)
-    xs_base = jnp.setdiff1d(xs_all, bad_x_range)
-
-    all_max = np.sum(np.max(np.abs(xs_all[None, :] - n * pdomain[:, None]) ** q * scipy.stats.binom.pmf(xs_all, n, pdomain[:, None]), axis=0)) ** (1/q)
-
-    split_max = (
-        np.sum(np.max(np.abs(bad_x_range[None, :] - n * pdomain[:, None]) ** q * scipy.stats.binom.pmf(bad_x_range, n, pdomain[:, None]), axis=0))
-        + np.sum(np.abs(xs_base - n * pworst) ** q * scipy.stats.binom.pmf(xs_base, n, pworst))
-    ) ** (1/q)
-
-    simple_edge = np.sum(np.abs(xs_all - n * pworst) ** q * scipy.stats.binom.pmf(xs_all, n, pworst)) ** (1/q)
-
-    # plt.plot(domain, [all_max, all_max], 'r:', label="all")
-    plt.plot(domain, [split_max, split_max], 'r-', label="split")
-    plt.plot(domain, [simple_edge, simple_edge], 'm:', label="simple")
-
-    ts = np.linspace(*domain, 1000)
-    cs = jax.jit(jax.vmap(C_numerical, in_axes=(0, None)))(ts, q)
-    plt.title(f"q = {q}")
-    plt.plot(ts, cs, 'k-')
-plt.show()
-```
-
-Let's construct a curve $C_e(\theta)$ that has the property that:
-
-$$
-C(\theta_{l}) \leq C_e(\theta) ~~ \forall ~~ \theta_{l} < \theta
-$$
-
-```python
-start_theta = scipy.special.logit(np.arange(1, n) / n)
-join = []
-j = 0
-left_f = C_numerical(start_theta[j], 1.2)
-right_f = C_numerical(start_theta[j + 1], 1.2)
-slope = (right_f - left_f) / (start_theta[j + 1] - start_theta[j])
-opt = scipy.optimize.minimize_scalar(
-    lambda t: -(C_numerical(t, 1.2) - (left_f + slope * (t - start_theta[j]))),
-    bounds = (start_theta[j], start_theta[j+1]),
-    method = "bounded",
-)
-join.append((opt['x'], C_numerical(opt['x'], 1.2)))
-
-for j in range(start_theta.shape[0] - 1):
-    opt = scipy.optimize.minimize_scalar(
-        lambda t: -(C_numerical(t, 1.2) - join[-1][1]) / (t - join[-1][0]),
-        bounds = (start_theta[j], start_theta[j+1]),
-        method = "bounded",
-    )
-    # print(opt['x'], opt['x'] - start_theta[j : (j+2)])
-    join.append((opt['x'], C_numerical(opt['x'], 1.2)))
-join = np.array(join)
-```
-
-```python
-plt.figure(figsize=(3,3))
-ts = np.linspace(-2.5, 2.5, 1000)
-cs = jax.jit(jax.vmap(C_numerical, in_axes=(0, None)))(ts, q)
-plt.title(f"q = {q}")
+domain = [-3, 3]
+ts = np.linspace(*domain, 1000)
+cs = jax.jit(jax.vmap(C_numerical, in_axes=(0, None)))(ts, holderq)
 plt.plot(ts, cs, label="C")
-cgs = jax.jit(jax.vmap(jax.grad(C_numerical), in_axes=(0, None)))(ts, q)
-cggs = jax.jit(jax.vmap(jax.grad(jax.grad(C_numerical)), in_axes=(0, None)))(ts, q)
-plt.plot(join[:,0], join[:,1], 'k-o')
+# cgs = jax.jit(jax.vmap(jax.grad(C_numerical), in_axes=(0, None)))(ts, q)
 # plt.plot(ts, cgs, label="dC/dtheta")
+# cggs = jax.jit(jax.vmap(jax.grad(jax.grad(C_numerical)), in_axes=(0, None)))(ts, q)
 # plt.plot(ts, cggs, label="d2C/dtheta2")
-# abs_pts = scipy.special.logit(np.arange(1, n) / n)
-# for t in abs_pts:
-#     plt.axvline(t, color='black', linewidth=0.5)
-# plt.ylim([-1, 4])
-plt.xlim([np.min(ts), np.max(ts)])
-plt.ylim([np.min(cs), np.max(cs)])
-plt.legend()
-plt.xlabel(r"$\theta$")
+plt.axhline(0, color="black")
 plt.show()
-```
-
-```python
-
 ```
 
 ## Computing bounds for a simple binomial test.
@@ -225,7 +110,7 @@ We're considering a tile where true p at the center of the tile is 0.2 and true 
 The true Type I Error should be ~0.093%:
 
 ```python
-thresh = 12
+thresh = 20
 # the minus 1 is to account for cdf = p(x <= x) and we want p(x >= x)
 1 - scipy.stats.binom.cdf(thresh - 1, n, p)
 ```
@@ -345,9 +230,9 @@ for a in np.linspace(0.001, 0.2, 10):
 ### Centering bound
 
 ```python
-centeredp = 3.0
+centeredp = 1.2
 centeredq = 1.0 / (1 - 1.0 / centeredp)
-C_centered = C_numerical(tmax, pmax, centeredq)
+C_centered = C_numerical(tmax, centeredq)
 def derivs(_, y):
     cur_f = y[0]
     c = copt(cur_f, centeredp)
@@ -424,4 +309,8 @@ plt.title('relative error in holder-ode')
 plt.xlabel(r'$\theta$')
 plt.ylabel('$\log_{10}(|(f_N - f_A) / f_A|)$')
 plt.show()
+```
+
+```python
+
 ```
