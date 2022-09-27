@@ -24,6 +24,9 @@ dependencies:
   - isort
   - jupytext
   - pip
+    
+  # needed for some GPU machines
+  - cudatoolkit
 
   # dependencies only available from pip.
   # - cppimport is only used for a few things in the research folder so we don't
