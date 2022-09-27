@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.6 ('base')
     language: python
     name: python3
 ---
@@ -91,13 +91,15 @@ def taylor(typeI_sum, typeI_score, n_arm_samples, nsims, t_path, delta=0.01, del
 def copt(a, p):
     return 1 / (1 + ((1-a)/a)**(1/(p-1)))
 
-def centered_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01, copt_f=copt):
+def centered_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01, copt_f=copt, constant_c=False):
     hq = 1 / (1 - 1 / hp)
     f0 = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum)
+    c = copt_f(f0, hp) if constant_c else None
 
     def derivs(t, y):
         cur_f = y[0]
-        c = copt_f(cur_f, hp)
+        if not constant_c:
+            c = copt_f(cur_f, hp)
         cur_Fc = cur_f * (1 - c) ** hp + (1 - cur_f) * c ** hp
         return C_numerical(n_arm_samples, t, hp, hq) * cur_Fc ** (1 / hp)
     

@@ -3,20 +3,16 @@ from dataclasses import dataclass
 from itertools import product
 from typing import List
 
+import jax
+import jax.numpy as jnp
 import numpy as np
-
-# TODO: see improvement suggestsions at
-# https://github.com/Confirm-Solutions/confirmasaurus/issues/32
-# corners should be a sparse matrix. that would reduce memory pressure.
-# TODO: filter the whole set of grid points to check for intersection, move the
-# ones that need to be split to the end, then do splitting. This would be much
-# faster because it would ignore the grid points that don't need to be split.
 
 
 @dataclass
 class HyperPlane:
-    """A plane defined by:
-    x \cdot n + c = 0
+    """
+    A plane defined by:
+    x \cdot n - c = 0
     """
 
     n: np.ndarray
@@ -29,7 +25,6 @@ class Grid:
     The first two arrays define the grid points/cells:
     - thetas: the center of each hyperrectangle.
     - radii: the half-width of each hyperrectangle in each dimension.
-        (NOTE: we could rename this since it's sort of a lie.)
 
     The next four arrays define the tiles:
     - vertices contains the vertices of each tiles. After splitting, tiles
@@ -59,12 +54,395 @@ class Grid:
     def n_grid_pts(self):
         return self.thetas.shape[0]
 
+    @property
+    def theta_tiles(self):
+        return self.thetas[self.grid_pt_idx]
+
+    @property
+    def d(self):
+        return self.thetas.shape[-1]
+
+
+def index_grid(g: Grid, idxs: np.ndarray):
+    """
+    Take a subset of a grid by indexing into the tiles.
+
+    Note: the grid points are not modified, so the resulting grid may have
+    unused grid point.
+
+    Args:
+        g: the grid
+        idxs: the tiles indexer
+
+    Returns:
+        the Grid subset.
+    """
+    return Grid(
+        g.thetas,
+        g.radii,
+        g.vertices[idxs],
+        g.is_regular[idxs],
+        g.null_truth[idxs],
+        g.grid_pt_idx[idxs],
+    )
+
+
+def concat_grids(*gs: List[Grid], shared_theta=False):
+    """
+    Concat a list of grids.
+
+    Args:
+        shared_theta: Do the grids already share the same grid points. This can
+            be useful if you are combining `concat_grid` with `index_grid`.
+            Defaults to False.
+
+    Returns:
+        The concatenated grid.
+    """
+    if len(gs) == 1:
+        return gs[0]
+
+    vs = [g.vertices for g in gs]
+    max_n_vertices = max([varr.shape[1] for varr in vs])
+    for i, varr in enumerate(vs):
+        if max_n_vertices > varr.shape[1]:
+            vs[i] = np.pad(
+                varr,
+                ((0, 0), (0, max_n_vertices - varr.shape[1]), (0, 0)),
+                constant_values=np.nan,
+            )
+
+    vertices = np.concatenate((vs), axis=0)
+    is_regular = np.concatenate([g.is_regular for g in gs], axis=0)
+    null_truth = np.concatenate([g.null_truth for g in gs], axis=0)
+
+    if shared_theta:
+        thetas = gs[0].thetas
+        radii = gs[0].radii
+        grid_pt_idx = np.concatenate([g.grid_pt_idx for g in gs], axis=0)
+    else:
+        thetas = np.concatenate([g.thetas for g in gs], axis=0)
+        radii = np.concatenate([g.radii for g in gs], axis=0)
+        grid_pt_offset = np.concatenate(([0], np.cumsum([g.n_grid_pts for g in gs])))
+        grid_pt_idx = np.concatenate(
+            [g.grid_pt_idx + grid_pt_offset[i] for i, g in enumerate(gs)], axis=0
+        )
+    return Grid(thetas, radii, vertices, is_regular, null_truth, grid_pt_idx)
+
+
+def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
+    """
+    Plot a 2D grid.
+
+    Args:
+        g: the grid
+        null_hypos: If provided, the function will plot red lines for the null
+            hypothesis boundaries. Defaults to [].
+    """
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+
+    polys = []
+    for i in range(g.n_tiles):
+        vs = g.vertices[i]
+        vs = vs[~np.isnan(vs).any(axis=1)]
+        centroid = np.mean(vs, axis=0)
+        angles = np.arctan2(vs[:, 1] - centroid[1], vs[:, 0] - centroid[0])
+        order = np.argsort(angles)
+        polys.append(mpl.patches.Polygon(vs[order], fill=None, edgecolor="k"))
+        plt.text(*centroid, str(i))
+
+    plt.gca().add_collection(
+        mpl.collections.PatchCollection(polys, match_original=True)
+    )
+
+    maxvs = np.max(np.where(np.isnan(g.vertices), -np.inf, g.vertices), axis=(0, 1))
+    minvs = np.min(np.where(np.isnan(g.vertices), np.inf, g.vertices), axis=(0, 1))
+    view_center = 0.5 * (maxvs + minvs)
+    view_radius = (maxvs - minvs) * 0.55
+    xlims = view_center[0] + np.array([-1, 1]) * view_radius[0]
+    ylims = view_center[1] + np.array([-1, 1]) * view_radius[1]
+    plt.xlim(xlims)
+    plt.ylim(ylims)
+
+    for h in null_hypos:
+        if h.n[0] == 0:
+            xs = np.linspace(*xlims, 100)
+            ys = (h.c - xs * h.n[0]) / h.n[1]
+        else:
+            ys = np.linspace(*ylims, 100)
+            xs = (h.c - ys * h.n[1]) / h.n[0]
+        plt.plot(xs, ys, "r-")
+
+    plt.show()
+
+
+def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
+    """
+    Intersect a grid with a set of null hypotheses.
+
+    Args:
+        g_in: The input grid.
+        null_hypos: The null hypotheses to intersect with.
+        jit: Should we jax.jit helper functions? This can make performance
+            slower for small grids and much faster for large grids. Defaults to
+            False.
+
+    Returns:
+        The intersected grid with split tiles.
+    """
+    eps = 1e-15
+    n_grid_pts, n_params = g_in.thetas.shape
+
+    ########################################
+    # Step 1. Check for grid point intersection:
+    # This is a rough check because it assumes all the tiles are
+    # hyperrectangles.
+    ########################################
+    Hns = np.array([H.n for H in null_hypos])
+    Hcs = np.array([H.c for H in null_hypos])
+
+    gridpt_dist = g_in.thetas.dot(Hns.T) - Hcs[None]
+    gridpt_any_intersect = np.any(np.abs(gridpt_dist) < g_in.radii, axis=-1)
+    any_intersect = gridpt_any_intersect[g_in.grid_pt_idx]
+    no_intersect = ~any_intersect
+    tile_rough_dist = gridpt_dist[g_in.grid_pt_idx]
+    null_truth = no_intersect[..., None] & (tile_rough_dist >= 0)
+
+    ########################################
+    # Step 2. Do a more precise check for tile intersections.
+    # We also record whether the null hypothesis is true for each tile.
+    ########################################
+
+    def _precise_check_for_intersections(vertices, Hns, Hcs):
+        n_tiles = vertices.shape[0]
+        n_hypos = len(Hns)
+        null_truth = jnp.full((n_tiles, n_hypos), -1)
+        all_dist = vertices.dot(Hns.T) - Hcs[None, None]
+        null_truth = ((all_dist >= 0) | jnp.isnan(all_dist)).all(axis=1)
+
+        # 0 means alt true, 1 means null true
+        all_above = ((all_dist >= -eps) | jnp.isnan(all_dist)).all(axis=1)
+        all_below = ((all_dist <= eps) | jnp.isnan(all_dist)).all(axis=1)
+        any_intersections = jnp.any(~(all_above | all_below), axis=1)
+
+        return any_intersections, null_truth
+
+    if jit:
+        _precise_check_for_intersections = jax.jit(_precise_check_for_intersections)
+
+    precise_any_intersect, precise_null_truth = _precise_check_for_intersections(
+        g_in.vertices[any_intersect], Hns, Hcs
+    )
+    null_truth[any_intersect] = precise_null_truth
+    any_intersect[any_intersect] = precise_any_intersect
+
+    g_in.null_truth = np.concatenate((g_in.null_truth, null_truth), axis=1)
+
+    # the subset of the grid that does not need to be checked for intersection.
+    g_ignore = index_grid(g_in, ~any_intersect)
+
+    # the working subset that we *do* need to check for intersection.
+    g = index_grid(g_in, any_intersect)
+
+    if g.n_tiles == 0:
+        return g_ignore
+
+    for iH, H in enumerate(null_hypos):
+        orig_max_v_count = g.vertices.shape[1]
+
+        ########################################
+        # Step 3. Find any intersections for this null hypothesis.
+        ########################################
+
+        # Measure the distance of each vertex from the null hypo boundary
+        # it's important to allow nan dist because some tiles may not have
+        # every vertex slot filled. Unused vertex slots will contain nans.
+        dist = g.vertices.dot(H.n) - H.c
+
+        is_null = ((dist >= 0) | np.isnan(dist)).all(axis=1)
+
+        # 0 means alt true, 1 means null true
+        g.null_truth[is_null, iH] = 1
+        g.null_truth[~is_null, iH] = 0
+
+        # Identify the tiles to be split by checking if all the tile vertices
+        # are on the same side of the plane. Give some floating point slack
+        # around zero so we don't suffer from imprecision.
+        to_split_or_copy = ~(
+            ((dist >= -eps) | np.isnan(dist)).all(axis=1)
+            | ((dist <= eps) | np.isnan(dist)).all(axis=1)
+        )
+
+        # If a tile has been split already, we don't split again because that
+        # would add substantial complexity in exchange for minimal performance
+        # gains.
+        to_split = to_split_or_copy & g.is_regular
+        to_copy = to_split_or_copy & ~g.is_regular
+        split_idxs = np.where(to_split)[0]
+        copy_idxs = np.where(to_copy)[0]
+
+        # The subset of the grid that we won't split
+        g_keep = index_grid(g, ~to_split_or_copy)
+
+        ########################################
+        # Step 4. Copy tiles.
+        ########################################
+        if copy_idxs.shape[0] == 0:
+            g_copy = index_grid(g, np.s_[0:0])
+        else:
+            copy_null_truth = np.repeat(g.null_truth[copy_idxs], 2, axis=0)
+            # If a tile is being copied that is because it intersects the null
+            # hypo plane. So, one side should be null true and the other alt
+            # true.
+            copy_null_truth[::2, iH] = 1
+            copy_null_truth[1::2, iH] = 0
+            g_copy = Grid(
+                g.thetas,
+                g.radii,
+                np.repeat(g.vertices[copy_idxs], 2, axis=0),
+                np.repeat(g.is_regular[copy_idxs], 2, axis=0),
+                copy_null_truth,
+                np.repeat(g.grid_pt_idx[copy_idxs], 2, axis=0),
+            )
+
+        ########################################
+        # Step 5. Split tiles!
+        ########################################
+        if split_idxs.shape[0] == 0:
+            g_split = index_grid(g, np.s_[0:0])
+        else:
+            split_grid_pt_idx = g.grid_pt_idx[split_idxs]
+
+            ########################################
+            # Step 5a. Intersect tile edges with the hyperplane.
+            # This will identify the new vertices that we need to add.
+            ########################################
+            split_edges = get_edges(
+                g.thetas[split_grid_pt_idx], g.radii[split_grid_pt_idx]
+            )
+            # The first n_params columns of split_edges are the vertices from which
+            # the edge originates and the second n_params are the edge vector.
+            split_vs = split_edges[..., :n_params]
+            split_dir = split_edges[..., n_params:]
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                # Intersect each edge with the plane.
+                alpha = (H.c - split_vs.dot(H.n)) / (split_dir.dot(H.n))
+                # Now we need to identify the new tile vertices. We have three
+                # possible cases here:
+                # 1. Intersection: indicated by 0 < alpha < 1. We give a little
+                #    eps slack to ignore intersections for null planes that just barely
+                #    touch a corner of a tile. In this case, we
+                # 2. Non-intersection indicated by alpha not in [0, 1]. In this
+                #    case, the new vertex will just be marked nan to be filtered out
+                #    later.
+                # 3. Non-finite alpha which also indicates no intersection. Again,
+                #    we produced a nan vertex to filter out later.
+                new_vs = split_vs + alpha[:, :, None] * split_dir
+                new_vs = np.where(
+                    (np.isfinite(new_vs))
+                    & ((alpha > eps) & (alpha < 1 - eps))[..., None],
+                    new_vs,
+                    np.nan,
+                )
+
+            ########################################
+            # Step 5b. Construct the vertex array for the new tiles..
+            ########################################
+            # Create the array for the new vertices. We need to expand the
+            # original vertex array in both dimensions:
+            # 1. We create a new row for each tile that is being split using np.repeat.
+            # 2. We create a new column for each potential additional vertex from
+            #    the intersection operation above using np.concatenate. This is
+            #    more new vertices than necessary, but facilitates a nice
+            #    vectorized implementation.. We will just filter out the
+            #    unnecessary slots later.
+            split_vertices = np.repeat(g.vertices[split_idxs], 2, axis=0)
+            split_vertices = np.concatenate(
+                (
+                    split_vertices,
+                    np.full(
+                        (split_vertices.shape[0], split_edges.shape[1], n_params),
+                        np.nan,
+                    ),
+                ),
+                axis=1,
+            )
+
+            # Now we need to fill in the new vertices:
+            # For each original tile vertex, we need to determine whether the tile
+            # lies in the new null tile or the new alt tile.
+            include_in_null_tile = dist[split_idxs] >= -eps
+            include_in_alt_tile = dist[split_idxs] <= eps
+
+            # Since we copied the entire tiles, we can "delete" vertices by
+            # multiply by nan
+            # note: ::2 traverses the range of new null hypo tiles
+            #       1::2 traverses the range of new alt hypo tiles
+            split_vertices[::2, :orig_max_v_count] *= np.where(
+                include_in_null_tile, 1, np.nan
+            )[..., None]
+            split_vertices[1::2, :orig_max_v_count] *= np.where(
+                include_in_alt_tile, 1, np.nan
+            )[..., None]
+
+            # The intersection vertices get added to both new tiles because
+            # they lie on the boundary between the two tiles.
+            split_vertices[::2, orig_max_v_count:] = new_vs
+            split_vertices[1::2, orig_max_v_count:] = new_vs
+
+            # Trim the new tile array:
+            # We now are left with an array of tile vertices that has many more
+            # vertex slots per tile than necessary with the unused slots filled
+            # with nan.
+            # To deal with this:
+            # 1. We sort along the vertices axis. This has the effect of
+            #    moving all the nan vertices to the end of the list.
+            split_vertices = split_vertices[
+                np.arange(split_vertices.shape[0])[:, None],
+                np.argsort(np.sum(split_vertices, axis=-1), axis=-1),
+            ]
+            # 2. Identify the maximum number of vertices of any tile and trim the
+            #    array so that is the new vertex dimension size
+            nonfinite_corners = (~np.isfinite(split_vertices)).all(axis=(0, 2))
+            # 3. If any corner is unused for all tiles, we should remove it.
+            #    But, we can't trim smaller than the original vertices array.
+            if nonfinite_corners[-1]:
+                first_all_nan_corner = nonfinite_corners.argmax()
+                split_vertices = split_vertices[:, :first_all_nan_corner]
+
+            ########################################
+            # Step 5c. Update the remaining tile properties.
+            ########################################
+            split_null_truth = np.repeat(g.null_truth[split_idxs], 2, axis=0)
+            # - the two sides of a split tile have their null hypo truth
+            # indicators updated.
+            split_null_truth[::2, iH] = 1
+            split_null_truth[1::2, iH] = 0
+            g_split = Grid(
+                g.thetas,
+                g.radii,
+                split_vertices,
+                np.full(split_idxs.shape[0] * 2, False, dtype=bool),
+                split_null_truth,
+                np.repeat(split_grid_pt_idx, 2, axis=0),
+            )
+
+        # Hurray, we made it! We can concatenate our grids!
+        g = concat_grids(g_keep, g_copy, g_split, shared_theta=True)
+
+    # After all the splitting is done, we can concat back to the tiles that we
+    # ignored because we knew they would never be split.
+    return concat_grids(g_ignore, g, shared_theta=True)
+
 
 def build_grid(
-    thetas: np.ndarray, radii: np.ndarray, null_hypos: List[HyperPlane], debug=False
+    thetas: np.ndarray, radii: np.ndarray, null_hypos: List[HyperPlane] = []
 ):
     """
-    Construct a Imprint grid from a set of grid point centers, radii and null
+    Construct an Imprint grid from a set of grid point centers, radii and null
     hypothesis.
     1. Initially, we construct simple hyperrectangle cells.
     2. Then, we split cells that are intersected by the null hypothesis boundaries.
@@ -74,26 +452,21 @@ def build_grid(
     bound tightness because very few cells are intersected by multiple
     hyperplanes.
 
-    Parameters
-    ----------
-    thetas
-        The centers of the hyperrectangle grid.
-    radii
-        The half-width of each hyperrectangle in each dimension.
-    null_hypos
-        A list of hyperplanes defining the boundary of the null hypothesis. The
-        normal vector of these hyperplanes point into the null domain.
+    Args:
+        thetas: The centers of the hyperrectangle grid.
+        radii: The half-width of each hyperrectangle in each dimension.
+        null_hypos: A list of hyperplanes defining the boundary of the null
+            hypothesis. The normal vector of these hyperplanes point into the null
+            domain.
 
 
-    Returns
-    -------
+    Returns:
         a Grid object
     """
     n_grid_pts, n_params = thetas.shape
 
     # For splitting cells, we will need to know the nD edges of each cell and
     # the vertices of each tile.
-    edges = get_edges(thetas, radii)
     unit_vs = hypercube_vertices(n_params)
     tile_vs = thetas[:, None, :] + (unit_vs[None, :, :] * radii[:, None, :])
 
@@ -101,180 +474,51 @@ def build_grid(
     # for definitions.
     grid_pt_idx = np.arange(n_grid_pts)
     is_regular = np.ones(n_grid_pts, dtype=bool)
-    null_truth = np.full((n_grid_pts, len(null_hypos)), -1)
-    eps = 1e-15
+    null_truth = np.full((n_grid_pts, 0), -1)
+    g = Grid(thetas, radii, tile_vs, is_regular, null_truth, grid_pt_idx)
+    if len(null_hypos) > 0:
+        g = intersect_grid(g, null_hypos)
+    return g
 
-    history = []
-    for iH, H in enumerate(null_hypos):
-        max_v_count = tile_vs.shape[1]
 
-        # Measure the distance of each vertex from the null hypo boundary
-        # 0 means alt true, 1 means null true
-        # it's important to allow nan dist because some tiles may not have
-        # every vertex slot filled. unused vertex slots will contain nans.
-        dist = tile_vs.dot(H.n) - H.c
-        is_null = ((dist >= 0) | np.isnan(dist)).all(axis=1)
-        null_truth[is_null, iH] = 1
-        null_truth[~is_null, iH] = 0
+def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
+    """
+    Produce a grid of points in the hyperrectangle defined by theta_min and
+    theta_max.
 
-        # Identify the tiles to be split. Give some floating point slack around
-        # zero so we don't suffer from imprecision.
-        to_split = ~(
-            ((dist >= -eps) | np.isnan(dist)).all(axis=1)
-            | ((dist <= eps) | np.isnan(dist)).all(axis=1)
-        )
+    Args:
+        theta_min: The minimum value of theta for each dimension.
+        theta_max: The maximum value of theta for each dimension.
+        n_theta_1d: The number of theta values to use in each dimension.
 
-        # Track which tile indices will be split or copied.
-        # Tiles that have already been split ("irregular tiles") are not split,
-        # just copied. This is just a simplification that makes the software
-        # much simpler
-        split_or_copy_idxs = np.where(to_split)[0]
-        split_idxs = np.where(to_split & is_regular)[0]
+    Returns:
+        theta: A 2D array of shape (n_grid_pts, n_params) containing the grid points.
+        radii: A 2D array of shape (n_grid_pts, n_params) containing the
+            half-width of each grid point in each dimension.
+    """
+    theta_min = np.asarray(theta_min)
+    theta_max = np.asarray(theta_max)
+    n_theta_1d = np.asarray(n_theta_1d)
 
-        # Intersect every tile edge with the hyperplane to find the new vertices.
-        split_edges = edges[grid_pt_idx[split_idxs]]
-        # The first n_params columns of split_edges are the vertices from which
-        # the edge originates and the second n_params are the edge vector.
-        split_vs = split_edges[..., :n_params]
-        split_dir = split_edges[..., n_params:]
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            # Intersect each edge with the plane.
-            alpha = (H.c - split_vs.dot(H.n)) / (split_dir.dot(H.n))
-            # Now we need to identify the new tile vertices. We have three
-            # possible cases here:
-            # 1. Intersection: indicated by 0 < alpha < 1. We give a little
-            #    eps slack to ignore intersections for null planes that just barely
-            #    touch a corner of a tile. In this case, we
-            # 2. Non-intersection indicated by alpha not in [0, 1]. In this
-            #    case, the new vertex will just be marked nan to be filtered out
-            #    later.
-            # 3. Non-finite alpha which also indicates no intersection. Again,
-            #    we produced a nan vertex to filter out later.
-            new_vs = split_vs + alpha[:, :, None] * split_dir
-            new_vs = np.where(
-                (np.isfinite(new_vs)) & ((alpha > eps) & (alpha < 1 - eps))[..., None],
-                new_vs,
-                np.nan,
-            )
-
-        # Create the array for the new vertices. We expand the original tile_vs
-        # array in both dimensions:
-        # 1. We create a new row for each tile that is being split using np.repeat.
-        # 2. We create a new column for each potential additional vertex from
-        #    the intersection operation above using np.concatenate. This is far
-        #    more new vertices than necessary, but facilitates a nice vectorized
-        #    implementation.. We will just filter out the unnecessary slots later.
-        # (note: to_split + 1 will be 1 for each unsplit tile and 2 for each
-        # split tile, so this np.repeat will duplicated rows that are
-        # being split)
-        new_tile_vs = np.repeat(tile_vs, to_split + 1, axis=0)
-        new_tile_vs = np.concatenate(
-            (
-                new_tile_vs,
-                np.full((new_tile_vs.shape[0], edges.shape[1], n_params), np.nan),
-            ),
-            axis=1,
-        )
-
-        # For each split tile, we need the indices of the tiles *after* the
-        # creation of the new array. This will be the existing index plus the
-        # count of lower-index split tiles.
-        new_split_or_copy_idxs = split_or_copy_idxs + np.arange(
-            split_or_copy_idxs.shape[0]
-        )
-        is_regular = np.repeat(is_regular, to_split + 1)
-        new_split_idxs = new_split_or_copy_idxs[is_regular[new_split_or_copy_idxs]]
-        # Update the is_regular array:
-        # - split tiles are marked irregular.
-        is_regular[new_split_or_copy_idxs] = False
-        is_regular[new_split_or_copy_idxs + 1] = False
-        np.testing.assert_allclose(
-            new_tile_vs[new_split_idxs, :max_v_count], tile_vs[split_idxs]
-        )
-
-        # For each original tile vertex, we need to determine whether the tile
-        # lies in the new null tile or the new alt tile.
-        include_in_null_tile = dist[split_idxs] >= -eps
-        include_in_alt_tile = dist[split_idxs] <= eps
-
-        # Since we copied the entire tiles, we can "delete" vertices by multiply by nan
-        # note: new_split_idxs     marks the index of the new null tile
-        #       new_split_idxs + 1 marks the index of the new alt  tile
-        new_tile_vs[new_split_idxs, :max_v_count] *= np.where(
-            include_in_null_tile, 1, np.nan
-        )[..., None]
-        new_tile_vs[new_split_idxs + 1, :max_v_count] *= np.where(
-            include_in_alt_tile, 1, np.nan
-        )[..., None]
-        # The intersection vertices get added to both new tiles.
-        new_tile_vs[new_split_idxs, max_v_count:] = new_vs
-        new_tile_vs[new_split_idxs + 1, max_v_count:] = new_vs
-
-        # Trim the new tile array:
-        # We now are left with an array of tile vertices that has many more
-        # vertex slots per tile than necessary with the unused slots filled
-        # with nan.
-        # To deal with this:
-        # 1. We sort along the vertices axis. This has the effect of
-        #    moving all the nan vertices to the end of the list.
-        new_tile_vs.sort(axis=1)
-        # 2. Identify the maximum number of vertices of any tile and trim the
-        #    array so that is the new vertex dimension size
-        finite_corners = (~np.isfinite(new_tile_vs)).all(axis=(0, 2))
-        if finite_corners[-1]:
-            first_all_nan_corner = finite_corners.argmax()
-            new_tile_vs = new_tile_vs[:, :first_all_nan_corner]
-
-        # For debugging purposes, it can be helpful to track the parent tile
-        # index of each new tile.
-        if debug:
-            parents = np.repeat(np.arange(tile_vs.shape[0]), to_split + 1)
-
-        # Hurray, we made it! Replace the tile array!
-        tile_vs = new_tile_vs
-
-        # Update the remaining tile characteristics.
-        # - the two sides of a split tile have their null hypo truth indicators updated.
-        null_truth = np.repeat(null_truth, to_split + 1, axis=0)
-        null_truth[new_split_or_copy_idxs, iH] = 1
-        null_truth[new_split_or_copy_idxs + 1, iH] = 0
-        # - duplicate the reference to the original grid pt for each split tile.
-        grid_pt_idx = np.repeat(grid_pt_idx, to_split + 1)
-
-        # Data on the intermediate state of the splitting can be helpful for
-        # debugging.
-        if debug:
-            history.append(
-                dict(
-                    parents=parents,
-                    split_vs=split_vs,
-                    split_dir=split_dir,
-                    split_idxs=split_idxs,
-                    alpha=alpha,
-                    grid=Grid(
-                        thetas, radii, tile_vs, is_regular, null_truth, grid_pt_idx
-                    ),
-                )
-            )
-
-    out = Grid(thetas, radii, tile_vs, is_regular, null_truth, grid_pt_idx)
-    if debug:
-        return out, history
-    else:
-        return out
+    n_arms = theta_min.shape[0]
+    theta1d = [
+        np.linspace(theta_min[i], theta_max[i], 2 * n_theta_1d[i] + 1)[1::2]
+        for i in range(n_arms)
+    ]
+    theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
+    radii = np.empty(theta.shape)
+    for i in range(theta.shape[1]):
+        radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
+    return theta, radii
 
 
 def prune(g):
     """Remove tiles that are entirely within the alternative hypothesis space.
 
-    Parameters
-    ----------
-    g
-        the Grid object
+    Args:
+        g: the Grid object
 
-    Returns
-    -------
+    Returns:
         the pruned Grid object.
     """
     if g.null_truth.shape[1] == 0:
@@ -308,6 +552,13 @@ def hypercube_vertices(d):
         (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1),
         (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1)
     ]
+
+    Args:
+        d: the dimension
+
+    Returns:
+        a numpy array of shape (2**d, d) containing the vertices of the
+        hypercube.
     """
     return np.array(list(product((1, -1), repeat=d)))
 
@@ -319,8 +570,13 @@ def get_edges(thetas, radii):
     - edges[:, :, n_params:] are the edge vectors pointing from the start to
         the end of the edge
 
-    In total, the edges array has shape:
-    (n_grid_pts, number of hypercube vertices, 2*n_params)
+    Args:
+        thetas: the centers of the hyperrectangles
+        radii: the half-width of the hyperrectangles
+
+    Returns:
+        edges: an array as specified in the docstring shaped like
+             (n_grid_pts, number of hypercube vertices, 2*n_params)
     """
 
     n_params = thetas.shape[1]
@@ -338,3 +594,44 @@ def get_edges(thetas, radii):
     edges[:, :, n_params:] *= 2 * radii[:, None, :]
     edges[:, :, :n_params] += thetas[:, None, :]
     return edges
+
+
+def refine_grid(g: Grid, refine_idxs):
+    """
+    Refine a grid by splitting the specified grid points. We split each grid
+    point in two along each dimension.
+
+    Note that we are not refining *tiles* here, but rather *grid points*.
+
+    Args:
+        g: the grid to refine
+        refine_idxs: the indices of the grid points to refine.
+
+    Returns:
+        new_thetas: the new grid points
+        new_radii: the radii for the new grid points.
+        unrefined_grid: the subset of the original grid that was not refined.
+        keep_tile_idxs: the indices of the tiles that were not refined.
+    """
+    refine_radii = g.radii[refine_idxs, None, :] * 0.5
+    new_thetas = (
+        g.thetas[refine_idxs, None, :]
+        + hypercube_vertices(g.d)[None, :, :] * refine_radii
+    ).reshape((-1, g.d))
+    new_radii = np.tile(refine_radii, (1, 2**g.d, 1)).reshape((-1, g.d))
+
+    keep_idxs = np.setdiff1d(np.arange(g.n_grid_pts), refine_idxs)
+    keep_tile_idxs = np.where(np.isin(g.grid_pt_idx, keep_idxs))[0]
+    _, keep_grid_pt_inverse = np.unique(
+        g.grid_pt_idx[keep_tile_idxs], return_inverse=True
+    )
+    unrefined_grid = Grid(
+        g.thetas[keep_idxs],
+        g.radii[keep_idxs],
+        g.vertices[keep_tile_idxs],
+        g.is_regular[keep_tile_idxs],
+        g.null_truth[keep_tile_idxs],
+        keep_grid_pt_inverse,
+    )
+
+    return new_thetas, new_radii, unrefined_grid, keep_tile_idxs
