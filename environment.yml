@@ -8,6 +8,7 @@ dependencies:
   - jupyterlab
   - numpy
   - scipy
+  - sympy
   - matplotlib
   - typer
 

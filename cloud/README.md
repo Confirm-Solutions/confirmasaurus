@@ -28,9 +28,11 @@ IMPORTANT: both the images in ghcr.io are stored in fully public package reposit
 
 ## Using GitHub Codespaces with the confirmasaurus repo
 
+NOTE: Do not use the default `.devcontainer/devcontainer.json`! Go to "Configure and create codespace" and use one of the three subfolder options: `smalldev`, `bigdev`, `clouddev`.
+
 To start using Codespaces, follow along with the [quick start](https://docs.github.com/en/codespaces/getting-started/quickstart) but just use our repo instead of the example repo. For the moment, I strongly recommend using the GPU configuration since it's free while the beta program is still ongoing. Also, they're really fast! 6 cores, 112G RAM, 1 NVidia V100 GPU.
 
-The dev environment should be set up quite cleanly. By default, the `smalldev` devcontainer/docker image will be launched, but in the advanced codespaces launch configuration, you should be able to select either of the other two devcontainers. If you select the `bigdev` devcontainer, the build time will be very long. The other two images should have very fast builds because the images are stored on GHCR.
+The dev environment should be set up quite cleanly. In the "Configure and create codespace" dialog, I would recommend choosing the `smalldev` devcontainer/docker image. You should be able to select either of the other two devcontainers. If you select the `bigdev` devcontainer, the build time will be very long. The `smalldev` and `clouddev` iamges should have very fast builds because the images are prebuilt and stored on GHCR.
 
 After you've set up your codespace, all the steps in the [main README's "Getting set up"](../README.md#getting-set-up) above will have already been done for you! There's no setup left to do. Just code and enjoy.
 
