@@ -271,6 +271,10 @@ def _build_odi_constant_func(q: int):
     return sp.lambdify(lambdify_args, central_moment, "numpy")
 
 
+def optimal_centering(f, p):
+    return 1 / (1 + ((1 - f) / f) ** (1 / (p - 1)))
+
+
 def _build_odi_constant_func_numerical(q: float):
     """
     Fully numerical integration constant evaluator. This can be useful for
