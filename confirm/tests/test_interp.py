@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 import scipy.interpolate
-
 from outlaw.interp import interpn
 
 
