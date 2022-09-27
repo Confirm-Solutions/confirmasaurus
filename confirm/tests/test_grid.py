@@ -136,16 +136,23 @@ def test_refine():
     theta, radii = grid.cartesian_gridpts(
         np.full(n_arms, -3.0), np.full(n_arms, 1.0), np.full(n_arms, 4)
     )
-    null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], -1.1) for i in range(n_arms)]
+    null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], 1.1) for i in range(n_arms)]
     g = grid.prune(grid.build_grid(theta, radii, null_hypos))
     refine_tiles = np.array([0, 3, 4, 5])
-    keep_tiles = np.setdiff1d(np.arange(g.n_tiles), refine_tiles)
     refine_gridpts = g.grid_pt_idx[refine_tiles]
-    new_theta, new_radii, unrefined, keep_tiles2 = grid.refine_grid(g, refine_gridpts)
-    np.testing.assert_allclose(keep_tiles2, keep_tiles)
+    new_theta, new_radii, unrefined, keep_tiles = grid.refine_grid(g, refine_gridpts)
+    np.testing.assert_allclose(
+        keep_tiles, np.array([1, 2, 7, 8, 9, 10, 11, 12, 13, 14, 15])
+    )
+    np.testing.assert_allclose(g.vertices[keep_tiles], unrefined.vertices)
+    np.testing.assert_allclose(new_radii, 0.25)
 
-    # TODO: refine everything, check that no gridpts are equal.
-    # TODO: do a single gridpt, manual case.
+    pts_to_refine = np.array([[-2.5, -2.5], [-2.5, -0.5], [-2.5, 0.5], [-1.5, -2.5]])
+    for i in range(2):
+        for j in range(2):
+            subset = new_theta[(2 * i + j) :: 4]
+            correct = pts_to_refine - np.array([2 * i - 1, 2 * j - 1]) * 0.25
+            np.testing.assert_allclose(subset, correct)
 
 
 n_arms = 4

@@ -7,12 +7,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# TODO: tests for concat and refine.
-
 
 @dataclass
 class HyperPlane:
-    """A plane defined by:
+    """
+    A plane defined by:
     x \cdot n - c = 0
     """
 
@@ -26,7 +25,6 @@ class Grid:
     The first two arrays define the grid points/cells:
     - thetas: the center of each hyperrectangle.
     - radii: the half-width of each hyperrectangle in each dimension.
-        (NOTE: we could rename this since it's sort of a lie.)
 
     The next four arrays define the tiles:
     - vertices contains the vertices of each tiles. After splitting, tiles
@@ -66,6 +64,19 @@ class Grid:
 
 
 def index_grid(g: Grid, idxs: np.ndarray):
+    """
+    Take a subset of a grid by indexing into the tiles.
+
+    Note: the grid points are not modified, so the resulting grid may have
+    unused grid point.
+
+    Args:
+        g: the grid
+        idxs: the tiles indexer
+
+    Returns:
+        the Grid subset.
+    """
     return Grid(
         g.thetas,
         g.radii,
@@ -77,6 +88,17 @@ def index_grid(g: Grid, idxs: np.ndarray):
 
 
 def concat_grids(*gs: List[Grid], shared_theta=False):
+    """
+    Concat a list of grids.
+
+    Args:
+        shared_theta: Do the grids already share the same grid points. This can
+            be useful if you are combining `concat_grid` with `index_grid`.
+            Defaults to False.
+
+    Returns:
+        The concatenated grid.
+    """
     if len(gs) == 1:
         return gs[0]
 
@@ -109,6 +131,14 @@ def concat_grids(*gs: List[Grid], shared_theta=False):
 
 
 def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
+    """
+    Plot a 2D grid.
+
+    Args:
+        g: the grid
+        null_hypos: If provided, the function will plot red lines for the null
+            hypothesis boundaries. Defaults to [].
+    """
     import matplotlib as mpl
     import matplotlib.pyplot as plt
 
@@ -147,28 +177,28 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
     plt.show()
 
 
-eps = 1e-15
+def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
+    """
+    Intersect a grid with a set of null hypotheses.
 
+    Args:
+        g_in: The input grid.
+        null_hypos: The null hypotheses to intersect with.
+        jit: Should we jax.jit helper functions? This can make performance
+            slower for small grids and much faster for large grids. Defaults to
+            False.
 
-@jax.jit
-def _precise_check_for_intersections(vertices, Hns, Hcs):
-    n_tiles = vertices.shape[0]
-    n_hypos = len(Hns)
-    null_truth = jnp.full((n_tiles, n_hypos), -1)
-    all_dist = vertices.dot(Hns.T) - Hcs[None, None]
-    null_truth = ((all_dist >= 0) | jnp.isnan(all_dist)).all(axis=1)
-
-    # 0 means alt true, 1 means null true
-    all_above = ((all_dist >= -eps) | jnp.isnan(all_dist)).all(axis=1)
-    all_below = ((all_dist <= eps) | jnp.isnan(all_dist)).all(axis=1)
-    any_intersections = jnp.any(~(all_above | all_below), axis=1)
-
-    return any_intersections, null_truth
-
-
-def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
+    Returns:
+        The intersected grid with split tiles.
+    """
+    eps = 1e-15
     n_grid_pts, n_params = g_in.thetas.shape
 
+    ########################################
+    # Step 1. Check for grid point intersection:
+    # This is a rough check because it assumes all the tiles are
+    # hyperrectangles.
+    ########################################
     Hns = np.array([H.n for H in null_hypos])
     Hcs = np.array([H.c for H in null_hypos])
 
@@ -179,6 +209,28 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
     tile_rough_dist = gridpt_dist[g_in.grid_pt_idx]
     null_truth = no_intersect[..., None] & (tile_rough_dist >= 0)
 
+    ########################################
+    # Step 2. Do a more precise check for tile intersections.
+    # We also record whether the null hypothesis is true for each tile.
+    ########################################
+
+    def _precise_check_for_intersections(vertices, Hns, Hcs):
+        n_tiles = vertices.shape[0]
+        n_hypos = len(Hns)
+        null_truth = jnp.full((n_tiles, n_hypos), -1)
+        all_dist = vertices.dot(Hns.T) - Hcs[None, None]
+        null_truth = ((all_dist >= 0) | jnp.isnan(all_dist)).all(axis=1)
+
+        # 0 means alt true, 1 means null true
+        all_above = ((all_dist >= -eps) | jnp.isnan(all_dist)).all(axis=1)
+        all_below = ((all_dist <= eps) | jnp.isnan(all_dist)).all(axis=1)
+        any_intersections = jnp.any(~(all_above | all_below), axis=1)
+
+        return any_intersections, null_truth
+
+    if jit:
+        _precise_check_for_intersections = jax.jit(_precise_check_for_intersections)
+
     precise_any_intersect, precise_null_truth = _precise_check_for_intersections(
         g_in.vertices[any_intersect], Hns, Hcs
     )
@@ -186,7 +238,11 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
     any_intersect[any_intersect] = precise_any_intersect
 
     g_in.null_truth = np.concatenate((g_in.null_truth, null_truth), axis=1)
+
+    # the subset of the grid that does not need to be checked for intersection.
     g_ignore = index_grid(g_in, ~any_intersect)
+
+    # the working subset that we *do* need to check for intersection.
     g = index_grid(g_in, any_intersect)
 
     if g.n_tiles == 0:
@@ -195,9 +251,13 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
     for iH, H in enumerate(null_hypos):
         orig_max_v_count = g.vertices.shape[1]
 
+        ########################################
+        # Step 3. Find any intersections for this null hypothesis.
+        ########################################
+
         # Measure the distance of each vertex from the null hypo boundary
         # it's important to allow nan dist because some tiles may not have
-        # every vertex slot filled. unused vertex slots will contain nans.
+        # every vertex slot filled. Unused vertex slots will contain nans.
         dist = g.vertices.dot(H.n) - H.c
 
         is_null = ((dist >= 0) | np.isnan(dist)).all(axis=1)
@@ -213,18 +273,28 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
             ((dist >= -eps) | np.isnan(dist)).all(axis=1)
             | ((dist <= eps) | np.isnan(dist)).all(axis=1)
         )
+
+        # If a tile has been split already, we don't split again because that
+        # would add substantial complexity in exchange for minimal performance
+        # gains.
         to_split = to_split_or_copy & g.is_regular
         to_copy = to_split_or_copy & ~g.is_regular
-
         split_idxs = np.where(to_split)[0]
         copy_idxs = np.where(to_copy)[0]
 
+        # The subset of the grid that we won't split
         g_keep = index_grid(g, ~to_split_or_copy)
 
+        ########################################
+        # Step 4. Copy tiles.
+        ########################################
         if copy_idxs.shape[0] == 0:
             g_copy = index_grid(g, np.s_[0:0])
         else:
             copy_null_truth = np.repeat(g.null_truth[copy_idxs], 2, axis=0)
+            # If a tile is being copied that is because it intersects the null
+            # hypo plane. So, one side should be null true and the other alt
+            # true.
             copy_null_truth[::2, iH] = 1
             copy_null_truth[1::2, iH] = 0
             g_copy = Grid(
@@ -236,12 +306,18 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
                 np.repeat(g.grid_pt_idx[copy_idxs], 2, axis=0),
             )
 
-        # If we're not splitting or copying any tiles, we can move on! We're done here.
+        ########################################
+        # Step 5. Split tiles!
+        ########################################
         if split_idxs.shape[0] == 0:
             g_split = index_grid(g, np.s_[0:0])
         else:
-            # Intersect every tile edge with the hyperplane to find the new vertices.
             split_grid_pt_idx = g.grid_pt_idx[split_idxs]
+
+            ########################################
+            # Step 5a. Intersect tile edges with the hyperplane.
+            # This will identify the new vertices that we need to add.
+            ########################################
             split_edges = get_edges(
                 g.thetas[split_grid_pt_idx], g.radii[split_grid_pt_idx]
             )
@@ -272,12 +348,17 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
                     np.nan,
                 )
 
-            # Create the array for the new vertices. We expand in both dimensions:
+            ########################################
+            # Step 5b. Construct the vertex array for the new tiles..
+            ########################################
+            # Create the array for the new vertices. We need to expand the
+            # original vertex array in both dimensions:
             # 1. We create a new row for each tile that is being split using np.repeat.
             # 2. We create a new column for each potential additional vertex from
-            #    the intersection operation above using np.concatenate. This is far
-            #    more new vertices than necessary, but facilitates a nice vectorized
-            #    implementation.. We will just filter out the unnecessary slots later.
+            #    the intersection operation above using np.concatenate. This is
+            #    more new vertices than necessary, but facilitates a nice
+            #    vectorized implementation.. We will just filter out the
+            #    unnecessary slots later.
             split_vertices = np.repeat(g.vertices[split_idxs], 2, axis=0)
             split_vertices = np.concatenate(
                 (
@@ -307,7 +388,8 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
                 include_in_alt_tile, 1, np.nan
             )[..., None]
 
-            # The intersection vertices get added to both new tiles.
+            # The intersection vertices get added to both new tiles because
+            # they lie on the boundary between the two tiles.
             split_vertices[::2, orig_max_v_count:] = new_vs
             split_vertices[1::2, orig_max_v_count:] = new_vs
 
@@ -331,7 +413,9 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
                 first_all_nan_corner = nonfinite_corners.argmax()
                 split_vertices = split_vertices[:, :first_all_nan_corner]
 
-            # Update the remaining tile characteristics.
+            ########################################
+            # Step 5c. Update the remaining tile properties.
+            ########################################
             split_null_truth = np.repeat(g.null_truth[split_idxs], 2, axis=0)
             # - the two sides of a split tile have their null hypo truth
             # indicators updated.
@@ -348,6 +432,9 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane]):
 
         # Hurray, we made it! We can concatenate our grids!
         g = concat_grids(g_keep, g_copy, g_split, shared_theta=True)
+
+    # After all the splitting is done, we can concat back to the tiles that we
+    # ignored because we knew they would never be split.
     return concat_grids(g_ignore, g, shared_theta=True)
 
 
@@ -509,7 +596,7 @@ def get_edges(thetas, radii):
     return edges
 
 
-def refine_grid(g: Grid, refine_idxs: np.ndarray[int]):
+def refine_grid(g: Grid, refine_idxs):
     """
     Refine a grid by splitting the specified grid points. We split each grid
     point in two along each dimension.
