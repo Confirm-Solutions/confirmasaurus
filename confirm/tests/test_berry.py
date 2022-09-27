@@ -3,12 +3,8 @@ import time
 
 import jax
 import numpy as np
-import pyimprint.grid as grid
 import pytest
 import scipy.stats
-from pyimprint.bound import TypeIErrorBound
-from pyimprint.driver import accumulate_process
-from pyimprint.model.binomial import SimpleSelection
 from scipy.special import logit
 
 import confirm.berrylib.dirty_bayes as dirty_bayes
@@ -16,7 +12,6 @@ import confirm.berrylib.fast_inla as fast_inla
 import confirm.berrylib.quadrature as quadrature
 import confirm.berrylib.util as util
 import confirm.mini_imprint.binomial as binomial
-from confirm.berrylib.imprint import BerryImprintModel
 
 
 def logistic(x):
@@ -260,6 +255,12 @@ def test_py_binomial(n_arms=2, n_theta_1d=16, sim_size=100):
     """
     Test against the Imprint accumulation and bound routines.
     """
+    import pyimprint.grid as grid
+    from pyimprint.bound import TypeIErrorBound
+    from pyimprint.driver import accumulate_process
+    from pyimprint.model.binomial import SimpleSelection
+    from confirm.berrylib.imprint import BerryImprintModel
+
     n_arm_samples = 35
     seed = 10
     # getting an exact match is only possible with n_threads = 1 because
