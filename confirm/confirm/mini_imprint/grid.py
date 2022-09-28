@@ -1,5 +1,6 @@
 import warnings
 from dataclasses import dataclass
+from dataclasses import field
 from itertools import product
 from typing import List
 
@@ -37,6 +38,7 @@ class Grid:
       have been split are considered "irregular" and tiles that have never been
       split are considered "regular".
     - null_truth indicates the truth of each null hypothesis for each tile.
+    - null_hypos contains the hyperplanes that define the null hypotheses.
     """
 
     thetas: np.ndarray
@@ -45,6 +47,7 @@ class Grid:
     is_regular: np.ndarray
     null_truth: np.ndarray
     grid_pt_idx: np.ndarray
+    null_hypos: List[HyperPlane] = field(default_factory=lambda: [])
 
     @property
     def n_tiles(self):
@@ -84,12 +87,17 @@ def index_grid(g: Grid, idxs: np.ndarray):
         g.is_regular[idxs],
         g.null_truth[idxs],
         g.grid_pt_idx[idxs],
+        g.null_hypos,
     )
 
 
 def concat_grids(*gs: List[Grid], shared_theta=False):
     """
     Concat a list of grids.
+
+    Note: this assumes the grids have the same null hypotheses. Concatenating
+    grids with different null hypotheses doesn't make sense and is not
+    supported.
 
     Args:
         shared_theta: Do the grids already share the same grid points. This can
@@ -127,7 +135,15 @@ def concat_grids(*gs: List[Grid], shared_theta=False):
         grid_pt_idx = np.concatenate(
             [g.grid_pt_idx + grid_pt_offset[i] for i, g in enumerate(gs)], axis=0
         )
-    return Grid(thetas, radii, vertices, is_regular, null_truth, grid_pt_idx)
+    return Grid(
+        thetas,
+        radii,
+        vertices,
+        is_regular,
+        null_truth,
+        grid_pt_idx,
+        null_hypos=gs[0].null_hypos,
+    )
 
 
 def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
@@ -173,8 +189,6 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
             ys = np.linspace(*ylims, 100)
             xs = (h.c - ys * h.n[1]) / h.n[0]
         plt.plot(xs, ys, "r-")
-
-    plt.show()
 
 
 def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
@@ -304,6 +318,7 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
                 np.repeat(g.is_regular[copy_idxs], 2, axis=0),
                 copy_null_truth,
                 np.repeat(g.grid_pt_idx[copy_idxs], 2, axis=0),
+                g.null_hypos,
             )
 
         ########################################
@@ -428,6 +443,7 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
                 np.full(split_idxs.shape[0] * 2, False, dtype=bool),
                 split_null_truth,
                 np.repeat(split_grid_pt_idx, 2, axis=0),
+                g.null_hypos,
             )
 
         # Hurray, we made it! We can concatenate our grids!
@@ -435,7 +451,9 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
 
     # After all the splitting is done, we can concat back to the tiles that we
     # ignored because we knew they would never be split.
-    return concat_grids(g_ignore, g, shared_theta=True)
+    out = concat_grids(g_ignore, g, shared_theta=True)
+    out.null_hypos.extend(null_hypos)
+    return out
 
 
 def build_grid(
@@ -533,6 +551,7 @@ def prune(g):
         g.is_regular[~all_alt],
         g.null_truth[~all_alt],
         grid_pt_inverse,
+        g.null_hypos,
     )
 
 
@@ -632,6 +651,7 @@ def refine_grid(g: Grid, refine_idxs):
         g.is_regular[keep_tile_idxs],
         g.null_truth[keep_tile_idxs],
         keep_grid_pt_inverse,
+        g.null_hypos,
     )
 
     return new_thetas, new_radii, unrefined_grid, keep_tile_idxs
