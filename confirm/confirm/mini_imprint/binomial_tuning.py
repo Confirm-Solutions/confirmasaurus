@@ -6,7 +6,7 @@ import numpy as np
 
 
 def binomial_tuner(test_fnc):
-    # @jax.jit
+    @jax.jit
     def fnc(pointwise_alpha, theta_tiles, null_truth, uniform_samples):
         sim_size, n_arm_samples, n_arms = uniform_samples.shape
         n_tiles = pointwise_alpha.shape[0]
@@ -26,9 +26,9 @@ def binomial_tuner(test_fnc):
             axis=-1,
         )
 
-        cv_idx = np.floor((sim_size + 1) * pointwise_alpha).astype(int)
-        partitioned_stats = np.partition(max_null_test, sim_size - cv_idx, axis=-1)
-        sim_cv = partitioned_stats[np.arange(n_tiles), -cv_idx]
+        cv_idx = jnp.floor((sim_size + 1) * pointwise_alpha).astype(int)
+        sorted_stats = jnp.sort(max_null_test, axis=-1)
+        sim_cv = sorted_stats[jnp.arange(n_tiles), sim_size - cv_idx]
 
         # TODO: this check could be removed?
         # nrejects_max = cv_idx - 1
@@ -54,6 +54,7 @@ def chunked_tune(
         tile_start = i * tile_chunk_size
         tile_end = (i + 1) * tile_chunk_size
         tile_end = min(tile_end, g.theta_tiles.shape[0])
+        print("chunk", tile_end - tile_start, sim_size)
         sim_cvs[tile_start:tile_end] = simulator(
             pointwise_alpha[tile_start:tile_end],
             g.theta_tiles[tile_start:tile_end],
