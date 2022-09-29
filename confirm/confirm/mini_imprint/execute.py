@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import jax.numpy as jnp
 import numpy as np
 import scipy.spatial
 
@@ -8,34 +9,45 @@ from . import grid
 
 
 def chunked_simulate(
-    g, accumulator, sim_size, n_arm_samples, tile_chunk_size=5000, sim_chunk_size=50000
+    g,
+    accumulator,
+    cv,
+    sim_size,
+    n_arm_samples,
+    tile_chunk_size=1000,
 ):
     n_tiles, n_params = g.theta_tiles.shape
 
-    typeI_sum = np.zeros(n_tiles)
-    typeI_score = np.zeros((n_tiles, n_params))
-    n_tile_chunks = int(np.ceil(n_tiles / tile_chunk_size))
-    n_sim_chunks = int(np.ceil(sim_size / sim_chunk_size))
+    typeI_sum = np.empty(n_tiles)
+    mem_usage = 2e9
+    tile_chunk_size = min(
+        tile_chunk_size, int(mem_usage / sim_size / g.theta_tiles.shape[1] / 8)
+    )
+    n_tile_chunks = int(jnp.ceil(n_tiles / tile_chunk_size))
 
-    for j in range(n_sim_chunks):
-        start_sims = j * sim_chunk_size
-        end_sims = min(start_sims + sim_chunk_size, sim_size)
-        nsims_this_chunk = end_sims - start_sims
-
-        # abstraction idea: this part could be controlled by accumulator/model?
-        samples = np.random.uniform(size=(nsims_this_chunk, n_arm_samples, n_params))
-        for i in range(n_tile_chunks):
-            gridpt_start = i * tile_chunk_size
-            gridpt_end = (i + 1) * tile_chunk_size
-            gridpt_end = min(gridpt_end, g.theta_tiles.shape[0])
-            sum_chunk, score_chunk = accumulator(
-                g.theta_tiles[gridpt_start:gridpt_end],
-                g.null_truth[gridpt_start:gridpt_end],
-                samples,
-            )
-            typeI_sum[gridpt_start:gridpt_end] += sum_chunk
-            typeI_score[gridpt_start:gridpt_end] += score_chunk
-    return typeI_sum, typeI_score
+    # abstraction idea: this part could be controlled by accumulator/model?
+    samples = np.random.uniform(size=(sim_size, n_arm_samples, n_params))
+    for i in range(n_tile_chunks):
+        tile_start = i * tile_chunk_size
+        tile_end = (i + 1) * tile_chunk_size
+        tile_end = min(tile_end, g.theta_tiles.shape[0])
+        padded_tiles = np.pad(
+            g.theta_tiles[tile_start:tile_end],
+            ((0, tile_chunk_size - (tile_end - tile_start)), (0, 0)),
+            "constant",
+        )
+        padded_null_truth = np.pad(
+            g.null_truth[tile_start:tile_end],
+            ((0, tile_chunk_size - (tile_end - tile_start)), (0, 0)),
+            "constant",
+        )
+        typeI_sum[tile_start:tile_end] = accumulator(
+            cv,
+            padded_tiles,
+            padded_null_truth,
+            samples,
+        )[: tile_end - tile_start]
+    return typeI_sum
 
 
 @dataclass

@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable
 
 import jax.numpy as jnp
@@ -31,7 +32,7 @@ def binomial_accumulator(rejection_fnc):
     # We wrap and return this function since rejection_fnc needs to be known at
     # jit time.
     @jax.jit
-    def fnc(theta_tiles, is_null_per_arm, uniform_samples):
+    def fnc(cv, theta_tiles, is_null_per_arm, uniform_samples):
         sim_size, n_arm_samples, n_arms = uniform_samples.shape
 
         # 1. Calculate the binomial count data.
@@ -51,7 +52,7 @@ def binomial_accumulator(rejection_fnc):
         y_flat = y.reshape((-1, n_arms))
         n_flat = jnp.full_like(y_flat, n_arm_samples)
         data = jnp.stack((y_flat, n_flat), axis=-1)
-        did_reject = rejection_fnc(data).reshape(y.shape)
+        did_reject = rejection_fnc(data, cv).reshape(y.shape)
 
         # 3. Determine type I family wise error rate.
         #  a. type I is only possible when the null hypothesis is true.
@@ -67,14 +68,7 @@ def binomial_accumulator(rejection_fnc):
         any_rejection = jnp.any(false_reject, axis=-1)
         typeI_sum = any_rejection.sum(axis=-1)
 
-        # 4. Calculate score. The score function is the primary component of the
-        #    gradient used in the bound:
-        #  a. for binomial, it's just: y - n * p
-        #  b. only summed when there is a rejection in the given simulation
-        score = y - n_arm_samples * p_tiles[:, None, :]
-        typeI_score = jnp.sum(any_rejection[:, :, None] * score, axis=1)
-
-        return typeI_sum, typeI_score
+        return typeI_sum
 
     return fnc
 
@@ -308,6 +302,7 @@ def _build_odi_constant_func_numerical(q: float):
     return constant_func_cache[q]
 
 
+@partial(jax.jit, static_argnums=(2, 3, 4, 5))
 def _calc_Cqpp(
     theta_tiles,
     tile_corners,
@@ -342,12 +337,13 @@ def _calc_Cqpp(
         raise ValueError("The q parameter must be an even integer less than 16.")
 
     holderp = 1 / (1 - 1.0 / holderq)
-    sup_v = np.max(
-        np.sum(
-            np.where(
-                np.isnan(tile_corners),
+    sup_v = jnp.max(
+        jnp.sum(
+            jnp.where(
+                jnp.isnan(tile_corners),
                 0,
-                np.abs(radius_ratio * (tile_corners - theta_tiles[:, None])) ** holderp,
+                jnp.abs(radius_ratio * (tile_corners - theta_tiles[:, None]))
+                ** holderp,
             ),
             axis=2,
         )
@@ -355,32 +351,34 @@ def _calc_Cqpp(
         axis=1,
     )
 
-    tile_corners_p = scipy.special.expit(tile_corners)
+    tile_corners_p = jax.scipy.special.expit(tile_corners)
 
     # NOTE: we are assuming that we know the supremum occurs at a corner or at
     # p=0.5. This might not be true for other models or for q > 16.
-    C_corners = np.where(
-        np.isnan(tile_corners_p.ravel()),
+    C_corners = jnp.where(
+        jnp.isnan(tile_corners_p.ravel()),
         0,
         C_f(n_arm_samples, tile_corners_p.ravel()),
     ).reshape(tile_corners_p.shape)
 
     # maximum per dimension over the corners of the tile
-    C_max = np.max(C_corners, axis=1)
+    C_max = jnp.max(C_corners, axis=1)
     # if the tile crosses p=0.5, we just set C_max equal to the value at 0.5
-    crosses05 = np.where(
-        np.any(tile_corners_p < 0.5, axis=1) & np.any(tile_corners_p > 0.5, axis=1)
+    C_max = jnp.where(
+        jnp.any(tile_corners_p < 0.5, axis=1) & jnp.any(tile_corners_p > 0.5, axis=1),
+        C_f(n_arm_samples, jnp.array([0.5]))[0],
+        C_max,
     )
-    C_max[crosses05] = C_f(n_arm_samples, np.array([0.5]))[0]
 
     # finally, sum across the arms to compute the full multidimensional moment
     # expectation
-    sup_moment = np.sum(C_max, axis=-1) ** (1 / holderq)
+    sup_moment = jnp.sum(C_max, axis=-1) ** (1 / holderq)
 
     # Cq'' from the paper:
     return sup_v * sup_moment
 
 
+@partial(jax.jit, static_argnums=(3, 4, 5, 6))
 def holder_odi_bound(
     typeI_bound,
     theta_tiles,
@@ -417,3 +415,11 @@ def holder_odi_bound(
         radius_ratio=radius_ratio,
     )
     return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq
+
+
+@partial(jax.jit, static_argnums=(3, 4))
+def invert_bound(bound, theta_tiles, vertices, n_arm_samples, holderq):
+    holderq = 6
+    C_f = _build_odi_constant_func_numerical(holderq)
+    Cqpp = _calc_Cqpp(theta_tiles, vertices, n_arm_samples, holderq, C_f)
+    return (bound ** (1 / holderq) - Cqpp / holderq) ** holderq

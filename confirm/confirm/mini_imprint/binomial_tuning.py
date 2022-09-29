@@ -12,7 +12,10 @@ def binomial_tuner(test_fnc):
         n_tiles = pointwise_alpha.shape[0]
 
         p_tiles = jax.scipy.special.expit(theta_tiles)
-        y = jnp.sum(uniform_samples[None] < p_tiles[:, None, None, :], axis=2)
+        y = jax.vmap(
+            lambda p: jnp.sum(uniform_samples < p[None, None, :], axis=1),
+            in_axes=(0,),
+        )(p_tiles)
         y_flat = y.reshape((-1, n_arms))
         n_flat = jnp.full_like(y_flat, n_arm_samples)
         data = jnp.stack((y_flat, n_flat), axis=-1)
@@ -41,11 +44,15 @@ def binomial_tuner(test_fnc):
 
 
 def chunked_tune(
-    g, simulator, pointwise_alpha, sim_size, n_arm_samples, tile_chunk_size=5000
+    g, simulator, pointwise_alpha, sim_size, n_arm_samples, tile_chunk_size=1000
 ):
     n_tiles, n_params = g.theta_tiles.shape
 
     sim_cvs = np.zeros(n_tiles)
+    mem_usage = 2e9
+    tile_chunk_size = min(
+        tile_chunk_size, int(mem_usage / sim_size / g.theta_tiles.shape[1] / 8)
+    )
     n_tile_chunks = int(np.ceil(n_tiles / tile_chunk_size))
 
     # abstraction idea: this part could be controlled by accumulator/model?
@@ -54,13 +61,27 @@ def chunked_tune(
         tile_start = i * tile_chunk_size
         tile_end = (i + 1) * tile_chunk_size
         tile_end = min(tile_end, g.theta_tiles.shape[0])
-        print("chunk", tile_end - tile_start, sim_size)
-        sim_cvs[tile_start:tile_end] = simulator(
+        padded_alpha = np.pad(
             pointwise_alpha[tile_start:tile_end],
-            g.theta_tiles[tile_start:tile_end],
-            g.null_truth[tile_start:tile_end],
-            samples,
+            ((0, tile_chunk_size - (tile_end - tile_start))),
+            "constant",
         )
+        padded_tiles = np.pad(
+            g.theta_tiles[tile_start:tile_end],
+            ((0, tile_chunk_size - (tile_end - tile_start)), (0, 0)),
+            "constant",
+        )
+        padded_null_truth = np.pad(
+            g.null_truth[tile_start:tile_end],
+            ((0, tile_chunk_size - (tile_end - tile_start)), (0, 0)),
+            "constant",
+        )
+        sim_cvs[tile_start:tile_end] = simulator(
+            padded_alpha,
+            padded_tiles,
+            padded_null_truth,
+            samples,
+        )[0 : (tile_end - tile_start)]
     return sim_cvs
 
 
