@@ -253,10 +253,10 @@ def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
 
     # plot everything
     plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
-    plt.plot(thetas, taylor_bounds, ls='--', label='taylor')
+    plt.plot(thetas, taylor_bounds, ls='-', label='taylor')
     for i, c in enumerate(hc):
         plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
-    plt.plot(thetas, exp_holder_bounds, ls='--', label='exp-holder')
+    plt.plot(thetas, exp_holder_bounds, ls='-.', label='exp-holder')
     plt.legend()
     plt.show()
 ```
