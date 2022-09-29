@@ -123,5 +123,6 @@
 	"python.formatting.provider": "black",
     "autoDocstring.docstringFormat": "google-notypes",
     "r.bracketedPaste": true,
-    "r.plot.useHttpgd": true
+    "r.plot.useHttpgd": true,
+    "cmake.sourceDirectory": "${workspaceFolder}/imprint/imprint"
 }
