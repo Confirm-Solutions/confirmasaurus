@@ -160,6 +160,11 @@ Hence,
     C_q = ||Z||_{L^q} \sup\limits_{v \in H-\theta_0} |v|
 \end{align*}
 
+Finally, we have the following as the optimal choice for the centering
+\begin{align*}
+    c^* := \frac{1}{1 + \left(\frac{1-f(\theta_0)}{f(\theta_0)}\right)^{\frac{1}{p-1}}}
+\end{align*}
+
 ```python
 def z_lq(q):
     frac = scipy.special.gamma((q+1)/2) / (2 * np.sqrt(np.pi))
@@ -167,8 +172,13 @@ def z_lq(q):
 
 def C_q(vs, q):
     return z_lq(q) * vs
+    
+def copt(f0, p):
+    return 1/(1 + ((1-f0) / f0)**(1/(p-1)))
 
-def holder_bound(f0, vs, hp, hc):
+def holder_bound(f0, vs, hp, hc='opt'):
+    if hc == 'opt':
+        hc = copt(f0, hp)
     hq = 1 / (1 - 1 / hp)
     B = hc**hp
     A = (1-hc)**hp - B
@@ -217,7 +227,6 @@ theta_0 = -1
 v_max = 1
 n_steps = 20
 alpha = 0.025
-n_sims = 100000
 ```
 
 ```python
@@ -228,14 +237,13 @@ vs = np.linspace(0, v_max, n_steps)
 ```
 
 ```python
-def run(theta_0, f0, df0, vs, alpha, z_crit, n_sims, hp, hc):
+def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
     # compute true Type I Error
     thetas = theta_0 + vs
     fs = 1-norm.cdf(z_crit - thetas)
 
     # compute taylor bound
-    typeI_sum, typeI_score = simulate(theta_0, n_sims, alpha)
-    taylor_bounds_est = taylor_bound_est(typeI_sum, typeI_score, n_sims, vs)
+    taylor_bounds = taylor_bound(f0, df0, vs)
 
     # compute holder centered bound
     holder_bounds = [holder_bound(f0, vs, hp, c) for c in hc]
@@ -245,7 +253,7 @@ def run(theta_0, f0, df0, vs, alpha, z_crit, n_sims, hp, hc):
 
     # plot everything
     plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
-    plt.plot(thetas, taylor_bounds_est, ls='--', label='taylor-est')
+    plt.plot(thetas, taylor_bounds, ls='--', label='taylor')
     for i, c in enumerate(hc):
         plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
     plt.plot(thetas, exp_holder_bounds, ls='--', label='exp-holder')
@@ -265,14 +273,13 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=2,
-    hc=[0, 0.2, 0.4, 0.6, 0.8, 1],
+    hc=[0, 0.2, 0.4, 0.6, 0.8, 1, 'opt'],
 )
 ```
 
-It's clear from the above that no centering is actually the optimal choice.
-Removing the other versions, we get the following
+It's clear from the above that no centering and optimal centering are nearly identical.
+Removing the other versions and keeping the optimal centering, we get the following:
 
 ```python
 run(
@@ -282,16 +289,14 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=2,
-    hc=[0],
+    hc=['opt'],
 )
 ```
 
 We see that from $\theta_0$ (leftmost point), if we increase the tile size all the way until it hits the origin
-(boundary of the null hypothesis), the exponential Holder bound does far worse than the Holder bound.
-However, it is still better than the classical Taylor bound.
-The reader should keep in mind that the Taylor bound is inflated by simulation error (though relatively small due to large simulation size).
+(boundary of the null hypothesis), the exponential Holder bound does far worse than the centered Holder bound.
+However, it is still uniformly better than the classical Taylor bound.
 
 Zooming in on a smaller region around $\theta_0$, we get the following:
 
@@ -305,15 +310,16 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=2,
-    hc=[0],
+    hc=['opt'],
 )
 ```
 
-Now we see that the exponential Holder is actually performing better than the centered Holder method with $p=2$
+Now we see that the exponential Holder is actually performing better than the optimally centered Holder method with $p=2$
 in a smaller region around $\theta_0$.
-From a previous study, $p=1.2$ gave a good estimate for an improved bound.
+Moreover, the Taylor expansion is nearly identical to the exponential Holder.
+
+From a previous study, $p=1.2$ gave a good estimate for an improved bound for the centered Holder method.
 The following shows the bound with $p=1.2$.
 
 ```python
@@ -324,19 +330,17 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=1.2,
-    hc=[0],
+    hc=['opt'],
 )
 ```
 
-Once again, the centered Holder bound is asymptotically performing better than the exponential Holder bound.
+The centered Holder bound is asymptotically performing better than the exponential Holder bound and Taylor bound.
 However, for tile size of about $0.003$ (the usual gridding radius we consider in practice),
 the two are nearly indistinguishable.
 
 
 Now, we consider what happens when $\theta_0$ is closer to the boundary (when Type I Error at the simulation point is larger).
-
 
 ```python
 theta_0 = -0.01
@@ -351,9 +355,8 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=1.2,
-    hc=[0, 0.2, 0.4, 0.6, 0.8, 1],
+    hc=[0, 0.2, 0.4, 0.6, 0.8, 1, 'opt'],
 )
 ```
 
@@ -368,9 +371,8 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=1.2,
-    hc=[0],
+    hc=['opt'],
 )
 ```
 
@@ -391,10 +393,28 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    n_sims=n_sims,
     hp=1.2,
-    hc=[0],
+    hc=['opt'],
 )
 ```
 
-Amazing! Exponential holder is literally right on the true Type I Error whereas the centered Holder performs much worse.
+Amazing! Exponential Holder and Taylor are literally right on the true Type I Error whereas the centered Holder performs much worse.
+
+
+### Final Remarks
+
+- Taylor bound is surprisingly accurate for this example. This is largely due to the fact that the Taylor bound simplifies very nicely to a simple formula with few boundings necessary. It is partly a consequence that estimating $\theta$ is independent of $\sigma$, i.e. $\sigma$ is really a nuisance parameter. Things may look different with curved Gaussian when $\theta$ also governs the variance parameter. This is a good approximation of a test with Binomial data since with large enough sample size, Binomial is approximately Gaussian with mean $np$ and variannce $np(1-p)$ where $p = expit(\theta)$.
+
+- Exponential Holder bound is also surprisingly accurate.
+Especially when the Type I Error is large, it's surprising that it is robust.
+Moreover, it beats Taylor with large enough tile size!
+So, in some sense, it has more potential of being tighter to the true Type I Error.
+
+- Centered Holder bound is very accurate in some regions, but I want to argue that it's not doing so well in cases that we care about.
+When Type I Error is large, that's when we would like to be tightest, if possible.
+When Type I Error is small, we have more budget to be wrong.
+The above shows that centered Holder does extremely well with _large_ tile-size when Type I Error is low at $\theta_0$.
+But within small regions around $\theta_0$,
+which is the typical use-case when we construct grid-points,
+it's doing worse than exponential Holder/Taylor.
+And at large Type I Error at $\theta_0$, it does worse than exponential Holder/Taylor.
