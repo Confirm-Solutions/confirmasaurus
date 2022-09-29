@@ -3,6 +3,7 @@ from typing import Callable
 import jax.numpy as jnp
 import jax.scipy.special
 import numpy as np
+import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
 import sympy as sp
@@ -275,30 +276,36 @@ def optimal_centering(f, p):
     return 1 / (1 + ((1 - f) / f) ** (1 / (p - 1)))
 
 
-# def _build_odi_constant_func_numerical(q: float):
-#     """
-#     Fully numerical integration constant evaluator. This can be useful for
-#     non-integer q.
+constant_func_cache = {}
 
-#     Args:
-#         q: The moment to compute. Must be a float greater than 1.
-#     """
 
-#     def f(n, p):
-#         if isinstance(p, float):
-#             pf = np.array([p])
-#         else:
-#             pf = p.flatten()
-#         xs = np.arange(n + 1).astype(np.float64)
-#         eggq = np.abs(xs[None, :] - n * pf[:, None]) ** q
-#         integrand = eggq * scipy.stats.binom.pmf(xs[None, :], n, pf[:, None])
-#         out = np.sum(integrand, axis=-1)
-#         if isinstance(p, float):
-#             return out[0]
-#         else:
-#             return out.reshape(p.shape)
+def _build_odi_constant_func_numerical(q: float):
+    """
+    Fully numerical integration constant evaluator. This can be useful for
+    non-integer q.
 
-#     return f
+    Args:
+        q: The moment to compute. Must be a float greater than 1.
+    """
+
+    def f(n, p):
+        if isinstance(p, float):
+            pf = np.array([p])
+        else:
+            pf = p.flatten()
+        xs = jnp.arange(n + 1).astype(jnp.float64)
+        return jnp.exp(
+            jax.scipy.special.logsumexp(
+                q * jnp.log(jnp.abs(xs - n * pf)) + dist.Binomial(n, pf).log_prob(xs)
+            )
+        )
+
+    if q not in constant_func_cache:
+        constant_func_cache[q] = jax.jit(
+            jax.vmap(f, in_axes=(None, 0)), static_argnums=(0,)
+        )
+
+    return constant_func_cache[q]
 
 
 def _calc_Cqpp(
@@ -353,10 +360,10 @@ def _calc_Cqpp(
     # NOTE: we are assuming that we know the supremum occurs at a corner or at
     # p=0.5. This might not be true for other models or for q > 16.
     C_corners = np.where(
-        np.isnan(tile_corners_p),
+        np.isnan(tile_corners_p.ravel()),
         0,
-        C_f(n_arm_samples, tile_corners_p),
-    )
+        C_f(n_arm_samples, tile_corners_p.ravel()),
+    ).reshape(tile_corners_p.shape)
 
     # maximum per dimension over the corners of the tile
     C_max = np.max(C_corners, axis=1)
@@ -364,7 +371,7 @@ def _calc_Cqpp(
     crosses05 = np.where(
         np.any(tile_corners_p < 0.5, axis=1) & np.any(tile_corners_p > 0.5, axis=1)
     )
-    C_max[crosses05] = C_f(n_arm_samples, 0.5)
+    C_max[crosses05] = C_f(n_arm_samples, np.array([0.5]))[0]
 
     # finally, sum across the arms to compute the full multidimensional moment
     # expectation
@@ -381,6 +388,7 @@ def holder_odi_bound(
     n_arm_samples: int,
     holderq: int,
     radius_ratio: float = 1.0,
+    C_f: Callable = None,
 ):
     """
     Compute the Holder-ODI on Type I Error. See the paper for mathematical
@@ -398,7 +406,8 @@ def holder_odi_bound(
     Returns:
         The Holder ODI type I error bound for each tile.
     """
-    C_f = _build_odi_constant_func(holderq)
+    if C_f is None:
+        C_f = _build_odi_constant_func_numerical(holderq)
     Cqpp = _calc_Cqpp(
         theta_tiles,
         tile_corners,

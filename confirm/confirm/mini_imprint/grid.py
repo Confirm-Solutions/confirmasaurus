@@ -251,13 +251,15 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
     null_truth[any_intersect] = precise_null_truth
     any_intersect[any_intersect] = precise_any_intersect
 
-    g_in.null_truth = np.concatenate((g_in.null_truth, null_truth), axis=1)
-
     # the subset of the grid that does not need to be checked for intersection.
     g_ignore = index_grid(g_in, ~any_intersect)
 
     # the working subset that we *do* need to check for intersection.
     g = index_grid(g_in, any_intersect)
+
+    full_null_truth = np.concatenate((g_in.null_truth, null_truth), axis=1)
+    g_ignore.null_truth = full_null_truth[~any_intersect]
+    g.null_truth = full_null_truth[any_intersect]
 
     if g.n_tiles == 0:
         return g_ignore
@@ -452,7 +454,7 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
     # After all the splitting is done, we can concat back to the tiles that we
     # ignored because we knew they would never be split.
     out = concat_grids(g_ignore, g, shared_theta=True)
-    out.null_hypos.extend(null_hypos)
+    out.null_hypos = out.null_hypos + null_hypos
     return out
 
 

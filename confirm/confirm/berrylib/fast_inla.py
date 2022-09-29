@@ -151,6 +151,10 @@ class FastINLA:
         _, exceedance, _, _ = self.inference(data, method)
         return exceedance > self.critical_value
 
+    def test_inference(self, data, method="jax"):
+        _, exceedance, _, _ = self.inference(data, method)
+        return exceedance
+
     def inference(self, data, method="jax"):
         fncs = dict(
             numpy=self.numpy_inference, jax=self.jax_inference, cpp=self.cpp_inference

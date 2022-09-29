@@ -168,6 +168,27 @@ for ada_i in range(iter_max):
 ```
 
 ```python
+n_arms = 4
+n_arm_samples = 100
+ys = np.arange(n_arm_samples + 1)
+Ygrids = np.stack(np.meshgrid(*[ys] * n_arms, indexing="ij"), axis=-1)
+Yravel = Ygrids.reshape((-1, n_arms))
+
+# 2. Sort the grid arms while tracking the sorting order so that we can
+# unsort later.
+colsortidx = np.argsort(Yravel, axis=-1)
+inverse_colsortidx = np.zeros(Yravel.shape, dtype=np.int32)
+axis0 = np.arange(Yravel.shape[0])[:, None]
+inverse_colsortidx[axis0, colsortidx] = np.arange(n_arms)
+Y_colsorted = Yravel[axis0, colsortidx]
+
+# 3. Identify the unique datasets. In a 35^4 grid, this will be about 80k
+# datasets instead of 1.7m.
+Y_unique, inverse_unique = np.unique(Y_colsorted, axis=0, return_inverse=True)
+(n_arm_samples ** n_arms), Y_unique.shape
+```
+
+```python
 %matplotlib widget 
 plt.figure(figsize=(8,8))
 plt.scatter(A.g.theta_tiles[:,0], A.g.theta_tiles[:, 1], c=A.hob_upper, s=2)
