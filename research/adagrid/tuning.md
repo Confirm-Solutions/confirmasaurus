@@ -7,14 +7,14 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.6 ('base')
     language: python
     name: python3
 ---
 
 ```python
 import confirm.berrylib.util as util
-util.setup_nb(pretty=True)
+util.setup_nb(pretty=False)
 
 import time
 from scipy.special import logit, expit
@@ -35,7 +35,7 @@ import jax
 ```
 
 ```python
-n_arms = 2
+n_arms = 3
 n_arm_samples = 35
 n_theta_1d = 16
 theta_min = -3.5
@@ -51,59 +51,58 @@ g_raw = grid.build_grid(theta, radii)
 ```
 
 ```python
+g_raw.n_tiles
+```
+
+```python
 fi = fast_inla.FastINLA(n_arms=n_arms)
 test_table = binomial_tuning.build_lookup_table(n_arms, n_arm_samples, fi.test_inference)
+```
+
+```python
+
 simulator = binomial_tuning.binomial_tuner(lambda data: binomial_tuning.lookup(test_table, data[...,0]))
+accumulator = binomial.binomial_accumulator(
+    lambda data, cv: binomial_tuning.lookup(test_table, data[..., 0]) > cv
+)
 ```
 
 ```python
 target_grid_cost = 0.001
 target_sim_cost = 0.001
-target_alpha = 0.025
+target_alpha = 0.15
 ```
 
 ```python
-def find_pointwise_alpha_target(g, target_alpha, holderq):
-    pointwise_target_alpha = np.full(g.n_tiles, target_alpha)
-    keep_checking = np.ones(g.n_tiles, dtype=bool)
-    i = 0
-    while True:
-        pointwise_target_alpha[keep_checking] /= 1.02
-        hob = binomial.holder_odi_bound(
-            np.full(g.n_tiles, pointwise_target_alpha),
-            g.theta_tiles,
-            g.vertices,
-            n_arm_samples,
-            holderq,
-        )
-        keep_checking &= hob - target_alpha > 0
-        if not np.any(keep_checking):
-            break
-        else:
-            i += 1
-    return pointwise_target_alpha
+g = grid.prune(grid.intersect_grid(g_raw, null_hypos))
+g.n_tiles
 ```
 
 ```python
-%matplotlib inline
-iter_max = 100
+iter_max = 50
 init_nsims = 2000
 g = grid.prune(grid.intersect_grid(g_raw, null_hypos))
 target_nsims = np.full(g.n_tiles, init_nsims)
 tuning_unfinished = np.ones(g.n_tiles, dtype=bool)
-checking_unfinished = np.ones(g.n_tiles, dtype=bool)
 sim_cvs = np.empty(g.n_tiles, dtype=float)
 typeI_sum = np.empty(g.n_tiles, dtype=float)
+hob_upper = np.empty(g.n_tiles, dtype=float)
 
 seed = 1
 for II in range(iter_max):
     holderq = 6
-    pointwise_target_alpha = find_pointwise_alpha_target(g, target_alpha, holderq)
+    # TODO: partial update here, need to batch!
+    # TODO: just move this to the refinement code!!
+    pointwise_target_alpha = binomial.invert_bound(
+        target_alpha, g.theta_tiles, g.vertices, n_arm_samples, holderq
+    )
 
+    # TODO: combine the two simulator functions.
     np.random.seed(seed)
+    updated_tiles = tuning_unfinished.copy()
     while np.any(tuning_unfinished):
         nsims = np.min(target_nsims[tuning_unfinished])
-        this_iter = target_nsims == nsims
+        this_iter = (target_nsims == nsims) & tuning_unfinished
         sim_cvs[this_iter] = binomial_tuning.chunked_tune(
             grid.index_grid(g, this_iter),
             simulator,
@@ -115,22 +114,17 @@ for II in range(iter_max):
     overall_cv = np.max(sim_cvs)
 
     np.random.seed(seed)
-    accumulator = binomial.binomial_accumulator(
-        lambda data: binomial_tuning.lookup(test_table, data[..., 0]) > overall_cv
-    )
-
+    checking_unfinished = updated_tiles.copy()
     while np.any(checking_unfinished):
         nsims = np.min(target_nsims[checking_unfinished])
-        this_iter = target_nsims == nsims
-        typeI_sum[this_iter], _ = execute.chunked_simulate(
-            grid.index_grid(g, this_iter),
-            accumulator,
-            nsims,
-            n_arm_samples,
-            sim_chunk_size=int(1e10),
+        this_iter = (target_nsims == nsims) & checking_unfinished
+        typeI_sum[this_iter] = execute.chunked_simulate(
+            grid.index_grid(g, this_iter), accumulator, overall_cv, nsims, n_arm_samples
         )
         checking_unfinished[this_iter] = False
 
+    # TODO: partial update here, systematic way to do this.
+    # TODO: jit zero_order_bound
     typeI_est, typeI_CI = binomial.zero_order_bound(typeI_sum, target_nsims, 0.01, 1.0)
     typeI_bound = typeI_est + typeI_CI
     hob_upper = binomial.holder_odi_bound(
@@ -141,8 +135,12 @@ for II in range(iter_max):
     hob_empirical_cost = hob_upper - typeI_bound
 
     worst_tile = np.argmax(sim_cvs)
-    which_refine = (hob_theory_cost > target_grid_cost) & ((hob_upper > 0.9 * target_alpha) | (sim_cvs == sim_cvs[worst_tile]))
-    which_more_sims = (typeI_CI > target_sim_cost) & ((typeI_bound > 0.9 * target_alpha) | (sim_cvs == sim_cvs[worst_tile]))
+    which_refine = (
+        hob_theory_cost > max(0.9 * hob_theory_cost[worst_tile], target_grid_cost)
+    ) & ((hob_upper > 0.9 * hob_upper[worst_tile]) | (sim_cvs == sim_cvs[worst_tile]))
+    which_more_sims = (typeI_CI > max(0.9 * typeI_CI[worst_tile], target_sim_cost)) & (
+        (typeI_bound > 0.9 * hob_upper[worst_tile]) | (sim_cvs == sim_cvs[worst_tile])
+    )
 
     report = dict(
         II=II,
@@ -155,18 +153,18 @@ for II in range(iter_max):
     )
     rprint(report)
 
-    plt.figure(figsize=(4,4))
-    plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=typeI_est, s=20)
-    plt.colorbar()
-    plt.show()
+    # plt.figure(figsize=(4,4))
+    # plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=typeI_est, s=20)
+    # plt.colorbar()
+    # plt.show()
 
     if np.sum(which_refine) > 0 or np.sum(which_more_sims) > 0:
         target_nsims[which_more_sims] *= 2
         tuning_unfinished[which_more_sims] = True
-        checking_unfinished[which_more_sims] = True
 
         refine_tile_idxs = np.where(which_refine)[0]
         refine_gridpt_idxs = g.grid_pt_idx[refine_tile_idxs]
+        # refine_target_nsims = target_nsims[refine_tile_idxs]
         new_thetas, new_radii, unrefined_grid, keep_tile_idxs = grid.refine_grid(
             g, refine_gridpt_idxs
         )
@@ -174,23 +172,32 @@ for II in range(iter_max):
         nearest_parent_tiles = scipy.spatial.KDTree(g.theta_tiles).query(
             new_grid.theta_tiles, k=2
         )
-        new_target_nsims = np.max(target_nsims[nearest_parent_tiles[1]], axis=1).astype(int)
+        new_target_nsims = np.max(target_nsims[nearest_parent_tiles[1]], axis=1).astype(
+            int
+        )
 
+        old_g = g
         g = grid.concat_grids(unrefined_grid, new_grid)
 
         target_nsims = np.concatenate([target_nsims[keep_tile_idxs], new_target_nsims])
-        tuning_unfinished = np.concatenate([
-            tuning_unfinished[keep_tile_idxs], np.ones(new_grid.n_tiles, dtype=bool)
-        ])
-        checking_unfinished = np.concatenate([
-            checking_unfinished[keep_tile_idxs], np.ones(new_grid.n_tiles, dtype=bool)
-        ])
-        typeI_sum = np.concatenate([typeI_sum[keep_tile_idxs], np.zeros(new_grid.n_tiles, dtype=float)])
-        sim_cvs = np.concatenate([sim_cvs[keep_tile_idxs], np.zeros(new_grid.n_tiles, dtype=float)])
+        tuning_unfinished = np.concatenate(
+            [tuning_unfinished[keep_tile_idxs], np.ones(new_grid.n_tiles, dtype=bool)]
+        )
+        typeI_sum = np.concatenate(
+            [typeI_sum[keep_tile_idxs], np.zeros(new_grid.n_tiles, dtype=float)]
+        )
+        hob_upper = np.concatenate(
+            [hob_upper[keep_tile_idxs], np.empty(new_grid.n_tiles, dtype=float)]
+        )
+        sim_cvs = np.concatenate(
+            [sim_cvs[keep_tile_idxs], np.zeros(new_grid.n_tiles, dtype=float)]
+        )
     else:
         print("done!")
         break
 
+%load_ext line_profiler
+%lprun -T prof.txt -f grid.build_grid -f grid.prune -f binomial._calc_Cqpp -f f -f binomial_tuning.chunked_tune -f execute.chunked_simulate f()
 ```
 
 ```python

@@ -85,3 +85,8 @@ def test_holder_odi(d):
     )
     correct = {1: 0.04163348, 2: 0.37039003}
     np.testing.assert_allclose(hob[0], correct[d], rtol=1e-6)
+
+    pointwise_bound = binomial.invert_bound(
+        theta_tiles, tile_corners, hob, n_arm_samples, holderq
+    )
+    np.testing.assert_allclose(pointwise_bound, typeI_bound)
