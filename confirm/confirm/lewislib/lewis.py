@@ -1,3 +1,7 @@
+import os
+import pickle
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -45,9 +49,61 @@ We define concepts used in the code:
 """
 
 
+@dataclass
+class Lewis45Spec:
+    """
+    # TODO: use this more!
+    The specification of the Lewis45 trial we are simulating.
+
+    This class should not contain execution-related parameters.
+
+    Args:
+        n_arms: number of arms.
+        n_stage_1: number of patients to enroll at stage 1 for each arm.
+        n_stage_2: number of patients to enroll at stage 2 for each arm.
+        n_stage_1_interims: number of interims in stage 1.
+        n_stage_1_add_per_interim: number of total patients to
+                                   add per interim in stage 1.
+        n_stage_2_add_per_interim: number of patients to
+                                   add in stage 2 interim to control
+                                   and the selected treatment arms.
+        futility_threshold: probability cut-off to decide
+                            futility for treatment arms.
+                            If P(arm_i best | data) < futility_threshold,
+                            declare arm_i as futile.
+        pps_threshold_lower: threshold for checking futility:
+                             PPS < pps_threshold_lower <=> futility.
+        pps_threshold_upper: threshold for checking efficacy:
+                             PPS > pps_threshold_upper <=> efficacy.
+        posterior_difference_threshold: threshold to compute posterior difference
+                                        of selected arm p and control arm p.
+        rejection_threshold: threshold for rejection at the final analysis
+                             (if reached):
+                             P(p_selected_treatment_arm - p_control_arm <
+                                posterior_difference_threshold | data)
+                                < rejection_threshold
+                             <=> rejection.
+    """
+
+    n_arms: int
+    n_stage_1: int
+    n_stage_2: int
+    n_stage_1_interims: int
+    n_stage_1_add_per_interim: int
+    n_stage_2_add_per_interim: int
+    stage_1_futility_threshold: float
+    stage_1_efficacy_threshold: float
+    stage_2_futility_threshold: float
+    stage_2_efficacy_threshold: float
+    inter_stage_futility_threshold: float
+    posterior_difference_threshold: float
+    rejection_threshold: float
+
+
 class Lewis45:
     def __init__(
         self,
+        # TODO: replace with just spec
         n_arms: int,
         n_stage_1: int,
         n_stage_2: int,
@@ -61,42 +117,19 @@ class Lewis45:
         inter_stage_futility_threshold: float,
         posterior_difference_threshold: float,
         rejection_threshold: float,
+        # TODO: refactor to pull the tables out as a separate class. and allow passing
+        # None. then move these params to the tables constructor.
         sig2_int=quad.log_gauss_rule(15, 2e-6, 1e3),
         n_sig2_sims: int = 20,
         dtype=jnp.float64,
         cache_tables=False,
-        **kwargs,
+        key=None,
+        batch_size=None,
+        n_pr_sims=None,
     ):
         """
         Constructs an object to run the Lei example.
 
-        Parameters:
-        -----------
-        n_arms:         number of arms.
-        n_stage_1:      number of patients to enroll at stage 1 for each arm.
-        n_stage_2:      number of patients to enroll at stage 2 for each arm.
-        n_stage_1_interims:     number of interims in stage 1.
-        n_stage_1_add_per_interim:      number of total patients to
-                                        add per interim in stage 1.
-        n_stage_2_add_per_interim:      number of patients to
-                                        add in stage 2 interim to control
-                                        and the selected treatment arms.
-        futility_threshold:     probability cut-off to decide
-                                futility for treatment arms.
-                                If P(arm_i best | data) < futility_threshold,
-                                declare arm_i as futile.
-        pps_threshold_lower:    threshold for checking futility:
-                                PPS < pps_threshold_lower <=> futility.
-        pps_threshold_upper:    threshold for checking efficacy:
-                                PPS > pps_threshold_upper <=> efficacy.
-        posterior_difference_threshold: threshold to compute posterior difference
-                                        of selected arm p and control arm p.
-        rejection_threshold:    threshold for rejection at the final analysis
-                                (if reached):
-                                P(p_selected_treatment_arm - p_control_arm <
-                                    posterior_difference_threshold | data)
-                                    < rejection_threshold
-                                <=> rejection.
         """
         self.n_arms = n_arms
         self.n_stage_1 = n_stage_1
@@ -111,6 +144,21 @@ class Lewis45:
         self.inter_stage_futility_threshold = inter_stage_futility_threshold
         self.posterior_difference_threshold = posterior_difference_threshold
         self.rejection_threshold = rejection_threshold
+        self.spec = Lewis45Spec(
+            n_arms,
+            n_stage_1,
+            n_stage_2,
+            n_stage_1_interims,
+            n_stage_1_add_per_interim,
+            n_stage_2_add_per_interim,
+            stage_1_futility_threshold,
+            stage_1_efficacy_threshold,
+            stage_2_futility_threshold,
+            stage_2_efficacy_threshold,
+            inter_stage_futility_threshold,
+            posterior_difference_threshold,
+            rejection_threshold,
+        )
         self.dtype = dtype
 
         # sig2 for quadrature integration
@@ -152,19 +200,49 @@ class Lewis45:
 
         # posterior difference tables for every possible combination of n
         if cache_tables:
-            self.pd_table = self.posterior_difference_table__(
-                batch_size=kwargs["batch_size"]
-            )
-            self.pr_best_pps_1_table = self.pr_best_pps_1_table__(
-                key=kwargs["key"],
-                n_pr_sims=kwargs["n_pr_sims"],
-                batch_size=kwargs["batch_size"],
-            )
-            _, key = jax.random.split(kwargs["key"])
-            self.pps_2_table = self.pps_2_table__(
-                key=key,
-                n_pr_sims=kwargs["n_pr_sims"],
-                batch_size=kwargs["batch_size"],
+            self.loaded_tables = False
+            if isinstance(cache_tables, str) and os.path.exists(cache_tables):
+                self.loaded_tables = self.load_tables(cache_tables)
+            if not self.loaded_tables:
+                self.build_tables(key, batch_size, n_pr_sims)
+                if isinstance(cache_tables, str):
+                    self.save_tables(cache_tables)
+
+    def build_tables(self, key, batch_size, n_pr_sims):
+        self.pd_table = self.posterior_difference_table__(batch_size=batch_size)
+        self.pr_best_pps_1_table = self.pr_best_pps_1_table__(
+            key=key,
+            n_pr_sims=n_pr_sims,
+            batch_size=batch_size,
+        )
+        _, key = jax.random.split(key)
+        self.pps_2_table = self.pps_2_table__(
+            key=key,
+            n_pr_sims=n_pr_sims,
+            batch_size=batch_size,
+        )
+
+    def load_tables(self, path):
+        with open(path, "rb") as f:
+            spec, tables = pickle.load(f)
+        # TODO: currently this just checks spec equality before accepting the
+        # cached table as correct. this is risky because the computational
+        # parameters could've also changed. we should add those! it would be
+        # nice to have a more general caching mechanism for lookup and
+        # interpolation tables.
+        if spec != self.spec:
+            return False
+        self.pd_table, self.pr_best_pps_1_table, self.pps_2_table = tables
+        return True
+
+    def save_tables(self, path):
+        with open(path, "wb") as f:
+            pickle.dump(
+                (
+                    self.spec,
+                    (self.pd_table, self.pr_best_pps_1_table, self.pps_2_table),
+                ),
+                f,
             )
 
     # ===============================================

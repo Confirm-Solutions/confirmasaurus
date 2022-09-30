@@ -1,8 +1,11 @@
+import os
+
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from confirm.lewislib import lewis
-
 
 default_params = {
     "n_arms": 3,
@@ -25,15 +28,33 @@ default_params = {
     "cache_tables": True,
 }
 
-key = jax.random.PRNGKey(0)
-lewis_obj = lewis.Lewis45(**default_params)
-unifs = jax.random.uniform(key=key, shape=lewis_obj.unifs_shape())
-p = jnp.array([0.25, 0.5, 0.75])
-berns = unifs < p[None]
-berns_order = jnp.arange(0, berns.shape[0])
+
+@pytest.fixture(scope="session")
+def lewis_small():
+    key = jax.random.PRNGKey(0)
+    lewis_obj = lewis.Lewis45(**default_params)
+    unifs = jax.random.uniform(key=key, shape=lewis_obj.unifs_shape())
+    p = jnp.array([0.25, 0.5, 0.75])
+    berns = unifs < p[None]
+    berns_order = jnp.arange(0, berns.shape[0])
+    return (lewis_obj, unifs, p, berns, berns_order)
 
 
-def test_stage_1():
+def test_save_load(lewis_small, tmp_path):
+    (L1, _, _, _, _) = lewis_small
+    assert not L1.loaded_tables
+    path = os.path.join(tmp_path, "tables.pkl")
+    L1.save_tables(path)
+
+    params = default_params.copy()
+    params["cache_tables"] = path
+    L2 = lewis.Lewis45(**params)
+    assert L2.loaded_tables
+    np.testing.assert_allclose(L1.pd_table.tables[0], L2.pd_table.tables[0])
+
+
+def test_stage_1(lewis_small):
+    lewis_obj, _, _, berns, berns_order = lewis_small
     # actual
     (
         early_exit_futility,
@@ -58,7 +79,8 @@ def test_stage_1():
     assert jnp.array_equal(berns_start, berns_start_expected)
 
 
-def test_stage_2():
+def test_stage_2(lewis_small):
+    lewis_obj, _, _, berns, berns_order = lewis_small
     # expected stage 1
     data = jnp.array([[1, 3], [0, 1], [2, 3]], dtype=int)
     best_arm = 2
@@ -71,7 +93,8 @@ def test_stage_2():
     assert jnp.array_equal(rej, False)
 
 
-def test_inter_stage():
+def test_inter_stage(lewis_small):
+    lewis_obj, unifs, p, berns, berns_order = lewis_small
     null_truths = jnp.zeros(default_params["n_arms"] - 1, dtype=bool)
     rej, _ = lewis_obj.simulate(p, null_truths, unifs, berns_order)
     assert jnp.array_equal(rej, False)
