@@ -45,7 +45,7 @@ def test_stage_1():
 
     # expected
     early_exit_futility_expected = False
-    data_expected = jnp.array([[1, 3], [0, 1], [2, 3]], dtype=int)
+    data_expected = jnp.array([[0, 3], [0, 1], [2, 3]], dtype=int)
     non_dropped_idx_expected = jnp.array([False, True])
     _, pps_expected = lewis_obj.get_pr_best_pps_1__(data_expected)
     berns_start_expected = 3
