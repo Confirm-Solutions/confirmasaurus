@@ -220,6 +220,13 @@ def exp_holder_bound(f0, df0, vs):
     return 1 - f0c * np.exp(-expos)
 ```
 
+## Exponential Holder Improved?
+
+```python
+def exp_holder_impr_bound(f0, vs):
+    return np.exp(-0.5 * (vs - np.sqrt(-2*np.log(f0)))**2)
+```
+
 ## Performance Comparison
 
 ```python
@@ -250,6 +257,9 @@ def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
 
     # compute exp holder bound
     exp_holder_bounds = exp_holder_bound(f0, df0, vs)
+    
+    # compute exp holder impr bound
+    exp_holder_impr_bounds = exp_holder_impr_bound(f0, vs)
 
     # plot everything
     plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
@@ -257,6 +267,7 @@ def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
     for i, c in enumerate(hc):
         plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
     plt.plot(thetas, exp_holder_bounds, ls='-.', label='exp-holder')
+    plt.plot(thetas, exp_holder_impr_bounds, ls=':', label='exp-holder-impr')
     plt.legend()
     plt.show()
 ```
@@ -289,7 +300,7 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    hp=2,
+    hp=1.2,
     hc=['opt'],
 )
 ```
