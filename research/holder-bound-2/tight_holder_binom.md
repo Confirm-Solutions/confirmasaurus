@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.6 ('confirm')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -99,70 +99,58 @@ def holder_bound(f0, n_arm_samples, theta_0, vs, hp, hc='opt'):
 def log_partition(t, n):
     return n * jnp.log(1 + jnp.exp(t))
 
-def opt_q(theta_0, n, v, a, eps=1e-4, max_iters=1000):
-    def f(u, v, a):
-        q = jnp.exp(u) + 1
-        return (log_partition(theta_0 + q*v, n) - log_partition(theta_0, n) + a) / q 
-    def df(u, v, a):
-        # up to a factor of 1/q^2
-        q = jnp.exp(u) + 1
-        t = theta_0 + q * v
-        return v * jax.scipy.special.expit(t) * q \
-            - (jnp.logaddexp(0, t) - jnp.logaddexp(0, theta_0)) - a / n
-    ddf = jax.grad(lambda u: df(u, v, a))
-    u_opt = 0.0
-    #f_opt_prev = np.inf
-    #f_opt = f(u_opt, v, a)
-    df_u_opt = df(u_opt, v, a)
-    i = 0
-    while np.abs(df_u_opt) >= eps and i < max_iters:
-        ddf_u_opt = ddf(u_opt) 
-        sgn_df = np.sign(df_u_opt)
-        sgn_ddf_u_opt = np.sign(ddf_u_opt)
-        if ddf_u_opt == 0:
-            u_opt = -sgn_df * np.inf
-            break
-        if sgn_df != sgn_ddf_u_opt and \
-            np.log(np.abs(df_u_opt)) - np.log(np.abs(ddf_u_opt)) < np.log(1e6):
-            u_opt = np.inf
-            break
-        u_opt -= df_u_opt / ddf_u_opt
-        df_u_opt = df(u_opt, v, a)
-        #f_opt_prev = f_opt
-        #f_opt = f(u_opt, v, a)
-        i += 1
-    return jnp.exp(u_opt) + 1
+def log_partition_cp(t, n):
+    return n * cp.logistic(t)
+
+def opt_q(n, theta_0, v, a):
+    A0 = log_partition(theta_0, n)
+    q = cp.Variable(pos=True)
+    objective_fn = (
+        (log_partition_cp(theta_0 + (q+1) * v, n) - A0)
+        + a
+    ) / (q + 1)
+    objective = cp.Minimize(objective_fn)
+    problem = cp.Problem(objective)
+    problem.solve(qcp=True)
+    return q.value + 1
 ```
 
 ```python
+def exp_holder_impr_bound_(f0, n, theta_0, vs, q):
+    A0 = log_partition(theta_0, n)
+    bounds = f0 * np.exp(
+        (log_partition(theta_0 + q * vs, n) - A0) / q
+        - np.log(f0) / q
+        - (log_partition(theta_0 + vs, n) - A0)
+    )
+    return bounds
+
 def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
     if isinstance(q, np.ndarray):
-        bounds = np.array([exp_holder_impr_bound(f0, n, theta_0, vs, qi)[1] for qi in q])
+        bounds = np.array([exp_holder_impr_bound_(f0, n, theta_0, vs, qi)[1] for qi in q])
         order = np.argmin(bounds, axis=0)
         return q[order], bounds[order, np.arange(0, len(order))]
     if q == 'inf' or (isinstance(q, float) and np.isinf(q)): 
         return None, f0 * np.exp(n*vs - log_partition(theta_0 + vs, n) + log_partition(theta_0, n))
     if q == 'opt':
         a = -np.log(f0)
-        q = np.array([opt_q(theta_0, n, v, a) for v in vs])
-    A0 = log_partition(theta_0, n)
-    return None, f0 * np.exp(
-        (log_partition(theta_0 + q * vs, n) - A0) / q
-        - np.log(f0) / q
-        - (log_partition(theta_0 + vs, n) - A0)
-    )
+        qs = np.array([opt_q(n, theta_0, v, a) for v in vs])
+        bounds = exp_holder_impr_bound_(f0, n, theta_0, vs, qs)
+        return qs, bounds
+    return None, bounds
 ```
 
 ## Performance Comparison
 
 ```python
 n = 500
-theta_0 = -1
-v_max = 0.1
+theta_0 = -0.1
+theta_boundary = 0
+v_max = theta_boundary - theta_0
 n_steps = 100
-alpha = 0.1
-p0 = scipy.special.expit(theta_0)
-thresh = np.sqrt(n*p0*(1-p0)) * scipy.stats.norm.isf(alpha) + n*p0
+alpha = 0.025
+p_boundary = scipy.special.expit(theta_boundary)
+thresh = np.sqrt(n*p_boundary*(1-p_boundary)) * scipy.stats.norm.isf(alpha) + n*p_boundary
 ```
 
 ```python
@@ -189,9 +177,10 @@ def run(theta_0, n, f0, df0, vs, thresh, hp, hc, q='inf'):
     # plot everything
     plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
     #plt.plot(thetas, taylor_bounds, ls='-', label='taylor')
-    for i, c in enumerate(hc):
-        plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
+    #for i, c in enumerate(hc):
+    #    plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
     plt.plot(thetas, exp_holder_impr_bounds, ls=':', label='exp-holder-impr')
+    #plt.ylim(0, 1)
     plt.legend()
     plt.show()
     
@@ -208,8 +197,7 @@ qs = run(
     thresh=thresh,
     hp=1.5,
     hc=['opt'],
-    q=np.logspace(0.1, 5, 100000),
-    #q=100000,
+    q='opt',
 )
 ```
 
