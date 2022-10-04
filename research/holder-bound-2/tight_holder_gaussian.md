@@ -153,7 +153,7 @@ By simple calculus, one can show
 \begin{align*}
     ||Z||_{L^q}
     &=
-    \sqrt{2} \left(\frac{\Gamma\left(\frac{q+1}{2}\right)}{2\sqrt{\pi}}\right)^{\frac{1}{q}}
+    \sqrt{2} \left(\frac{\Gamma\left(\frac{q+1}{2}\right)}{\sqrt{\pi}}\right)^{\frac{1}{q}}
 \end{align*}
 Hence,
 \begin{align*}
@@ -167,7 +167,7 @@ Finally, we have the following as the optimal choice for the centering
 
 ```python
 def z_lq(q):
-    frac = scipy.special.gamma((q+1)/2) / (2 * np.sqrt(np.pi))
+    frac = scipy.special.gamma((q+1)/2) / np.sqrt(np.pi)
     return np.sqrt(2) * frac**(1/q)
 
 def C_q(vs, q):
@@ -177,6 +177,9 @@ def copt(f0, p):
     return 1/(1 + ((1-f0) / f0)**(1/(p-1)))
 
 def holder_bound(f0, vs, hp, hc='opt'):
+    if isinstance(hp, list) or isinstance(hp, np.array):
+        bounds = np.array([holder_bound(f0, vs, hpp, hc) for hpp in hp])
+        return np.min(bounds, axis=0)
     if hc == 'opt':
         hc = copt(f0, hp)
     hq = 1 / (1 - 1 / hp)
@@ -284,23 +287,7 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    hp=2,
-    hc=[0, 0.2, 0.4, 0.6, 0.8, 1, 'opt'],
-)
-```
-
-It's clear from the above that no centering and optimal centering are nearly identical.
-Removing the other versions and keeping the optimal centering, we get the following:
-
-```python
-run(
-    theta_0=theta_0,
-    f0=f0,
-    df0=df0,
-    vs=vs,
-    alpha=alpha,
-    z_crit=z_crit,
-    hp=1.2,
+    hp=[1.1, 1.15, 1.2, 1.25, 1.3, 1.35],
     hc=['opt'],
 )
 ```
@@ -321,7 +308,7 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    hp=2,
+    hp=np.arange(1.01, 10, 0.01),
     hc=['opt'],
 )
 ```
