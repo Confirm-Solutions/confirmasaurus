@@ -177,7 +177,7 @@ def copt(f0, p):
     return 1/(1 + ((1-f0) / f0)**(1/(p-1)))
 
 def holder_bound(f0, vs, hp, hc='opt'):
-    if isinstance(hp, list) or isinstance(hp, np.array):
+    if isinstance(hp, list) or isinstance(hp, np.ndarray):
         bounds = np.array([holder_bound(f0, vs, hpp, hc) for hpp in hp])
         return np.min(bounds, axis=0)
     if hc == 'opt':
@@ -236,7 +236,7 @@ def exp_holder_impr_bound(f0, vs):
 theta_0 = -1
 v_max = 1
 n_steps = 20
-alpha = 0.025
+alpha = 0.1
 ```
 
 ```python
@@ -268,7 +268,7 @@ def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
     plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
     plt.plot(thetas, taylor_bounds, ls='-', label='taylor')
     for i, c in enumerate(hc):
-        plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
+        plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c})')
     plt.plot(thetas, exp_holder_bounds, ls='-.', label='exp-holder')
     plt.plot(thetas, exp_holder_impr_bounds, ls=':', label='exp-holder-impr')
     plt.legend()
@@ -328,7 +328,7 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    hp=1.2,
+    hp=np.arange(1.01, 10, 0.01),
     hc=['opt'],
 )
 ```
@@ -353,31 +353,13 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    hp=1.2,
-    hc=[0, 0.2, 0.4, 0.6, 0.8, 1, 'opt'],
+    hp=np.arange(1.01, 10, 0.01),
+    hc=['opt'],
 )
 ```
 
 As before, clearly the best centered Holder occurs when the centering is small (close to 0).
 Removing the others shows:
-
-```python
-run(
-    theta_0=theta_0,
-    f0=f0,
-    df0=df0,
-    vs=vs,
-    alpha=alpha,
-    z_crit=z_crit,
-    hp=1.2,
-    hc=['opt'],
-)
-```
-
-Awesome! The exponential Holder bound is actually slightly better than the centered Holder bound!
-Let's study the high Type I Error even more.
-To simulate the scenario when the Type I Error might be high (possibly due to wrong specification of critical threshold),
-let us take the current Gaussian setup with $\alpha = 0.3$.
 
 ```python
 alpha = 0.3
@@ -391,7 +373,7 @@ run(
     vs=vs,
     alpha=alpha,
     z_crit=z_crit,
-    hp=1.2,
+    hp=np.arange(1.01, 10, 0.01),
     hc=['opt'],
 )
 ```
