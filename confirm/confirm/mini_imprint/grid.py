@@ -14,6 +14,9 @@ class HyperPlane:
     """
     A plane defined by:
     x \cdot n - c = 0
+
+    Sign convention: When used as the boundary between null hypothesis and
+    alternative, the normal should point towards the null hypothesis space.
     """
 
     n: np.ndarray
@@ -23,7 +26,7 @@ class HyperPlane:
 @dataclass
 class Grid:
     """
-    The first two arrays define the grid points/cells:
+    The first two arrays define the grid points/tiles:
     - thetas: the center of each hyperrectangle.
     - radii: the half-width of each hyperrectangle in each dimension.
 
@@ -146,7 +149,7 @@ def concat_grids(*gs: List[Grid], shared_theta=False):
     )
 
 
-def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
+def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = [], dims=(0, 1)):
     """
     Plot a 2D grid.
 
@@ -158,9 +161,11 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
     import matplotlib as mpl
     import matplotlib.pyplot as plt
 
+    vertices = g.vertices[..., dims]
+
     polys = []
     for i in range(g.n_tiles):
-        vs = g.vertices[i]
+        vs = vertices[i]
         vs = vs[~np.isnan(vs).any(axis=1)]
         centroid = np.mean(vs, axis=0)
         angles = np.arctan2(vs[:, 1] - centroid[1], vs[:, 0] - centroid[0])
@@ -172,8 +177,8 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = []):
         mpl.collections.PatchCollection(polys, match_original=True)
     )
 
-    maxvs = np.max(np.where(np.isnan(g.vertices), -np.inf, g.vertices), axis=(0, 1))
-    minvs = np.min(np.where(np.isnan(g.vertices), np.inf, g.vertices), axis=(0, 1))
+    maxvs = np.max(np.where(np.isnan(vertices), -np.inf, vertices), axis=(0, 1))
+    minvs = np.min(np.where(np.isnan(vertices), np.inf, vertices), axis=(0, 1))
     view_center = 0.5 * (maxvs + minvs)
     view_radius = (maxvs - minvs) * 0.55
     xlims = view_center[0] + np.array([-1, 1]) * view_radius[0]
@@ -197,7 +202,10 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
 
     Args:
         g_in: The input grid.
-        null_hypos: The null hypotheses to intersect with.
+        null_hypos: The null hypotheses to intersect with. Sign convention:
+            When used as the boundary between null hypothesis and alternative,
+            the normal of a HyperPlane should point towards the null hypothesis
+            space.
         jit: Should we jax.jit helper functions? This can make performance
             slower for small grids and much faster for large grids. Defaults to
             False.
@@ -205,6 +213,9 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
     Returns:
         The intersected grid with split tiles.
     """
+    if len(null_hypos) == 0:
+        return g_in
+
     eps = 1e-15
     n_grid_pts, n_params = g_in.thetas.shape
 
@@ -460,17 +471,25 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
 
 
 def build_grid(
-    thetas: np.ndarray, radii: np.ndarray, null_hypos: List[HyperPlane] = []
+    thetas: np.ndarray,
+    radii: np.ndarray,
+    null_hypos: List[HyperPlane] = [],
+    symmetry_planes: List[HyperPlane] = [],
+    should_prune: bool = True,
 ):
     """
     Construct an Imprint grid from a set of grid point centers, radii and null
     hypothesis.
-    1. Initially, we construct simple hyperrectangle cells.
-    2. Then, we split cells that are intersected by the null hypothesis boundaries.
+    1. Initially, we construct simple hyperrectangle tiles.
+    2. Then, we remove tiles on the negative side of any symmetry planes.
+    3. Then, we split tiles that are intersected by the null hypothesis boundaries.
+    4. Finally, we optionally remove tiles that are in the alternative
+       hypothesis region for all null hypotheses. These tiles are not
+       interesting for Type I Error analysis.
 
-    Note that we do not split cells twice. This is a simplification that makes
+    Note that we do not split tiles twice. This is a simplification that makes
     the software much simpler and probably doesn't cost us much in terms of
-    bound tightness because very few cells are intersected by multiple
+    bound tightness because very few tiles are intersected by multiple
     hyperplanes.
 
     Args:
@@ -479,6 +498,10 @@ def build_grid(
         null_hypos: A list of hyperplanes defining the boundary of the null
             hypothesis. The normal vector of these hyperplanes point into the null
             domain.
+        symmetry_planes: A list of hyperplanes defining symmetry planes. These
+            are used to filter out redundant tiles.
+        should_prune: If True, remove tiles that are entirely in the alternative
+            hypothesis space.
 
 
     Returns:
@@ -486,7 +509,7 @@ def build_grid(
     """
     n_grid_pts, n_params = thetas.shape
 
-    # For splitting cells, we will need to know the nD edges of each cell and
+    # For splitting tiles, we will need to know the nD edges of each cell and
     # the vertices of each tile.
     unit_vs = hypercube_vertices(n_params)
     tile_vs = thetas[:, None, :] + (unit_vs[None, :, :] * radii[:, None, :])
@@ -497,9 +520,13 @@ def build_grid(
     is_regular = np.ones(n_grid_pts, dtype=bool)
     null_truth = np.full((n_grid_pts, 0), -1)
     g = Grid(thetas, radii, tile_vs, is_regular, null_truth, grid_pt_idx)
-    if len(null_hypos) > 0:
-        g = intersect_grid(g, null_hypos)
-    return g
+    g_sym = prune(intersect_grid(g, symmetry_planes), hard=True)
+    g_sym.null_truth = np.empty((g_sym.n_tiles, 0), dtype=bool)
+    g_out = intersect_grid(g_sym, null_hypos)
+    if prune:
+        return prune(g_out)
+    else:
+        return g_out
 
 
 def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
@@ -533,26 +560,45 @@ def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
     return theta, radii
 
 
-def prune(g):
-    """Remove tiles that are entirely within the alternative hypothesis space.
+def prune(g: Grid, hard: bool = False) -> Grid:
+    """
+    Remove tiles that are entirely within the alternative hypothesis space.
 
     Args:
         g: the Grid object
+        hard: If True, remove tiles with any hypotheses in the alternative
+            space. If False, remove tiles with all hypotheses in the alternative
+            space.
 
     Returns:
         the pruned Grid object.
     """
     if g.null_truth.shape[1] == 0:
         return g
-    all_alt = (g.null_truth == 0).all(axis=1)
-    grid_pt_idx = g.grid_pt_idx[~all_alt]
-    included_grid_pts, grid_pt_inverse = np.unique(grid_pt_idx, return_inverse=True)
+    if hard:
+        keep = ~((g.null_truth == 0).any(axis=1))
+    else:
+        keep = ~((g.null_truth == 0).all(axis=1))
+    return trim(index_grid(g, keep))
+
+
+def trim(g: Grid) -> Grid:
+    """
+    Remove unused grid points from the grid.
+
+    Args:
+        g: The Grid to be trimmed.
+
+    Returns:
+        The trimmed Grid.
+    """
+    included_grid_pts, grid_pt_inverse = np.unique(g.grid_pt_idx, return_inverse=True)
     return Grid(
         g.thetas[included_grid_pts],
         g.radii[included_grid_pts],
-        g.vertices[~all_alt],
-        g.is_regular[~all_alt],
-        g.null_truth[~all_alt],
+        g.vertices,
+        g.is_regular,
+        g.null_truth,
         grid_pt_inverse,
         g.null_hypos,
     )
