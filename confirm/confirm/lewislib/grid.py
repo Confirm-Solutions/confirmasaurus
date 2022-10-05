@@ -1,8 +1,9 @@
 import numpy as np
-import pyimprint.grid as pygrid
 
 
 def make_cartesian_grid_range(size, lower, upper):
+    import pyimprint.grid as pygrid
+
     assert lower.shape[0] == upper.shape[0]
 
     # make initial 1d grid

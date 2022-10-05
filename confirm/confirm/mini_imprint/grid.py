@@ -217,7 +217,8 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
     Hcs = np.array([H.c for H in null_hypos])
 
     gridpt_dist = g_in.thetas.dot(Hns.T) - Hcs[None]
-    gridpt_any_intersect = np.any(np.abs(gridpt_dist) < g_in.radii, axis=-1)
+    sphere_radii = np.sqrt(np.sum(g_in.radii**2, axis=-1))
+    gridpt_any_intersect = np.any(np.abs(gridpt_dist) < sphere_radii[:, None], axis=-1)
     any_intersect = gridpt_any_intersect[g_in.grid_pt_idx]
     no_intersect = ~any_intersect
     tile_rough_dist = gridpt_dist[g_in.grid_pt_idx]

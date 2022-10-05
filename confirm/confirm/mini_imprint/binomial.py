@@ -419,7 +419,7 @@ def holder_odi_bound(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def invert_bound(bound, theta_tiles, vertices, n_arm_samples, holderq):
-    holderq = 6
     C_f = _build_odi_constant_func_numerical(holderq)
     Cqpp = _calc_Cqpp(theta_tiles, vertices, n_arm_samples, holderq, C_f)
-    return (bound ** (1 / holderq) - Cqpp / holderq) ** holderq
+    pointwise_bound = (bound ** (1 / holderq) - Cqpp / holderq) ** holderq
+    return jnp.where(pointwise_bound > bound, 0.0, pointwise_bound)
