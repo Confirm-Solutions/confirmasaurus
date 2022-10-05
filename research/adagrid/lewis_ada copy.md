@@ -16,6 +16,7 @@ jupyter:
 import confirm.outlaw.nb_util as nb_util
 
 nb_util.setup_nb(pretty=True)
+
 ```
 
 ```python
@@ -37,9 +38,9 @@ from rich import print as rprint
 
 ```python
 # Configuration used during simulation
-name = '3d'
+name = '4d'
 params = {
-    "n_arms": 3,
+    "n_arms": 4,
     "n_stage_1": 50,
     "n_stage_2": 100,
     "n_stage_1_interims": 2,
@@ -169,20 +170,20 @@ batched_invert_bound = batch.batch_all_concat(
 ```
 
 ```python
-load_iter = 0
-g = grid.prune(grid.intersect_grid(g_raw, null_hypos))
-sim_sizes = np.full(g.n_tiles, init_nsims)
-sim_cvs = np.empty(g.n_tiles, dtype=float)
-typeI_sum = np.empty(g.n_tiles, dtype=float)
-hob_upper = np.empty(g.n_tiles, dtype=float)
-pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
-todo = np.ones(g.n_tiles, dtype=bool)
-
-# load_iter = 49
-# with open(f'{name}/{load_iter}.pkl', 'rb') as f:
-#     g, sim_sizes, sim_cvs, typeI_sum, hob_upper, pointwise_target_alpha = pickle.load(f)
-# todo = np.zeros(g.n_tiles, dtype=bool)
-# todo[-1] = True
+load_iter = 22
+if load_iter == 0:
+    g = grid.prune(grid.intersect_grid(g_raw, null_hypos))
+    sim_sizes = np.full(g.n_tiles, init_nsims)
+    sim_cvs = np.empty(g.n_tiles, dtype=float)
+    typeI_sum = np.empty(g.n_tiles, dtype=float)
+    hob_upper = np.empty(g.n_tiles, dtype=float)
+    pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
+    todo = np.ones(g.n_tiles, dtype=bool)
+else:
+    with open(f'{name}/{load_iter}.pkl', 'rb') as f:
+        g, sim_sizes, sim_cvs, typeI_sum, hob_upper, pointwise_target_alpha = pickle.load(f)
+    todo = np.zeros(g.n_tiles, dtype=bool)
+    todo[-1] = True
 
 
 adafrac = 0.8
@@ -190,10 +191,15 @@ iter_max = 70
 for II in range(load_iter + 1, iter_max):
     if np.sum(todo) == 0:
         break
+        
+    print(f'starting iteration {II}')
 
+    start = time.time()
     pointwise_target_alpha[todo] = batched_invert_bound(
         target_alpha, g.theta_tiles[todo], g.vertices[todo], n_arm_samples, holderq
     )[0]
+    print('inverting the bound took', time.time() - start)
+    start = time.time()
 
     sim_cvs[todo] = batched_tune(
         sim_sizes[todo],
@@ -204,6 +210,7 @@ for II in range(load_iter + 1, iter_max):
         unifs_order,
     )
     overall_cv = np.min(sim_cvs)
+    print('tuning took', time.time() - start)
 
     # typeI_sum[todo] = batched_sim(
     #     sim_sizes[todo],
