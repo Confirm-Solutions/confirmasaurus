@@ -155,6 +155,36 @@ def test_refine():
             np.testing.assert_allclose(subset, correct)
 
 
+def test_prune_and_symmetry():
+    null_hypos = [
+        grid.HyperPlane([1, -1, 0, 0], 0),
+        grid.HyperPlane([1, 0, -1, 0], 0),
+        grid.HyperPlane([1, 0, 0, -1], 0),
+    ]
+    syms = [grid.HyperPlane([0, 1, -1, 0], 0), grid.HyperPlane([0, 0, 1, -1], 0)]
+
+    theta, radii = grid.cartesian_gridpts(np.full(4, -1), np.full(4, 1), np.full(4, 4))
+
+    g = grid.build_grid(
+        theta, radii, null_hypos=null_hypos, symmetry_planes=syms, should_prune=True
+    )
+
+    Hns = np.array([H.n for H in null_hypos])
+    is_alt = np.all(g.theta_tiles.dot(Hns.T) < 0, axis=1)
+    assert not np.any(is_alt)
+    assert np.all(g.theta_tiles[:, 1] >= g.theta_tiles[:, 2])
+    assert np.all(g.theta_tiles[:, 2] >= g.theta_tiles[:, 3])
+    assert g.n_tiles == 133
+
+    g2 = grid.build_grid(theta, radii, null_hypos=null_hypos)
+    Hns = np.array([H.n for H in null_hypos])
+    is_alt = np.all(g2.theta_tiles.dot(Hns.T) < 0, axis=1)
+    is_sym = (g2.theta_tiles[:, 1] < g2.theta_tiles[:, 2]) | (
+        g2.theta_tiles[:, 2] < g2.theta_tiles[:, 3]
+    )
+    assert (g2.n_tiles - np.sum(is_alt | is_sym)) == g.n_tiles
+
+
 n_arms = 4
 n_theta_1d = 52
 

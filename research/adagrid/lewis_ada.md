@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.6 ('base')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -125,20 +125,28 @@ ns = np.concatenate(
     axis=-1,
 )
 null_hypos = [grid.HyperPlane(n, 0) for n in ns]
+symmetry = []
+for i in range(n_arms - 2):
+    n = np.zeros(n_arms)
+    n[i + 1] = 1
+    n[i + 2] = -1
+    symmetry.append(grid.HyperPlane(n, 0))
 
 theta_min = -1.0
 theta_max = 1.0
-init_grid_size = 8
-# theta_min = -0.25
-# theta_max = 0.25
-# init_grid_size = 8
+init_grid_size = 4
 theta, radii = grid.cartesian_gridpts(
     np.full(n_arms, theta_min),
     np.full(n_arms, theta_max),
     np.full(n_arms, init_grid_size),
 )
-g_raw = grid.build_grid(theta, radii)
-g = grid.prune(grid.intersect_grid(g_raw, null_hypos))
+
+for syms in [symmetry, []]:
+    g = grid.build_grid(theta, radii, null_hypos=null_hypos, symmetry_planes=syms, should_prune=True)
+    print(g.n_tiles)
+```
+
+```python
 
 ```
 
@@ -149,7 +157,7 @@ target_alpha = 0.025
 holderq = 6
 delta_validate = 0.01
 
-max_grid_batch_size = 2**10
+max_grid_batch_size = 2**6 if jax.devices()[0].device_kind == 'cpu' else 2**10
 max_sim_size = 2**17
 init_nsims = 2000
 seed = 0
@@ -169,20 +177,19 @@ batched_invert_bound = batch.batch_all_concat(
 ```
 
 ```python
-load_iter = 0
-g = grid.prune(grid.intersect_grid(g_raw, null_hypos))
-sim_sizes = np.full(g.n_tiles, init_nsims)
-sim_cvs = np.empty(g.n_tiles, dtype=float)
-typeI_sum = np.empty(g.n_tiles, dtype=float)
-hob_upper = np.empty(g.n_tiles, dtype=float)
-pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
-todo = np.ones(g.n_tiles, dtype=bool)
-
-# load_iter = 49
-# with open(f'{name}/{load_iter}.pkl', 'rb') as f:
-#     g, sim_sizes, sim_cvs, typeI_sum, hob_upper, pointwise_target_alpha = pickle.load(f)
-# todo = np.zeros(g.n_tiles, dtype=bool)
-# todo[-1] = True
+load_iter = 43
+if load_iter == 0:
+    sim_sizes = np.full(g.n_tiles, init_nsims)
+    sim_cvs = np.empty(g.n_tiles, dtype=float)
+    typeI_sum = np.empty(g.n_tiles, dtype=float)
+    hob_upper = np.empty(g.n_tiles, dtype=float)
+    pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
+    todo = np.ones(g.n_tiles, dtype=bool)
+else:
+    with open(f'{name}/{load_iter}.pkl', 'rb') as f:
+        g, sim_sizes, sim_cvs, typeI_sum, hob_upper, pointwise_target_alpha = pickle.load(f)
+    todo = np.zeros(g.n_tiles, dtype=bool)
+    todo[-1] = True
 
 
 adafrac = 0.8
@@ -191,9 +198,14 @@ for II in range(load_iter + 1, iter_max):
     if np.sum(todo) == 0:
         break
 
+    print(f'starting iteration {II} with {np.sum(todo)} tiles to process')
+    start = time.time()
+
     pointwise_target_alpha[todo] = batched_invert_bound(
         target_alpha, g.theta_tiles[todo], g.vertices[todo], n_arm_samples, holderq
     )[0]
+    print('inverting the bound took', time.time() - start)
+    start = time.time()
 
     sim_cvs[todo] = batched_tune(
         sim_sizes[todo],
@@ -204,6 +216,7 @@ for II in range(load_iter + 1, iter_max):
         unifs_order,
     )
     overall_cv = np.min(sim_cvs)
+    print('tuning took', time.time() - start)
 
     # typeI_sum[todo] = batched_sim(
     #     sim_sizes[todo],
@@ -268,7 +281,7 @@ for II in range(load_iter + 1, iter_max):
         new_thetas, new_radii, unrefined_grid, keep_tile_idxs = grid.refine_grid(
             g, refine_gridpt_idxs
         )
-        new_grid = grid.prune(grid.build_grid(new_thetas, new_radii, g.null_hypos))
+        new_grid = grid.build_grid(new_thetas, new_radii, null_hypos=g.null_hypos, symmetry_planes=syms, should_prune=True)
         nearest_parent_tiles = scipy.spatial.KDTree(g.theta_tiles).query(
             new_grid.theta_tiles, k=2
         )
