@@ -522,6 +522,7 @@ def build_grid(
     g = Grid(thetas, radii, tile_vs, is_regular, null_truth, grid_pt_idx)
     g_sym = prune(intersect_grid(g, symmetry_planes), hard=True)
     g_sym.null_truth = np.empty((g_sym.n_tiles, 0), dtype=bool)
+    g_sym.null_hypos = []
     g_out = intersect_grid(g_sym, null_hypos)
     if prune:
         return prune(g_out)

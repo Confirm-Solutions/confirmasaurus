@@ -14,6 +14,7 @@ jupyter:
 
 ```python
 import confirm.berrylib.util as util
+
 util.setup_nb(pretty=False)
 
 import time
@@ -35,16 +36,17 @@ import jax
 ```python
 def dots_plot(g, typeI_upper_bound, hob):
     plt.subplots(1, 2, figsize=(7, 3.0), constrained_layout=True)
-    plt.subplot(1,2,1)
-    plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=hob, s=10)
+    plt.subplot(1, 2, 1)
+    plt.scatter(g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=hob, s=10)
     plt.colorbar()
-    plt.subplot(1,2,2)
-    plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=typeI_upper_bound, s=10)
+    plt.subplot(1, 2, 2)
+    plt.scatter(g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=typeI_upper_bound, s=10)
     plt.colorbar()
     plt.show()
 
+
 def dots_plot2(g, typeI_upper_bound, hob):
-    plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=hob, s=10)
+    plt.scatter(g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=hob, s=10)
     plt.colorbar()
 ```
 
@@ -52,8 +54,12 @@ def dots_plot2(g, typeI_upper_bound, hob):
 n_arms = 2
 n_arm_samples = 35
 fi = fast_inla.FastINLA(n_arms=n_arms, critical_value=0.99)
-rejection_table = binomial.build_rejection_table(n_arms, n_arm_samples, fi.rejection_inference)
-accumulator = binomial.binomial_accumulator(lambda data: binomial.lookup_rejection(rejection_table, data[...,0]))
+rejection_table = binomial.build_rejection_table(
+    n_arms, n_arm_samples, fi.rejection_inference
+)
+accumulator = binomial.binomial_accumulator(
+    lambda data: binomial.lookup_rejection(rejection_table, data[..., 0])
+)
 ```
 
 ```python
@@ -144,27 +150,26 @@ for ada_i in range(iter_max):
 
     # if (np.sum(which_refine) > 0) and (should_refine or np.sum(more_sims) == 0):
     A.target_sim_sizes[more_sims] *= 2
-    report['n_add_sims'] = np.sum(more_sims)
-    report['n_add_sims_because_expensive'] = np.sum(sim_expensive)
-    report['n_add_sims_because_loose'] = np.sum(sim_loose & (~sim_tiny))
+    report["n_add_sims"] = np.sum(more_sims)
+    report["n_add_sims_because_expensive"] = np.sum(sim_expensive)
+    report["n_add_sims_because_loose"] = np.sum(sim_loose & (~sim_tiny))
 
     A, did_refine = execute.ada_refine(A, which_refine)
-    report['n_refined'] = np.sum(which_refine)
-    report['n_refined_because_expensive'] = np.sum(hob_expensive)
-    report['n_refined_because_loose'] = np.sum(hob_loose & (~hob_tiny))
+    report["n_refined"] = np.sum(which_refine)
+    report["n_refined_because_expensive"] = np.sum(hob_expensive)
+    report["n_refined_because_loose"] = np.sum(hob_loose & (~hob_tiny))
     # elif np.sum(more_sims) > 0:
-        # A.target_sim_sizes[more_sims] += 5000
+    # A.target_sim_sizes[more_sims] += 5000
     if np.sum(which_refine) == 0 and np.sum(more_sims) == 0:
         print("done after", ada_i, "iterations")
         break
 
-    report['simulation_runtime']=f"{sim_runtime:.2f}s"
-    report['iteration_runtime']=f"{time.time() - start:.2f}s"
+    report["simulation_runtime"] = f"{sim_runtime:.2f}s"
+    report["iteration_runtime"] = f"{time.time() - start:.2f}s"
     rprint(report)
     report_history.append(report)
 
 # plt.show()
-
 ```
 
 ```python
@@ -185,13 +190,13 @@ Y_colsorted = Yravel[axis0, colsortidx]
 # 3. Identify the unique datasets. In a 35^4 grid, this will be about 80k
 # datasets instead of 1.7m.
 Y_unique, inverse_unique = np.unique(Y_colsorted, axis=0, return_inverse=True)
-(n_arm_samples ** n_arms), Y_unique.shape
+(n_arm_samples**n_arms), Y_unique.shape
 ```
 
 ```python
-%matplotlib widget 
-plt.figure(figsize=(8,8))
-plt.scatter(A.g.theta_tiles[:,0], A.g.theta_tiles[:, 1], c=A.hob_upper, s=2)
+%matplotlib widget
+plt.figure(figsize=(8, 8))
+plt.scatter(A.g.theta_tiles[:, 0], A.g.theta_tiles[:, 1], c=A.hob_upper, s=2)
 plt.colorbar()
 plt.show()
 # plt.figure(figsize=(20,20))

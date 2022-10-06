@@ -73,8 +73,8 @@ def test_holder_odi(d):
 
     np.random.seed(17)
     uniforms = np.random.uniform(size=(nsims, n_arm_samples, d))
-    typeI_sum, _ = binomial.binomial_accumulator(lambda x: x[..., 0] >= thresh)(
-        theta_tiles, is_null_per_arm, uniforms
+    typeI_sum = binomial.binomial_accumulator(lambda x, thresh: x[..., 0] >= thresh)(
+        thresh, theta_tiles, is_null_per_arm, uniforms
     )
 
     typeI_est, typeI_CI = binomial.zero_order_bound(typeI_sum, nsims, delta, 1.0)
@@ -84,9 +84,9 @@ def test_holder_odi(d):
         typeI_bound, theta_tiles, tile_corners, n_arm_samples, holderq
     )
     correct = {1: 0.04163348, 2: 0.37039003}
-    np.testing.assert_allclose(hob[0], correct[d], rtol=1e-6)
+    np.testing.assert_allclose(hob[0], correct[d], atol=2e-6)
 
     pointwise_bound = binomial.invert_bound(
-        theta_tiles, tile_corners, hob, n_arm_samples, holderq
+        hob, theta_tiles, tile_corners, n_arm_samples, holderq
     )
-    np.testing.assert_allclose(pointwise_bound, typeI_bound)
+    np.testing.assert_allclose(pointwise_bound, typeI_bound, atol=1e-7)

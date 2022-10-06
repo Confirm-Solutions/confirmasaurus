@@ -235,6 +235,8 @@ class Lewis45:
         # nice to have a more general caching mechanism for lookup and
         # interpolation tables.
         if spec != self.spec:
+            # TODO: we should log or raise a warning when ignoring cached
+            # tables
             return False
         self.pd_table, self.pr_best_pps_1_table, self.pps_2_table = tables
         return True

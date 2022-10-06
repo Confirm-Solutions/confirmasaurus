@@ -69,7 +69,10 @@ def batch(f, batch_size: int, in_axes):
         # batch_size_new = min(batch_size, dim)
         n_full_batches = dim // batch_size
         remainder = dim % batch_size
-        n_pad = batch_size - remainder
+        if remainder == 0:
+            n_pad = 0
+        else:
+            n_pad = batch_size - remainder
         pad_last = remainder > 0
         start = 0
         end = batch_size
@@ -140,7 +143,7 @@ def batch_all_concat(f, batch_size: int, in_axes, out_axes=None):
         return [
             np.concatenate(
                 [
-                    outs[j][i][:-n_pad] if j == last_j else outs[j][i]
+                    outs[j][i][:-n_pad] if (j == last_j and n_pad != 0) else outs[j][i]
                     for j in range(len(outs))
                 ],
                 axis=internal_out_axes[i],

@@ -206,10 +206,14 @@ def zero_order_bound(typeI_sum, sim_sizes, delta, delta_prop_0to1):
     d0 = typeI_sum / sim_sizes
     # clopper-pearson upper bound in beta form.
     d0u_factor = 1.0 - delta * delta_prop_0to1
+    # NOTE: moving this to JAX is nontrivial and probably best done with
+    # tensorflow_probability:
+    # https://github.com/google/jax/issues/2399#issuecomment-1225990206
+    # https://github.com/pyro-ppl/numpyro/blob/e28a3feaa4f95d76b361101f0c75dcb5add2365e/numpyro/distributions/util.py#L426
     d0u = scipy.stats.beta.ppf(d0u_factor, typeI_sum + 1, sim_sizes - typeI_sum) - d0
     # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
     # because there is no way to go higher than 1.0
-    d0u = np.where(np.isnan(d0u), 0, d0u)
+    d0u = jnp.where(jnp.isnan(d0u), 0, d0u)
     return d0, d0u
 
 
