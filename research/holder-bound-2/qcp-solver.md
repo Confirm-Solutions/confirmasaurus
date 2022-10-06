@@ -219,7 +219,7 @@ print(np.sum(np.isinf(qs)))
 ```python
 theta_0 = -1.
 n = 350
-f0 = 0.025
+f0 = 0.001
 vs = np.linspace(0, 1, 1000)
 solver = binomial.ForwardQCPSolver(n)
 q_solver = jax.jit(jax.vmap(solver.solve, in_axes=(None, 0, None)))
