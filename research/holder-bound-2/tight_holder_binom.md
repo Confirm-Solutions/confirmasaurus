@@ -22,6 +22,7 @@ import scipy
 from scipy.stats import norm, beta
 import matplotlib.pyplot as plt
 import cvxpy as cp
+import confirm.mini_imprint.bound.binomial as binomial
 ```
 
 This notebook studies the behavior of a collection of bounds in a simple binomial test setting.
@@ -101,18 +102,6 @@ def log_partition(t, n):
 
 def log_partition_cp(t, n):
     return n * cp.logistic(t)
-
-def opt_q(n, theta_0, v, a):
-    A0 = log_partition(theta_0, n)
-    q = cp.Variable(pos=True)
-    objective_fn = (
-        (log_partition_cp(theta_0 + (q+1) * v, n) - A0)
-        + a
-    ) / (q + 1)
-    objective = cp.Minimize(objective_fn)
-    problem = cp.Problem(objective)
-    problem.solve(qcp=True)
-    return q.value + 1
 ```
 
 ```python
@@ -134,7 +123,9 @@ def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
         return None, f0 * np.exp(n*vs - log_partition(theta_0 + vs, n) + log_partition(theta_0, n))
     if q == 'opt':
         a = -np.log(f0)
-        qs = np.array([opt_q(n, theta_0, v, a) for v in vs])
+        solver = binomial.ForwardQCPSolver(n)
+        q_solver = jax.jit(jax.vmap(solver.solve, in_axes=(None, 0, None)))
+        qs = q_solver(theta_0, vs, a)
         bounds = exp_holder_impr_bound_(f0, n, theta_0, vs, qs)
         return qs, bounds
     return None, bounds
@@ -143,8 +134,8 @@ def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
 ## Performance Comparison
 
 ```python
-n = 500
-theta_0 = -0.1
+n = 350
+theta_0 = -1.0
 theta_boundary = 0
 v_max = theta_boundary - theta_0
 n_steps = 100
@@ -156,7 +147,7 @@ thresh = np.sqrt(n*p_boundary*(1-p_boundary)) * scipy.stats.norm.isf(alpha) + n*
 ```python
 f0 = f(theta_0, n, thresh)
 df0 = df(theta_0, n, thresh)
-vs = np.linspace(0, v_max, n_steps)
+vs = np.linspace(0.001, v_max, n_steps)
 ```
 
 ```python
@@ -176,11 +167,11 @@ def run(theta_0, n, f0, df0, vs, thresh, hp, hc, q='inf'):
 
     # plot everything
     plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
-    #plt.plot(thetas, taylor_bounds, ls='-', label='taylor')
-    #for i, c in enumerate(hc):
-    #    plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
+    plt.plot(thetas, taylor_bounds, ls='-', label='taylor')
+    for i, c in enumerate(hc):
+        plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
     plt.plot(thetas, exp_holder_impr_bounds, ls=':', label='exp-holder-impr')
-    #plt.ylim(0, 1)
+    plt.ylim(np.min(fs)-1e-4, np.max(exp_holder_impr_bounds)+1e-4)
     plt.legend()
     plt.show()
     
@@ -199,8 +190,4 @@ qs = run(
     hc=['opt'],
     q='opt',
 )
-```
-
-```python
-plt.plot(theta_0 + vs, qs)
 ```

@@ -13,11 +13,18 @@ jupyter:
 ---
 
 ```python
+%load_ext autoreload
+%autoreload 2
+```
+
+```python
 import cvxpy as cp
 import numpy as np
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
+
+import confirm.mini_imprint.bound.binomial as binomial
 ```
 
 ## Optimizing q for Exponential Holder Bound
@@ -147,237 +154,20 @@ def qcp_solve(n, theta_0, v, a, q0=2, bs_tol=1e-3, **kwargs):
 ```
 
 ```python
-# JAX version of the above
-class QCPSolver():
-    '''
-    
-    '''
-
-    def __init__(
-        self, 
-        n,
-        a,
-        cp_convg_tol=1e-6, 
-        cp_max_entropy_tol=1e7, 
-        cp_gamma_tol=1e7, 
-        cp_max_iters=int(1e2),
-        qcp_q0 = 2.,
-        qcp_convg_tol=1e-3,
-    ):
-        self.n = n
-        self.a = a
-        self.cp_convg_tol = cp_convg_tol
-        self.cp_max_entropy_tol = cp_max_entropy_tol
-        self.cp_gamma_tol = cp_gamma_tol
-        self.cp_max_iters = cp_max_iters
-        self.qcp_q0 = qcp_q0
-        self.qcp_convg_tol = qcp_convg_tol
-        
-    def logistic(self, t):
-        '''
-        Numerically stable implementation of log(1 + e^t).
-        '''
-        return jnp.maximum(t, 0) + jnp.log(1 + jnp.exp(-jnp.abs(t)))
-
-    def A(self, t):
-        return self.n * jnp.sum(self.logistic(t))
-        
-    def dA(self, t):
-        return self.n * jax.nn.sigmoid(t)
-
-    def phi_t(self, q, t, theta_0, v):
-        '''
-        Computes phi_t(q) defined as
-            A(theta_0 + qv) - tq 
-        '''
-        return self.A(theta_0 + q * v) - t * q
-        
-    def dphi_t(self, q, t, theta_0, v):
-        '''
-        Computes dphi_t(q)/dq given by
-            A'(theta_0 + qv)^T v - t
-        '''
-        return jnp.sum(self.dA(theta_0 + q * v) * v) - t
-
-    def transform(self, u):
-        return 1 + self.logistic(u)
-        
-    def dtransform(self, u):
-        return jax.nn.sigmoid(u)
-        
-    def inv_transform(self, q):
-        return (q-1) + jnp.log(1 - jnp.exp(1-q))
-
-    def convex_feasible(
-        self, t, theta_0, v, bound, q_hint,
-    ):
-        '''
-        We say phi_t(q) is feasible if there exists q >= 1
-        such that phi_t(q) <= bound, where bound == A(theta_0) - a.
-        To unconstrain the minimization problem, we parametrize q = log(1 + e^u) + 1.
-        We are using the Barzilai-Borwein method,
-        so we must guarantee that the newly parametrized function is also convex and Lipschitz.
-
-        Returns True if phi_t(q) is feasible.
-        '''
-        q0 = q_hint
-        u0 = self.inv_transform(q0)
-
-        u_prev = u0 - jnp.maximum(1, 2*self.cp_convg_tol)
-        q_prev = self.transform(u_prev)
-        dphi_t_u_prev = self.dphi_t(q_prev, t, theta_0, v) * self.dtransform(u_prev)
-
-        u = u0
-        q = q0
-        phi_t_u = self.phi_t(q, t, theta_0, v)
-        dphi_t_u = self.dphi_t(q, t, theta_0, v) * self.dtransform(u)
-
-        iter = 0
-        
-        def _cond_func(args):
-            (
-                u_prev,
-                _,
-                _,
-                u,
-                _,
-                phi_t_u,
-                _, 
-                iter,
-            ) = args
-            return (
-                (phi_t_u > bound) & 
-                (jnp.abs(u - u_prev) > self.cp_convg_tol) & 
-                (iter < self.cp_max_iters) & 
-                (jnp.abs(u) <= self.cp_max_entropy_tol)
-            )
-
-        def _body_func(args):
-            (
-                u_prev,
-                q_prev,
-                dphi_t_u_prev,
-                u,
-                q,
-                phi_t_u,
-                dphi_t_u, 
-                iter,
-            ) = args
-
-            # compute descent quantities
-            abs_delta_dphi_t_u = jnp.abs(dphi_t_u - dphi_t_u_prev)
-            abs_delta_u = jnp.abs(u - u_prev)
-            early_exit = (abs_delta_u > self.cp_gamma_tol * abs_delta_dphi_t_u)
-            gamma = jnp.where(early_exit, 0, abs_delta_u / abs_delta_dphi_t_u)
-
-            # update previous states
-            u_prev = u
-            q_prev = q
-            dphi_t_u_prev = dphi_t_u
-            
-            # update current states
-            u = u - gamma * dphi_t_u
-            q = self.transform(u)
-            phi_t_u = self.phi_t(q, t, theta_0, v)
-            dphi_t_u = self.dphi_t(q, t, theta_0, v) * self.dtransform(u)
-
-            iter = iter + 1
-            
-            return (
-                u_prev, q_prev, dphi_t_u_prev,
-                u, q, phi_t_u, dphi_t_u, iter
-            )
-            
-        args = (
-            u_prev,
-            q_prev,
-            dphi_t_u_prev,
-            u,
-            q,
-            phi_t_u,
-            dphi_t_u, 
-            iter,
-        )
-
-        (
-            _,
-            _,
-            _,
-            _,
-            q,
-            phi_t_u,
-            _, 
-            iter,
-        ) = jax.lax.while_loop(
-            _cond_func,
-            _body_func,
-            args,
-        )
-            
-        return q, (phi_t_u <= bound), iter
-
-    def solve(self, theta_0, v):
-        A0 = self.A(theta_0)
-        bound = A0 - self.a
-
-        # theoretical bounds that contain the minimum value
-        lower = self.A(theta_0 + v) - A0
-        upper = self.n * jnp.sum(jnp.maximum(v, 0))
-        
-        q = jnp.inf
-        q_hint = self.qcp_q0
-        
-        def _cond_func(args):
-            (
-                lower, upper, _, _,
-            ) = args
-            return (upper - lower) >= self.qcp_convg_tol
-            
-        def _body_func(args):
-            (
-                lower, upper, q, q_hint,
-            ) = args
-            mid = (upper + lower) / 2
-            q_new, is_feasible, _ = self.convex_feasible(
-                mid, theta_0, v, bound, q_hint
-            )    
-            lower, upper, q, q_hint = jax.lax.cond(
-                is_feasible,
-                lambda: (lower, mid, q_new, q_new),
-                lambda: (mid, upper, q, q_hint),
-            )
-            return (
-                lower, upper, q, q_hint
-            )
-            
-        args = (lower, upper, q, q_hint)
-
-        (
-            _, _, q, _,
-        ) = jax.lax.while_loop(
-            _cond_func,
-            _body_func,
-            args,
-        )
-        
-        return q
-```
-
-```python
 theta_0 = jnp.array([-2., -1., 0.3])
-n = 1000
+n = 350
 a = -np.log(0.025)
-v = 0.01 * jnp.array([0.4, 1, 50])
+v = 0.1 * jnp.array([0.4, 1, 0.2])
 ```
 
 ```python
-solver = QCPSolver(n, a)
+solver = binomial.ForwardQCPSolver(n)
 solve_jit = jax.jit(solver.solve)
 ```
 
 ```python
 %%time
-solve_jit(theta_0, v)
+solve_jit(theta_0, v, a)
 ```
 
 ```python
@@ -392,40 +182,60 @@ q_opt_qcp_cvxpy = opt_q_cp(n, theta_0, v, a)
 ```
 
 ```python
-def objective(n, theta_0, v, a, q):
-    return (A(theta_0 + q*v, n) - A(theta_0, n) + a) / q
-
 qs = jnp.linspace(1.0001, 100, 100)
 phis = np.array([
-    objective(n, theta_0, v, a, q) for q in qs
+    solver.objective(q, theta_0, v, a) for q in qs
 ]) 
 plt.plot(qs, phis)
-plt.plot(q_opt_qcp, objective(n, theta_0, v, a, q_opt_qcp), 'bo')
-plt.plot(q_opt_qcp_cvxpy, objective(n, theta_0, v, a, q_opt_qcp_cvxpy), 'r^')
+plt.plot(q_opt_qcp, solver.objective(q_opt_qcp, theta_0, v, a), 'bo')
+plt.plot(q_opt_qcp_cvxpy, solver.objective(q_opt_qcp_cvxpy, theta_0, v, a), 'r^')
 ```
 
 ```python
-solver = QCPSolver(n, a)
-solve_vmap_jit = jax.jit(jax.vmap(solver.solve, in_axes=(0, 0)))
+solver = binomial.ForwardQCPSolver(n)
+solve_vmap_jit = jax.jit(jax.vmap(lambda t, v, a: solver.solve(t, v, a)[2], in_axes=(0, 0, None)))
 
 def vectorize_run(key, m, d, a=-np.log(0.025), n=350):
     theta_0 = jax.random.normal(key, (m, d))
     _, key = jax.random.split(key)
     v = 0.001 * jax.random.normal(key, (m, d))
-    return solve_vmap_jit(theta_0, v)
+    return solve_vmap_jit(theta_0, v, a)
 ```
 
 ```python
 %%time
 qs = vectorize_run(
     jax.random.PRNGKey(10),
-    10000,
+    100000,
     3,
 )
 ```
 
 ```python
-plt.hist(qs, bins=30)
+plt.hist(qs[~np.isinf(qs)], bins=30)
+print(np.sum(np.isinf(qs)))
+```
+
+```python
+theta_0 = -1.
+n = 350
+f0 = 0.025
+vs = np.linspace(0, 1, 1000)
+solver = binomial.ForwardQCPSolver(n)
+q_solver = jax.jit(jax.vmap(solver.solve, in_axes=(None, 0, None)))
+```
+
+```python
+qs = q_solver(theta_0, vs, -np.log(f0))
+```
+
+```python
+bounder = jax.vmap(binomial.q_holder_bound, in_axes=(0, None, None, 0, None))
+bounds = bounder(qs, n, theta_0, vs, f0)
+```
+
+```python
+plt.plot(theta_0 + vs, bounds, ls='-')
 ```
 
 ## Optimizing q for Implicit Exponential Holder Bound
