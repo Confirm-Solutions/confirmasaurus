@@ -7,12 +7,17 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.6 ('confirm')
     language: python
     name: python3
 ---
 
 # Tight Bounds for Binomial
+
+```python
+%load_ext autoreload
+%autoreload 2
+```
 
 ```python
 import jax
@@ -107,9 +112,8 @@ def log_partition_cp(t, n):
 ```python
 def exp_holder_impr_bound_(f0, n, theta_0, vs, q):
     A0 = log_partition(theta_0, n)
-    bounds = f0 * np.exp(
+    bounds = f0**(1-1/q) * np.exp(
         (log_partition(theta_0 + q * vs, n) - A0) / q
-        - np.log(f0) / q
         - (log_partition(theta_0 + vs, n) - A0)
     )
     return bounds
@@ -119,15 +123,17 @@ def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
         bounds = np.array([exp_holder_impr_bound_(f0, n, theta_0, vs, qi)[1] for qi in q])
         order = np.argmin(bounds, axis=0)
         return q[order], bounds[order, np.arange(0, len(order))]
-    if q == 'inf' or (isinstance(q, float) and np.isinf(q)): 
+    elif q == 'inf' or (isinstance(q, float) and np.isinf(q)): 
         return None, f0 * np.exp(n*vs - log_partition(theta_0 + vs, n) + log_partition(theta_0, n))
-    if q == 'opt':
+    elif q == 'opt':
         a = -np.log(f0)
-        solver = binomial.ForwardQCPSolver(n)
+        solver = binomial.ForwardQCPSolver(n, qcp_convg_tol=1e-4)
         q_solver = jax.jit(jax.vmap(solver.solve, in_axes=(None, 0, None)))
         qs = q_solver(theta_0, vs, a)
-        bounds = exp_holder_impr_bound_(f0, n, theta_0, vs, qs)
+        bounds_f = jax.vmap(binomial.q_holder_bound_fwd, in_axes=(0, None, None, 0, None))
+        bounds = bounds_f(qs, n, theta_0, vs, f0)
         return qs, bounds
+    bounds = exp_holder_impr_bound_(f0, n, theta_0, vs, q)
     return None, bounds
 ```
 
@@ -135,7 +141,7 @@ def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
 
 ```python
 n = 350
-theta_0 = -1.0
+theta_0 = -0.1
 theta_boundary = 0
 v_max = theta_boundary - theta_0
 n_steps = 100
@@ -147,7 +153,7 @@ thresh = np.sqrt(n*p_boundary*(1-p_boundary)) * scipy.stats.norm.isf(alpha) + n*
 ```python
 f0 = f(theta_0, n, thresh)
 df0 = df(theta_0, n, thresh)
-vs = np.linspace(0.001, v_max, n_steps)
+vs = np.linspace(1e-8, v_max, n_steps)
 ```
 
 ```python
@@ -171,7 +177,7 @@ def run(theta_0, n, f0, df0, vs, thresh, hp, hc, q='inf'):
     for i, c in enumerate(hc):
         plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c}), p={hp}')
     plt.plot(thetas, exp_holder_impr_bounds, ls=':', label='exp-holder-impr')
-    plt.ylim(np.min(fs)-1e-4, np.max(exp_holder_impr_bounds)+1e-4)
+    plt.ylim(np.maximum(np.min(fs)-1e-7, 0), np.max(exp_holder_impr_bounds)+1e-7)
     plt.legend()
     plt.show()
     
@@ -186,8 +192,21 @@ qs = run(
     df0=df0,
     vs=vs,
     thresh=thresh,
-    hp=1.5,
+    hp=1.1,
     hc=['opt'],
     q='opt',
 )
+```
+
+```python
+solver = binomial.ForwardQCPSolver(n)
+q_opt = solver.solve(theta_0, vs[-1], -np.log(f0))
+qs_plt = np.linspace(1.00001, 100, 1000)
+objs = [solver.objective(q, theta_0, vs[-1], -np.log(f0)) for q in qs_plt]
+plt.plot(qs_plt, objs)
+plt.plot(q_opt, solver.objective(q_opt, theta_0, vs[-1], -np.log(f0)), 'r.')
+```
+
+```python
+np.min(objs), solver.objective(q_opt, theta_0, vs[-1], -np.log(f0))
 ```
