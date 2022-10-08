@@ -725,10 +725,18 @@ def q_holder_bound_fwd(
     f0,
 ):
     """
-    Computes the optimal q-Holder bound given by:
+    Computes the forward q-Holder bound given by:
         f0 * exp[L(q) - (A(theta_0 + v) - A(theta_0))]
     for fixed f0, n, theta_0, v,
     where L, A are as given in ForwardQCPSolver.
+
+    Parameters:
+    -----------
+    q:      q parameter.
+    n:      scalar Binomial size parameter.
+    theta_0:    d-array pivot point.
+    v:          d-array displacement vector.
+    f0:         probability value at theta_0.
     """
     A0 = A(n, theta_0)
     expo = (A(n, theta_0 + q * v) - A0) / q - (A(n, theta_0 + v) - A0)
@@ -743,7 +751,7 @@ def q_holder_bound_bwd(
     alpha,
 ):
     """
-    Computes the optimal q-Holder bound given by:
+    Computes the backward q-Holder bound given by:
         exp(-L(q))
     where L(q) is as given in BackwardQCPSolver.
     The resulting value is alpha' such that
@@ -752,10 +760,10 @@ def q_holder_bound_bwd(
     Parameters:
     -----------
     q:      q parameter.
-    n:      Binomial size parameter.
+    n:      scalar Binomial size parameter.
     theta_0:    d-array pivot point.
-    v:          d-array displacement from pivot poinlt.
-    alpha:      target alpha.
+    v:          d-array displacement from pivot point.
+    alpha:      target level.
     """
 
     def _bound(q):
