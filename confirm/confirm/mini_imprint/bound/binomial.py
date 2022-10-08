@@ -241,7 +241,26 @@ def _qcp_bisect(
     tol,
 ):
     """
-    This function uses the golden bisection method.
+    This function uses the golden bisection method
+    to solve the quasiconvex minimization problem:
+        minimize_q f(q)
+        subject to q >= 1
+
+    Parameters:
+    -----------
+    lower:      initial lower value for bisection method.
+                The minimum value of f must be >= lower.
+    upper:      initial upper value for bisection method.
+                The minimum value of f must be <= upper.
+    q_init:     initial starting point.
+                f(q_init) must lie in the range [lower, upper].
+    q_hint:     initial hint to start is_feasible_f.
+    is_feasible_f:  function that takes in (t, q_hint)
+                    and returns (q_new, is_feasible)
+                    where q_new is a new point that achieves a value
+                    below the given level, t, if is_feasible is True.
+                    If is_feasible is False, q_new is undefined.
+    tol:            convergence tolerance.
 
     Returns:
     --------
@@ -293,17 +312,7 @@ def _qcp_bisect(
     return args
 
 
-class ForwardQCPSolver:
-    """
-    This class optimizes the quasiconvex program:
-    For a fixed value of n, theta_0, v, a,
-        minimize_q L(q)
-        subject to q >= 1
-    where
-        L(q) = (A(theta_0 + q * v) - A(theta_0) + a) / q
-        A(theta) = n * log(1 + e^theta) (elementwise)
-    """
-
+class BaseQCPSolver:
     def __init__(
         self,
         n: int,
@@ -353,6 +362,18 @@ class ForwardQCPSolver:
         self.q_lower = q_lower
         self.q_upper = q_upper
 
+
+class ForwardQCPSolver(BaseQCPSolver):
+    """
+    This class optimizes the quasiconvex program:
+    For a fixed value of n, theta_0, v, a,
+        minimize_q L(q)
+        subject to q >= 1
+    where
+        L(q) = (A(theta_0 + q * v) - A(theta_0) + a) / q
+        A(theta) = n * log(1 + e^theta) (elementwise)
+    """
+
     # ============================================================
     # Members for non-optimization routine.
     # ============================================================
@@ -375,33 +396,26 @@ class ForwardQCPSolver:
     # ============================================================
 
     def A(self, t):
-        """
-        Log-partition function of a Bernoulli family with d-arms
-        where arm i has n Bernoullis with logit t_i.
-        """
         return A(self.n, t)
 
     def dA(self, t):
-        """
-        Gradient of the log-partition function A.
-        """
         return dA(self.n, t)
 
     def phi_t(self, q, t, theta_0, v):
         """
         Computes phi_t(q) defined by
-            A(theta_0 + qv) - tq
+            A(theta_0 + q * v) - t * q
         This is the convex function that induces the level sets of L(q).
         Specifically, for any level t,
             {x : L(x) <= t} = {x : phi_t(x) <= bound}
-        for some appropriate bound (see self._convex_feasible).
+        for some appropriate bound (see self._bm_check_feasible).
         """
         return self.A(theta_0 + q * v) - t * q
 
     def dphi_t(self, q, t, theta_0, v):
         """
         Computes dphi_t(q)/dq given by
-            A'(theta_0 + qv)^T v - t
+            A'(theta_0 + q * v)^T v - t
         """
         return jnp.sum(self.dA(theta_0 + q * v) * v) - t
 
@@ -520,7 +534,7 @@ class ForwardQCPSolver:
         return self._solve(theta_0, v, a)[2]
 
 
-class BackwardQCPSolver:
+class BackwardQCPSolver(BaseQCPSolver):
     """
     This class optimizes the quasiconvex program:
     For a fixed value of n, theta_0, v, a,
@@ -534,55 +548,6 @@ class BackwardQCPSolver:
         ]
         A(theta) = n * log(1 + e^theta) (elementwise)
     """
-
-    def __init__(
-        self,
-        n: int,
-        bm_t0: float = 1.0,
-        bm_mu: float = 10.0,
-        bm_tol: float = 1e-4,
-        cp_convg_tol: float = 1e-6,
-        cp_gamma_tol: float = 1e7,
-        cp_max_iters: int = int(1e2),
-        qcp_q0: float = 2.0,
-        qcp_convg_tol: float = 1e-3,
-        q_lower: float = 1.0,
-        q_upper: float = 1e7,
-    ):
-        if n < 0:
-            raise ValueError("n must be >= 0.")
-        if bm_t0 <= 0:
-            raise ValueError("bm_t0 must be positive.")
-        if bm_mu <= 1:
-            raise ValueError("bm_mu must be > 1.")
-        if bm_tol <= 0:
-            raise ValueError("bm_tol must be positive.")
-        if cp_convg_tol <= 0:
-            raise ValueError("cp_convg_tol must be positive.")
-        if cp_gamma_tol <= 0:
-            raise ValueError("cp_gamma_tol must be positive.")
-        if cp_max_iters < 0:
-            raise ValueError("cp_max_iters must be non-negative.")
-        if qcp_q0 < 1:
-            raise ValueError("qcp_q0 must be >= 1.")
-        if qcp_convg_tol <= 0:
-            raise ValueError("qcp_convg_tol must be positive.")
-        if q_lower < 1:
-            raise ValueError("q_lower must be >= 1.")
-        if q_upper <= q_lower:
-            raise ValueError("q_upper must be greater than q_lower.")
-
-        self.n = n
-        self.bm_t0 = bm_t0
-        self.bm_mu = bm_mu
-        self.bm_tol = bm_tol
-        self.cp_convg_tol = cp_convg_tol
-        self.cp_gamma_tol = cp_gamma_tol
-        self.cp_max_iters = cp_max_iters
-        self.qcp_q0 = qcp_q0
-        self.qcp_convg_tol = qcp_convg_tol
-        self.q_lower = q_lower
-        self.q_upper = q_upper
 
     # ============================================================
     # Members for non-optimization routine.
@@ -618,16 +583,9 @@ class BackwardQCPSolver:
     # ============================================================
 
     def A(self, t):
-        """
-        Log-partition function of a Bernoulli family with d-arms
-        where arm i has n Bernoullis with logit t_i.
-        """
         return A(self.n, t)
 
     def dA(self, t):
-        """
-        Gradient of the log-partition function A.
-        """
         return dA(self.n, t)
 
     def phi_t(self, q, t, theta_0, v, a):
