@@ -23,6 +23,11 @@ variable "image_name" {
 variable "instance_type" {
   type        = string
   default     = "t2.xlarge"
-  # default     = "p3.2xlarge"
-  description = "description"
+  description = "The type of instance to use"
+}
+
+variable "disk_size" {
+  type        = number
+  default     = "40"
+  description = "The size of the disk in GB"
 }
