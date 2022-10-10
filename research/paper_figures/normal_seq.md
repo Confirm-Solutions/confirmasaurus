@@ -58,6 +58,10 @@ true_err = lambda mu: 1 - jax.scipy.stats.norm.cdf(-mu + z_thresh)
 true_err(0), z_thresh
 ```
 
+```python
+z_thresh
+```
+
 Using JAX, we can compute the true gradient and hessian for this error function:
 
 ```python
@@ -434,8 +438,9 @@ plt.show()
 ```
 
 ```python
-def fig3(**kwargs):
-    npts = [2, 6, 18, 18]
+def fig3(npts = None, legend=True, **kwargs):
+    if npts is None:
+        npts = [2, 6, 18, 18]
     nsims = [int(1e5), int(1e5), int(1e5), int(1e6)]
     linestyle = ["k:", "k--", "k-", "b-"]
     x = np.linspace(-1, 0, 1000)
@@ -453,12 +458,57 @@ def fig3(**kwargs):
     pow_dense10 = true_err(mu_dense10)
     plt.plot(mu_dense10, pow_dense10, "r:")
     set_domain(**kwargs)
-    plt.legend(loc=(0.697, 0.018), fontsize=11, title="(N, S)", title_fontsize=12)
+    if legend:
+        plt.legend(loc=(0.697, 0.018), fontsize=11, title="(N, S)", title_fontsize=12)
 
 
 fig3()
 plt.title("Quadratic bounds with N points S simulations", fontsize=12)
 plt.show()
+
+```
+
+```python
+for fig_idx, npts in enumerate([[2], [2], [6], [18], [54], [54]]):
+    # npts = [2]#, 6, 18, 18]
+    nsims = [int(1e5)] if fig_idx <= 4 else [int(1e6)]
+    # linestyle = ["k:", "k--", "k-", "b-"]
+    linestyle=['k-']
+    x = np.linspace(-1, 0, 1000)
+    for j in range(len(npts)):
+        P = npts[j]
+        S = nsims[j]
+        z = ztest(npts = P, nsims=S, delta=0.01, x = x, seed=13)
+
+        if fig_idx <= 2:
+            plt.errorbar(
+                z['mu'],
+                z['typeI_est'],
+                yerr=z['typeI_CI'],
+                ecolor="k",
+                fmt="o",
+                capsize=4,
+                markeredgecolor="k",
+                markerfacecolor="none",
+            )
+
+        if fig_idx > 0:
+            for i in range(len(z['mu'])):
+                select = (z['closest_mu_idx'] == i)
+                plt.plot(x[select], z['full_max_bound'][select], linestyle[j], linewidth=2, label='bound' if i == 0 else None)
+    mu_dense10 = np.linspace(-1, 0, 100)
+    pow_dense10 = true_err(mu_dense10)
+    plt.plot(mu_dense10, pow_dense10, "r:", linewidth=4, label='true')
+    mu_dense01 = np.linspace(0, 1, 100)
+    pow_dense01 = true_err(mu_dense01)
+    plt.plot(mu_dense01, pow_dense01, "r:", linewidth=4)
+    set_domain()
+    plt.savefig(f"bayes2022_z{fig_idx}.png", dpi=300, bbox_inches="tight")
+    plt.legend(loc='lower right', bbox_to_anchor=(0.95, 0.0))
+    plt.show()
+```
+
+```python
 
 ```
 
@@ -631,4 +681,8 @@ plt.gca().set_xticklabels([f'{x:.1e}' for x in nsims])
 plt.xlabel('$N$')
 plt.savefig("z-test-cost.pdf", bbox_inches="tight")
 plt.show()
+```
+
+```python
+
 ```
