@@ -242,6 +242,7 @@ class Lewis45:
         return True
 
     def save_tables(self, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb") as f:
             pickle.dump(
                 (
@@ -1050,7 +1051,7 @@ class Lewis45:
         # Stage 2 only if no early termination based on futility
         return jax.lax.cond(
             early_exit,
-            lambda: (1.0, best_arm, jnp.zeros(self.n_arms)),
+            lambda: (2.0, best_arm, jnp.zeros(self.n_arms)),
             lambda: self.stage_2(
                 data=data,
                 best_arm=best_arm,

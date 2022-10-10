@@ -22,6 +22,7 @@ nb_util.setup_nb(pretty=True)
 import time
 import jax
 import os
+import re
 import pickle
 import numpy as np
 import jax.numpy as jnp
@@ -91,7 +92,6 @@ params = {
 ```
 
 ```python
-
 lei_obj = lewis.Lewis45(**params)
 n_arm_samples = int(lei_obj.unifs_shape()[0])
 ```
@@ -122,11 +122,10 @@ g_raw = grid.build_grid(theta, radii)
 ```
 
 ```python
-target_grid_cost = 0.0002
-target_sim_cost = 0.001
+target_grid_cost = 0.002
+target_sim_cost = 0.002
 target_alpha = 0.025
 holderq = 6
-delta_validate = 0.01
 
 grid_batch_size = 2**6 if jax.devices()[0].device_kind == "cpu" else 2**10
 max_sim_size = 2**17
@@ -136,23 +135,40 @@ key = jax.random.PRNGKey(seed)
 
 unifs = jax.random.uniform(key=key, shape=(max_sim_size,) + lei_obj.unifs_shape())
 unifs_order = np.arange(0, unifs.shape[1])
+n_bootstrap = 30
+bootstrap_idxs = {
+    K: jnp.concatenate((
+        jnp.arange(K)[None, :],
+        jax.random.choice(key, np.arange(K), shape=(n_bootstrap, K), replace=True)
+    ))
+    for K in [1000]
+}
 
 batched_tune = lts.grouped_by_sim_size(lei_obj, lts.tunev, grid_batch_size)
 batched_rej = lts.grouped_by_sim_size(lei_obj, lts.rejv, grid_batch_size)
-
-```
-
-```python
-
 batched_invert_bound = batch.batch_all_concat(
     lambda *args: (binomial.invert_bound(*args),),
     grid_batch_size,
     in_axes=(None, 0, 0, None, None),
 )
+batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
+```
+
+```python
+(1000 * 2 ** np.arange(1, 6))
+```
+
+```python
+max_sim_size
 ```
 
 ```python
 load_iter = 'latest'
+if load_iter == 'latest':
+    # find the file with the largest checkpoint index: name/###.pkl 
+    available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
+    load_iter = 0 if len(available_iters) == 0 else max(available_iters)
+
 if load_iter == 0:
     g = grid.build_grid(
         theta, radii, null_hypos=null_hypos, symmetry_planes=symmetry, should_prune=True
@@ -161,10 +177,10 @@ if load_iter == 0:
     sim_cvs = np.empty(g.n_tiles, dtype=float)
     pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
     todo = np.ones(g.n_tiles, dtype=bool)
+    # TODO: remove
+    typeI_sum = None
+    hob_upper = None
 else:
-    if load_iter == 'latest':
-        # find the file with the largest checkpoint index: name/###.pkl 
-        load_iter = max([int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)])
     fn = f"{name}/{load_iter}.pkl"
     print(f'loading checkpoint {fn}')
     with open(fn, "rb") as f:
@@ -178,14 +194,166 @@ else:
         ) = pickle.load(f)
     todo = np.zeros(g.n_tiles, dtype=bool)
     todo[-1] = True
-# TODO: remove
-typeI_sum = None
-hob_upper = None
+```
+
+## Goofing around
+
+```python
+batched_sim = lts.grouped_by_sim_size(lei_obj, lts.simv, grid_batch_size)
+
+K = 1000
+
+widx = np.argmin(sim_cvs)
+idxs = np.arange(widx, widx + 1)
+idxs = np.argsort(sim_cvs)[:10*grid_batch_size]
+test_stats, best_arms = batched_sim(sim_sizes[idxs], (g.theta_tiles[idxs],), (unifs,), unifs_order)
+false_test_stats = jnp.where(g.null_truth[np.arange(idxs.shape[0])[:, None], best_arms - 1], test_stats, 3.0)
+_tunev = jax.vmap(lts._tune, in_axes=(0, None, None))
+sim_cv = _tunev(false_test_stats, K, pointwise_target_alpha[idxs])
 ```
 
 ```python
-todo[:] = True
+idxs = np.argsort(sim_cvs)[:grid_batch_size]
+
 ```
+
+```python
+bootstrap_sim_cvs = bootstrap_tune_runner(
+    sim_sizes[idxs],
+    pointwise_target_alpha[idxs],
+    g.theta_tiles[idxs],
+    g.null_truth[idxs],
+    unifs,
+    bootstrap_idxs,
+    unifs_order,
+)
+bootstrap_cvs = bootstrap_sim_cvs.min(axis=0)
+overall_cv = bootstrap_cvs[0]
+overall_cv, bootstrap_cvs
+```
+
+```python
+
+bootstrap_cv_rej = batched_many_rej(
+    sim_sizes[idxs],
+    (np.tile(bootstrap_cvs[None, :], (idxs.shape[0], 1)),
+    g.theta_tiles[idxs],
+    g.null_truth[idxs],),
+    (unifs[:K],),
+    unifs_order
+)
+```
+
+```python
+plt.hist(np.sqrt(bootstrap_cv_rej.var(axis=1)) / K)
+plt.show()
+```
+
+```python
+n_bootstrap = 30
+bootstrap_idxs = jax.random.choice(key, np.arange(K), shape=(n_bootstrap, K), replace=True)
+bootstrap_sim_cv = np.array([_tunev(false_test_stats[:, bootstrap_idxs[i]], K, target_alpha) for i in range(n_bootstrap)])
+bootstrap_cv = bootstrap_sim_cv.min(axis=1)
+
+check_idxs = np.arange(widx, widx + 1)
+check_idxs = idxs#[grid_batch_size]
+# bootstrap_cv_rej = rejvv(
+#     lei_obj,
+#     np.tile(bootstrap_cv[None, :], (check_idxs.shape[0], 1)),
+#     g.theta_tiles[check_idxs],
+#     g.null_truth[check_idxs],
+#     unifs[:K],
+#     unifs_order
+# )[0]
+bootstrap_cv_rej = batched_many_rej(
+    sim_sizes[check_idxs],
+    (np.tile(bootstrap_cv[None, :], (check_idxs.shape[0], 1)),
+    g.theta_tiles[check_idxs],
+    g.null_truth[check_idxs],),
+    (unifs[:K],),
+    unifs_order
+)
+```
+
+```python
+bootstrap_cv_rej.shape
+```
+
+```python
+plt.hist(np.sqrt(bootstrap_cv_rej.var(axis=1)) / K)
+```
+
+```python
+bootstrap_cv_rej[0]
+```
+
+```python
+
+```
+
+```python
+plt.hist(bootstrap_cv_rej)
+```
+
+```python
+plt.plot(np.var(bootstrap_cv, axis=1))
+```
+
+```python
+plt.hist(np.sum(test_stat <= 0, axis=-1) / sim_sizes[idxs])
+plt.show()
+```
+
+```python
+overall_cv = np.min(sim_cvs)
+rej1 = batched_rej(sim_sizes[idxs], (np.full(idxs.shape[0], overall_cv), g.theta_tiles[idxs], g.null_truth[idxs]), unifs, unifs_order)
+```
+
+```python
+key2 = jax.random.PRNGKey(seed+1)
+unifs2 = jax.random.uniform(key=key2, shape=(max_sim_size,) + lei_obj.unifs_shape())
+rej2 = batched_rej(sim_sizes[idxs], (np.full(idxs.shape[0], overall_cv), g.theta_tiles[idxs], g.null_truth[idxs]), unifs2, unifs_order)
+```
+
+```python
+rej1, rej2
+```
+
+```python
+plt.hist((rej1 - rej2) / (sim_sizes[idxs]))
+plt.show()
+```
+
+```python
+checksims = np.where(sim_cvs <= adafrac * overall_cv)[0][:(10*grid_batch_size)]
+typeI_sum_check = batched_rej(
+    sim_sizes[checksims],
+    (np.full(checksims.shape[0], overall_cv),
+    g.theta_tiles[checksims],
+    g.null_truth[checksims],),
+    unifs,
+    unifs_order,
+)
+```
+
+```python
+np.min(typeI_sum_check / sim_sizes[checksims])
+```
+
+```python
+sim_sizes[checksims] = 128000
+est, ci = binomial.zero_order_bound(pointwise_target_alpha[checksims] * sim_sizes[checksims], sim_sizes[checksims], 0.05, 1.0)
+```
+
+```python
+np.argmax(est + ci)
+```
+
+```python
+np.max(ci)
+```
+
+## The big run
 
 ```python
 adafrac = 1.10
@@ -232,6 +400,22 @@ for II in range(load_iter + 1, iter_max):
     )
     impossible_alpha = np.floor(pointwise_target_alpha * (sim_sizes + 1)) - 1 <= 0
     which_refine |= impossible_alpha
+    
+    which_addsims = np.zeros_like(which_refine)
+    if np.all(~which_refine):
+        which_addsims = np.argsort(sim_cvs)[:(5*grid_batch_size)]
+        # checksims = np.argsort(sim_cvs)[:(5*grid_batch_size)]
+        # print(checksims.shape)
+        # typeI_sum_check = batched_rej(
+        #     sim_sizes[checksims],
+        #     (np.full(checksims.shape[0], overall_cv),
+        #     g.theta_tiles[checksims],
+        #     g.null_truth[checksims],),
+        #     unifs,
+        #     unifs_order,
+        # )
+        # typeI_est_check = typeI_sum_check / sim_sizes[checksims]
+        # typeI_est_check > pointwise_target_alpha[checksims] - 
 
     report = dict(
         II=II,
@@ -278,6 +462,10 @@ for II in range(load_iter + 1, iter_max):
                 np.empty(new_grid.n_tiles, dtype=float),
             ]
         )
+        continue
+    else:
+        sim_sizes[which_addsims] *= 2
+        todo[which_addsims] = True
         continue
     print("done!")
     break
@@ -336,6 +524,10 @@ typeI_sum = batched_rej(
     unifs_order,
 )
 
+```
+
+```python
+
 typeI_est, typeI_CI = binomial.zero_order_bound(
     typeI_sum, sim_sizes, delta_validate, 1.0
 )
@@ -373,6 +565,11 @@ typeI_est[worst_cv_idx], sim_cvs[worst_cv_idx], g.theta_tiles[worst_cv_idx], poi
 ```
 
 ```python
+plt.hist(typeI_est, bins=np.linspace(0.02,0.025, 100))
+plt.show()
+```
+
+```python
 np.sum((sim_cvs <= adafrac * overall_cv) & (hob_theory_cost > target_grid_cost))
 ```
 
@@ -401,32 +598,41 @@ batched_sim(
 ```
 
 ```python
-def pandemonium(field):
-    for unplot_set in [{0, 1}, {1, 2}]:
-        plot = list(set(range(n_arms)) - unplot_set)
-        unplot = list(unplot_set)
-        select = np.where(np.all(np.abs(g.theta_tiles[:, unplot] - worst_tile[unplot]), axis=-1) < 0.08)[
-            0
-        ]
+unplot
+```
 
-        ordered_select = select[np.argsort(field[select])]
-        print(ordered_select.shape[0])
+```python
+np.abs(g.theta_tiles[:, unplot] - worst_tile[unplot])
+```
 
-        plt.figure(figsize=(6, 6))
-        plt.title(r"$\hat{f}(\lambda^{*})$")
-        plt.scatter(
-            g.theta_tiles[ordered_select, plot[0]],
-            g.theta_tiles[ordered_select, plot[1]],
-            c=field[ordered_select],
-            s=20,
-        )
-        plt.colorbar()
-        plt.xlabel(f"$\\theta_{plot[0]}$")
-        plt.ylabel(f"$\\theta_{plot[1]}$")
-        plt.show()
+```python
+# def pandemonium(field):
+field = typeI_est
+# for unplot_set in [{0, 1}, {1, 2}]:
+for unplot_set in [{0}, {1}]:
+    plot = list(set(range(n_arms)) - unplot_set)
+    unplot = list(unplot_set)
+    select = np.where(np.all(np.abs(g.theta_tiles[:, unplot] - worst_tile[unplot]) < 0.5, axis=-1))[
+        0
+    ]
 
+    ordered_select = select[np.argsort(field[select])]
+    print(ordered_select.shape[0])
 
-pandemonium(typeI_est)
+    plt.figure(figsize=(6, 6))
+    plt.title(r"$\hat{f}(\lambda^{*})$")
+    plt.scatter(
+        g.theta_tiles[ordered_select, plot[0]],
+        g.theta_tiles[ordered_select, plot[1]],
+        c=field[ordered_select],
+        s=20,
+    )
+    plt.xlim([-1, 1])
+    plt.ylim([-1, 1])
+    plt.colorbar()
+    plt.xlabel(f"$\\theta_{plot[0]}$")
+    plt.ylabel(f"$\\theta_{plot[1]}$")
+    plt.show()
 ```
 
 ```python

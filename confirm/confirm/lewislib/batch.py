@@ -61,6 +61,11 @@ def batch(f, batch_size: int, in_axes):
                 "along their corresopnding in_axes."
             )
 
+        if len(args) != len(in_axes):
+            raise ValueError(
+                "The number of arguments must match the number of in_axes."
+            )
+
         dim = dims[0]
 
         # NOTE: i don't think we should shrink the batch size because that'll
