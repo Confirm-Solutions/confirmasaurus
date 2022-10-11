@@ -26,6 +26,8 @@ RUN apt-get update \
         software-properties-common \
         dirmngr \
         neovim \
+        cm-super \
+        dvipng \
     && ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc \
     && echo "conda activate base" >> ~/.bashrc \

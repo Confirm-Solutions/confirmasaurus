@@ -16,6 +16,7 @@ jupyter:
 import confirm.outlaw.nb_util as nb_util
 nb_util.setup_nb()
 
+import re
 import matplotlib.pyplot as plt
 import numpy as np
 import jax.numpy as jnp
@@ -28,7 +29,7 @@ from confirm.lewislib import lewis
 ```
 
 ```python
-name = '3d_withsims'
+name = '3d_smaller'
 params = {
     "n_arms": 3,
     "n_stage_1": 50,
@@ -56,11 +57,39 @@ batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
 ```
 
 ```python
+n_arm_samples = int(lei_obj.unifs_shape()[0])
+holderq = 6
+```
+
+```python
 import pickle
-with open(f'{name}/164.pkl', 'rb') as f:
-    data = pickle.load(f)
-g, sim_sizes, bootstrap_cvs, _, _, pointwise_target_alpha = data
-!df -h /workspaces
+load_iter = 'latest'
+# load_iter = 173
+if load_iter == 'latest':
+    # find the file with the largest checkpoint index: name/###.pkl 
+    available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
+    load_iter = 0 if len(available_iters) == 0 else max(available_iters)
+
+if load_iter == 0:
+    print('fail')
+else:
+    fn = f"{name}/{load_iter}.pkl"
+    print(f'loading checkpoint {fn}')
+    with open(fn, "rb") as f:
+        (
+            g,
+            sim_sizes,
+            bootstrap_cvs,
+            typeI_sum,
+            hob_upper,
+            pointwise_target_alpha,
+        ) = pickle.load(f)
+!du -hs {name}
+!df -h /
+```
+
+```python
+np.sum(bootstrap_cvs[:, 1:].min(axis=1) < np.min(bootstrap_cvs[:, 0])), overall_cv
 ```
 
 ```python
@@ -79,57 +108,105 @@ unifs_order = np.arange(0, unifs.shape[1])
 ```
 
 ```python
+# for i in range(203, 231):
+#     with open(f'3d_withsims/{i}.pkl', 'rb') as f:
+#         (
+#             g,
+#             sim_sizes,
+#             bootstrap_cvs,
+#             typeI_sum,
+#             hob_upper,
+#             pointwise_target_alpha,
+#         ) = pickle.load(f)
+#     print(i)
+#     overall_cv = np.min(bootstrap_cvs[:,0])
+#     print('loose bounds', np.sum((bootstrap_cvs[:,0] < 0.08) & (0.025 - pointwise_target_alpha > 0.002)))
+    
+```
+
+```python
 overall_cv = np.min(bootstrap_cvs[:,0])
 print('number of tiles near critical: ', np.sum((bootstrap_cvs[:,0] < overall_cv + 0.01)))
 print('    and with loose bounds', np.sum((bootstrap_cvs[:,0] < overall_cv + 0.01) & (0.025 - pointwise_target_alpha > 0.002)))
 print(f'pct of sim sizes > 2000: {100 * np.mean(sim_sizes > 2000):.1f}%')
+print(f'pct of alpha tight: {100 * np.mean(target_alpha - pointwise_target_alpha < target_grid_cost):.1f}%')
+print(f'sim size distribution: {np.unique(sim_sizes, return_counts=True)}')
+```
 
-plt.title('histogram of critical values')
-plt.hist(bootstrap_cvs[:,0], bins=np.linspace(0, 1, 100))
-plt.show()
+```python
+np.unique(sim_sizes, return_counts=True)
+```
 
-plt.title('distribution of sim sizes')
-plt.hist(sim_sizes)
-plt.show()
-
-plt.title('distribution of target alpha')
-plt.hist(0.025 - pointwise_target_alpha, bins=100)
-plt.axvline(0.002, color='r')
+```python
+plt.hist(
+    [bootstrap_cvs[sim_sizes == K, 0] for K in np.unique(sim_sizes)],
+    stacked=True,
+    bins=np.linspace(0.05, 0.15, 100),
+    label=[f'K={K}' for K in np.unique(sim_sizes)],
+)
+plt.legend()
+plt.xlabel('$\lambda^*$')
+plt.ylabel('number of tiles')
 plt.show()
 ```
 
 ```python
-ada_step_size = grid_batch_size
+refinement_done = target_alpha - pointwise_target_alpha < target_grid_cost
+plt.hist(
+    [bootstrap_cvs[refinement_done,0 ], bootstrap_cvs[~refinement_done,0]],
+    stacked=True,
+    bins=np.linspace(0.05, 0.15, 100),
+    label=['fully refined', 'not fully refined'],
+)
+plt.legend()
+plt.xlabel('$\lambda^*$')
+plt.ylabel('number of tiles')
+plt.show()
 ```
 
 ```python
-cost_to_refine = 2 ** n_arms
-sims_required_to_rej_once = 2 / pointwise_target_alpha - 1
-cost_to_rej_once = sims_required_to_rej_once / sim_sizes
+worst_tile_idx = np.argmin(bootstrap_cvs[:,0])
+worst_tile = g.theta_tiles[worst_tile_idx]
+# def pandemonium(field):
+field = bootstrap_cvs[:,0]
+# for unplot_set in [{0, 1}, {1, 2}]:
+for unplot_set in [{0}, {1}]:
+    plot = list(set(range(n_arms)) - unplot_set)
+    unplot = list(unplot_set)
+    axis_slice = np.all(np.abs(g.theta_tiles[:, unplot] - (-0.01)) < 0.03, axis=-1)
+    select = np.where(axis_slice & (field < 0.15))[0]
 
-# if a tile always stops early, it's probably not interesting and we should
-# lean towards simulating more rather than more expensive refinement
-always_stops_early = bootstrap_cvs[:, 0] >= 1
-prefer_simulation = (cost_to_refine > cost_to_rej_once) & (always_stops_early)
+    ordered_select = select[np.argsort(field[select])[::-1]]
+    print(ordered_select.shape[0])
 
-alpha_to_rej_once = 2 / (sim_sizes + 1)
-impossible = pointwise_target_alpha < alpha_to_rej_once
-impossible_refine = impossible & (~prefer_simulation)
-impossible_sim = impossible & prefer_simulation
+    plt.figure(figsize=(6, 6))
+    plt.title(r"$\lambda^{*}$")
+    plt.scatter(
+        g.theta_tiles[ordered_select, plot[0]],
+        g.theta_tiles[ordered_select, plot[1]],
+        c=field[ordered_select],
+        vmin=0.05,
+        vmax=0.15,
+        s=20,
+    )
+    plt.xlim([-1, 1])
+    plt.ylim([-1, 1])
+    plt.colorbar()
+    plt.xlabel(f"$\\theta_{plot[0]}$")
+    plt.ylabel(f"$\\theta_{plot[1]}$")
+    plt.show()
+```
 
+```python
+ada_step_size = 1 * grid_batch_size
 close_to_worst = np.zeros(g.n_tiles, dtype=bool)
 # close_to_worst[np.random.choice(np.arange(g.n_tiles), size)] = True
-close_to_worst[np.argsort(bootstrap_cvs[:, 0])[:ada_step_size]] = True
-close_to_worst[impossible] = False
-
-hob_theory_cost = target_alpha - pointwise_target_alpha
-which_refine = close_to_worst & (hob_theory_cost > target_grid_cost)
-which_refine |= impossible_refine
-
+# close_to_worst[np.argsort(bootstrap_cvs[:, 0] * (1 - (sim_sizes >= 16000)))[:ada_step_size]] = True
+close_to_worst[np.where(sim_sizes == 256000)[0]] = True
 bootstrap_min_cvs = np.min(bootstrap_cvs[:, 0:], axis=0)
 cv_std = bootstrap_min_cvs.std()
 bootstrap_typeI_sum = batched_many_rej(
-    sim_sizes[close_to_worst] * 8,
+    sim_sizes[close_to_worst],
     (np.tile(bootstrap_min_cvs[None, :], (np.sum(close_to_worst), 1)),
     g.theta_tiles[close_to_worst],
     g.null_truth[close_to_worst],),
@@ -138,32 +215,25 @@ bootstrap_typeI_sum = batched_many_rej(
 )
 typeI_std = np.zeros(g.n_tiles)
 typeI_std[close_to_worst] = (bootstrap_typeI_sum / sim_sizes[close_to_worst, None]).std(axis=1)
-```
-
-```python
 bootstrap_min_cvs
 ```
 
 ```python
-bootstrap_min_cvs[0] - bootstrap_min_cvs[1:].mean()
+bootstrap_cvs[close_to_worst]
 ```
 
 ```python
-(bootstrap_typeI_sum[:, 0] - (bootstrap_typeI_sum[:, 1:].mean(axis=1))) / sim_sizes[close_to_worst]
+overall_cv
 ```
 
 ```python
-bias = bootstrap_typeI_sum[:,0] - bootstrap_typeI_sum[:, 1:].mean(axis=1)
-std = bootstrap_typeI_sum[:, 1:].std(axis=1)
+np.where(sim_sizes == 128000)[0][:32]
+```
+
+```python
+bias = (bootstrap_typeI_sum[:,0] - bootstrap_typeI_sum[:, 1:].mean(axis=1)) / sim_sizes[close_to_worst]
+std = bootstrap_typeI_sum[:, 1:].std(axis=1) / sim_sizes[close_to_worst]
 bias, std
-```
-
-```python
-bootstrap_typeI_sum[worst_tile]
-```
-
-```python
-(bootstrap_typeI_sum / sim_sizes[close_to_worst, None]).std(axis=1)
 ```
 
 ```python
@@ -223,4 +293,19 @@ typeI_sum = batched_sim(
     unifs,
     unifs_order,
 )
+```
+
+```python
+
+# import confirm.lewislib.batch as batch
+# import confirm.mini_imprint.binomial as binomial
+# batched_invert_bound = batch.batch_all_concat(
+#     lambda *args: (binomial.invert_bound(*args),),
+#     grid_batch_size,
+#     in_axes=(None, 0, 0, None, None),
+# )
+# pta = batched_invert_bound(
+#     target_alpha, g.theta_tiles[:1], g.vertices[:1], n_arm_samples, holderq
+# )[0]
+# pta
 ```

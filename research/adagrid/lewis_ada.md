@@ -67,28 +67,28 @@ params = {
 
 ```python
 # Configuration used during simulation
-name = "3d_withsims"
-params = {
-    "n_arms": 3,
-    "n_stage_1": 50,
-    "n_stage_2": 100,
-    "n_stage_1_interims": 2,
-    "n_stage_1_add_per_interim": 100,
-    "n_stage_2_add_per_interim": 100,
-    "stage_1_futility_threshold": 0.15,
-    "stage_1_efficacy_threshold": 0.7,
-    "stage_2_futility_threshold": 0.2,
-    "stage_2_efficacy_threshold": 0.95,
-    "inter_stage_futility_threshold": 0.6,
-    "posterior_difference_threshold": 0,
-    "rejection_threshold": 0.05,
-    "key": jax.random.PRNGKey(0),
-    "n_table_pts": 20,
-    "n_pr_sims": 100,
-    "n_sig2_sims": 20,
-    "batch_size": int(2**12),
-    "cache_tables": f"./{name}/lei_cache.pkl",
-}
+# name = "3d_smaller2"
+# params = {
+#     "n_arms": 3,
+#     "n_stage_1": 50,
+#     "n_stage_2": 100,
+#     "n_stage_1_interims": 2,
+#     "n_stage_1_add_per_interim": 100,
+#     "n_stage_2_add_per_interim": 100,
+#     "stage_1_futility_threshold": 0.15,
+#     "stage_1_efficacy_threshold": 0.7,
+#     "stage_2_futility_threshold": 0.2,
+#     "stage_2_efficacy_threshold": 0.95,
+#     "inter_stage_futility_threshold": 0.6,
+#     "posterior_difference_threshold": 0,
+#     "rejection_threshold": 0.05,
+#     "key": jax.random.PRNGKey(0),
+#     "n_table_pts": 20,
+#     "n_pr_sims": 100,
+#     "n_sig2_sims": 20,
+#     "batch_size": int(2**12),
+#     "cache_tables": f"./{name}/lei_cache.pkl",
+# }
 ```
 
 ```python
@@ -110,8 +110,8 @@ for i in range(n_arms - 2):
     n[i + 2] = -1
     symmetry.append(grid.HyperPlane(n, 0))
 
-theta_min = -2.0
-theta_max = 2.0
+theta_min = -1.0
+theta_max = 1.0
 init_grid_size = 8
 theta, radii = grid.cartesian_gridpts(
     np.full(n_arms, theta_min),
@@ -132,17 +132,19 @@ init_nsims = 2000
 max_sim_double = 7
 max_sim_size = init_nsims * 2 ** max_sim_double
 seed = 0
-key = jax.random.PRNGKey(seed)
+src_key = jax.random.PRNGKey(seed)
+key1, key2, key3 = jax.random.split(src_key, 3)
 
-unifs = jax.random.uniform(key=key, shape=(max_sim_size,) + lei_obj.unifs_shape())
+unifs = jax.random.uniform(key=key1, shape=(max_sim_size,) + lei_obj.unifs_shape())
 unifs_order = np.arange(0, unifs.shape[1])
-n_bootstrap = 10
+n_bootstrap = 5
 bootstrap_idxs = {
     K: jnp.concatenate((
         jnp.arange(K)[None, :],
-        jax.random.choice(key, np.arange(K), shape=(n_bootstrap, K), replace=True)
+        jax.random.choice(key2, np.arange(K), shape=(n_bootstrap, K), replace=True),
+        jax.random.choice(key3, np.arange(K), shape=(n_bootstrap, K), replace=True)
     ))
-    for K in (1000 * 2 ** np.arange(0, max_sim_double + 1))
+    for K in (init_nsims * 2 ** np.arange(0, max_sim_double + 1))
 }
 
 batched_tune = lts.grouped_by_sim_size(lei_obj, lts.tunev, grid_batch_size)
@@ -168,7 +170,7 @@ if load_iter == 0:
         theta, radii, null_hypos=null_hypos, symmetry_planes=symmetry, should_prune=True
     )
     sim_sizes = np.full(g.n_tiles, init_nsims)
-    bootstrap_cvs = np.empty((g.n_tiles, 1 + n_bootstrap), dtype=float)
+    bootstrap_cvs = np.empty((g.n_tiles, 1 + 2 * n_bootstrap), dtype=float)
     pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
     todo = np.ones(g.n_tiles, dtype=bool)
     # TODO: remove
@@ -188,6 +190,15 @@ else:
         ) = pickle.load(f)
     todo = np.zeros(g.n_tiles, dtype=bool)
     todo[-1] = True
+    # keep = np.ones(g.n_tiles, dtype=bool)
+    # for d in range(3):
+    #     keep &= (g.theta_tiles[:, d] > -1) & (g.theta_tiles[:, d] < 1)
+    # g = grid.index_grid(g, keep)
+    # pointwise_target_alpha = pointwise_target_alpha[keep]
+    # sim_sizes = sim_sizes[keep]
+    # bootstrap_cvs = bootstrap_cvs[keep]
+    # typeI_sum = typeI_sum[keep] if typeI_sum is not None else None
+    # hob_upper = hob_upper[keep] if hob_upper is not None else None
 ```
 
 ## The big run
@@ -204,7 +215,7 @@ for II in range(load_iter + 1, iter_max):
     print(f"starting iteration {II} with {np.sum(todo)} tiles to process")
     if cost_per_sim is not None:
         predicted_time = np.sum(sim_sizes[todo] * cost_per_sim)
-        print(f'runtime prediction: {predicted_time:.2f} seconds')
+        print(f"runtime prediction: {predicted_time:.2f} seconds")
 
     start = time.time()
     pointwise_target_alpha[todo] = batched_invert_bound(
@@ -221,7 +232,7 @@ for II in range(load_iter + 1, iter_max):
         g.null_truth[todo],
         unifs,
         bootstrap_idxs,
-        unifs_order
+        unifs_order,
     )
     worst_tile = np.argmin(bootstrap_cvs[:, 0])
     overall_cv = bootstrap_cvs[worst_tile, 0]
@@ -229,14 +240,18 @@ for II in range(load_iter + 1, iter_max):
     todo[:] = False
     print("tuning took", time.time() - start)
 
+    start = time.time()
     savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
-    with open(f"{name}/{II}.pkl", "wb") as f:
-        pickle.dump(savedata, f)
+    if II % 10 == 0 or II <= load_iter + 5:
+        with open(f"{name}/{II}.pkl", "wb") as f:
+            pickle.dump(savedata, f)
+    print("checkpointing took", time.time() - start)
 
+    start = time.time()
     # try to estimate the number of refinements steps required to get to the
     # target alpha. for now, it's okay to slightly preference refinement over
     # adding sims because refinment gives more information in a sense.
-    cost_to_refine = 2 ** n_arms
+    cost_to_refine = 2**n_arms
     sims_required_to_rej_once = 2 / pointwise_target_alpha - 1
     cost_to_rej_once = sims_required_to_rej_once / sim_sizes
 
@@ -247,7 +262,7 @@ for II in range(load_iter + 1, iter_max):
 
     alpha_to_rej_once = 2 / (sim_sizes + 1)
     impossible = pointwise_target_alpha < alpha_to_rej_once
-    impossible_refine = impossible & (~prefer_simulation)
+    impossible_refine = (impossible & (~prefer_simulation)) | (pointwise_target_alpha == 0)
     impossible_sim = impossible & prefer_simulation
 
     close_to_worst = np.zeros(g.n_tiles, dtype=bool)
@@ -258,32 +273,71 @@ for II in range(load_iter + 1, iter_max):
     which_refine = close_to_worst & (hob_theory_cost > target_grid_cost)
     which_refine |= impossible_refine
 
+    # concat_cvs = np.concatenate(
+    #     (
+    #         bootstrap_cvs[close_to_worst],
+    #         np.tile(bootstrap_min_cvs[None, :], (np.sum(close_to_worst), 1)),
+    #     ),
+    #     axis=-1,
+    # )
+    # concat_typeI_sum = batched_many_rej(
+    #     sim_sizes[close_to_worst],
+    #     (
+    #         concat_cvs,
+    #         g.theta_tiles[close_to_worst],
+    #         g.null_truth[close_to_worst],
+    #     ),
+    #     (unifs,),
+    #     unifs_order,
+    # )
+    # tile_bootstrap_typeI_sum = concat_typeI_sum[:, :(n_bootstrap + 1)]
+    # grid_bootstrap_typeI_sum = concat_typeI_sum[:, (n_bootstrap + 1):]
+
+    # typeI_bias = np.zeros(g.n_tiles)
+    # typeI_bias[close_to_worst] = (
+    #     grid_bootstrap_typeI_sum[:, 0] - grid_bootstrap_typeI_sum[:, 1:].mean(axis=1)
+    # ) / sim_sizes[close_to_worst]
+
+    # typeI_tile_var = np.zeros(g.n_tiles)
+    # typeI_tile_var[close_to_worst] = np.std(tile_bootstrap_typeI_sum, axis=-1) / sim_sizes[close_to_worst]
+    
+
     bootstrap_min_cvs = np.min(bootstrap_cvs, axis=0)
     cv_std = bootstrap_min_cvs.std()
-    bootstrap_typeI_sum = batched_many_rej(
-        sim_sizes[close_to_worst],
-        (np.tile(bootstrap_min_cvs[None, :], (np.sum(close_to_worst), 1)),
-        g.theta_tiles[close_to_worst],
-        g.null_truth[close_to_worst],),
+    worst_idxs = np.arange(worst_tile, worst_tile + 1)
+    worst_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, 1)
+    worst_typeI_sum = worst_many_rej(
+        sim_sizes[worst_idxs],
+        (
+            bootstrap_min_cvs[None, :],
+            g.theta_tiles[worst_idxs],
+            g.null_truth[worst_idxs],
+        ),
         (unifs,),
-        unifs_order
+        unifs_order,
     )
-    typeI_std = np.zeros(g.n_tiles)
-    typeI_std[close_to_worst] = (bootstrap_typeI_sum / sim_sizes[close_to_worst, None]).std(axis=1)
-    # alternative: 
-    # close_to_worst = (bootstrap_cvs[:,0] <= overall_cv + max(adaparam, cv_std))
+    bias = (worst_typeI_sum[0,0] - worst_typeI_sum[0,1:1+n_bootstrap].mean()) / sim_sizes[worst_tile]
+    
 
-    which_moresims = close_to_worst & (typeI_std > target_sim_cost)
+    # alternative:
+
+    which_moresims = np.zeros(g.n_tiles, dtype=bool)
+    # dangerous = np.any(bootstrap_cvs[:, 1:1+n_bootstrap] < overall_cv, axis=-1)
+    tilewise_bootstrap_min_cv = np.min(bootstrap_cvs[:, 1+n_bootstrap:], axis=-1)
+    dangerous = np.argsort(tilewise_bootstrap_min_cv)[:ada_step_size]
+    which_moresims[dangerous] = bias > target_sim_cost
+    # close_to_worst = (bootstrap_cvs[:,0] <= overall_cv + max(adaparam, cv_std))
+    # which_moresims = close_to_worst & (typeI_tile_var > target_sim_cost)
     which_moresims |= impossible_sim
     which_moresims &= ~which_refine
-
+    which_moresims &= (sim_sizes < max_sim_size)
 
     report = dict(
         II=II,
-        overall_cv=overall_cv,
-        cv_std=cv_std,
+        overall_cv=f"{overall_cv:.4f}",
+        cv_std=f"{cv_std:.4f}",
         grid_cost=f"{hob_theory_cost[worst_tile]:.4f}",
-        sim_cost=f"{typeI_std[worst_tile]:.4f}",
+        bias=f"{bias:.4f}",
         n_tiles=g.n_tiles,
         n_refine=np.sum(which_refine),
         n_refine_impossible=np.sum(impossible_refine),
@@ -292,8 +346,11 @@ for II in range(load_iter + 1, iter_max):
         # moresims_dist=np.unique(sim_multiplier, return_counts=True)
     )
     rprint(report)
+    print("analysis took", time.time() - start)
+    start = time.time()
 
     if (np.sum(which_refine) > 0 or np.sum(which_moresims) > 0) and II != iter_max - 1:
+
         # unnecessarily complicated:
         # impossible_sim_multiplier = 2 ** np.maximum(0, np.ceil(np.log2((sims_required_to_rej_once / sim_sizes))).astype(int))
         # sim_multiplier = np.where(impossible_sim, impossible_sim_multiplier, 2)
@@ -316,13 +373,18 @@ for II in range(load_iter + 1, iter_max):
         old_g = g
         g = grid.concat_grids(unrefined_grid, new_grid)
 
-        sim_sizes = np.concatenate([sim_sizes[keep_tile_idxs], np.full(new_grid.n_tiles, init_nsims)])
+        sim_sizes = np.concatenate(
+            [sim_sizes[keep_tile_idxs], np.full(new_grid.n_tiles, init_nsims)]
+        )
         todo = np.concatenate(
             [todo[keep_tile_idxs], np.ones(new_grid.n_tiles, dtype=bool)]
         )
         bootstrap_cvs = np.concatenate(
-            [bootstrap_cvs[keep_tile_idxs], np.zeros((new_grid.n_tiles, n_bootstrap + 1), dtype=float)],
-            axis=0
+            [
+                bootstrap_cvs[keep_tile_idxs],
+                np.zeros((new_grid.n_tiles, 1 + 2 * n_bootstrap), dtype=float),
+            ],
+            axis=0,
         )
         pointwise_target_alpha = np.concatenate(
             [
@@ -330,13 +392,29 @@ for II in range(load_iter + 1, iter_max):
                 np.empty(new_grid.n_tiles, dtype=float),
             ]
         )
+        print("refinement took", time.time() - start)
         continue
     print("done!")
     break
+
 ```
 
 ```python
-bootstrap_typeI_sum / sim_sizes[close_to_worst, None]
+savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
+with open(f"{name}/{II}.pkl", "wb") as f:
+    pickle.dump(savedata, f)
+```
+
+```python
+dangerous = np.any(bootstrap_cvs[:, 1:] < overall_cv, axis=-1)
+```
+
+```python
+
+```
+
+```python
+
 ```
 
 ```python
