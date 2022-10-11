@@ -137,7 +137,7 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 
 **Stopping and restarting an EC2 dev instance used by Dev Containers without terminating the instance**
 
-- Terminate the instance using the AWS CLI or the Console
+- Stop the instance using the AWS CLI or the Console
 - Restart the instance using the AWS CLI or the Console
 - `terraform apply` to update the terraform outputs (the public ipv4 DNS url will have changed)
 - you might need to start docker... `./connect.sh` then `sudo systemctl start docker`. We could integrate this step into `./setup_remotedev.sh`.
