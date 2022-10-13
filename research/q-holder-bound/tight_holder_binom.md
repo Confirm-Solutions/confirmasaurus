@@ -36,16 +36,6 @@ and $p(\theta)$ is the sigmoid function.
 For a fixed critical threshold $t^*$, we reject if $X > t^*$.
 
 
-\begin{align*}
-A(\theta) &:= n\log(1 + e^{\theta})\\
-A(\theta_0 + qv) - A(\theta_0)
-&:=
-n\left(\log(1 + e^{\theta_0+qv}) - \log(1 + e^{\theta_0})\right)
-\\&\leq
-n q|v|
-\end{align*}
-
-
 ## Taylor Bound
 
 ```python
@@ -104,9 +94,6 @@ def holder_bound(f0, n_arm_samples, theta_0, vs, hp, hc='opt'):
 ```python
 def log_partition(t, n):
     return n * jnp.log(1 + jnp.exp(t))
-
-def log_partition_cp(t, n):
-    return n * cp.logistic(t)
 ```
 
 ```python
@@ -126,10 +113,9 @@ def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
     elif q == 'inf' or (isinstance(q, float) and np.isinf(q)): 
         return None, f0 * np.exp(n*vs - log_partition(theta_0 + vs, n) + log_partition(theta_0, n))
     elif q == 'opt':
-        a = -np.log(f0)
         solver = binomial.ForwardQCPSolver(n, qcp_convg_tol=1e-4)
         q_solver = jax.jit(jax.vmap(solver.solve, in_axes=(None, 0, None)))
-        qs = q_solver(theta_0, vs, a)
+        qs = q_solver(theta_0, vs, f0)
         bounds_f = jax.vmap(binomial.q_holder_bound_fwd, in_axes=(0, None, None, 0, None))
         bounds = bounds_f(qs, n, theta_0, vs, f0)
         return qs, bounds
@@ -141,7 +127,7 @@ def exp_holder_impr_bound(f0, n, theta_0, vs, q = 'inf'):
 
 ```python
 n = 350
-theta_0 = -0.1
+theta_0 = -0.5
 theta_boundary = 0
 v_max = theta_boundary - theta_0
 n_steps = 100
@@ -200,13 +186,13 @@ qs = run(
 
 ```python
 solver = binomial.ForwardQCPSolver(n)
-q_opt = solver.solve(theta_0, vs[-1], -np.log(f0))
+q_opt = solver.solve(theta_0, vs[-1], f0)
 qs_plt = np.linspace(1.00001, 100, 1000)
-objs = [solver.objective(q, theta_0, vs[-1], -np.log(f0)) for q in qs_plt]
+objs = [solver.objective(q, theta_0, vs[-1], f0) for q in qs_plt]
 plt.plot(qs_plt, objs)
-plt.plot(q_opt, solver.objective(q_opt, theta_0, vs[-1], -np.log(f0)), 'r.')
+plt.plot(q_opt, solver.objective(q_opt, theta_0, vs[-1], f0), 'r.')
 ```
 
 ```python
-np.min(objs), solver.objective(q_opt, theta_0, vs[-1], -np.log(f0))
+np.min(objs), solver.objective(q_opt, theta_0, vs[-1], f0)
 ```

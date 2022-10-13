@@ -42,7 +42,7 @@ def opt_q_cp(n, theta_0, v, a):
     q = cp.Variable(pos=True)
     objective_fn = (
         (A_cp(n, theta_0 + (q+1) * v) - A0)
-        + a
+        - np.log(a)
     ) / (q + 1)
     objective = cp.Minimize(objective_fn)
     problem = cp.Problem(objective)
@@ -53,7 +53,7 @@ def opt_q_cp(n, theta_0, v, a):
 ```python
 theta_0 = jnp.array([-2., -1., 0.3])
 n = 350
-a = -np.log(0.025)
+f0 = 0.025
 v = 0.1 * jnp.array([0.4, 1, -1.32])
 ```
 
@@ -64,29 +64,29 @@ solve_jit = jax.jit(solver.solve)
 
 ```python
 %%time
-q_opt = solve_jit(theta_0, v, a)
+q_opt = solve_jit(theta_0, v, f0)
 ```
 
 ```python
 %%time
-q_opt_qcp_cvxpy = opt_q_cp(n, theta_0, v, a)
+q_opt_qcp_cvxpy = opt_q_cp(n, theta_0, v, f0)
 ```
 
 ```python
 qs = jnp.linspace(1.0001, 10, 100)
 phis = np.array([
-    solver.objective(q, theta_0, v, a) for q in qs
+    solver.objective(q, theta_0, v, f0) for q in qs
 ]) 
 plt.plot(qs, phis)
-plt.plot(q_opt, solver.objective(q_opt, theta_0, v, a), 'bo')
-plt.plot(q_opt_qcp_cvxpy, solver.objective(q_opt_qcp_cvxpy, theta_0, v, a), 'r^')
+plt.plot(q_opt, solver.objective(q_opt, theta_0, v, f0), 'bo')
+plt.plot(q_opt_qcp_cvxpy, solver.objective(q_opt_qcp_cvxpy, theta_0, v, f0), 'r^')
 ```
 
 ```python
 solver = binomial.ForwardQCPSolver(n)
 solve_vmap_jit = jax.jit(jax.vmap(solver.solve, in_axes=(0, 0, None)))
 
-def vectorize_run(key, m, d, a=-np.log(0.025), n=350):
+def vectorize_run(key, m, d, a=0.025, n=350):
     theta_0 = jax.random.normal(key, (m, d))
     _, key = jax.random.split(key)
     v = 0.001 * jax.random.normal(key, (m, d))
@@ -139,7 +139,7 @@ solve_bwd_jit = jax.jit(solver_bwd.solve)
 ```python
 solve_bwd_vmap_jit = jax.jit(jax.vmap(solver_bwd.solve, in_axes=(0, 0, None)))
 
-def vectorize_run_bwd(key, m, d, a=-np.log(0.025), n=350):
+def vectorize_run_bwd(key, m, d, a=0.025, n=350):
     theta_0 = jax.random.normal(key, (m, d))
     _, key = jax.random.split(key)
     v = 0.001 * jax.random.normal(key, (m, d))
@@ -162,7 +162,7 @@ plt.show()
 
 ```python
 %%time
-opt_q = solve_bwd_jit(theta_0, v, -np.log(alpha))
+opt_q = solve_bwd_jit(theta_0, v, alpha)
 ```
 
 ```python
@@ -195,7 +195,7 @@ alpha = 0.005
 ```python
 # Backward solve the implicit bound at theta_0
 solver_bwd = binomial.BackwardQCPSolver(n)
-opt_q_bwd = solver_bwd.solve(theta_0, v, -np.log(alpha))
+opt_q_bwd = solver_bwd.solve(theta_0, v, alpha)
 alpha_prime = binomial.q_holder_bound_bwd(
     opt_q_bwd, n, theta_0, v, alpha
 )
@@ -213,7 +213,6 @@ bound, alpha, alpha_prime
 n = 350
 theta_0 = -1.0
 vs = np.linspace(-1, 1, 100)
-f0 = 0.0001
 bound_vs_f = jax.vmap(binomial.q_holder_bound_fwd, in_axes=(None, None, None, 0, None))
 bound_vs = bound_vs_f(2, n, theta_0, vs, f0)
 ```

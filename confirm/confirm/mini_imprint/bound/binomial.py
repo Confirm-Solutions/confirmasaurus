@@ -370,7 +370,7 @@ class ForwardQCPSolver(BaseQCPSolver):
         minimize_q L(q)
         subject to q >= 1
     where
-        L(q) = (A(theta_0 + q * v) - A(theta_0) + a) / q
+        L(q) = (A(theta_0 + q * v) - A(theta_0) - np.log(a)) / q
         A(theta) = n * log(1 + e^theta) (elementwise)
     """
 
@@ -389,7 +389,7 @@ class ForwardQCPSolver(BaseQCPSolver):
         v:          displacement from pivot point.
         a:          constant shift.
         """
-        return (self.A(theta_0 + q * v) - self.A(theta_0) + a) / q
+        return (self.A(theta_0 + q * v) - self.A(theta_0) - jnp.log(a)) / q
 
     # ============================================================
     # Members for optimization routine.
@@ -501,7 +501,7 @@ class ForwardQCPSolver(BaseQCPSolver):
 
         # pre-compute some auxiliary quantities for reuse
         A0 = self.A(theta_0)
-        bound = A0 - a
+        bound = A0 + jnp.log(a)
 
         # theoretical bounds that contain the minimum value
         lower = self.A(theta_0 + v) - A0
@@ -543,8 +543,8 @@ class BackwardQCPSolver(BaseQCPSolver):
     where
         L(q) = (q / (q-1)) * [
             (A(theta_0 + q * v) - A(theta_0)) / q
-            - (A(theta_0 + v) - A(theta_0))]
-            + a
+            - (A(theta_0 + v) - A(theta_0))
+            - np.log(a)
         ]
         A(theta) = n * log(1 + e^theta) (elementwise)
     """
@@ -569,11 +569,11 @@ class BackwardQCPSolver(BaseQCPSolver):
             p = 1 / (1 - 1 / q)
             A0 = self.A(theta_0)
             slope_diff = (self.A(theta_0 + q * v) - A0) / q - (self.A(theta_0 + v) - A0)
-            return p * (slope_diff + a)
+            return p * (slope_diff - jnp.log(a))
 
         return jax.lax.cond(
             q <= 1,
-            lambda _: jnp.where(a <= 0, 0, jnp.inf),
+            lambda _: jnp.where(a >= 1, 0, jnp.inf),
             _eval,
             q,
         )
@@ -593,14 +593,14 @@ class BackwardQCPSolver(BaseQCPSolver):
         return (
             self.A(theta_0 + q * v)
             - A0
-            - q * (self.A(theta_0 + v) - A0 - a)
+            - q * (self.A(theta_0 + v) - A0 + jnp.log(a))
             - t * (q - 1)
         )
 
     def dphi_t(self, q, t, theta_0, v, a):
         return (
             jnp.sum(self.dA(theta_0 + q * v) * v)
-            - (self.A(theta_0 + v) - self.A(theta_0) - a)
+            - (self.A(theta_0 + v) - self.A(theta_0) + jnp.log(a))
             - t
         )
 
@@ -687,8 +687,8 @@ class BackwardQCPSolver(BaseQCPSolver):
         A0 = self.A(theta_0)
 
         # theoretical bounds that contain the minimum value
-        lower = a
-        upper = self.n * jnp.sum(jnp.maximum(v, 0)) - (self.A(theta_0 + v) - A0) + a
+        lower = -jnp.log(a)
+        upper = self.n * jnp.sum(jnp.maximum(v, 0)) - (self.A(theta_0 + v) - A0) + lower
 
         # initial optimal value
         # invariance: q achieves a value in [lower, upper].
@@ -774,7 +774,7 @@ def q_holder_bound_bwd(
 
     return jax.lax.cond(
         q <= 1,
-        lambda _: float(alpha == 1),
+        lambda _: float(alpha >= 1),
         _bound,
         q,
     )
