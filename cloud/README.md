@@ -73,6 +73,10 @@ We have some S3 Buckets. These contain various important data:
 - `imprint-dump` - each subfolder here should contain the output of a model run.
 - `aws-cloudtrail-logs-644171722153-2d03f9cb` - AWS access/management logs of everything we've done.
 
+Pushing data:
+- To push a folder of data to an S3 bucket: `aws s3 sync ./source_foldername s3://imprint-dump/target_foldername`
+- To push a single file to an S3 bucket: `aws s3 cp ./source_file s3://imprint-dump/target_file`
+
 ## Using VSCode Dev Containers
 
 I recommend this as the first point of attack for running on AWS. In the future, we should jobs as individual ephemeral docker containers on something like AWS Elastic Container Service, but this is a starting point. Install:
