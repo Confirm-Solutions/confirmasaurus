@@ -11,3 +11,7 @@ sudo yum install --disablerepo="*" --enablerepo="libnvidia-container" nvidia-con
 
 sudo service docker start
 sudo usermod -a -G docker ec2-user
+
+# set docker to start automatically on boot.
+sudo systemctl enable docker.service
+sudo systemctl enable containerd.service
