@@ -73,8 +73,8 @@ def test_holder_odi(d):
 
     np.random.seed(17)
     uniforms = np.random.uniform(size=(nsims, n_arm_samples, d))
-    typeI_sum = binomial.binomial_accumulator(lambda x, thresh: x[..., 0] >= thresh)(
-        thresh, theta_tiles, is_null_per_arm, uniforms
+    typeI_sum, _ = binomial.binomial_accumulator(lambda x: x[..., 0] >= thresh)(
+        theta_tiles, is_null_per_arm, uniforms
     )
 
     typeI_est, typeI_CI = binomial.zero_order_bound(typeI_sum, nsims, delta, 1.0)
