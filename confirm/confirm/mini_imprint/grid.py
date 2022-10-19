@@ -46,11 +46,14 @@ class Grid:
     def n_tiles(self):
         return self.null_truth.shape[0]
 
-    def vertices(self, idx):
-        gridpt_idx = self.grid_pt_idx[idx]
-        center = self.thetas[gridpt_idx]
-        radii = self.radii[gridpt_idx]
-        return center[None, :] + hypercube_vertices(self.d)[:, :] * radii
+    @property
+    def vertices(self):
+        center = self.thetas[self.grid_pt_idx]
+        radii = self.radii[self.grid_pt_idx]
+        return (
+            center[:, None, :]
+            + hypercube_vertices(self.d)[None, :, :] * radii[:, None, :]
+        )
 
     @property
     def n_grid_pts(self):
@@ -144,6 +147,7 @@ def plot_grid2d(g: Grid, null_hypos: List[HyperPlane] = [], dims=(0, 1)):
     vertices = g.vertices[..., dims]
 
     polys = []
+    vertices = g.vertices()
     for i in range(g.n_tiles):
         vs = vertices[i]
         vs = vs[~np.isnan(vs).any(axis=1)]
