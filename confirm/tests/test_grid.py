@@ -2,7 +2,6 @@ import time
 
 import numpy as np
 import pytest
-from numpy import nan
 
 import confirm.mini_imprint.grid as grid
 
@@ -25,43 +24,20 @@ def simple_grid():
 def test_cartesian_gridpts():
     theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [2, 2])
     g = grid.build_grid(theta, radii)
-    np.testing.assert_allclose(g.vertices[0], [[0, 0], [0, -1], [-1, 0], [-1, -1]])
-    np.testing.assert_allclose(g.vertices[1], [[1, 0], [1, -1], [0, 0], [0, -1]])
+    assert np.all(g.grid_pt_idx == [0, 1, 2, 3])
+    assert g.null_truth.shape[1] == 0
 
     null_hypos = [grid.HyperPlane(-np.identity(2)[i], -0.1) for i in range(2)]
     g = grid.build_grid(theta, radii, null_hypos)
-    np.testing.assert_allclose(g.vertices[0], [[0, 0], [0, -1], [-1, 0], [-1, -1]])
-    # np.testing.assert_allclose(g.vertices[1], [[1, 0], [1, -1], [0, 0], [0, -1]])
+    assert np.all(g.grid_pt_idx == [0, 1, 1, 2, 2, 3, 3, 3, 3])
 
 
-def test_edge_vecs():
-    edges = grid.get_edges(np.array([[1, 0]]), np.array([[1, 2]]))
-    correct = np.array([[[2, -2, 0, 4], [0, 2, 2, 0], [0, -2, 2, 0], [0, -2, 0, 4]]])
-    np.testing.assert_allclose(edges, correct)
-
-
-def test_tile_split(simple_grid):
+def test_tile_copy(simple_grid):
     g = simple_grid
     np.testing.assert_allclose(g.grid_pt_idx, [1, 2, 3, 3, 0, 0, 0, 0])
-    np.testing.assert_allclose(g.is_regular, [1, 1, 0, 0, 0, 0, 0, 0])
     np.testing.assert_allclose(
         g.null_truth,
         np.array([[0, 1], [1, 1], [1, 1], [0, 1], [1, 1], [1, 0], [0, 1], [0, 0]]),
-    )
-    np.testing.assert_allclose(
-        g.vertices,
-        np.array(
-            [
-                [[0.0, 1.0], [0.0, 0.0], [-1.0, 1.0], [-1.0, 0.0]],
-                [[1.0, 0.0], [1.0, -1.0], [0.0, 0.0], [0.0, -1.0]],
-                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [nan, nan]],
-                [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [nan, nan]],
-                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
-            ]
-        ),
     )
 
 
@@ -69,24 +45,9 @@ def test_tile_prune(simple_grid):
     g = simple_grid
     gp = grid.prune(g)
     np.testing.assert_allclose(gp.grid_pt_idx, [1, 2, 3, 3, 0, 0, 0])
-    np.testing.assert_allclose(gp.is_regular, [1, 1, 0, 0, 0, 0, 0])
     np.testing.assert_allclose(
         gp.null_truth,
         np.array([[0, 1], [1, 1], [1, 1], [0, 1], [1, 1], [1, 0], [0, 1]]),
-    )
-    np.testing.assert_allclose(
-        gp.vertices,
-        np.array(
-            [
-                [[0.0, 1.0], [0.0, 0.0], [-1.0, 1.0], [-1.0, 0.0]],
-                [[1.0, 0.0], [1.0, -1.0], [0.0, 0.0], [0.0, -1.0]],
-                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [nan, nan]],
-                [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [nan, nan]],
-                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [0.0, -1.0], [0.0, 0.0], [nan, nan]],
-                [[-1.0, -1.0], [-1.0, 0.0], [0.0, 0.0], [nan, nan]],
-            ]
-        ),
     )
 
 
@@ -106,10 +67,8 @@ def test_prune_is_regular():
     g = grid.build_grid(thetas, radii, hypos, should_prune=False)
     # np.testing.assert_allclose(g.thetas, np.array([[0.0, 0.0]]))
     np.testing.assert_allclose(g.grid_pt_idx, np.array([0, 0]))
-    np.testing.assert_allclose(g.is_regular, np.array([0, 0]))
     gp = grid.prune(g)
     np.testing.assert_allclose(gp.grid_pt_idx, np.array([0]))
-    np.testing.assert_allclose(gp.is_regular, np.array([0]))
 
 
 def test_prune_no_surfaces():
@@ -125,8 +84,6 @@ def test_prune_twice_invariance(simple_grid):
     gpp = grid.prune(gp)
     np.testing.assert_allclose(gp.thetas, gpp.thetas)
     np.testing.assert_allclose(gp.radii, gpp.radii)
-    np.testing.assert_allclose(gp.vertices, gpp.vertices)
-    np.testing.assert_allclose(gp.is_regular, gpp.is_regular)
     np.testing.assert_allclose(gp.null_truth, gpp.null_truth)
     np.testing.assert_allclose(gp.grid_pt_idx, gpp.grid_pt_idx)
 
@@ -140,11 +97,11 @@ def test_refine():
     g = grid.prune(grid.build_grid(theta, radii, null_hypos))
     refine_tiles = np.array([0, 3, 4, 5])
     refine_gridpts = g.grid_pt_idx[refine_tiles]
-    new_theta, new_radii, unrefined, keep_tiles = grid.refine_grid(g, refine_gridpts)
+    new_theta, new_radii, keep_tiles = grid.refine_grid(g, refine_gridpts)
     np.testing.assert_allclose(
         keep_tiles, np.array([1, 2, 7, 8, 9, 10, 11, 12, 13, 14, 15])
     )
-    np.testing.assert_allclose(g.vertices[keep_tiles], unrefined.vertices)
+    # np.testing.assert_allclose(g.grid_pt_idx[keep_tiles], unrefined.grid_pt_idx)
     np.testing.assert_allclose(new_radii, 0.25)
 
     pts_to_refine = np.array([[-2.5, -2.5], [-2.5, -0.5], [-2.5, 0.5], [-1.5, -2.5]])
