@@ -125,9 +125,9 @@ def bootstrap_tune_runner(
     for size, idx in get_sim_size_groups(sim_sizes):
         # TODO: fix hardcoded 2**10
         grid_batch_size = min(int(1e9 / n_arm_samples / size), 2**10)
-        # TODO: allow batch_all_concat to decide internally what batch size to
+        # TODO: allow batch to decide internally what batch size to
         # use.
-        f_batched = batch.batch_concat(
+        f_batched = batch.batch(
             bootstrap_tunev,
             grid_batch_size,
             in_axes=(None, 0, 0, 0, None, None, None),
@@ -160,7 +160,7 @@ def grouped_by_sim_size(lei_obj, f, max_grid_batch_size, n_out=None):
             # batch over the tile args and not the sim args.
             in_axes = [None] + [0] * len(tile_args) + [None] * len(sim_args) + [None]
 
-            f_batched = batch.batch_concat(f, grid_batch_size, in_axes=in_axes)
+            f_batched = batch.batch(f, grid_batch_size, in_axes=in_axes)
             res = f_batched(
                 lei_obj,
                 *[ta[idx] for ta in tile_args],
