@@ -1,5 +1,6 @@
 import os
 import pickle
+import warnings
 from dataclasses import dataclass
 
 import jax
@@ -52,7 +53,6 @@ We define concepts used in the code:
 @dataclass
 class Lewis45Spec:
     """
-    # TODO: use this more!
     The specification of the Lewis45 trial we are simulating.
 
     This class should not contain execution-related parameters.
@@ -103,7 +103,7 @@ class Lewis45Spec:
 class Lewis45:
     def __init__(
         self,
-        # TODO: replace with just spec
+        # TODO: replace with just spec?
         n_arms: int,
         n_stage_1: int,
         n_stage_2: int,
@@ -172,7 +172,6 @@ class Lewis45:
         )
 
         # sig2 for simulation
-        # TODO: should we pass this as a parameter to the relevant function?
         self.sig2_sim = 10 ** jnp.linspace(-6, 3, n_sig2_sims, dtype=self.dtype)
         self.dsig2_sim = jnp.diff(self.sig2_sim)
         self.custom_ops_sim = berry.optimized(self.sig2_sim, n_arms=self.n_arms).config(
@@ -233,10 +232,10 @@ class Lewis45:
         # cached table as correct. this is risky because the computational
         # parameters could've also changed. we should add those! it would be
         # nice to have a more general caching mechanism for lookup and
-        # interpolation tables.
+        # interpolation tables. This situation of needing to cache simulation
+        # intermediates seems quite common!
         if spec != self.spec:
-            # TODO: we should log or raise a warning when ignoring cached
-            # tables
+            warnings.warn("Ignoring cached tables due to spec mismatch.")
             return False
         self.pd_table, self.pr_best_pps_1_table, self.pps_2_table = tables
         return True

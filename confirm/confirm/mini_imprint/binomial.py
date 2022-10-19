@@ -210,6 +210,7 @@ def zero_order_bound(typeI_sum, sim_sizes, delta, delta_prop_0to1):
     # tensorflow_probability:
     # https://github.com/google/jax/issues/2399#issuecomment-1225990206
     # https://github.com/pyro-ppl/numpyro/blob/e28a3feaa4f95d76b361101f0c75dcb5add2365e/numpyro/distributions/util.py#L426
+    # Also, probably unnecessary since this is fast!
     d0u = scipy.stats.beta.ppf(d0u_factor, typeI_sum + 1, sim_sizes - typeI_sum) - d0
     # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
     # because there is no way to go higher than 1.0
