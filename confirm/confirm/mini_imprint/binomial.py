@@ -12,6 +12,9 @@ import sympy as sp
 
 def binomial_accumulator(rejection_fnc):
     """
+    NOTE: THIS IS DEPRECATED BECAUSE IT DOESN'T TAKE A CRITICAL VALUE AS A
+    PARAMETER.
+
     A simple re-implementation of accumulation. This is useful for distilling
     what is happening during accumulation down to a simple linear sequence of
     operations. Retaining this could be useful for tutorials or conceptual
@@ -32,7 +35,7 @@ def binomial_accumulator(rejection_fnc):
     # We wrap and return this function since rejection_fnc needs to be known at
     # jit time.
     @jax.jit
-    def fnc(cv, theta_tiles, is_null_per_arm, uniform_samples):
+    def fnc(theta_tiles, is_null_per_arm, uniform_samples):
         sim_size, n_arm_samples, n_arms = uniform_samples.shape
 
         # 1. Calculate the binomial count data.
@@ -52,7 +55,7 @@ def binomial_accumulator(rejection_fnc):
         y_flat = y.reshape((-1, n_arms))
         n_flat = jnp.full_like(y_flat, n_arm_samples)
         data = jnp.stack((y_flat, n_flat), axis=-1)
-        did_reject = rejection_fnc(data, cv).reshape(y.shape)
+        did_reject = rejection_fnc(data).reshape(y.shape)
 
         # 3. Determine type I family wise error rate.
         #  a. type I is only possible when the null hypothesis is true.
@@ -68,7 +71,14 @@ def binomial_accumulator(rejection_fnc):
         any_rejection = jnp.any(false_reject, axis=-1)
         typeI_sum = any_rejection.sum(axis=-1)
 
-        return typeI_sum
+        # 4. Calculate score. The score function is the primary component of the
+        #    gradient used in the bound:
+        #  a. for binomial, it's just: y - n * p
+        #  b. only summed when there is a rejection in the given simulation
+        score = y - n_arm_samples * p_tiles[:, None, :]
+        typeI_score = jnp.sum(any_rejection[:, :, None] * score, axis=1)
+
+        return typeI_sum, typeI_score
 
     return fnc
 

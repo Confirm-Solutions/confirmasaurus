@@ -68,7 +68,7 @@ def test_stage_1(lewis_small):
     early_exit_futility_expected = False
     data_expected = jnp.array([[0, 3], [0, 1], [2, 3]], dtype=int)
     non_dropped_idx_expected = jnp.array([False, True])
-    _, pps_expected = lewis_obj.get_pr_best_pps_1__(data_expected)
+    _, pps_expected = lewis_obj._get_pr_best_pps_1(data_expected)
     berns_start_expected = 3
 
     # test
@@ -80,21 +80,22 @@ def test_stage_1(lewis_small):
 
 
 def test_stage_2(lewis_small):
-    lewis_obj, _, _, berns, berns_order = lewis_small
+    lewis_obj, _, p, berns, berns_order = lewis_small
     # expected stage 1
     data = jnp.array([[1, 3], [0, 1], [2, 3]], dtype=int)
     best_arm = 2
     berns_start = 3
 
     # actual stage 2
-    rej, _ = lewis_obj.stage_2(data, best_arm, berns, berns_order, berns_start)
-
-    # test
-    assert jnp.array_equal(rej, False)
+    test_stat, best_arm, _ = lewis_obj.stage_2(
+        data, best_arm, berns, berns_order, berns_start, p
+    )
+    np.testing.assert_allclose(test_stat, 1.0)
+    assert best_arm == 2
 
 
 def test_inter_stage(lewis_small):
-    lewis_obj, unifs, p, berns, berns_order = lewis_small
-    null_truths = jnp.zeros(default_params["n_arms"] - 1, dtype=bool)
-    rej, _ = lewis_obj.simulate(p, null_truths, unifs, berns_order)
-    assert jnp.array_equal(rej, False)
+    lewis_obj, unifs, p, _, berns_order = lewis_small
+    test_stat, best_arm, _ = lewis_obj.simulate(p, unifs, berns_order)
+    np.testing.assert_allclose(test_stat, 2.0)
+    assert best_arm == 2

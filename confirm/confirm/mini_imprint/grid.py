@@ -524,7 +524,7 @@ def build_grid(
     g_sym.null_truth = np.empty((g_sym.n_tiles, 0), dtype=bool)
     g_sym.null_hypos = []
     g_out = intersect_grid(g_sym, null_hypos)
-    if prune:
+    if should_prune:
         return prune(g_out)
     else:
         return g_out

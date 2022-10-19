@@ -65,7 +65,7 @@ def test_pr_best_permute():
 
 def test_pps_permute():
     lewis_obj = lewis.Lewis45(**default_params)
-    lewis_obj.pd_table = lewis_obj.posterior_difference_table__(batch_size=int(2**16))
+    lewis_obj.pd_table = lewis_obj._posterior_difference_table(batch_size=int(2**16))
 
     n = default_params["n_stage_1"]
     key = jax.random.PRNGKey(10)

@@ -19,7 +19,7 @@ def simple_grid():
         grid.HyperPlane(normalize(np.array([1, -1])), 0),
         grid.HyperPlane(normalize(np.array([1, 1])), -1),
     ]
-    return grid.build_grid(thetas, radii, hypos)
+    return grid.build_grid(thetas, radii, hypos, should_prune=False)
 
 
 def test_cartesian_gridpts():
@@ -103,7 +103,7 @@ def test_prune_is_regular():
     thetas = np.array([[0.0, 0.0]])
     radii = np.full_like(thetas, 0.5)
     hypos = [grid.HyperPlane(normalize(np.array([1, 1])), 0)]
-    g = grid.build_grid(thetas, radii, hypos)
+    g = grid.build_grid(thetas, radii, hypos, should_prune=False)
     # np.testing.assert_allclose(g.thetas, np.array([[0.0, 0.0]]))
     np.testing.assert_allclose(g.grid_pt_idx, np.array([0, 0]))
     np.testing.assert_allclose(g.is_regular, np.array([0, 0]))
