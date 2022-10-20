@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.6 ('base')
     language: python
     name: python3
 ---
@@ -40,9 +40,9 @@ from rich import print as rprint
 
 ```python
 # Configuration used during simulation
-name = "4d_05"
+name = "4d_full"
 params = {
-    "n_arms": 3,
+    "n_arms": 4,
     "n_stage_1": 50,
     "n_stage_2": 100,
     "n_stage_1_interims": 2,
@@ -110,8 +110,8 @@ for i in range(n_arms - 2):
     n[i + 2] = -1
     symmetry.append(grid.HyperPlane(n, 0))
 
-theta_min = -0.50
-theta_max = 0.50
+theta_min = -1.0
+theta_max = 1.0
 init_grid_size = 8
 theta, radii = grid.cartesian_gridpts(
     np.full(n_arms, theta_min),
@@ -214,7 +214,7 @@ def invert_bound(alpha, theta_0, vertices, n):
     ))
 batched_invert_bound = batch.batch(
     jax.jit(jax.vmap(invert_bound, in_axes=(None, 0, 0, None)), static_argnums=(0, 3)),
-    grid_batch_size,
+    5*grid_batch_size,
     in_axes=(None, 0, 0, None),
 )
 ```
@@ -231,7 +231,7 @@ print(alpha0.shape)
 ada_step_size = 10 * grid_batch_size
 ada_min_step_size = grid_batch_size
 iter_max = 1000
-cost_per_sim = 500e-9
+cost_per_sim = np.inf
 for II in range(load_iter + 1, iter_max):
     if np.sum(todo) == 0:
         break
@@ -239,7 +239,7 @@ for II in range(load_iter + 1, iter_max):
     print(f"starting iteration {II} with {np.sum(todo)} tiles to process")
     if cost_per_sim is not None:
         predicted_time = np.sum(sim_sizes[todo] * cost_per_sim)
-        print(f"runtime prediction: {predicted_time:.2f} seconds")
+        print(f"runtime prediction: {predicted_time:.2f}")
         
     ########################################
     # Simulate any new or updated tiles. 
@@ -249,7 +249,7 @@ for II in range(load_iter + 1, iter_max):
     pointwise_target_alpha[todo] = batched_invert_bound(
         target_alpha, g.theta_tiles[todo], g.vertices[todo], n_arm_samples
     )[0]
-    print("inverting the bound took", time.time() - start)
+    print(f"inverting the bound took {time.time() - start:.2f}s")
     start = time.time()
 
     bootstrap_cvs_todo = lts.bootstrap_tune_runner(
@@ -264,12 +264,13 @@ for II in range(load_iter + 1, iter_max):
     )
     bootstrap_cvs[todo, 0] = bootstrap_cvs_todo[:, 0]
     bootstrap_cvs[todo, 1:-1] = bootstrap_cvs_todo[:, 1:1+nB_global]
-    bootstrap_cvs[todo, -1] = bootstrap_cvs_todo[:, 1+nB_global:].min(axis=1)
+    tilewise_bootstrap_min_cv = bootstrap_cvs_todo[:, 1+nB_global:].min(axis=1)
+    tilewise_bootstrap_mean_cv = bootstrap_cvs_todo[:, 1+nB_global:].mean(axis=1)
     worst_tile = np.argmin(bootstrap_cvs[:, 0])
     overall_cv = bootstrap_cvs[worst_tile, 0]
     cost_per_sim = (time.time() - start) / np.sum(sim_sizes[todo])
     todo[:] = False
-    print("tuning took", time.time() - start)
+    print(f"tuning took {time.time() - start:.2f}s")
     
 
     ########################################
@@ -281,7 +282,7 @@ for II in range(load_iter + 1, iter_max):
     if II % 10 == 0 or II <= load_iter + 5:
         with open(f"{name}/{II}.pkl", "wb") as f:
             pickle.dump(savedata, f)
-    print("checkpointing took", time.time() - start)
+    print(f"checkpointing took {time.time() - start:.2f}s")
     
 
     ########################################
@@ -329,25 +330,27 @@ for II in range(load_iter + 1, iter_max):
     # Criterion step 3: Refine tiles that are too large, deepen tiles that
     # cause too much bias.
     ########################################
-    which_moresims = np.zeros(g.n_tiles, dtype=bool)
+    which_deepen = np.zeros(g.n_tiles, dtype=bool)
     which_refine = np.zeros(g.n_tiles, dtype=bool)
-    tilewise_bootstrap_min_cv = bootstrap_cvs[:, -1]
-    hob_theory_cost = target_alpha - pointwise_target_alpha
+    alpha_cost = target_alpha - pointwise_target_alpha
     
-    if hob_theory_cost[worst_tile] > target_grid_cost or bias > target_sim_cost:
+    if alpha_cost[worst_tile] > target_grid_cost or bias > target_sim_cost:
         sorted_orig_cvs = np.argsort(bootstrap_cvs[:, 0])
-        sorted_bootstrap_cvs = np.argsort(tilewise_bootstrap_min_cv)
-        dangerous_bootstrap = sorted_bootstrap_cvs[:ada_step_size]
         dangerous_cv = sorted_orig_cvs[:ada_min_step_size]
+        which_refine[dangerous_cv] = (alpha_cost[dangerous_cv] > target_grid_cost)
 
-        which_refine[dangerous_bootstrap] = (hob_theory_cost[dangerous_bootstrap] > target_grid_cost)
-        which_refine[dangerous_cv] = (hob_theory_cost[dangerous_cv] > target_grid_cost)
+        sorted_bootstrap_idxs = np.argsort(tilewise_bootstrap_min_cv)
+        dangerous_bootstrap = sorted_bootstrap_idxs[:ada_step_size]
+        db_should_refine = alpha_cost[dangerous_bootstrap] > target_grid_cost
+        db_should_deepen = bias > target_sim_cost
+        deepen_likely_to_work = tilewise_bootstrap_mean_cv[dangerous_bootstrap] > overall_cv
+        which_refine[dangerous_bootstrap] = db_should_refine & (~deepen_likely_to_work)
+        which_deepen[dangerous_bootstrap] = db_should_deepen & deepen_likely_to_work
+
         which_refine |= impossible_refine
-
-        which_moresims[dangerous_bootstrap] = bias > target_sim_cost
-        which_moresims |= impossible_sim
-        which_moresims &= ~which_refine
-        which_moresims &= (sim_sizes < max_sim_size)
+        which_deepen |= impossible_sim
+        which_deepen &= ~which_refine
+        which_deepen &= (sim_sizes < max_sim_size)
 
     ########################################
     # Report current status 
@@ -356,27 +359,27 @@ for II in range(load_iter + 1, iter_max):
         II=II,
         overall_cv=f"{overall_cv:.4f}",
         cv_std=f"{cv_std:.4f}",
-        grid_cost=f"{hob_theory_cost[worst_tile]:.4f}",
+        grid_cost=f"{alpha_cost[worst_tile]:.4f}",
         bias=f"{bias:.4f}",
         n_tiles=g.n_tiles,
         n_refine=np.sum(which_refine),
         n_refine_impossible=np.sum(impossible_refine),
-        n_moresims=np.sum(which_moresims),
+        n_moresims=np.sum(which_deepen),
         n_moresims_impossible=np.sum(impossible_sim),
         # moresims_dist=np.unique(sim_multiplier, return_counts=True)
     )
     rprint(report)
-    print("analysis took", time.time() - start)
+    print(f"analysis took", time.time() - start)
     start = time.time()
 
     ########################################
     # Refine! 
     ########################################
 
-    if (np.sum(which_refine) > 0 or np.sum(which_moresims) > 0) and II != iter_max - 1:
+    if (np.sum(which_refine) > 0 or np.sum(which_deepen) > 0) and II != iter_max - 1:
 
-        sim_sizes[which_moresims] = sim_sizes[which_moresims] * 2
-        todo[which_moresims] = True
+        sim_sizes[which_deepen] = sim_sizes[which_deepen] * 2
+        todo[which_deepen] = True
 
         refine_tile_idxs = np.where(which_refine)[0]
         refine_gridpt_idxs = g.grid_pt_idx[refine_tile_idxs]
@@ -413,7 +416,7 @@ for II in range(load_iter + 1, iter_max):
                 np.empty(new_grid.n_tiles, dtype=float),
             ]
         )
-        print("refinement took", time.time() - start)
+        print(f"refinement took {time.time() - start:.2f}s")
         continue
     print("done!")
     savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
@@ -534,7 +537,7 @@ plt.show()
 ```
 
 ```python
-np.sum((sim_cvs <= adafrac * overall_cv) & (hob_theory_cost > target_grid_cost))
+np.sum((sim_cvs <= adafrac * overall_cv) & (alpha_cost > target_grid_cost))
 ```
 
 ```python
