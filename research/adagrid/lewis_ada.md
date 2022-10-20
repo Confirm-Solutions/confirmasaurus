@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.6 ('base')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -40,9 +40,9 @@ from rich import print as rprint
 
 ```python
 # Configuration used during simulation
-name = "4d"
+name = "3d"
 params = {
-    "n_arms": 4,
+    "n_arms": 3,
     "n_stage_1": 50,
     "n_stage_2": 100,
     "n_stage_1_interims": 2,
@@ -202,6 +202,30 @@ else:
     # hob_upper = hob_upper[keep] if hob_upper is not None else None
 ```
 
+```python
+import confirm.mini_imprint.bound.binomial as ehbound
+bwd_solver = ehbound.BackwardQCPSolver(n=n_arm_samples)
+def invert_bound(alpha, theta_0, vertices, n):
+    v = vertices - theta_0
+    q_opt = jax.vmap(bwd_solver.solve, in_axes=(None, 0, None))(
+        theta_0, v, alpha
+    )
+    return jnp.min(jax.vmap(ehbound.q_holder_bound_bwd, in_axes=(0, None, None, 0, None))(
+        q_opt, n, theta_0, v, alpha
+    ))
+batched_invert_bound = batch.batch(
+    jax.jit(jax.vmap(invert_bound, in_axes=(None, 0, 0, None)), static_argnums=(0, 3)),
+    grid_batch_size,
+    in_axes=(None, 0, 0, None),
+)
+```
+
+```python
+%%time
+alpha0 = batched_invert_bound(0.025, g.theta_tiles, g.vertices, n_arm_samples)
+print(alpha0.shape)
+```
+
 ## The big run
 
 ```python
@@ -224,7 +248,7 @@ for II in range(load_iter + 1, iter_max):
 
     start = time.time()
     pointwise_target_alpha[todo] = batched_invert_bound(
-        target_alpha, g.theta_tiles[todo], g.vertices[todo], n_arm_samples, holderq
+        target_alpha, g.theta_tiles[todo], g.vertices[todo], n_arm_samples
     )[0]
     print("inverting the bound took", time.time() - start)
     start = time.time()
@@ -351,7 +375,7 @@ for II in range(load_iter + 1, iter_max):
 
         refine_tile_idxs = np.where(which_refine)[0]
         refine_gridpt_idxs = g.grid_pt_idx[refine_tile_idxs]
-        new_thetas, new_radii, unrefined_grid, keep_tile_idxs = grid.refine_grid(
+        new_thetas, new_radii, keep_tile_idxs = grid.refine_grid(
             g, refine_gridpt_idxs
         )
         new_grid = grid.build_grid(
@@ -363,7 +387,7 @@ for II in range(load_iter + 1, iter_max):
         )
 
         old_g = g
-        g = grid.concat_grids(unrefined_grid, new_grid)
+        g = grid.concat_grids(grid.index_grid(old_g, keep_tile_idxs), new_grid)
 
         sim_sizes = np.concatenate(
             [sim_sizes[keep_tile_idxs], np.full(new_grid.n_tiles, init_nsims)]
@@ -817,4 +841,34 @@ plt.hist(np.sqrt(bootstrap_cv_rej.var(axis=1)) / K)
     # typeI_tile_var = np.zeros(g.n_tiles)
     # typeI_tile_var[close_to_worst] = np.std(tile_bootstrap_typeI_sum, axis=-1) / sim_sizes[close_to_worst]
     
+```
+
+```python
+theta_0 = np.array([0.5, 0.4, -0.9])      # sim point
+radius = 0.05
+vertices = theta_0 + grid.hypercube_vertices(3) * radius
+v = vertices - theta_0
+f0 = 0.025
+bwd_solver = ehbound.BackwardQCPSolver(n=n_arm_samples)
+q_opt = jax.vmap(bwd_solver.solve, in_axes=(None, 0, None))(theta_0, v, f0)
+ehb = np.min(jax.vmap(ehbound.q_holder_bound_bwd, in_axes=(0, None, None, 0, None))(q_opt, n_arm_samples, theta_0, v, f0))
+
+hob = batched_invert_bound(
+    f0,
+    theta_0[None],
+    vertices[None],
+    n_arm_samples,
+    14
+)[0]
+
+hob[0], float(ehb)
+```
+
+```python
+theta_0 = np.array([-1.0, -1.0, -1.0])      # sim point
+v = 0.1 * np.ones(theta_0.shape[0])     # displacement
+f0 = 0.01                               # Type I Error at theta_0
+fwd_solver = ehbound.ForwardQCPSolver(n=n_arm_samples)
+q_opt = fwd_solver.solve(theta_0=theta_0, v=v, a=f0) # optimal q
+ehbound.q_holder_bound_fwd(q_opt, n_arm_samples, theta_0, v, f0)
 ```
