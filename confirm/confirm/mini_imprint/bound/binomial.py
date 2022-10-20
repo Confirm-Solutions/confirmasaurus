@@ -9,12 +9,36 @@ def logistic(t):
     return jnp.maximum(t, 0) + jnp.log(1 + jnp.exp(-jnp.abs(t)))
 
 
+def logistic_secant(t, v, q, b):
+    """
+    Numerically stable implementation of the secant of logistic defined by:
+        (logistic(t + q * v) - logistic(b)) / q
+    defined for all t, v in R and q > 0.
+    It is only numerically stable if t, b are not too large in magnitude
+    and q is sufficiently away from 0.
+    """
+    t_div_q = t / q
+    ls_1 = jnp.maximum(t_div_q + v, 0) - jnp.maximum(b, 0) / q
+    ls_2 = jnp.log(1 + jnp.exp(-jnp.abs(t + q * v)))
+    ls_2 = ls_2 - jnp.log(1 + jnp.exp(-jnp.abs(b)))
+    ls_2 = ls_2 / q
+    return ls_1 + ls_2
+
+
 def A(n, t):
     """
     Log-partition function of a Bernoulli family with d-arms
     where arm i has n Bernoullis with logit t_i.
     """
     return n * jnp.sum(logistic(t))
+
+
+def A_secant(n, t, v, q, b):
+    """
+    Numerically stable implementation of the secant of A:
+        (A(t + q * v) - A(b)) / q
+    """
+    return n * jnp.sum(logistic_secant(t, v, q, b))
 
 
 def dA(n, t):
@@ -389,7 +413,7 @@ class ForwardQCPSolver(BaseQCPSolver):
         v:          displacement from pivot point.
         a:          constant shift.
         """
-        return (self.A(theta_0 + q * v) - self.A(theta_0) - jnp.log(a)) / q
+        return self.A_secant(theta_0, v, q, theta_0) - jnp.log(a) / q
 
     # ============================================================
     # Members for optimization routine.
@@ -397,6 +421,9 @@ class ForwardQCPSolver(BaseQCPSolver):
 
     def A(self, t):
         return A(self.n, t)
+
+    def A_secant(self, t, v, q, b):
+        return A_secant(self.n, t, v, q, b)
 
     def dA(self, t):
         return dA(self.n, t)
@@ -567,8 +594,8 @@ class BackwardQCPSolver(BaseQCPSolver):
 
         def _eval(q):
             p = 1 / (1 - 1 / q)
-            A0 = self.A(theta_0)
-            slope_diff = (self.A(theta_0 + q * v) - A0) / q - (self.A(theta_0 + v) - A0)
+            slope_diff = self.A_secant(theta_0, v, q, theta_0)
+            slope_diff = slope_diff - self.A_secant(theta_0, v, 1, theta_0)
             return p * (slope_diff - jnp.log(a))
 
         return jax.lax.cond(
@@ -585,16 +612,19 @@ class BackwardQCPSolver(BaseQCPSolver):
     def A(self, t):
         return A(self.n, t)
 
+    def A_secant(self, t, v, q, b):
+        return A_secant(self.n, t, v, q, b)
+
     def dA(self, t):
         return dA(self.n, t)
 
     def phi_t(self, q, t, theta_0, v, a):
+        p_inv = 1 - 1 / q
         A0 = self.A(theta_0)
-        return (
-            self.A(theta_0 + q * v)
-            - A0
-            - q * (self.A(theta_0 + v) - A0 + jnp.log(a))
-            - t * (q - 1)
+        return q * (
+            self.A_secant(theta_0, v, q, theta_0)
+            - (self.A(theta_0 + v) - A0 + jnp.log(a))
+            - t * p_inv
         )
 
     def dphi_t(self, q, t, theta_0, v, a):
@@ -738,8 +768,8 @@ def q_holder_bound_fwd(
     v:          d-array displacement vector.
     f0:         probability value at theta_0.
     """
-    A0 = A(n, theta_0)
-    expo = (A(n, theta_0 + q * v) - A0) / q - (A(n, theta_0 + v) - A0)
+    expo = A_secant(n, theta_0, v, q, theta_0)
+    expo = expo - A_secant(n, theta_0, v, 1, theta_0)
     return f0 ** (1 - 1 / q) * jnp.exp(expo)
 
 
@@ -767,14 +797,14 @@ def q_holder_bound_bwd(
     """
 
     def _bound(q):
-        p = q / (q - 1)
-        A0 = A(n, theta_0)
-        slope_diff = (A(n, theta_0 + q * v) - A0) / q - (A(n, theta_0 + v) - A0)
+        p = 1 / (1 - 1 / q)
+        slope_diff = A_secant(n, theta_0, v, q, theta_0)
+        slope_diff = slope_diff - A_secant(n, theta_0, v, 1, theta_0)
         return (alpha * jnp.exp(-slope_diff)) ** p
 
     return jax.lax.cond(
         q <= 1,
-        lambda _: float(alpha >= 1),
+        lambda _: (alpha >= 1) + 0.0,
         _bound,
         q,
     )

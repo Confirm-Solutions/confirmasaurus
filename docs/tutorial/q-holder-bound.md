@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.6 ('confirm')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -35,6 +35,8 @@ and requires non-trivial implementation to compute these bounds.
 import jax
 import jax.numpy as jnp
 import numpy as np
+import scipy
+from functools import partial
 import matplotlib.pyplot as plt
 import pyimprint.grid as pygrid
 import confirm.mini_imprint.grid as grid
@@ -159,18 +161,35 @@ Assume that we have access to the Type I Error values at each of the `thetas`.
 ```python
 gr = pygrid.make_cartesian_grid_range(
     size=100, 
-    lower=-np.ones(theta_0.shape[0]), 
-    upper=np.ones(theta_0.shape[0]), 
+    lower=-np.ones(2), 
+    upper=np.ones(2), 
     grid_sim_size=0, # dummy for now
 )
 thetas = gr.thetas().T
+subset = thetas[:, 0] >= thetas[:, 1]
+thetas = thetas[subset]
 radii = gr.radii().T
-f0s = np.full(thetas.shape[0], 0.025) # dummy values
+radii = radii[subset]
+
+# dummy function to output TIE of a simple test.
+def simple_TIE(n, theta, alpha):
+    prob = scipy.special.expit(theta)
+    var = np.sum(n * prob * (1 - prob), axis=-1)
+    mean = n * (prob[:, 1] - prob[:, 0]) / np.sqrt(var)
+    z_crit = scipy.stats.norm.isf(alpha)
+    return scipy.stats.norm.sf(z_crit - mean)
+
+f0s = simple_TIE(n, thetas, 0.025) 
+```
+
+```python
+sc = plt.scatter(thetas[:, 0], thetas[:, 1], c=f0s, marker='.')
+plt.colorbar(sc)
 ```
 
 ```python
 hypercube = grid.hypercube_vertices(
-    theta_0.shape[0],
+    thetas.shape[1],
 )
 make_vertices = jax.vmap(
     lambda r: r * hypercube,
@@ -192,4 +211,104 @@ q_holder_bound_fwd_tile_jvmap = jax.jit(jax.vmap(
 bounds = q_holder_bound_fwd_tile_jvmap(
     n, thetas, vertices, f0s,
 )
+```
+
+```python
+sc = plt.scatter(thetas[:,0], thetas[:,1], c=bounds, marker='.')
+plt.colorbar(sc)
+```
+
+## Tuning Step 
+
+
+In the tuning step, we invert the q-Holder bound and optimize a different objective.
+The inversion gives us a bound on the TIE at `theta_0` in order to achieve level alpha in a tile.
+Intuitively, we would like this inverted bound to be as large as possible (less conservative).
+Hence, the `q` parameter allows us to maximize the bound for any given `v`.
+
+```python
+bwd_solver = binomial.BackwardQCPSolver(n=n)
+```
+
+```python
+def _sanity_check_bwd_solver():
+    q_grid = np.linspace(1+1e-6, 4, 1000)
+    bound_vmap = jax.vmap(binomial.q_holder_bound_bwd, in_axes=(0, None, None, None, None))
+    bounds = bound_vmap(q_grid, n, theta_0, v, f0)
+    q_opt = bwd_solver.solve(theta_0, v, f0)
+    opt_bound = binomial.q_holder_bound_bwd(q_opt, n, theta_0, v, f0)
+    plt.plot(q_grid, bounds, '--')
+    plt.plot(q_opt, opt_bound, 'r.')
+_sanity_check_bwd_solver()
+```
+
+Similar to the validation step, we will extend the optimization routine for the whole tile.
+
+```python
+def q_holder_bound_bwd_tile(n, theta_0, vs, f0, bwd_solver):
+    # vectorize bwd_solver over v
+    bwd_solver_vmap_v = jax.vmap(
+        bwd_solver.solve,
+        in_axes=(None, 0, None),
+    )
+    q_opts = bwd_solver_vmap_v(theta_0, vs, f0)
+    
+    # compute bounds over q_opt, v
+    bound_vmap = jax.vmap(
+        binomial.q_holder_bound_bwd,
+        in_axes=(0, None, None, 0, None),
+    )
+    bounds = bound_vmap(
+        q_opts, n, theta_0, vs, f0,
+    )
+    
+    # find the minimax of the bounds at corners
+    i_max = jnp.argmin(bounds)
+    return vs[i_max], q_opts[i_max], bounds[i_max]
+```
+
+```python
+def invert_bound(alpha, theta_0, vertices, n):
+    v = vertices - theta_0
+    q_opt = jax.vmap(bwd_solver.solve, in_axes=(None, 0, None))(
+        theta_0, v, alpha
+    )
+    return jnp.min(jax.vmap(binomial.q_holder_bound_bwd, in_axes=(0, None, None, 0, None))(
+        q_opt, n, theta_0, v, alpha
+    ))
+```
+
+```python
+q_holder_bound_bwd_tile(
+    n, theta_0, vs, f0, bwd_solver
+)
+```
+
+### Main Workflow
+
+
+The main workflow is similar to that of validation step.
+For each tile (and its corresponding simulation point),
+we would like to optimize for $q$ based on the worse corner
+of the backward bound.
+
+The following is an example of a workflow.
+We continue with the setup as in validation step.
+
+```python
+q_holder_bound_bwd_tile_jvmap = jax.jit(jax.vmap(
+    lambda n, t, v, f0: q_holder_bound_bwd_tile(n, t, v, f0, bwd_solver)[-1],
+    in_axes=(None, 0, 0, 0),
+))
+```
+
+```python
+bounds_bwd = q_holder_bound_bwd_tile_jvmap(
+    n, thetas, vertices, f0s,
+)
+```
+
+```python
+sc = plt.scatter(thetas[:,0], thetas[:,1], c=bounds_bwd, marker='.')
+plt.colorbar(sc)
 ```
