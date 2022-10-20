@@ -40,7 +40,7 @@ from rich import print as rprint
 
 ```python
 # Configuration used during simulation
-name = "4d"
+name = "4d_05"
 params = {
     "n_arms": 4,
     "n_stage_1": 50,
@@ -110,8 +110,8 @@ for i in range(n_arms - 2):
     n[i + 2] = -1
     symmetry.append(grid.HyperPlane(n, 0))
 
-theta_min = -0.25
-theta_max = 0.25
+theta_min = -0.50
+theta_max = 0.50
 init_grid_size = 8
 theta, radii = grid.cartesian_gridpts(
     np.full(n_arms, theta_min),
@@ -138,7 +138,7 @@ key1, key2, key3 = jax.random.split(src_key, 3)
 unifs = jax.random.uniform(key=key1, shape=(max_sim_size,) + lei_obj.unifs_shape())
 unifs_order = np.arange(0, unifs.shape[1])
 nB_global = 10
-nB_tile = 100
+nB_tile = 20
 bootstrap_idxs = {
     K: jnp.concatenate((
         jnp.arange(K)[None, :],
@@ -160,7 +160,6 @@ batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
 
 ```python
 load_iter = 'latest'
-load_iter = 0
 if load_iter == 'latest':
     # find the file with the largest checkpoint index: name/###.pkl 
     available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
@@ -205,8 +204,8 @@ else:
 ## The big run
 
 ```python
-# adaparam = 0.01
 ada_step_size = 10 * grid_batch_size
+ada_min_step_size = grid_batch_size
 iter_max = 1000
 cost_per_sim = 500e-9
 for II in range(load_iter + 1, iter_max):
@@ -244,7 +243,7 @@ for II in range(load_iter + 1, iter_max):
     bootstrap_cvs[todo, -1] = bootstrap_cvs_todo[:, 1+nB_global:].min(axis=1)
     worst_tile = np.argmin(bootstrap_cvs[:, 0])
     overall_cv = bootstrap_cvs[worst_tile, 0]
-    cost_per_sim = min((time.time() - start) / np.sum(sim_sizes[todo]), 500e-9)
+    cost_per_sim = (time.time() - start) / np.sum(sim_sizes[todo])
     todo[:] = False
     print("tuning took", time.time() - start)
     
@@ -309,16 +308,22 @@ for II in range(load_iter + 1, iter_max):
     which_moresims = np.zeros(g.n_tiles, dtype=bool)
     which_refine = np.zeros(g.n_tiles, dtype=bool)
     tilewise_bootstrap_min_cv = bootstrap_cvs[:, -1]
-    dangerous = np.argsort(tilewise_bootstrap_min_cv)[:ada_step_size]
-    
     hob_theory_cost = target_alpha - pointwise_target_alpha
-    which_refine[dangerous] = (hob_theory_cost[dangerous] > target_grid_cost)
-    which_refine |= impossible_refine
     
-    which_moresims[dangerous] = bias > target_sim_cost
-    which_moresims |= impossible_sim
-    which_moresims &= ~which_refine
-    which_moresims &= (sim_sizes < max_sim_size)
+    if hob_theory_cost[worst_tile] > target_grid_cost or bias > target_sim_cost:
+        sorted_orig_cvs = np.argsort(bootstrap_cvs[:, 0])
+        sorted_bootstrap_cvs = np.argsort(tilewise_bootstrap_min_cv)
+        dangerous_bootstrap = sorted_bootstrap_cvs[:ada_step_size]
+        dangerous_cv = sorted_orig_cvs[:ada_min_step_size]
+
+        which_refine[dangerous_bootstrap] = (hob_theory_cost[dangerous_bootstrap] > target_grid_cost)
+        which_refine[dangerous_cv] = (hob_theory_cost[dangerous_cv] > target_grid_cost)
+        which_refine |= impossible_refine
+
+        which_moresims[dangerous_bootstrap] = bias > target_sim_cost
+        which_moresims |= impossible_sim
+        which_moresims &= ~which_refine
+        which_moresims &= (sim_sizes < max_sim_size)
 
     ########################################
     # Report current status 
@@ -387,6 +392,9 @@ for II in range(load_iter + 1, iter_max):
         print("refinement took", time.time() - start)
         continue
     print("done!")
+    savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
+    with open(f"{name}/{II}.pkl", "wb") as f:
+        pickle.dump(savedata, f)
     break
 
 ```
