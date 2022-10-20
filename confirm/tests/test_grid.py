@@ -23,12 +23,12 @@ def simple_grid():
 
 def test_cartesian_gridpts():
     theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [2, 2])
-    g = grid.build_grid(theta, radii)
+    g = grid.build_grid(theta, radii, should_prune=False)
     assert np.all(g.grid_pt_idx == [0, 1, 2, 3])
     assert g.null_truth.shape[1] == 0
 
     null_hypos = [grid.HyperPlane(-np.identity(2)[i], -0.1) for i in range(2)]
-    g = grid.build_grid(theta, radii, null_hypos)
+    g = grid.build_grid(theta, radii, null_hypos, should_prune=False)
     assert np.all(g.grid_pt_idx == [0, 1, 1, 2, 2, 3, 3, 3, 3])
 
 

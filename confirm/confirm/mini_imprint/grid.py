@@ -268,12 +268,9 @@ def intersect_grid(g_in: Grid, null_hypos: List[HyperPlane], jit=False):
         return g_ignore
 
     for iH, H in enumerate(null_hypos):
-        if iH == 0:
-            vertices = intersect_vertices
-        else:
-            vertices = g.thetas[g.grid_pt_idx, None, :] + (
-                unit_vs[None, :, :] * g.radii[g.grid_pt_idx, None, :]
-            )
+        vertices = g.thetas[g.grid_pt_idx, None, :] + (
+            unit_vs[None, :, :] * g.radii[g.grid_pt_idx, None, :]
+        )
 
         ########################################
         # Step 3. Find any intersections for this null hypothesis.
@@ -371,7 +368,7 @@ def build_grid(
     grid_pt_idx = np.arange(n_grid_pts)
     null_truth = np.full((n_grid_pts, 0), -1)
 
-    g = Grid(thetas, radii, tile_vs, is_regular, null_truth, grid_pt_idx)
+    g = Grid(thetas, radii, null_truth, grid_pt_idx)
     g_sym = prune(intersect_grid(g, symmetry_planes), hard=True)
     g_sym.null_truth = np.empty((g_sym.n_tiles, 0), dtype=bool)
     g_sym.null_hypos = []
@@ -380,11 +377,6 @@ def build_grid(
         return prune(g_out)
     else:
         return g_out
-
-    # g = Grid(thetas, radii, null_truth, grid_pt_idx)
-    # if len(null_hypos) > 0:
-    #     g = intersect_grid(g, null_hypos)
-    # return g
 
 
 def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
