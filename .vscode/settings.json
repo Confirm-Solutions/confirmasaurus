@@ -122,5 +122,6 @@
   "autoDocstring.docstringFormat": "google-notypes",
   "r.bracketedPaste": true,
   "r.plot.useHttpgd": true,
-  "python.analysis.extraPaths": ["./outlaw", "./imprint/python"]
+  "python.analysis.extraPaths": ["./outlaw", "./imprint/python"],
+  "cmake.sourceDirectory": "${workspaceFolder}/imprint/imprint"
 }
