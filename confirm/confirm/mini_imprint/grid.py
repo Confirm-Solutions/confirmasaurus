@@ -46,10 +46,13 @@ class Grid:
     def n_tiles(self):
         return self.null_truth.shape[0]
 
-    @property
-    def vertices(self):
-        center = self.thetas[self.grid_pt_idx]
-        radii = self.radii[self.grid_pt_idx]
+    def vertices(self, idxs=None):
+        if idxs is None:
+            gpi = self.grid_pt_idx
+        else:
+            gpi = self.grid_pt_idx[idxs]
+        center = self.thetas[gpi]
+        radii = self.radii[gpi]
         return (
             center[:, None, :]
             + hypercube_vertices(self.d)[None, :, :] * radii[:, None, :]

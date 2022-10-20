@@ -31,7 +31,7 @@ import matplotlib.pyplot as plt
 from confirm.mini_imprint import grid
 from confirm.lewislib import grid as lewgrid
 from confirm.lewislib import lewis, batch
-from confirm.mini_imprint import binomial
+from confirm.mini_imprint import binomial, checkpoint
 
 import confirm.mini_imprint.lewis_drivers as lts
 
@@ -150,27 +150,43 @@ bootstrap_idxs = {
 
 batched_tune = lts.grouped_by_sim_size(lei_obj, lts.tunev, grid_batch_size)
 batched_rej = lts.grouped_by_sim_size(lei_obj, lts.rejv, grid_batch_size)
-batched_invert_bound = batch.batch(
-    lambda *args: (binomial.invert_bound(*args),),
-    grid_batch_size,
-    in_axes=(None, 0, 0, None, None),
-)
 batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
+
+import confirm.mini_imprint.bound.binomial as ehbound
+bwd_solver = ehbound.BackwardQCPSolver(n=n_arm_samples)
+def invert_bound(alpha, theta_0, vertices, n):
+    v = vertices - theta_0
+    # NOTE: OPTIMIZATION POTENTIAL: if we ever need faster EH bounds, then we
+    # can only run the optimizer at a single corner. The bound is still valid
+    # because we're just using a suboptimal q.
+
+    q_opt = jax.vmap(bwd_solver.solve, in_axes=(None, 0, None))(
+        theta_0, v, alpha
+    )
+    return jnp.min(jax.vmap(ehbound.q_holder_bound_bwd, in_axes=(0, None, None, 0, None))(
+        q_opt, n, theta_0, v, alpha
+    ))
+batched_invert_bound = batch.batch(
+    jax.jit(jax.vmap(invert_bound, in_axes=(None, 0, 0, None)), static_argnums=(0, 3)),
+    5*grid_batch_size,
+    in_axes=(None, 0, 0, None),
+)
 ```
 
 ```python
 load_iter = 'latest'
+load_iter = 4
 if load_iter == 'latest':
     # find the file with the largest checkpoint index: name/###.pkl 
     available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
-    load_iter = 0 if len(available_iters) == 0 else max(available_iters)
+    load_iter = -1 if len(available_iters) == 0 else max(available_iters)
 
-if load_iter == 0:
+if load_iter == -1:
     g = grid.build_grid(
         theta, radii, null_hypos=null_hypos, symmetry_planes=symmetry, should_prune=True
     )
     sim_sizes = np.full(g.n_tiles, init_nsims)
-    bootstrap_cvs = np.empty((g.n_tiles, 2 + nB_global), dtype=float)
+    bootstrap_cvs = np.empty((g.n_tiles, 3 + nB_global), dtype=float)
     pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
     todo = np.ones(g.n_tiles, dtype=bool)
     # TODO: remove
@@ -201,30 +217,6 @@ else:
     # hob_upper = hob_upper[keep] if hob_upper is not None else None
 ```
 
-```python
-import confirm.mini_imprint.bound.binomial as ehbound
-bwd_solver = ehbound.BackwardQCPSolver(n=n_arm_samples)
-def invert_bound(alpha, theta_0, vertices, n):
-    v = vertices - theta_0
-    q_opt = jax.vmap(bwd_solver.solve, in_axes=(None, 0, None))(
-        theta_0, v, alpha
-    )
-    return jnp.min(jax.vmap(ehbound.q_holder_bound_bwd, in_axes=(0, None, None, 0, None))(
-        q_opt, n, theta_0, v, alpha
-    ))
-batched_invert_bound = batch.batch(
-    jax.jit(jax.vmap(invert_bound, in_axes=(None, 0, 0, None)), static_argnums=(0, 3)),
-    5*grid_batch_size,
-    in_axes=(None, 0, 0, None),
-)
-```
-
-```python
-%%time
-alpha0 = batched_invert_bound(0.025, g.theta_tiles, g.vertices, n_arm_samples)
-print(alpha0.shape)
-```
-
 ## The big run
 
 ```python
@@ -240,15 +232,15 @@ for II in range(load_iter + 1, iter_max):
     if cost_per_sim is not None:
         predicted_time = np.sum(sim_sizes[todo] * cost_per_sim)
         print(f"runtime prediction: {predicted_time:.2f}")
-        
+
     ########################################
-    # Simulate any new or updated tiles. 
+    # Simulate any new or updated tiles.
     ########################################
 
     start = time.time()
     pointwise_target_alpha[todo] = batched_invert_bound(
-        target_alpha, g.theta_tiles[todo], g.vertices[todo], n_arm_samples
-    )[0]
+        target_alpha, g.theta_tiles[todo], g.vertices(todo), n_arm_samples
+    )
     print(f"inverting the bound took {time.time() - start:.2f}s")
     start = time.time()
 
@@ -263,30 +255,31 @@ for II in range(load_iter + 1, iter_max):
         unifs_order,
     )
     bootstrap_cvs[todo, 0] = bootstrap_cvs_todo[:, 0]
-    bootstrap_cvs[todo, 1:-1] = bootstrap_cvs_todo[:, 1:1+nB_global]
-    tilewise_bootstrap_min_cv = bootstrap_cvs_todo[:, 1+nB_global:].min(axis=1)
-    tilewise_bootstrap_mean_cv = bootstrap_cvs_todo[:, 1+nB_global:].mean(axis=1)
+    bootstrap_cvs[todo, 1:1 + nB_global] = bootstrap_cvs_todo[:, 1 : 1 + nB_global]
+    bootstrap_cvs[todo, 1 + nB_global] = bootstrap_cvs_todo[:, 1 + nB_global :].min(axis=1)
+    bootstrap_cvs[todo, 2 + nB_global] = bootstrap_cvs_todo[:, 1 + nB_global :].mean(axis=1)
     worst_tile = np.argmin(bootstrap_cvs[:, 0])
     overall_cv = bootstrap_cvs[worst_tile, 0]
     cost_per_sim = (time.time() - start) / np.sum(sim_sizes[todo])
     todo[:] = False
     print(f"tuning took {time.time() - start:.2f}s")
-    
 
     ########################################
-    # Checkpoint 
+    # Checkpoint
     ########################################
 
     start = time.time()
     savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
-    if II % 10 == 0 or II <= load_iter + 5:
-        with open(f"{name}/{II}.pkl", "wb") as f:
-            pickle.dump(savedata, f)
+    with open(f"{name}/{II}.pkl", "wb") as f:
+        pickle.dump(savedata, f)
+    for old_II in checkpoint.exponential_delete(II):
+        fp = f"{name}/{old_II}.pkl"
+        if os.path.exists(fp):
+            print(f'os.remove({fp})')
     print(f"checkpointing took {time.time() - start:.2f}s")
-    
 
     ########################################
-    # Criterion step 1: is tuning impossible? 
+    # Criterion step 1: is tuning impossible?
     ########################################
     # try to estimate the number of refinements steps required to get to the
     # target alpha. for now, it's okay to slightly preference refinement over
@@ -303,9 +296,10 @@ for II in range(load_iter + 1, iter_max):
 
     alpha_to_rej_once = 2 / (sim_sizes + 1)
     impossible = pointwise_target_alpha < alpha_to_rej_once
-    impossible_refine = (impossible & (~prefer_simulation)) | (pointwise_target_alpha == 0)
+    impossible_refine = (impossible & (~prefer_simulation)) | (
+        pointwise_target_alpha == 0
+    )
     impossible_sim = impossible & prefer_simulation
-
 
     ########################################
     # Criterion step 2: what is the bias?
@@ -324,8 +318,10 @@ for II in range(load_iter + 1, iter_max):
         (unifs,),
         unifs_order,
     )
-    bias = (worst_typeI_sum[0,0] - worst_typeI_sum[0,1:].mean()) / sim_sizes[worst_tile]
-    
+    bias = (worst_typeI_sum[0, 0] - worst_typeI_sum[0, 1:].mean()) / sim_sizes[
+        worst_tile
+    ]
+
     ########################################
     # Criterion step 3: Refine tiles that are too large, deepen tiles that
     # cause too much bias.
@@ -333,27 +329,29 @@ for II in range(load_iter + 1, iter_max):
     which_deepen = np.zeros(g.n_tiles, dtype=bool)
     which_refine = np.zeros(g.n_tiles, dtype=bool)
     alpha_cost = target_alpha - pointwise_target_alpha
-    
+    tilewise_bootstrap_min_cv = bootstrap_cvs[:, -1]
+    tilewise_bootstrap_mean_cv = bootstrap_cvs[:, -2]
+
     if alpha_cost[worst_tile] > target_grid_cost or bias > target_sim_cost:
         sorted_orig_cvs = np.argsort(bootstrap_cvs[:, 0])
         dangerous_cv = sorted_orig_cvs[:ada_min_step_size]
-        which_refine[dangerous_cv] = (alpha_cost[dangerous_cv] > target_grid_cost)
-
         sorted_bootstrap_idxs = np.argsort(tilewise_bootstrap_min_cv)
         dangerous_bootstrap = sorted_bootstrap_idxs[:ada_step_size]
-        db_should_refine = alpha_cost[dangerous_bootstrap] > target_grid_cost
-        db_should_deepen = bias > target_sim_cost
-        deepen_likely_to_work = tilewise_bootstrap_mean_cv[dangerous_bootstrap] > overall_cv
-        which_refine[dangerous_bootstrap] = db_should_refine & (~deepen_likely_to_work)
-        which_deepen[dangerous_bootstrap] = db_should_deepen & deepen_likely_to_work
+        dangerous = np.union1d(dangerous_cv, dangerous_bootstrap)
+
+        d_should_refine = alpha_cost[dangerous] > target_grid_cost
+        deepen_likely_to_work = tilewise_bootstrap_mean_cv[dangerous] > overall_cv + 2 * cv_std
+        d_should_deepen = deepen_likely_to_work & (sim_sizes[dangerous] < max_sim_size)
+        which_refine[dangerous] = d_should_refine & (~d_should_deepen)
+        which_deepen[dangerous] = d_should_deepen
 
         which_refine |= impossible_refine
         which_deepen |= impossible_sim
         which_deepen &= ~which_refine
-        which_deepen &= (sim_sizes < max_sim_size)
+        which_deepen &= sim_sizes < max_sim_size
 
     ########################################
-    # Report current status 
+    # Report current status
     ########################################
     report = dict(
         II=II,
@@ -373,7 +371,7 @@ for II in range(load_iter + 1, iter_max):
     start = time.time()
 
     ########################################
-    # Refine! 
+    # Refine!
     ########################################
 
     if (np.sum(which_refine) > 0 or np.sum(which_deepen) > 0) and II != iter_max - 1:
@@ -383,9 +381,7 @@ for II in range(load_iter + 1, iter_max):
 
         refine_tile_idxs = np.where(which_refine)[0]
         refine_gridpt_idxs = g.grid_pt_idx[refine_tile_idxs]
-        new_thetas, new_radii, keep_tile_idxs = grid.refine_grid(
-            g, refine_gridpt_idxs
-        )
+        new_thetas, new_radii, keep_tile_idxs = grid.refine_grid(g, refine_gridpt_idxs)
         new_grid = grid.build_grid(
             new_thetas,
             new_radii,
@@ -406,7 +402,7 @@ for II in range(load_iter + 1, iter_max):
         bootstrap_cvs = np.concatenate(
             [
                 bootstrap_cvs[keep_tile_idxs],
-                np.zeros((new_grid.n_tiles, 2 + nB_global), dtype=float),
+                np.zeros((new_grid.n_tiles, 3 + nB_global), dtype=float),
             ],
             axis=0,
         )
@@ -424,6 +420,10 @@ for II in range(load_iter + 1, iter_max):
         pickle.dump(savedata, f)
     break
 
+```
+
+```python
+tilewise_bootstrap_mean_cv.shape
 ```
 
 ```python

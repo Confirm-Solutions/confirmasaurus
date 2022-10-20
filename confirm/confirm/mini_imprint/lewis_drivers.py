@@ -165,7 +165,7 @@ def grouped_by_sim_size(lei_obj, f, max_grid_batch_size, n_out=None):
                 lei_obj,
                 *[ta[idx] for ta in tile_args],
                 *[sa[:size] for sa in sim_args],
-                *other_args
+                *other_args,
             )
 
             if _n_out is None:
@@ -180,7 +180,11 @@ def grouped_by_sim_size(lei_obj, f, max_grid_batch_size, n_out=None):
                 outs[i][idx] = res[i]
             end = time.time()
             print(
-                "running for size", size, "with", np.sum(idx), "tiles took", end - start
+                "running for size",
+                size,
+                "with",
+                np.sum(idx),
+                f"tiles took {end - start:.2f}s",
             )
         if _n_out == 1:
             return outs[0]
