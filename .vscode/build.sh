@@ -1,5 +1,5 @@
 #!/bin/bash
 eval "$(conda shell.bash hook)"
 cd imprint
-./.vscode/build.sh
+sh ./.vscode/build.sh
 cd ..
