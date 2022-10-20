@@ -1,5 +1,10 @@
 # JAX development patterns
 
+## Memory profiling
+
+JAX memory profiling produces output readable by the `pprof` Go program. There's an online hosted version of this here: https://pprofweb.evanjones.ca/pprofweb/
+
+## Miscellaneous
 JAX development patterns that might be useful:
 
 - Pull your `jax.jit` and `jax.vmap` calls into the outermost layer of the code. This has two benefits

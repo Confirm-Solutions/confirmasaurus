@@ -175,7 +175,6 @@ batched_invert_bound = batch.batch(
 
 ```python
 load_iter = 'latest'
-load_iter = 4
 if load_iter == 'latest':
     # find the file with the largest checkpoint index: name/###.pkl 
     available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
@@ -244,6 +243,7 @@ for II in range(load_iter + 1, iter_max):
     print(f"inverting the bound took {time.time() - start:.2f}s")
     start = time.time()
 
+    jax.profiler.save_device_memory_profile(f"{name}/{II}_memory_profile_A.prof")
     bootstrap_cvs_todo = lts.bootstrap_tune_runner(
         lei_obj,
         sim_sizes[todo],
@@ -254,6 +254,9 @@ for II in range(load_iter + 1, iter_max):
         bootstrap_idxs,
         unifs_order,
     )
+    # TODO: this indexing has been a source of bugs. it would be nice to a
+    # tile-wise database tool that can give names to different values while
+    # smoothly handling the refinement, possibly also sparsity?
     bootstrap_cvs[todo, 0] = bootstrap_cvs_todo[:, 0]
     bootstrap_cvs[todo, 1:1 + nB_global] = bootstrap_cvs_todo[:, 1 : 1 + nB_global]
     bootstrap_cvs[todo, 1 + nB_global] = bootstrap_cvs_todo[:, 1 + nB_global :].min(axis=1)
@@ -275,7 +278,7 @@ for II in range(load_iter + 1, iter_max):
     for old_II in checkpoint.exponential_delete(II):
         fp = f"{name}/{old_II}.pkl"
         if os.path.exists(fp):
-            print(f'os.remove({fp})')
+            os.remove(fp)
     print(f"checkpointing took {time.time() - start:.2f}s")
 
     ########################################
@@ -308,6 +311,7 @@ for II in range(load_iter + 1, iter_max):
     cv_std = bootstrap_min_cvs.std()
     worst_idxs = np.arange(worst_tile, worst_tile + 1)
     worst_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, 1)
+    jax.profiler.save_device_memory_profile(f"{name}/{II}_memory_profile_B.prof")
     worst_typeI_sum = worst_many_rej(
         sim_sizes[worst_idxs],
         (
@@ -343,7 +347,7 @@ for II in range(load_iter + 1, iter_max):
         deepen_likely_to_work = tilewise_bootstrap_mean_cv[dangerous] > overall_cv + 2 * cv_std
         d_should_deepen = deepen_likely_to_work & (sim_sizes[dangerous] < max_sim_size)
         which_refine[dangerous] = d_should_refine & (~d_should_deepen)
-        which_deepen[dangerous] = d_should_deepen
+        which_deepen[dangerous] = d_should_deepen | (bias > target_sim_cost)
 
         which_refine |= impossible_refine
         which_deepen |= impossible_sim
@@ -420,6 +424,19 @@ for II in range(load_iter + 1, iter_max):
         pickle.dump(savedata, f)
     break
 
+```
+
+```python
+
+```
+
+```python
+
+```
+
+```python
+import jax.profiler
+jax.profiler.save_device_memory_profile(f"memory_profile.prof")
 ```
 
 ```python
