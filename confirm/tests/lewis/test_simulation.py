@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -21,15 +22,16 @@ default_params = {
     "inter_stage_futility_threshold": 0.8,
     "posterior_difference_threshold": 0.05,
     "rejection_threshold": 0.05,
-    "batch_size": 2**16,
+    "batch_size": 2**4,
     "key": jax.random.PRNGKey(1),
     "n_pr_sims": 100,
     "n_sig2_sims": 20,
-    "cache_tables": True,
+    # NOTE: because we are caching tables, this code *does not* test the table
+    # construction!
+    "cache_tables": Path(__file__).resolve().parent.joinpath("lewis.pkl"),
 }
 
 
-@pytest.fixture(scope="session")
 def lewis_small():
     key = jax.random.PRNGKey(0)
     lewis_obj = lewis.Lewis45(**default_params)
@@ -40,10 +42,18 @@ def lewis_small():
     return (lewis_obj, unifs, p, berns, berns_order)
 
 
-def test_save_load(lewis_small, tmp_path):
-    (L1, _, _, _, _) = lewis_small
-    assert not L1.loaded_tables
+@pytest.fixture(name="lewis_small", scope="session")
+def lewis_small_fixture():
+    return lewis_small()
+
+
+def test_save_load(tmp_path):
+    params = default_params.copy()
+    params["cache_tables"] = False
+    L1 = lewis.Lewis45(**default_params)
     path = os.path.join(tmp_path, "tables.pkl")
+    if os.path.exists(path):
+        os.remove(path)
     L1.save_tables(path)
 
     params = default_params.copy()
