@@ -2,6 +2,7 @@ import os
 import pickle
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -203,11 +204,12 @@ class Lewis45:
         # posterior difference tables for every possible combination of n
         if cache_tables:
             self.loaded_tables = False
-            if isinstance(cache_tables, str) and os.path.exists(cache_tables):
+            cache_is_path = isinstance(cache_tables, (str, Path))
+            if cache_is_path and os.path.exists(cache_tables):
                 self.loaded_tables = self.load_tables(cache_tables)
             if not self.loaded_tables:
                 self.build_tables(key, n_table_pts, batch_size, n_pr_sims)
-                if isinstance(cache_tables, str):
+                if cache_is_path:
                     self.save_tables(cache_tables)
 
     def build_tables(self, key, n_table_pts, batch_size, n_pr_sims):
