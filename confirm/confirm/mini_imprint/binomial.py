@@ -271,6 +271,36 @@ def _build_odi_constant_func(q: int):
     return sp.lambdify(lambdify_args, central_moment, "numpy")
 
 
+def optimal_centering(f, p):
+    return 1 / (1 + ((1 - f) / f) ** (1 / (p - 1)))
+
+
+# def _build_odi_constant_func_numerical(q: float):
+#     """
+#     Fully numerical integration constant evaluator. This can be useful for
+#     non-integer q.
+
+#     Args:
+#         q: The moment to compute. Must be a float greater than 1.
+#     """
+
+#     def f(n, p):
+#         if isinstance(p, float):
+#             pf = np.array([p])
+#         else:
+#             pf = p.flatten()
+#         xs = np.arange(n + 1).astype(np.float64)
+#         eggq = np.abs(xs[None, :] - n * pf[:, None]) ** q
+#         integrand = eggq * scipy.stats.binom.pmf(xs[None, :], n, pf[:, None])
+#         out = np.sum(integrand, axis=-1)
+#         if isinstance(p, float):
+#             return out[0]
+#         else:
+#             return out.reshape(p.shape)
+
+#     return f
+
+
 def _calc_Cqpp(
     theta_tiles,
     tile_corners,

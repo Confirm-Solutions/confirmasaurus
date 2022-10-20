@@ -24,7 +24,7 @@ def configure_mpl_pretty():
     """Retina and Latex matplotlib figures"""
     magic("config InlineBackend.figure_format='retina'")
     plt.rcParams["text.usetex"] = True
-    plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
+    plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath, amssymb}"
 
 
 def setup_nb(text_size_ratio=0.75, pretty=True, autoreload=True):

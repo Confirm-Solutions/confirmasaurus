@@ -49,7 +49,7 @@ resource "aws_instance" "main" {
   iam_instance_profile = aws_iam_instance_profile.main.name
 
   root_block_device {
-    volume_size = 40
+    volume_size = var.disk_size
     volume_type = "gp3"
   }
 

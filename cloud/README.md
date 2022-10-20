@@ -18,7 +18,7 @@ We have three docker images at the moment:
 
 There are subfolders in the [cloud/images folder](./images) for each of these images that include the [Dockerfile](./images/smalldev/Dockerfile). Some of the subfolders have `./build` and `./test` scripts that run the build and check that the expected capabilities are available.
 
-Then, there are [`.devcontainer.json`](../.devcontainer/devcontainer.json) as well for each of these images. This allows you to launch the images in either Codespaces or the VSCode Remote-Containers extension.
+Then, there are [`.devcontainer.json`](../.devcontainer/devcontainer.json) as well for each of these images. This allows you to launch the images in either Codespaces or the VSCode Dev Containers extension.
 
 The `smalldev` and `clouddev` images are stored in ghcr.io, the GitHub container registry. You can find these on the right side of the repo dashboard in the "packages" section. [The Github action here](../.github/workflows/docker-publish.yml) builds the images on any PR that changes the relevant configuration and builds and pushes the images on any commit to `main` that affects the images.
 
@@ -40,7 +40,7 @@ For personal customizations, you get to do a few things. These are not mutually 
 
 - you can either run the browser-based VSCode that is the Codespaces default or you can connect to the remote machine from your local VSCode app. I much prefer connecting with my local app but I haven't tried the browser version very much!
 - you can use [VSCode Settings Sync](https://docs.github.com/en/codespaces/customizing-your-codespace/personalizing-github-codespaces-for-your-account#settings-sync) (you sign in to your github account) to sync settings VSCode settings, keybindings and extensions between local machine and codespace. This is nice and I strongly recommend it!!
-- you can create a [dotfiles repo](https://docs.github.com/en/codespaces/customizing-your-codespace/personalizing-github-codespaces-for-your-account#dotfiles) that the codespace will clone and copy in automatically. These will set up your terminal development environment including things like your bash/zsh configuration, any tools you would like to install with tools like `apt` and any other configuration/installation that you want to automate. I have everything set up so that the environment/tools are essentially indistinguishable from my local machine. This is really nice and I really strongly recommend this if you're going to be using Codespaces or Remote-Containers much!
+- you can create a [dotfiles repo](https://docs.github.com/en/codespaces/customizing-your-codespace/personalizing-github-codespaces-for-your-account#dotfiles) that the codespace will clone and copy in automatically. These will set up your terminal development environment including things like your bash/zsh configuration, any tools you would like to install with tools like `apt` and any other configuration/installation that you want to automate. I have everything set up so that the environment/tools are essentially indistinguishable from my local machine. This is really nice and I really strongly recommend this if you're going to be using Codespaces or Dev Containers much!
 
 I am happy to share my dotfiles and VSCode settings if you'd like. To share the dotfiles, I'll need to scrub out some passwords first, but that's probably an improvement anyway. :embarrassed:
 
@@ -64,7 +64,7 @@ Actually launching some infrastructure-as-code.
 6. Congratulations, you've launched an EC2 instance! At this point, you can either destroy the instance or go to another section and make use of the instance.
 7. Run `terraform destroy` to destroy your instance and supporting infrastructure.
 
-Go to the [VSCode Remote-Containers](#using-vscode-remote-containers) section to start a development instance. Or [launch a non-interactive job](#launching-a-non-interactive-job).
+Go to the [VSCode Dev Containers](#using-vscode-remote-containers) section to start a development instance. Or [launch a non-interactive job](#launching-a-non-interactive-job).
 
 ## Our data on AWS
 
@@ -74,7 +74,7 @@ We have some S3 Buckets. These contain various important data:
 - `aws-cloudtrail-logs-644171722153-2d03f9cb` - AWS access/management logs of everything we've done.
 - `s3-access-logs-111222` - S3 access logs
 
-## Using VSCode Remote-Containers
+## Using VSCode Dev Containers
 
 I recommend this as the first point of attack for running on AWS. In the future, we should jobs as individual ephemeral docker containers on something like AWS Elastic Container Service, but this is a starting point. Install:
 
@@ -85,7 +85,7 @@ Then, to run:
 
 3. The rest of this section assumes that you have already launched an EC2 instance using `terraform apply` as explained above.
 4. Next, run the `./setup_remotedev.sh` script. This sets the remote EC2 instance as your docker context. Now all docker commands will be running remotely!! The script will also log in to ghcr.io on the instance. For this to work correctly, you need to have the `$GITHUB_TOKEN` and `$GITHUB_USER` environment variables set. [Follow the directions here to create a `$GITHUB_TOKEN` personal access token (PAT) if you haven't before.](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) Finally, the script will pull the `smalldev` docker image.
-5. Now, we're going to set up the remote machine as a devcontainer using the **Remote-Containers extension**. Run the VSCode command "Remote-Containers: Clone Repository in Container Volume...". Then, select the Github repo you want to use: `Confirm-Solutions/confirmasaurus`.
+5. Now, we're going to set up the remote machine as a devcontainer using the **Dev Containers extension**. Run the VSCode command "Dev Containers: Clone Repository in Container Volume...". Then, select the Github repo you want to use: `Confirm-Solutions/confirmasaurus`.
 6. This will launch the `smalldev` devcontainer/docker image and after a minute or two of building the container, you'll be dropped into a lovely development environment!
 7. When you're done, close the VSCode window, then `terraform destroy` if you want to delete the infrastructure. Alternatively, you can `aws ec2 stop-instances --instance-ids $( terraform output --raw id )` to stop the running instance. Later the same command but with `start-instances` instead of `stop-instances` will work to restart the instance. (note: the `terraform destroy` seems to take a long time for some P instances!)
 
@@ -125,7 +125,7 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 **Installing dotfiles:**
 
 - This can be done automatically on Codespaces by specifying your dotfiles repo in GitHub settings.
-- Also, doable automatically foR VSCode Remote-Containers by specifying your dotfiles repo in VSCode settings.
+- Also, doable automatically foR VSCode Dev Containers by specifying your dotfiles repo in VSCode settings.
 - Or, you can do it manually with something like: `sh -c "$(curl -fsLS https://chezmoi.io/get)" -- init --ssh --apply tbenthompson`
 
 **Building docker images on Mac M1:**
@@ -135,15 +135,15 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 - Or, you can build a multi-architecture image using something like `docker buildx build --platform linux/amd64,linux/arm64 -t company/image_name .`
 - Or, you can build images in the `clouddev` devcontainer/docker image.
 
-**Stopping and restarting an EC2 dev instance used by Remote-Containers without terminating the instance**
+**Stopping and restarting an EC2 dev instance used by Dev Containers without terminating the instance**
 
-- Terminate the instance using the AWS CLI or the Console
+- Stop the instance using the AWS CLI or the Console
 - Restart the instance using the AWS CLI or the Console
 - `terraform apply` to update the terraform outputs (the public ipv4 DNS url will have changed)
 - you might need to start docker... `./connect.sh` then `sudo systemctl start docker`. We could integrate this step into `./setup_remotedev.sh`.
 - `./setup_remotedev.sh` to re-initalize the remote machine
 - Open the docker sidebar in VSCode, start the relevant stopped container.
-- Then, run the VSCode command "Remote-Containers: Attach to running container".
+- Then, run the VSCode command "Dev Containers: Attach to running container".
 - Once the container has launched, open the existing workspace folder inside the remote docker container. Probably `/workspaces/confirmasaurus`.
 
 **Handy tools:**

@@ -22,6 +22,7 @@ import scipy.stats
 from numpy import sqrt
 import jax
 import jax.numpy as jnp
+import numpyro.distributions as dist
 ```
 
 ```python
@@ -34,7 +35,7 @@ dg = jax.grad(g)
 dg_vmap = jax.vmap(dg, in_axes=(None, 0))
 dgg_vmap = jax.vmap(jax.grad(dg), in_axes=(None, 0))
 
-holderp = 3.0#1.2
+holderp = 1.2
 holderq = 1.0 / (1 - 1.0 / holderp)
 ```
 
@@ -45,10 +46,19 @@ Compute the constant term using both a numerical sum and using the 6th moment fo
 ```python
 # numerical integral to compute E[ |grad g|^q]^(1/q)
 # need to compute for the worst t in the "tile".
-def C_numerical(t, p, q):
+# def C_numerical(t, q):
+#     p = jax.scipy.special.expit(t)
+#     xs = jnp.arange(n + 1).astype(jnp.float64)
+#     eggq = jnp.abs(xs - n * p) ** q
+#     return sum(eggq * scipy.stats.binom.pmf(xs, n, p)) ** (1 / q)
+    
+def C_numerical(t, q):
+    p = jax.scipy.special.expit(t)
     xs = jnp.arange(n + 1).astype(jnp.float64)
-    eggq = jnp.abs(dg_vmap(t, xs)) ** q
-    return sum(eggq * scipy.stats.binom.pmf(xs, n, p)) ** (1 / q)
+    return jnp.exp((1 / q) * jax.scipy.special.logsumexp(
+        q * jnp.log(jnp.abs(xs - n * p))
+        + dist.Binomial(n, p).log_prob(xs)
+    ))
 
 # Formula for C with q = 6 from wikipedia
 def C_wiki(p, q):
@@ -63,20 +73,26 @@ def C_wiki(p, q):
 tmax = -1.1
 pmax = jax.scipy.special.expit(tmax)
 # C = C_wiki(pmax)
-C = C_numerical(tmax, pmax, holderq)
-# C_numerical(tmax, pmax), C_wiki(pmax)
+C = C_numerical(tmax, holderq)
+C_numerical(tmax, 6), C_wiki(pmax, 6)
 ```
 
 ### Is the constant term monotonic? 
 
-It's unimodal. Monotonic in [0, 0.5] and separately in [0.5, 1].
+For even integer q: It's unimodal. Monotonic in [0, 0.5] and separately in [0.5, 1].
+
+For q < 2: there are tons of micro peaks...
 
 ```python
-ts = np.linspace(-10, 10, 100)
-cs = [C_numerical(t, jax.scipy.special.expit(t), holderq) for t in ts]
-plt.plot(ts, cs)
-plt.ylabel(r'$E[|\nabla g|^q]^{1/q}$')
-plt.xlabel(r"$\theta$")
+domain = [-3, 3]
+ts = np.linspace(*domain, 1000)
+cs = jax.jit(jax.vmap(C_numerical, in_axes=(0, None)))(ts, holderq)
+plt.plot(ts, cs, label="C")
+# cgs = jax.jit(jax.vmap(jax.grad(C_numerical), in_axes=(0, None)))(ts, q)
+# plt.plot(ts, cgs, label="dC/dtheta")
+# cggs = jax.jit(jax.vmap(jax.grad(jax.grad(C_numerical)), in_axes=(0, None)))(ts, q)
+# plt.plot(ts, cggs, label="d2C/dtheta2")
+plt.axhline(0, color="black")
 plt.show()
 ```
 
@@ -94,7 +110,7 @@ We're considering a tile where true p at the center of the tile is 0.2 and true 
 The true Type I Error should be ~0.093%:
 
 ```python
-thresh = 12
+thresh = 20
 # the minus 1 is to account for cdf = p(x <= x) and we want p(x >= x)
 1 - scipy.stats.binom.cdf(thresh - 1, n, p)
 ```
@@ -214,9 +230,9 @@ for a in np.linspace(0.001, 0.2, 10):
 ### Centering bound
 
 ```python
-centeredp = 3.0
+centeredp = 1.2
 centeredq = 1.0 / (1 - 1.0 / centeredp)
-C_centered = C_numerical(tmax, pmax, centeredq)
+C_centered = C_numerical(tmax, centeredq)
 def derivs(_, y):
     cur_f = y[0]
     c = copt(cur_f, centeredp)
@@ -293,4 +309,8 @@ plt.title('relative error in holder-ode')
 plt.xlabel(r'$\theta$')
 plt.ylabel('$\log_{10}(|(f_N - f_A) / f_A|)$')
 plt.show()
+```
+
+```python
+
 ```
