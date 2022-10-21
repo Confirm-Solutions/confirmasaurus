@@ -218,6 +218,20 @@ else:
     # hob_upper = hob_upper[keep] if hob_upper is not None else None
 ```
 
+```python
+%%time
+_ = lts.bootstrap_tune_runner(
+    lei_obj,
+    sim_sizes[:1024],
+    pointwise_target_alpha[:1024],
+    g.theta_tiles[:1024],
+    g.null_truth[:1024],
+    unifs,
+    bootstrap_idxs,
+    unifs_order
+)
+```
+
 ## The big run
 
 ```python
@@ -379,9 +393,9 @@ for II in range(load_iter + 1, iter_max):
     ########################################
 
     if (np.sum(which_refine) > 0 or np.sum(which_deepen) > 0) and II != iter_max - 1:
-
-        sim_sizes[which_deepen] = sim_sizes[which_deepen] * 2
-        todo[which_deepen] = True
+        if np.sum(which_refine) == 0:
+            sim_sizes[which_deepen] = sim_sizes[which_deepen] * 2
+            todo[which_deepen] = True
 
         refine_tile_idxs = np.where(which_refine)[0]
         refine_gridpt_idxs = g.grid_pt_idx[refine_tile_idxs]

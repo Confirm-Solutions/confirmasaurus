@@ -22,16 +22,16 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 # Run on CPU because a concurrent process is probably running on GPU.
-jax.config.update('jax_platform_name', 'gpu')
+jax.config.update('jax_platform_name', 'cpu')
 
-import lewis_tune_sim as lts
+import confirm.mini_imprint.lewis_drivers as lts
 from confirm.lewislib import lewis
 ```
 
 ```python
-name = '3d_smaller2'
+name = '4d_full'
 params = {
-    "n_arms": 3,
+    "n_arms": 4,
     "n_stage_1": 50,
     "n_stage_2": 100,
     "n_stage_1_interims": 2,
@@ -58,7 +58,6 @@ batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
 
 ```python
 n_arm_samples = int(lei_obj.unifs_shape()[0])
-holderq = 6
 ```
 
 ```python
@@ -93,9 +92,9 @@ else:
 # TODO: things that should be saved in the future!!
 n_arms = params['n_arms']
 target_alpha = 0.025
-target_grid_cost = 0.002
-init_nsims = 2000
-max_sim_double = 7
+target_grid_cost = 0.005
+init_nsims = 1000
+max_sim_double = 8
 max_sim_size = init_nsims * 2 ** max_sim_double
 seed = 0
 key = jax.random.PRNGKey(seed)
@@ -134,7 +133,7 @@ np.unique(sim_sizes, return_counts=True)
 ```
 
 ```python
-HH = [np.repeat(bootstrap_cvs[sim_sizes == K, 0], K//2000) for K in np.unique(sim_sizes)]
+HH = [bootstrap_cvs[sim_sizes == K, 0] for K in np.unique(sim_sizes)]
 plt.hist(
     HH,
     stacked=True,
@@ -145,6 +144,41 @@ plt.legend()
 plt.xlabel('$\lambda^*$')
 plt.ylabel('number of tiles')
 plt.show()
+```
+
+```python
+HH = [np.repeat(bootstrap_cvs[sim_sizes == K, 0], K//1000) for K in np.unique(sim_sizes)]
+plt.hist(
+    HH,
+    stacked=True,
+    bins=np.linspace(0.05, 0.15, 100),
+    label=[f'K={K}' for K in np.unique(sim_sizes)]
+)
+plt.legend()
+plt.xlabel('$\lambda^*$')
+plt.ylabel('number of tiles')
+plt.show()
+```
+
+```python
+
+```
+
+```python
+bootstrap_cvs[sim_sizes == 256000,-2]
+```
+
+```python
+pointwise_target_alpha[bootstrap_cvs[:,1:-2].argmin(axis=0)]
+```
+
+```python
+bootstrap_cvs[bootstrap_cvs[:,1:-2].argmin(axis=0), -1]
+```
+
+```python
+
+bootstrap_cvs[:,0] < 0.05
 ```
 
 ```python

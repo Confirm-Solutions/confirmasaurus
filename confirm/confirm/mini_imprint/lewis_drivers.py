@@ -114,11 +114,18 @@ tunev = jax.vmap(tune, in_axes=(None, 0, None, None), out_axes=1)
 
 
 def bootstrap_tune_runner(
-    lei_obj, sim_sizes, alpha, theta, null_truth, unifs, bootstrap_idxs, unifs_order
+    lei_obj,
+    sim_sizes,
+    alpha,
+    theta,
+    null_truth,
+    unifs,
+    bootstrap_idxs,
+    unifs_order,
+    sim_batch_size=1000,
+    grid_batch_size=64,
 ):
     n_bootstraps = next(iter(bootstrap_idxs.values())).shape[0]
-    sim_batch_size = 1000
-    grid_batch_size = 1000
     batched_statv = batch.batch(
         batch.batch(
             statv, sim_batch_size, in_axes=(None, None, None, 0, None), out_axes=(1,)
