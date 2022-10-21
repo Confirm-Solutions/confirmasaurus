@@ -1,6 +1,8 @@
 import jax.numpy as jnp
 import numpy as np
 
+# TODO: allow batch to decide internally what batch size to use??
+
 
 def _pad_arg(a, axis, n_pad: int):
     """
@@ -90,7 +92,6 @@ def batch_yield(f, batch_size: int, in_axes):
                 start=start,
                 end=end,
             )
-            # TODO: why return n_pad?
             yield (f(*batched_args), 0)
             start += batch_size
             end += batch_size
@@ -156,22 +157,32 @@ def batch(f, batch_size: int, in_axes, out_axes=None):
 
     def internal(*args):
         outs, n_pad = f_batch_all(*args)
-        internal_out_axes = (
-            out_axes if out_axes is not None else tuple(0 for _ in range(len(outs[0])))
-        )
-        last_j = len(outs) - 1
 
         return_first = False
         if isinstance(outs[0], np.ndarray) or isinstance(outs[0], jnp.DeviceArray):
             return_first = True
             outs = [[o] for o in outs]
+            internal_out_axes = (0,) if out_axes is None else out_axes
+        else:
+            internal_out_axes = (
+                out_axes
+                if out_axes is not None
+                else tuple(0 for _ in range(len(outs[0])))
+            )
+
+        def entry(i, j):
+            if j == len(outs) - 1 and n_pad > 0:
+                axis = internal_out_axes[i]
+                N = outs[-1][i].shape[axis]
+                return np.take(
+                    outs[-1][i], np.r_[0 : N - n_pad], mode="clip", axis=axis
+                )
+            else:
+                return outs[j][i]
 
         return_vals = [
             np.concatenate(
-                [
-                    outs[j][i][:-n_pad] if (j == last_j and n_pad != 0) else outs[j][i]
-                    for j in range(len(outs))
-                ],
+                [entry(i, j) for j in range(len(outs))],
                 axis=internal_out_axes[i],
             )
             for i in range(len(outs[0]))

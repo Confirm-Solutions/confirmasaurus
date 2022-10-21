@@ -1,8 +1,23 @@
 # JAX development patterns
 
-## Memory profiling
+## Memory
 
-JAX memory profiling produces output readable by the `pprof` Go program. There's an online hosted version of this here: https://pprofweb.evanjones.ca/pprofweb/
+
+This snippet is useful for inspecting the currently allocated device buffers.
+
+```
+client = jax.lib.xla_bridge.get_backend()
+mem_usage = sum([b.nbytes for b in client.live_buffers()]) / 1e9
+print(mem_usage)
+print([b.shape for b in client.live_buffers()])
+```
+
+Also, to clear the compilation cache for a particular function: `f_jit.clear_cache()`
+
+- JAX memory profiling produces output readable by the `pprof` Go program. There's an online hosted version of this here: https://pprofweb.evanjones.ca/pprofweb/
+- **`jax.vmap`** can be dangerous for memory usage. Don't assume that a loop will be ordered in a sane way to minimize memory usage.
+- [Clearing the JAX compilation cache](https://github.com/google/jax/issues/10828)
+- It's possible to run into out of memory errors when too much data is stored in the JAX compilation cache. The error will look like `Execution of replica 0 failed: INTERNAL: Failed to load in-memory CUBIN: CUDA_ERROR_OUT_OF_MEMORY: out of memory` in contrast to the normal JAX out of memory errors.
 
 ## Miscellaneous
 JAX development patterns that might be useful:

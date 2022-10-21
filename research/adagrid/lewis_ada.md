@@ -135,22 +135,23 @@ seed = 0
 src_key = jax.random.PRNGKey(seed)
 key1, key2, key3 = jax.random.split(src_key, 3)
 
-unifs = jax.random.uniform(key=key1, shape=(max_sim_size,) + lei_obj.unifs_shape())
-unifs_order = np.arange(0, unifs.shape[1])
+unifs = jax.random.uniform(key=key1, shape=(max_sim_size,) + lei_obj.unifs_shape(), dtype=jnp.float32)
+unifs_order = jnp.arange(0, unifs.shape[1])
 nB_global = 10
 nB_tile = 20
 bootstrap_idxs = {
     K: jnp.concatenate((
         jnp.arange(K)[None, :],
-        jax.random.choice(key2, np.arange(K), shape=(nB_global, K), replace=True),
-        jax.random.choice(key3, np.arange(K), shape=(nB_tile, K), replace=True)
-    ))
+        jax.random.choice(key2, K, shape=(nB_global, K), replace=True),
+        jax.random.choice(key3, K, shape=(nB_tile, K), replace=True)
+    )).astype(jnp.int32)
     for K in (init_nsims * 2 ** np.arange(0, max_sim_double + 1))
 }
 
-batched_tune = lts.grouped_by_sim_size(lei_obj, lts.tunev, grid_batch_size)
-batched_rej = lts.grouped_by_sim_size(lei_obj, lts.rejv, grid_batch_size)
-batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
+# batched_tune = lts.grouped_by_sim_size(lei_obj, lts.tunev, grid_batch_size)
+# batched_rej = lts.grouped_by_sim_size(lei_obj, lts.rejv, grid_batch_size)
+# batched_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, grid_batch_size)
+
 
 import confirm.mini_imprint.bound.binomial as ehbound
 bwd_solver = ehbound.BackwardQCPSolver(n=n_arm_samples)
@@ -175,6 +176,7 @@ batched_invert_bound = batch.batch(
 
 ```python
 load_iter = 'latest'
+# load_iter = 34
 if load_iter == 'latest':
     # find the file with the largest checkpoint index: name/###.pkl 
     available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
@@ -243,7 +245,6 @@ for II in range(load_iter + 1, iter_max):
     print(f"inverting the bound took {time.time() - start:.2f}s")
     start = time.time()
 
-    jax.profiler.save_device_memory_profile(f"{name}/{II}_memory_profile_A.prof")
     bootstrap_cvs_todo = lts.bootstrap_tune_runner(
         lei_obj,
         sim_sizes[todo],
@@ -309,20 +310,19 @@ for II in range(load_iter + 1, iter_max):
     ########################################
     bootstrap_min_cvs = np.min(bootstrap_cvs[:, :-1], axis=0)
     cv_std = bootstrap_min_cvs.std()
-    worst_idxs = np.arange(worst_tile, worst_tile + 1)
-    worst_many_rej = lts.grouped_by_sim_size(lei_obj, lts.rejvv, 1)
-    jax.profiler.save_device_memory_profile(f"{name}/{II}_memory_profile_B.prof")
-    worst_typeI_sum = worst_many_rej(
-        sim_sizes[worst_idxs],
-        (
-            bootstrap_min_cvs[None, :],
-            g.theta_tiles[worst_idxs],
-            g.null_truth[worst_idxs],
-        ),
-        (unifs,),
+    worst_stats = batch.batch(
+        lts.stat_jit,
+        int(1e4),
+        in_axes=(None, None, None, 0, None),
+    )(
+        lei_obj,
+        g.theta_tiles[worst_tile],
+        g.null_truth[worst_tile],
+        unifs[:sim_sizes[worst_tile]],
         unifs_order,
     )
-    bias = (worst_typeI_sum[0, 0] - worst_typeI_sum[0, 1:].mean()) / sim_sizes[
+    worst_typeI_sum = (worst_stats[None, :] < bootstrap_min_cvs[:, None]).sum(axis=1)
+    bias = (worst_typeI_sum[0] - worst_typeI_sum[1:].mean()) / sim_sizes[
         worst_tile
     ]
 
@@ -427,79 +427,9 @@ for II in range(load_iter + 1, iter_max):
 ```
 
 ```python
-
-```
-
-```python
-
-```
-
-```python
-import jax.profiler
-jax.profiler.save_device_memory_profile(f"memory_profile.prof")
-```
-
-```python
-tilewise_bootstrap_mean_cv.shape
-```
-
-```python
 savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
 with open(f"{name}/{II}.pkl", "wb") as f:
     pickle.dump(savedata, f)
-```
-
-```python
-dangerous = np.any(bootstrap_cvs[:, 1:] < overall_cv, axis=-1)
-```
-
-```python
-
-```
-
-```python
-
-```
-
-```python
-bootstrap_min_cvs = np.min(bootstrap_cvs[:, 1:], axis=0)
-cv_std = bootstrap_min_cvs.std()
-bootstrap_cv_rej = batched_many_rej(
-    sim_sizes[close_to_worst],
-    (np.tile(bootstrap_min_cvs[None, :], (np.sum(close_to_worst), 1)),
-    g.theta_tiles[close_to_worst],
-    g.null_truth[close_to_worst],),
-    (unifs,),
-    unifs_order
-)
-```
-
-```python
-np.max()
-```
-
-```python
-
-```
-
-```python
-close_to_worst.shape, g.n_tiles, sim_sizes.shape, g.theta_tiles.shape, g.null_truth.shape, np.tile(bootstrap_min_cvs[None, :], (close_to_worst.shape[0], 1)).shape
-```
-
-```python
-
-```
-
-```python
-np.tile(bootstrap_cvs[None, :], (close_to_worst.shape[0], 1)).shape
-```
-
-```python
-np.min(bootstrap_cvs, axis=0)
-```
-
-```python
-bootstrap_cvs.shape
 ```
 
 ```python

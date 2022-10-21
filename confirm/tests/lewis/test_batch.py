@@ -47,3 +47,13 @@ def test_batch_multidim_single():
     batched_f = batch(f, batch_size=5, in_axes=(0,))
     out = batched_f(inputs)
     np.testing.assert_allclose(out, inputs.sum(axis=1))
+
+
+def test_batch_out_axes1():
+    def f(x):
+        return x.T
+
+    inputs = np.random.rand(7, 5)
+    batched_f = batch(f, batch_size=5, in_axes=(0,), out_axes=(1,))
+    out = batched_f(inputs)
+    np.testing.assert_allclose(out, inputs.T)

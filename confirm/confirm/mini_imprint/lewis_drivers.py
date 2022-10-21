@@ -94,53 +94,55 @@ def get_sim_size_groups(sim_sizes):
         yield size, idx
 
 
-def bootstrap_tune(
-    lei_obj, alpha, theta, null_truth, unifs, bootstrap_idxs, unifs_order
-):
+def stat(lei_obj, theta, null_truth, unifs, unifs_order):
     test_stats, best_arms = simulate(lei_obj, theta, unifs, unifs_order)
-    # anywhere that we have a correct rejection, stick in a large number for
-    # the test stat so that we can be sure to never include those simulations
-    # as false rejections.
     false_test_stats = jnp.where(null_truth[best_arms - 1], test_stats, 100.0)
-    sim_cv = _tune(false_test_stats[bootstrap_idxs], unifs.shape[0], alpha)
-    return (sim_cv,)
+    return false_test_stats
 
 
-bootstrap_tunev = jax.jit(
-    jax.vmap(
-        jax.vmap(bootstrap_tune, in_axes=(None, None, None, None, None, 0, None)),
-        in_axes=(None, 0, 0, 0, None, None, None),
-    ),
-    static_argnums=(0,),
-)
+stat_jit = jax.jit(stat, static_argnums=(0,))
+statv = jax.jit(jax.vmap(stat, in_axes=(None, 0, 0, None, None)), static_argnums=(0,))
+
+
+def tune(stats, order, K, alpha):
+    sorted_stats = jnp.sort(stats, axis=-1)
+    cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
+    return sorted_stats[jnp.arange(stats.shape[0]), cv_idx]
+
+
+tunev = jax.vmap(tune, in_axes=(None, 0, None, None), out_axes=1)
 
 
 def bootstrap_tune_runner(
     lei_obj, sim_sizes, alpha, theta, null_truth, unifs, bootstrap_idxs, unifs_order
 ):
-    n_arm_samples = int(lei_obj.unifs_shape()[0])
-
     n_bootstraps = next(iter(bootstrap_idxs.values())).shape[0]
+    sim_batch_size = 1000
+    grid_batch_size = 1000
+    batched_statv = batch.batch(
+        batch.batch(
+            statv, sim_batch_size, in_axes=(None, None, None, 0, None), out_axes=(1,)
+        ),
+        grid_batch_size,
+        in_axes=(None, 0, 0, None, None),
+    )
+
+    batched_tune = batch.batch(
+        tunev, grid_batch_size, in_axes=(0, None, None, 0)  # , out_axes=(0,)
+    )
+
     out = np.empty((sim_sizes.shape[0], n_bootstraps), dtype=float)
     for size, idx in get_sim_size_groups(sim_sizes):
-        # TODO: fix hardcoded 2**10
-        grid_batch_size = min(int(1e9 / n_arm_samples / size), 2**10)
-        # TODO: allow batch to decide internally what batch size to
-        # use.
-        f_batched = batch.batch(
-            bootstrap_tunev,
-            grid_batch_size,
-            in_axes=(None, 0, 0, 0, None, None, None),
+        print(
+            f"tuning for {size} simulations with {idx.sum()} tiles"
+            f" and batch size ({grid_batch_size}, {sim_batch_size})"
         )
-        out[idx] = f_batched(
-            lei_obj,
-            alpha[idx],
-            theta[idx],
-            null_truth[idx],
-            unifs[:size],
-            bootstrap_idxs[size],
-            unifs_order,
+
+        stats = batched_statv(
+            lei_obj, theta[idx], null_truth[idx], unifs[:size], unifs_order
         )
+        res = batched_tune(stats, bootstrap_idxs[size], size, alpha[idx])
+        out[idx] = res
     return out
 
 

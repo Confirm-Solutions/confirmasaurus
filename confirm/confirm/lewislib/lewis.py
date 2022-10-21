@@ -413,8 +413,8 @@ class Lewis45:
         if n_points:
             return LinearInterpTable(
                 self.n_configs_pd + 1,
-                grid,
-                jnp.array(tup_tables),
+                grid.astype(jnp.int32),
+                jnp.array(tup_tables, dtype=jnp.float32),
             )
 
         else:
@@ -486,8 +486,11 @@ class Lewis45:
         if n_points:
             return LinearInterpTable(
                 self.n_configs_pr_best_pps_1 + 1,
-                grid,
-                (jnp.array(pr_best_tables), jnp.array(pps_tables)),
+                grid.astype(jnp.int32),
+                (
+                    jnp.array(pr_best_tables, dtype=jnp.float32),
+                    jnp.array(pps_tables, dtype=jnp.float32),
+                ),
             )
         else:
             return LookupTable(
@@ -554,8 +557,8 @@ class Lewis45:
         if n_points:
             return LinearInterpTable(
                 self.n_configs_pps_2 + 1,
-                grid,
-                jnp.array(tup_tables),
+                grid.astype(jnp.int32),
+                jnp.array(tup_tables, dtype=jnp.float32),
             )
         else:
             return LookupTable(self.n_configs_pps_2 + 1, tup_tables)
