@@ -77,18 +77,6 @@ adap = AdaParams(
 ```
 
 ```python
-overall_cv = np.min(bootstrap_cvs[:, 0])
-twb_min_cv = bootstrap_cvs[:, -2]
-twb_mean_cv = bootstrap_cvs[:, -1]
-inflated_min_cv = twb_mean_cv + (twb_min_cv - twb_mean_cv) * 6
-
-B_lamss_idx = bootstrap_cvs[:, 1:-2].argmin(axis=0)
-B_lamss = bootstrap_cvs[B_lamss_idx, np.arange(1, 1 + bootstrap_cvs.shape[1] - 3)]
-twb_B_lamss = inflated_min_cv[B_lamss_idx]
-B_min = bootstrap_cvs[:, 1:-2].min(axis=1)
-```
-
-```python
 print('overall_cv', overall_cv)
 print('bias driver priority', np.sum(inflated_min_cv[:, None] < twb_B_lamss[None, :], axis=0))
 bias_bad = B_min < overall_cv
@@ -108,7 +96,7 @@ for K in np.unique(sim_sizes):
     count = np.sum(sel)
     print(f"K={K}:")
     print(f'    count={count / 1e6:.3f}m')
-    print(f'    lambda**B[K]={bootstrap_cvs[sel, 1:-2].min(axis=0)}')
+    print(f'    lambda**B[K]={B_lam[sel].min(axis=0)}')
     print(f'    min lambda*B[K]={np.min(B_min[sel]):.4f}')
     print(f'    min lambda*b[K]={np.min(bootstrap_cvs[sel, -2]):.4f}')
     effort = K * count / total_effort
@@ -118,9 +106,7 @@ for K in np.unique(sim_sizes):
 ```python
 from diagnostics import status_report, lamstar_histogram
 
-tilewise_bootstrap_min_cv = bootstrap_cvs[:, -2]
-tilewise_bootstrap_mean_cv = bootstrap_cvs[:, -1]
-inflated_min_cv = tilewise_bootstrap_mean_cv + (tilewise_bootstrap_min_cv - tilewise_bootstrap_mean_cv) * 6
+inflated_min_cv = twb_mean_cv + (twb_min_cv - twb_mean_cv) * 2
 lamstar_histogram(inflated_min_cv, sim_sizes, xlim=[-0.5, 0.5])
 plt.show()
 ```
