@@ -19,6 +19,13 @@ Also, to clear the compilation cache for a particular function: `f_jit.clear_cac
 - [Clearing the JAX compilation cache](https://github.com/google/jax/issues/10828)
 - It's possible to run into out of memory errors when too much data is stored in the JAX compilation cache. The error will look like `Execution of replica 0 failed: INTERNAL: Failed to load in-memory CUBIN: CUDA_ERROR_OUT_OF_MEMORY: out of memory` in contrast to the normal JAX out of memory errors.
 
+**Python not knowing about the size of JAX arrays can cause memory leaks**: 
+- python only knows about system RAM, not GPU RAM.
+- so it only schedules "deep" garbage collection (level 2) when memory usage is getting high.
+- but a JAX DeviceArray uses almost no system RAM since it’s all stored on the GPU.
+- so a DeviceArray looks to Python like the kind of thing that doesn’t need to be urgently garbage collected.
+- so, giant 1.5 GB DeviceArrays start to leak every iteration through AdaGrid.
+
 ## Miscellaneous
 JAX development patterns that might be useful:
 

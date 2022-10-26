@@ -12,6 +12,7 @@ Lots of duplication here with code that is in:
 For now, I'm going to leave it as is, but as soon as we have the paper done, we
 should clean this up.
 """
+import gc
 import time
 
 import jax
@@ -101,16 +102,41 @@ def stat(lei_obj, theta, null_truth, unifs, unifs_order):
 
 
 stat_jit = jax.jit(stat, static_argnums=(0,))
+
+
+def memory_status(title):
+    client = jax.lib.xla_bridge.get_backend()
+    mem_usage = sum([b.nbytes for b in client.live_buffers()]) / 1e9
+    print(f"{title} memory usage", mem_usage)
+    print(f"{title} buffer sizes", [b.shape for b in client.live_buffers()])
+
+
+def one_stat(lei_obj, theta, null_truth, K, unifs, unifs_order):
+    # memory_status('one_stat')
+    unifs_chunk = unifs[:K]
+    out = batch.batch(stat_jit, int(1e4), in_axes=(None, None, None, 0, None),)(
+        lei_obj,
+        theta,
+        null_truth,
+        unifs_chunk,
+        unifs_order,
+    )
+    del unifs_chunk
+    return out
+
+
 statv = jax.jit(jax.vmap(stat, in_axes=(None, 0, 0, None, None)), static_argnums=(0,))
 
 
-def tune(stats, order, K, alpha):
-    sorted_stats = jnp.sort(stats, axis=-1)
+def tune(stats, order, alpha):
+    K = stats.shape[0]
+    sorted_stats = jnp.sort(stats[order])
     cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
-    return sorted_stats[jnp.arange(stats.shape[0]), cv_idx]
+    return sorted_stats[cv_idx]
 
 
-tunev = jax.vmap(tune, in_axes=(None, 0, None, None), out_axes=1)
+jit_tune = jax.jit(tune)
+tunev = jax.jit(jax.vmap(jax.vmap(tune, in_axes=(None, 0, None)), in_axes=(0, None, 0)))
 
 
 def bootstrap_tune_runner(
@@ -135,21 +161,29 @@ def bootstrap_tune_runner(
     )
 
     batched_tune = batch.batch(
-        tunev, grid_batch_size, in_axes=(0, None, None, 0)  # , out_axes=(0,)
+        batch.batch(tunev, 25, in_axes=(None, 0, None), out_axes=(1,)),
+        grid_batch_size,
+        in_axes=(0, None, 0),
     )
 
     out = np.empty((sim_sizes.shape[0], n_bootstraps), dtype=float)
     for size, idx in get_sim_size_groups(sim_sizes):
+        start = time.time()
         print(
             f"tuning for {size} simulations with {idx.sum()} tiles"
             f" and batch size ({grid_batch_size}, {sim_batch_size})"
         )
-
+        unifs_chunk = unifs[:size]
         stats = batched_statv(
-            lei_obj, theta[idx], null_truth[idx], unifs[:size], unifs_order
+            lei_obj, theta[idx], null_truth[idx], unifs_chunk, unifs_order
         )
-        res = batched_tune(stats, bootstrap_idxs[size], size, alpha[idx])
+        print(time.time() - start)
+        start = time.time()
+        del unifs_chunk
+        gc.collect()
+        res = batched_tune(stats, bootstrap_idxs[size], alpha[idx])
         out[idx] = res
+        print(time.time() - start)
     return out
 
 
