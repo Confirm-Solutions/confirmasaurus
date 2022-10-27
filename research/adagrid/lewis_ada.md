@@ -118,26 +118,31 @@ from criterion import Criterion
 
 lei_obj = lewis.Lewis45(**params)
 n_arm_samples = int(lei_obj.unifs_shape()[0])
+```
 
+```python
 P = adastate.AdaParams(
-    init_K = 1000,
+    init_K=2**10,
     n_K_double=8,
     alpha_target=0.025,
     grid_target=0.002,
     bias_target=0.002,
     nB_global=50,
     nB_tile=50,
-    step_size=2 ** 16
+    step_size=2**14,
+    tuning_min=20
 )
 D = adastate.init_data(P, lei_obj, 0)
+
 ```
 
 ```python
 load_iter = 'latest'
-load_iter = -1
 S, load_iter, fn = adastate.load(name, load_iter)
 if S is None:
+    print('initializing')
     S = adastate.init_state(P, g)
+S.todo[0] = True
 ```
 
 ```python
@@ -149,12 +154,13 @@ for II in range(load_iter + 1, iter_max):
         break
 
     print(f"starting iteration {II} with {np.sum(S.todo)} tiles to process")
-    if cost_per_sim is not None:
-        predicted_time = np.sum(S.sim_sizes[S.todo] * cost_per_sim)
-        print(f"runtime prediction: {predicted_time:.2f}")
+    total_effort = np.sum(S.sim_sizes[S.todo])
+    predicted_time = total_effort * cost_per_sim
+    print(f"runtime prediction: {predicted_time:.2f}")
 
     start = time.time()
     R.step(P, S, D)
+    cost_per_sim = (time.time() - start) / total_effort
     print(f"step took {time.time() - start:.2f}s")
 
     start = time.time()
@@ -163,10 +169,7 @@ for II in range(load_iter + 1, iter_max):
     print(f"checkpointing took {time.time() - start:.2f}s")
 
     start = time.time()
-    cr = Criterion(
-        lei_obj,
-        P, S, D
-    )
+    cr = Criterion(lei_obj, P, S, D)
     print(f'criterion took {time.time() - start:.2f}s')
     rprint(cr.report)
 
@@ -175,168 +178,12 @@ for II in range(load_iter + 1, iter_max):
         S.sim_sizes[cr.which_deepen] = S.sim_sizes[cr.which_deepen] * 2
         S.todo[cr.which_deepen] = True
 
+        S = S.refine(P, cr.which_refine, null_hypos, symmetry)
         print(f"refinement took {time.time() - start:.2f}s")
 ```
 
 ```python
-ada_step_size = 10 * grid_batch_size
-ada_min_step_size = grid_batch_size
-iter_max = 10000
-cost_per_sim = np.inf
-for II in range(load_iter + 1, iter_max):
-    if np.sum(state.todo) == 0:
-        break
 
-    print(f"starting iteration {II} with {np.sum(todo)} tiles to process")
-    if cost_per_sim is not None:
-        predicted_time = np.sum(sim_sizes[todo] * cost_per_sim)
-        print(f"runtime prediction: {predicted_time:.2f}")
-
-    ########################################
-    # Simulate any new or updated tiles.
-    ########################################
-
-    start = time.time()
-    pointwise_target_alpha[todo] = batched_invert_bound(
-        target_alpha, g.theta_tiles[todo], g.vertices(todo), n_arm_samples
-    )
-    print(f"inverting the bound took {time.time() - start:.2f}s")
-    start = time.time()
-
-    bootstrap_cvs_todo = lts.bootstrap_tune_runner(
-        lei_obj,
-        sim_sizes[todo],
-        pointwise_target_alpha[todo],
-        g.theta_tiles[todo],
-        g.null_truth[todo],
-        unifs,
-        bootstrap_idxs,
-        unifs_order,
-    )
-    # TODO: this indexing has been a source of bugs. it would be nice to a
-    # tile-wise database tool that can give names to different values while
-    # smoothly handling the refinement, possibly also sparsity?
-    bootstrap_cvs[todo, 0] = bootstrap_cvs_todo[:, 0]
-    bootstrap_cvs[todo, 1 : 1 + nB_global] = bootstrap_cvs_todo[:, 1 : 1 + nB_global]
-    bootstrap_cvs[todo, 1 + nB_global] = bootstrap_cvs_todo[:, 1 + nB_global :].min(
-        axis=1
-    )
-    bootstrap_cvs[todo, 2 + nB_global] = bootstrap_cvs_todo[:, 1 + nB_global :].mean(
-        axis=1
-    )
-    bootstrap_cvs[todo, 3 + nB_global] = bootstrap_cvs_todo[:, 1 + nB_global :].max(
-        axis=1
-    )
-    cost_per_sim = (time.time() - start) / np.sum(sim_sizes[todo])
-    todo[:] = False
-    print(f"tuning took {time.time() - start:.2f}s")
-
-    ########################################
-    # Checkpoint
-    ########################################
-
-    start = time.time()
-    savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
-    with open(f"{name}/{II}.pkl", "wb") as f:
-        pickle.dump(savedata, f)
-    for old_II in checkpoint.exponential_delete(II):
-        fp = f"{name}/{old_II}.pkl"
-        if os.path.exists(fp):
-            os.remove(fp)
-    print(f"checkpointing took {time.time() - start:.2f}s")
-
-    criterion = Criterion(
-        lei_obj,
-        g,
-        bootstrap_cvs,
-        sim_sizes,
-        pointwise_target_alpha,
-        target_alpha,
-        unifs,
-        unifs_order,
-    )
-
-    ########################################
-    # Report current status
-    ########################################
-    report = dict(
-        II=II,
-        overall_cv=f"{overall_cv:.5f}",
-        cv_std=f"{cv_std:.4f}",
-        grid_cost=f"{alpha_cost[overall_tile]:.5f}",
-        bias=f"{bias:.5f}",
-        total_slack=f"{alpha_cost[overall_tile] + bias:.5f}",
-        n_tiles=g.n_tiles,
-        n_refine=np.sum(which_refine),
-        n_refine_impossible=np.sum(impossible_refine),
-        n_moresims=np.sum(which_deepen),
-        n_moresims_impossible=np.sum(impossible_sim),
-        # moresims_dist=np.unique(sim_multiplier, return_counts=True)
-    )
-    rprint(report)
-    print(f"analysis took", time.time() - start)
-    start = time.time()
-
-    ########################################
-    # Refine!
-    ########################################
-
-    if (np.sum(which_refine) > 0 or np.sum(which_deepen) > 0) and II != iter_max - 1:
-        if np.sum(which_refine) == 0:
-            sim_sizes[which_deepen] = sim_sizes[which_deepen] * 2
-            todo[which_deepen] = True
-
-        refine_tile_idxs = np.where(which_refine)[0]
-        refine_gridpt_idxs = g.grid_pt_idx[refine_tile_idxs]
-        new_thetas, new_radii, keep_tile_idxs = grid.refine_grid(g, refine_gridpt_idxs)
-        new_grid = grid.build_grid(
-            new_thetas,
-            new_radii,
-            null_hypos=g.null_hypos,
-            symmetry_planes=symmetry,
-            should_prune=True,
-        )
-
-        old_g = g
-        # NOTE: It would be possible to avoid concatenating the grid every
-        # iteration. For particularly large problems, that might be a large win
-        # in runtime. But the additional complexity is undesirable at the
-        # moment.
-        g = grid.concat_grids(grid.index_grid(old_g, keep_tile_idxs), new_grid)
-
-        sim_sizes = np.concatenate(
-            [sim_sizes[keep_tile_idxs], np.full(new_grid.n_tiles, init_nsims)]
-        )
-        todo = np.concatenate(
-            [todo[keep_tile_idxs], np.ones(new_grid.n_tiles, dtype=bool)]
-        )
-        bootstrap_cvs = np.concatenate(
-            [
-                bootstrap_cvs[keep_tile_idxs],
-                np.zeros((new_grid.n_tiles, 4 + nB_global), dtype=float),
-            ],
-            axis=0,
-        )
-        pointwise_target_alpha = np.concatenate(
-            [
-                pointwise_target_alpha[keep_tile_idxs],
-                np.empty(new_grid.n_tiles, dtype=float),
-            ]
-        )
-        print(f"refinement took {time.time() - start:.2f}s")
-        continue
-    print("done!")
-    savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
-    with open(f"{name}/{II}.pkl", "wb") as f:
-        pickle.dump(savedata, f)
-    break
-
-```
-
-```python
-savedata = [g, sim_sizes, bootstrap_cvs, None, None, pointwise_target_alpha]
-with open(f"{name}/{II}.pkl", "wb") as f:
-    pickle.dump(savedata, f)
 ```
 
 ```python
@@ -385,48 +232,4 @@ f0 = 0.01                               # Type I Error at theta_0
 fwd_solver = ehbound.ForwardQCPSolver(n=n_arm_samples)
 q_opt = fwd_solver.solve(theta_0=theta_0, v=v, a=f0) # optimal q
 ehbound.q_holder_bound_fwd(q_opt, n_arm_samples, theta_0, v, f0)
-```
-
-```python
-load_iter = 'latest'
-load_iter = -1
-if load_iter == 'latest':
-    # find the file with the largest checkpoint index: name/###.pkl 
-    available_iters = [int(fn[:-4]) for fn in os.listdir(name) if re.match(r'[0-9]+.pkl', fn)]
-    load_iter = -1 if len(available_iters) == 0 else max(available_iters)
-
-if load_iter == -1:
-    g = grid.build_grid(
-        theta, radii, null_hypos=null_hypos, symmetry_planes=symmetry, should_prune=True
-    )
-    sim_sizes = np.full(g.n_tiles, init_nsims)
-    bootstrap_cvs = np.empty((g.n_tiles, 4 + nB_global), dtype=float)
-    pointwise_target_alpha = np.empty(g.n_tiles, dtype=float)
-    todo = np.ones(g.n_tiles, dtype=bool)
-    # TODO: remove
-    typeI_sum = None
-    hob_upper = None
-else:
-    fn = f"{name}/{load_iter}.pkl"
-    print(f'loading checkpoint {fn}')
-    with open(fn, "rb") as f:
-        (
-            g,
-            sim_sizes,
-            bootstrap_cvs,
-            typeI_sum,
-            hob_upper,
-            pointwise_target_alpha,
-        ) = pickle.load(f)
-    todo = np.zeros(g.n_tiles, dtype=bool)
-    todo[-1] = True
-    # keep = np.ones(g.n_tiles, dtype=bool)
-    # for d in range(3):
-    #     keep &= (g.theta_tiles[:, d] > -1) & (g.theta_tiles[:, d] < 1)
-    # g = grid.index_grid(g, keep)
-    # pointwise_target_alpha = pointwise_target_alpha[keep]
-    # sim_sizes = sim_sizes[keep]
-    # bootstrap_cvs = bootstrap_cvs[keep]
-    # typeI_sum = typeI_sum[keep] if typeI_sum is not None else None
-    # hob_upper = hob_upper[keep] if hob_upper is not None else None
 ```

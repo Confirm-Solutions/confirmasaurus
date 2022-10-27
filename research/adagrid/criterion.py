@@ -16,11 +16,12 @@ class Criterion:
         ########################################
         # Criterion step 0: prep some useful numbers
         ########################################
-        self.alpha_cost = P.alpha_target - S.alpha0
-        twb_worst_lam = np.min(S.twb_min_lam)
         eps_twb = 1e-6
-        ties = np.where(np.abs(S.twb_min_lam - twb_worst_lam) < eps_twb)[0]
-        self.twb_worst_tile = np.argmin(S.twb_max_lam[ties])
+        self.alpha_cost = P.alpha_target - S.alpha0
+
+        self.twb_worst_lam = np.min(S.twb_max_lam)
+        self.ties = np.where(np.abs(S.twb_max_lam - self.twb_worst_lam) < eps_twb)[0]
+        self.twb_worst_tile = self.ties[np.argmin(S.twb_min_lam[self.ties])]
         self.overall_tile = np.argmin(S.orig_lam)
         self.overall_lam = S.orig_lam[self.overall_tile]
 
@@ -84,24 +85,28 @@ class Criterion:
         ):
             return
 
-        self.inflation_factor = 2
-        self.inflate_from = S.twb_max_lam[self.twb_worst_tile]
-        self.inflated_min_lam = (
-            self.inflate_from
-            + (S.twb_min_lam - self.inflate_from) * self.inflation_factor
+        self.inflation_factor = 1
+        # self.inflate_from = S.twb_max_lam[self.twb_worst_tile]
+        # assert self.inflate_from < 1
+        # self.inflated_min_lam = (
+        #     self.inflate_from
+        #     + (S.twb_min_lam - self.inflate_from) * self.inflation_factor
+        # )
+
+        self.inflated_min_lam = np.empty((S.g.n_tiles,))
+        temp_inflate = (
+            S.twb_mean_lam + (S.twb_min_lam - S.twb_mean_lam) * self.inflation_factor
         )
-        # this could be improved??
-        # think about twb_max_lam[worst_tile] and twb_min_lam??
-        self.focus = S.twb_min_lam < 1
-        self.sorted_bootstrap_idxs = np.argsort(self.inflated_min_lam[self.focus])
-        self.dangerous = np.where(self.focus)[0][
-            self.sorted_bootstrap_idxs[: P.step_size]
-        ]
+        ignore = S.twb_mean_lam >= 1
+        self.inflated_min_lam[ignore] = 1
+        self.inflated_min_lam[~ignore] = temp_inflate[~ignore]
+
+        self.dangerous = np.argsort(self.inflated_min_lam)[: P.step_size]
 
         self.d_should_refine = self.alpha_cost[self.dangerous] > P.grid_target
         self.deepen_likely_to_work = (
             S.twb_mean_lam[self.dangerous] > S.twb_max_lam[self.twb_worst_tile]
-        )
+        ) & (S.alpha0[self.dangerous] > P.alpha_target / 2)
         self.d_should_deepen = self.deepen_likely_to_work & (
             S.sim_sizes[self.dangerous] < P.max_sim_size
         )

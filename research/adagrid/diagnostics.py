@@ -1,25 +1,20 @@
-from pprint import pformat
-
+# from pprint import pformat
 import matplotlib.pyplot as plt
 import numpy as np
 
 
-def status_report(adap, sim_sizes, bootstrap_cvs, pointwise_target_alpha):
-    overall_cv = np.min(bootstrap_cvs[:, 0])
-    n_critical = np.sum((bootstrap_cvs[:, 0] < overall_cv + 0.01))
-    n_loose = np.sum(
-        (bootstrap_cvs[:, 0] < overall_cv + 0.01)
-        & (adap.alpha_target - pointwise_target_alpha > adap.grid_target)
-    )
-    sim_size_dist = {s: c for s, c in zip(*np.unique(sim_sizes, return_counts=True))}
-    total_effort = sum([c * s for s, c in sim_size_dist.items()])
-    sim_size_effort = {s: c * s / total_effort * 100 for s, c in sim_size_dist.items()}
-    out = f"overall_cv: {overall_cv:.4f}"
-    out += f"\nnumber of tiles near critical: {n_critical}"
-    out += f"\n    and with loose bounds {n_loose}"
-    out += f"\nsim size distribution: \n{pformat(sim_size_dist, indent=4)}"
-    out += f"\nsim size effort %: \n{pformat(sim_size_effort, indent=4)}"
-    return out
+# def status_report(adap, sim_sizes, bootstrap_cvs, pointwise_target_alpha):
+#     overall_cv = np.min(bootstrap_cvs[:, 0])
+#     sim_size_dist = {s: c for s, c in zip(*np.unique(sim_sizes, return_counts=True))}
+#     total_effort = sum([c * s for s, c in sim_size_dist.items()])
+#     sim_size_effort = {s: c * s / total_effort * 100 for s, c in
+#     sim_size_dist.items()}
+#     out = f"overall_cv: {overall_cv:.4f}"
+#     out += f"\nnumber of tiles near critical: {n_critical}"
+#     out += f"\n    and with loose bounds {n_loose}"
+#     out += f"\nsim size distribution: \n{pformat(sim_size_dist, indent=4)}"
+#     out += f"\nsim size effort %: \n{pformat(sim_size_effort, indent=4)}"
+#     return out
 
 
 def lamstar_histogram(bootstrap_cvs, sim_sizes, xlim=None, weighted=False):

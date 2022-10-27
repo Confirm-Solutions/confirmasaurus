@@ -148,7 +148,7 @@ def bootstrap_tune_runner(
     unifs,
     bootstrap_idxs,
     unifs_order,
-    sim_batch_size=1000,
+    sim_batch_size=1024,
     grid_batch_size=64,
 ):
     n_bootstraps = next(iter(bootstrap_idxs.values())).shape[0]

@@ -26,7 +26,8 @@ jax.config.update('jax_platform_name', 'cpu')
 import confirm.mini_imprint.lewis_drivers as lts
 from confirm.lewislib import lewis
 
-from adastate import load_iter, AdaParams
+import adastate
+from criterion import Criterion
 ```
 
 ```python
@@ -56,49 +57,90 @@ lei_obj = lewis.Lewis45(**params)
 ```
 
 ```python
-# Configuration used during simulation
-# TODO: things that should be saved in the future!!
 
-adap = AdaParams(
+P = adastate.AdaParams(
     init_K = 1000,
-    n_sim_double = 8,
-    alpha_target = 0.025,
-    grid_target = 0.002,
-    bias_target = 0.002
+    n_K_double=8,
+    alpha_target=0.025,
+    grid_target=0.002,
+    bias_target=0.002,
+    nB_global=50,
+    nB_tile=50,
+    step_size=2 ** 14
 )
-(
-    g,
-    sim_sizes,
-    bootstrap_cvs,
-    typeI_sum,
-    hob_upper,
-    pointwise_target_alpha,
-), _, _ = load_iter(name, 'latest')
+D = adastate.init_data(P, lei_obj, 0)
 ```
 
 ```python
-print('overall_cv', overall_cv)
-print('bias driver priority', np.sum(inflated_min_cv[:, None] < twb_B_lamss[None, :], axis=0))
-bias_bad = B_min < overall_cv
-print('n bias bad', np.sum(bias_bad))
-for i in range(10):
-    inflated_min_cv = twb_mean_cv + (twb_min_cv - twb_mean_cv) * i
-    dangerous = np.sum(inflated_min_cv[bias_bad] < overall_cv)
-    collateral = np.sum(inflated_min_cv < overall_cv)
-    print(f'inflation factor {i}')
-    print(f'    dangerous tiles caught: {dangerous}')
-    print(f'    collateral tiles caught: {collateral}')
+load_iter = 'latest'
+S, load_iter, fn = adastate.load(name, load_iter)
+```
 
-print('lambda**B', B_lamss)
-total_effort = np.sum(sim_sizes)
-for K in np.unique(sim_sizes):
-    sel = sim_sizes == K
+```python
+cr = Criterion(lei_obj, P, S, D)
+```
+
+```python
+assert S.twb_max_lam[cr.twb_worst_tile] == np.min(S.twb_max_lam)
+assert S.twb_min_lam[cr.twb_worst_tile] == np.min(S.twb_min_lam[cr.ties])
+```
+
+```python
+S.alpha0[cr.dangerous]
+```
+
+```python
+S.B_lam[cr.dangerous].min(axis=1)
+```
+
+```python
+twb_B_lamss = S.B_lam[cr.B_lamss_idx, np.arange(cr.B_lamss_idx.shape[0])]
+twb_B_lamss
+```
+
+```python
+
+```
+
+```python
+def find_queue_position(lam):
+    return np.sum(cr.inflated_min_lam[:, None] < lam[None, :], axis=0)
+```
+
+```python
+print('overall driver priority', find_queue_position(np.sort(S.orig_lam)[:10]))
+```
+
+```python
+print('overall_lam', cr.overall_lam)
+print('bias driver priority', find_queue_position(twb_B_lamss))
+B_min = S.B_lam.min(axis=1)
+bias_bad = B_min < cr.overall_lam
+print('n bias bad', np.sum(bias_bad))
+n_critical = np.sum((S.orig_lam < cr.overall_lam + 0.01))
+n_loose = np.sum(
+    (S.orig_lam < cr.overall_lam + 0.01)
+    & (P.alpha_target - S.alpha0 > P.grid_target)
+)
+print(f"number of tiles near critical: {n_critical}")
+print(f"    and with loose bounds {n_loose}")
+# for i in range(10):
+#     dangerous = np.sum(cr.inflated_min_lam[bias_bad] < cr.overall_lam)
+#     collateral = np.sum(cr.inflated_min_lam < cr.overall_lam)
+#     print(f'inflation factor {i}')
+#     print(f'    dangerous tiles caught: {dangerous}')
+#     print(f'    collateral tiles caught: {collateral}')
+
+print('lambda**B', cr.B_lamss)
+total_effort = np.sum(S.sim_sizes)
+for K in np.unique(S.sim_sizes):
+    sel = S.sim_sizes == K
     count = np.sum(sel)
     print(f"K={K}:")
     print(f'    count={count / 1e6:.3f}m')
-    print(f'    lambda**B[K]={B_lam[sel].min(axis=0)}')
-    print(f'    min lambda*B[K]={np.min(B_min[sel]):.4f}')
-    print(f'    min lambda*b[K]={np.min(bootstrap_cvs[sel, -2]):.4f}')
+    print(f'    lambda**B[K]={S.B_lam[sel].min(axis=0)}')
+    print(f'    min lambda*B[K]={np.min(S.B_lam[sel].min(axis=1)):.4f}')
+    print(f'    min lambda*b[K]={np.min(S.twb_min_lam):.4f}')
     effort = K * count / total_effort
     print(f'    % effort={100 * effort:.4f}') 
 ```
@@ -106,14 +148,12 @@ for K in np.unique(sim_sizes):
 ```python
 from diagnostics import status_report, lamstar_histogram
 
-inflated_min_cv = twb_mean_cv + (twb_min_cv - twb_mean_cv) * 2
-lamstar_histogram(inflated_min_cv, sim_sizes, xlim=[-0.5, 0.5])
+lamstar_histogram(cr.inflated_min_lam, S.sim_sizes, xlim=[-0.5, 0.5])
 plt.show()
 ```
 
 ```python
 
-rpt = status_report(adap, sim_sizes, bootstrap_cvs, pointwise_target_alpha)
 print(rpt)
 plt.figure(figsize=(10, 10), constrained_layout=True)
 plt.subplot(2,2, 1)
