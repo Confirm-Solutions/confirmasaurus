@@ -16,6 +16,7 @@ jupyter:
 import confirm.outlaw.nb_util as nb_util
 nb_util.setup_nb()
 
+import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import jax.numpy as jnp
@@ -28,6 +29,7 @@ from confirm.lewislib import lewis
 
 import adastate
 from criterion import Criterion
+from diagnostics import lamstar_histogram
 ```
 
 ```python
@@ -57,27 +59,34 @@ lei_obj = lewis.Lewis45(**params)
 ```
 
 ```python
-
-P = adastate.AdaParams(
-    init_K = 1000,
-    n_K_double=8,
-    alpha_target=0.025,
-    grid_target=0.002,
-    bias_target=0.002,
-    nB_global=50,
-    nB_tile=50,
-    step_size=2 ** 14
-)
-D = adastate.init_data(P, lei_obj, 0)
-```
-
-```python
+with open(f"./{name}/data_params.pkl", "rb") as f:
+    P, D = pickle.load(f)
 load_iter = 'latest'
 S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
 cr = Criterion(lei_obj, P, S, D)
+```
+
+```python
+S.sim_sizes[cr.dangerous]
+```
+
+```python
+cr.alpha_cost[cr.dangerous]
+```
+
+```python
+np.sum(cr.impossible_refine_orig)
+```
+
+```python
+cr.twb_worst_tile_lam_max
+```
+
+```python
+cr.twb_worst_tile_lam_min
 ```
 
 ```python
@@ -94,12 +103,16 @@ S.B_lam[cr.dangerous].min(axis=1)
 ```
 
 ```python
-twb_B_lamss = S.B_lam[cr.B_lamss_idx, np.arange(cr.B_lamss_idx.shape[0])]
+twb_B_lamss = S.twb_min_lam[cr.B_lamss_idx]
 twb_B_lamss
 ```
 
 ```python
+S.alpha0[cr.B_lamss_idx]
+```
 
+```python
+cr.B_lamss
 ```
 
 ```python
@@ -108,7 +121,24 @@ def find_queue_position(lam):
 ```
 
 ```python
-print('overall driver priority', find_queue_position(np.sort(S.orig_lam)[:10]))
+S.twb_min_lam[np.argsort(S.orig_lam)[0]]
+```
+
+```python
+up_next = np.argsort(S.orig_lam)[:10000]
+S.alpha0[up_next].argmax(), S.sim_sizes[up_next].max()
+```
+
+```python
+sorted_ordering = np.sort(cr.inflated_min_lam)
+query = cr.inflated_min_lam[np.argsort(S.orig_lam)[:1000]]
+overall_priority = jnp.searchsorted(sorted_ordering, query)
+print("overall driver priority", overall_priority)
+
+```
+
+```python
+np.maximum.accumulate(overall_priority)
 ```
 
 ```python
@@ -146,23 +176,26 @@ for K in np.unique(S.sim_sizes):
 ```
 
 ```python
-from diagnostics import status_report, lamstar_histogram
-
-lamstar_histogram(cr.inflated_min_lam, S.sim_sizes, xlim=[-0.5, 0.5])
-plt.show()
+S.db.data[cr.twb_worst_tile, -3:]
 ```
 
 ```python
+S.alpha0[S.twb_min_lam < 0.04359697]
+```
 
-print(rpt)
+```python
+S.twb_min_lam[np.argsort(S.orig_lam)[:1000]]
+```
+
+```python
 plt.figure(figsize=(10, 10), constrained_layout=True)
 plt.subplot(2,2, 1)
 plt.title('$min(\lambda^*_B)$')
-lamstar_histogram(bootstrap_cvs[:, 1:-2].min(axis=1), sim_sizes)
-for i, (idx, title) in enumerate([(0, '$\lambda^{*}$'), (-2, '$min(\lambda^*_b)$'), (-1, '$mean(\lambda^*_b)$')]):
+lamstar_histogram(S.B_lam.min(axis=1), S.sim_sizes)
+for i, (field, title) in enumerate([(S.orig_lam, '$\lambda^{*}$'), (S.twb_min_lam, '$min(\lambda^*_b)$'), (S.twb_mean_lam, '$mean(\lambda^*_b)$')]):
     plt.subplot(2,2,i + 2)
     plt.title(title)
-    lamstar_histogram(bootstrap_cvs[:, idx], sim_sizes)
+    lamstar_histogram(field, S.sim_sizes)
 plt.show()
 ```
 

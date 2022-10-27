@@ -25,15 +25,36 @@ class Criterion:
         self.overall_tile = np.argmin(S.orig_lam)
         self.overall_lam = S.orig_lam[self.overall_tile]
 
+        idxs = [self.twb_worst_tile]
+        self.twb_worst_tile_lams = lts.bootstrap_tune_runner(
+            self.lei_obj,
+            S.sim_sizes[idxs],
+            np.full(1, P.alpha_target),
+            S.g.theta_tiles[idxs],
+            S.g.null_truth[idxs],
+            D.unifs,
+            D.bootstrap_idxs,
+            D.unifs_order,
+            sim_batch_size=1024 * 16,
+            grid_batch_size=1,
+        )
+        self.twb_worst_tile_lam_min = self.twb_worst_tile_lams[
+            0, 1 + P.nB_global :
+        ].min()
+        self.twb_worst_tile_lam_mean = self.twb_worst_tile_lams[
+            0, 1 + P.nB_global :
+        ].mean()
+        self.twb_worst_tile_lam_max = self.twb_worst_tile_lams[
+            0, 1 + P.nB_global :
+        ].max()
+
         ########################################
         # Criterion step 1: is tuning impossible?
         ########################################
-        # try to estimate the number of refinements steps required to get to the
-        # target alpha. for now, it's okay to slightly preference refinement over
-        # adding sims because refinment gives more information in a sense.
         self.cost_to_refine = 2**lei_obj.n_arms
-        self.sims_required_to_rej_once = 2 / S.alpha0 - 1
-        self.cost_to_rej_once = self.sims_required_to_rej_once / S.sim_sizes
+        self.sims_to_rej_enough = (P.tuning_min_idx + 1) / S.alpha0 - 1
+        self.alpha_to_rej_enough = (P.tuning_min_idx + 1) / (S.sim_sizes + 1)
+        self.cost_to_rej_once = self.sims_to_rej_enough / S.sim_sizes
 
         # if a tile always stops early, it's probably not interesting and we should
         # lean towards simulating more rather than more expensive refinement
@@ -42,11 +63,14 @@ class Criterion:
             self.normally_stops_early
         )
 
-        self.alpha_to_rej_once = 2 / (S.sim_sizes + 1)
-        self.impossible = S.alpha0 < self.alpha_to_rej_once
-        self.impossible_refine = (self.impossible & (~self.prefer_simulation)) | (
+        self.impossible = S.alpha0 < self.alpha_to_rej_enough
+        self.impossible_refine_orig = (self.impossible & (~self.prefer_simulation)) | (
             S.alpha0 == 0
         )
+        self.impossible_refine = np.zeros(S.g.n_tiles, dtype=bool)
+        self.impossible_refine[
+            np.where(self.impossible_refine_orig)[0][: P.step_size]
+        ] = True
         self.impossible_sim = self.impossible & self.prefer_simulation
 
         ########################################
@@ -85,7 +109,7 @@ class Criterion:
         ):
             return
 
-        self.inflation_factor = 1
+        # self.inflation_factor = 1
         # self.inflate_from = S.twb_max_lam[self.twb_worst_tile]
         # assert self.inflate_from < 1
         # self.inflated_min_lam = (
@@ -93,23 +117,24 @@ class Criterion:
         #     + (S.twb_min_lam - self.inflate_from) * self.inflation_factor
         # )
 
-        self.inflated_min_lam = np.empty((S.g.n_tiles,))
-        temp_inflate = (
-            S.twb_mean_lam + (S.twb_min_lam - S.twb_mean_lam) * self.inflation_factor
-        )
-        ignore = S.twb_mean_lam >= 1
-        self.inflated_min_lam[ignore] = 1
-        self.inflated_min_lam[~ignore] = temp_inflate[~ignore]
+        # self.inflated_min_lam = np.empty((S.g.n_tiles,))
+        # temp_inflate = (
+        #     S.twb_mean_lam + (S.twb_min_lam - S.twb_mean_lam) * self.inflation_factor
+        # )
+        # ignore = S.twb_mean_lam >= 1
+        # self.inflated_min_lam[ignore] = 1
+        # self.inflated_min_lam[~ignore] = temp_inflate[~ignore]
+        self.inflated_min_lam = S.twb_min_lam
 
         self.dangerous = np.argsort(self.inflated_min_lam)[: P.step_size]
 
         self.d_should_refine = self.alpha_cost[self.dangerous] > P.grid_target
         self.deepen_likely_to_work = (
-            S.twb_mean_lam[self.dangerous] > S.twb_max_lam[self.twb_worst_tile]
-        ) & (S.alpha0[self.dangerous] > P.alpha_target / 2)
-        self.d_should_deepen = self.deepen_likely_to_work & (
-            S.sim_sizes[self.dangerous] < P.max_sim_size
+            S.twb_mean_lam[self.dangerous] > self.twb_worst_tile_lam_mean
         )
+        self.d_should_deepen = (
+            self.deepen_likely_to_work & (S.sim_sizes[self.dangerous] < P.max_sim_size)
+        ) | (~self.d_should_refine)
         self.which_refine[self.dangerous] = self.d_should_refine & (
             ~self.d_should_deepen
         )

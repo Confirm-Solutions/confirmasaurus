@@ -12,6 +12,24 @@ jupyter:
     name: python3
 ---
 
+Tuning inside Adagrid is a scary thing to do. This document is a summary of the various problems I've run into. 
+
+First, some basics. We have three different groups of thresholds. $i$ is a tile index, $j$ is a bootstrap index.
+1. The original sample, $\lambda^*_i$ and it's grid-wise minimum $\lambda^{**}$. 
+2. $N_B$  global bootstraps $\lambda_{i, B_j}^*$ and their grid-wise minima $\lambda_{B_j}^{**}$. In the code, info regarding these bootstraps is prefixed with `B_`.
+3. $N_b$  tile-wise investigation bootstraps $\lambda_{i, b_j}^*$ and their tile-wise minima $\lambda_{i}^{**}$. In the code, info regarding these bootstraps is prefixed with `twb_` standing for "tile-wise bootstrap". 
+
+For each of these tuning problems, we tune at TIE level $\alpha_0 = \alpha - C_{\alpha}$ where $C_{\alpha}$ is the TIE consumed by continuous simulation extension. The C stands for "cost" and in the code this is called `alpha_cost`. 
+
+The different problems I've run into so far:
+- impossible tuning. This occurs when $\alpha_0 < 2 / (K+1)$ . In this situation, we can't tune because there are too few test statistics. We need to either run more simulations (increase $K$) or refine (increase $\alpha_0$). 
+- it's possible to have a tile where the twb_min_lam is large... like 1 but B_lam is small like 0.015. 
+	- these tiles have too much variance, but there's no way to detect them because our tilewise bootstrap didn't turn up any evidence of danger. 
+	- it's not possible to completely remove this possibility because there's always some randomness.
+	- this partially suggests i'm using a baseline of too few simulations or too large tiles. this is fixable. I bumped up the baseline K to 4096.
+	- another option would be to use a new bootstrap in some way to get a new sample?
+- part of the problem is tiles for which $\alpha_0$ is super small and so the tuning result is like index 2 of the batch which will of course result in a high variance. the simple thing to do is to make $\alpha_0$ larger. is there a smooth way to do this?
+
 ```python
 import confirm.outlaw.nb_util as nb_util
 
@@ -122,7 +140,7 @@ n_arm_samples = int(lei_obj.unifs_shape()[0])
 
 ```python
 P = adastate.AdaParams(
-    init_K=2**10,
+    init_K=2**11,
     n_K_double=8,
     alpha_target=0.025,
     grid_target=0.002,
@@ -130,10 +148,10 @@ P = adastate.AdaParams(
     nB_global=50,
     nB_tile=50,
     step_size=2**14,
-    tuning_min=20
+    tuning_min_idx=20
 )
 D = adastate.init_data(P, lei_obj, 0)
-
+adastate.save(f"./{name}/data_params.pkl", (P, D))
 ```
 
 ```python
@@ -165,7 +183,10 @@ for II in range(load_iter + 1, iter_max):
 
     start = time.time()
     adastate.save(f"{name}/{II}.pkl", S)
-    adastate.clean_checkpoints(name, II)
+    for old_i in checkpoint.exponential_delete(II, base=1):
+        fp = f"{name}/{old_i}.pkl"
+        if os.path.exists(fp):
+            os.remove(fp)
     print(f"checkpointing took {time.time() - start:.2f}s")
 
     start = time.time()
@@ -180,10 +201,6 @@ for II in range(load_iter + 1, iter_max):
 
         S = S.refine(P, cr.which_refine, null_hypos, symmetry)
         print(f"refinement took {time.time() - start:.2f}s")
-```
-
-```python
-
 ```
 
 ```python

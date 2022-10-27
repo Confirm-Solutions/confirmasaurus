@@ -11,7 +11,6 @@ import numpy as np
 import confirm.mini_imprint.bound.binomial as ehbound
 import confirm.mini_imprint.lewis_drivers as lts
 from confirm.lewislib import batch
-from confirm.mini_imprint import checkpoint
 from confirm.mini_imprint import grid
 
 
@@ -25,6 +24,7 @@ class AdaParams:
     nB_global: int
     nB_tile: int
     step_size: int
+    tuning_min_idx: int
 
     @property
     def max_sim_size(self):
@@ -186,13 +186,6 @@ def load(name, i):
         return data, i, fn
     else:
         return None, i, None
-
-
-def clean_checkpoints(name, i):
-    for old_i in checkpoint.exponential_delete(i):
-        fp = f"{name}/{old_i}.pkl"
-        if os.path.exists(fp):
-            os.remove(fp)
 
 
 def save(fp, data):

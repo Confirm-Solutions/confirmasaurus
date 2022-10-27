@@ -1,4 +1,6 @@
 def exponential_delete(i, base=10):
+    if base == 1:
+        return range(0, i - 1)
     delete = []
     for j in range(i):
         power = 0
