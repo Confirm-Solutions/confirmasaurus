@@ -124,9 +124,11 @@ class Criterion:
         # ignore = S.twb_mean_lam >= 1
         # self.inflated_min_lam[ignore] = 1
         # self.inflated_min_lam[~ignore] = temp_inflate[~ignore]
-        self.inflated_min_lam = S.twb_min_lam
+        self.orderer = S.twb_min_lam
+        self.sorted_ordering = np.argsort(self.orderer)
+        self.sorted_orderer = self.orderer[self.sorted_ordering]
 
-        self.dangerous = np.argsort(self.inflated_min_lam)[: P.step_size]
+        self.dangerous = self.sorted_ordering[: P.step_size]
 
         self.d_should_refine = self.alpha_cost[self.dangerous] > P.grid_target
         self.deepen_likely_to_work = (
@@ -158,4 +160,24 @@ class Criterion:
             n_refine_impossible=np.sum(self.impossible_refine),
             n_moresims=np.sum(self.which_deepen),
             n_moresims_impossible=np.sum(self.impossible_sim),
+        )
+        self.report["min(twb_min_lam)"] = f"{S.twb_min_lam.min():.5f}"
+        self.report["min(twb_mean_lam)"] = f"{S.twb_mean_lam.min():.5f}"
+        self.report["min(twb_max_lam)"] = f"{S.twb_max_lam.min():.5f}"
+        self.report["twb_min_lam < min(twb_mean_lam)"] = np.sum(
+            S.twb_min_lam < S.twb_mean_lam.min()
+        )
+        self.report["twb_min_lam < min(twb_max_lam)"] = np.sum(
+            S.twb_min_lam < S.twb_max_lam.min()
+        )
+        self.report[
+            "max(twb_min_lam[dangerous])"
+        ] = f"{S.twb_min_lam[self.dangerous].max():.5f}"
+
+        query = self.orderer[self.overall_tile]
+        self.report["overall priority"] = np.searchsorted(self.sorted_orderer, query)
+        self.report["min(B_lamss)"] = np.min(self.B_lamss)
+        query = self.orderer[self.B_lamss_idx[self.B_lamss.argmin()]]
+        self.report["min(B_lamss) priority"] = np.searchsorted(
+            self.sorted_orderer, query
         )

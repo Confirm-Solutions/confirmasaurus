@@ -35,6 +35,8 @@ import confirm.outlaw.nb_util as nb_util
 
 nb_util.setup_nb(pretty=True)
 
+import gc
+import psutil
 import time
 import jax
 import os
@@ -139,19 +141,22 @@ n_arm_samples = int(lei_obj.unifs_shape()[0])
 ```
 
 ```python
-P = adastate.AdaParams(
-    init_K=2**11,
-    n_K_double=8,
-    alpha_target=0.025,
-    grid_target=0.002,
-    bias_target=0.002,
-    nB_global=50,
-    nB_tile=50,
-    step_size=2**14,
-    tuning_min_idx=20
-)
-D = adastate.init_data(P, lei_obj, 0)
-adastate.save(f"./{name}/data_params.pkl", (P, D))
+# P = adastate.AdaParams(
+#     init_K=2**11,
+#     n_K_double=8,
+#     alpha_target=0.025,
+#     grid_target=0.002,
+#     bias_target=0.002,
+#     nB_global=50,
+#     nB_tile=50,
+#     step_size=2**14,
+#     tuning_min_idx=20
+# )
+# D = adastate.init_data(P, lei_obj, 0)
+fp = f"./{name}/data_params.pkl"
+# adastate.save(fp, (P, D))
+with open(fp, 'rb') as f:
+    P, D = pickle.load(f)
 ```
 
 ```python
@@ -161,92 +166,144 @@ if S is None:
     print('initializing')
     S = adastate.init_state(P, g)
 S.todo[0] = True
+S.db.data = S.db.data.astype(np.float32)
 ```
 
 ```python
+(
+    S.db.data.nbytes +
+    S.todo.nbytes + 
+    S.sim_sizes.nbytes + 
+    S.g.thetas.nbytes +
+    S.g.radii.nbytes + 
+    S.g.null_truth.nbytes +
+    S.g.grid_pt_idx.nbytes +
+    D.unifs.nbytes + 
+    sum([v.nbytes for v in D.bootstrap_idxs.values()]) + 
+    sum([t.nbytes for t in lei_obj.pd_table.tables]) + 
+    sum([t.nbytes for t in lei_obj.pr_best_pps_1_table.tables]) +
+    sum([t.nbytes for t in lei_obj.pps_2_table.tables])
+) / 1e9, psutil.Process(os.getpid()).memory_info().rss / 1e9
+```
+
+```python
+with open('4d_full/storage_0.06375528470923503.pkl', 'rb') as f:
+    S_load = pickle.load(f) 
+```
+
+```python
+# keep_thresh = 0.075
+# keep1 = S.twb_min_lam < keep_thresh
+# keep2 = S_load.twb_min_lam < keep_thresh
+
+# S_store = adastate.AdaState(
+#     grid.concat_grids(grid.index_grid(S.g, ~keep1), grid.index_grid(S_load.g, ~keep2)),
+#     np.concatenate((
+#         S.sim_sizes[~keep1],
+#         S_load.sim_sizes[~keep2]
+#     ), dtype=np.int32),
+#     np.concatenate((
+#         S.todo[~keep1],
+#         S_load.todo[~keep2]
+#     ), dtype=bool),
+#     adastate.TileDB(
+#         np.concatenate((
+#             S.db.data[~keep1],
+#             S_load.db.data[~keep2]
+#         ), dtype=np.float32),
+#         S.db.slices
+#     )
+# )
+# print(S_store.g.n_tiles)
+# adastate.save(f"./{name}/storage_{keep_thresh}.pkl", S_store)
+# del S_store
+# gc.collect()
+
+# print('keeping', np.sum(keep1) + np.sum(keep2))
+# S_keep = adastate.AdaState(
+#     grid.concat_grids(grid.index_grid(S.g, keep1), grid.index_grid(S_load.g, keep2)),
+#     np.concatenate((
+#         S.sim_sizes[keep1],
+#         S_load.sim_sizes[keep2]
+#     ), dtype=np.int32),
+#     np.concatenate((
+#         S.todo[keep1],
+#         S_load.todo[keep2]
+#     ), dtype=np.bool),
+#     adastate.TileDB(
+#         np.concatenate((
+#             S.db.data[keep1],
+#             S_load.db.data[keep2]
+#         ), dtype=np.float32),
+#         S.db.slices
+#     )
+# )
+# S = S_keep
+# S.todo[0] = True
+# gc.collect()
+```
+
+```python
+# assign the first tile todo so that we have something to do!
+S.todo[0]=True
+
 R = adastate.AdaRunner(P, lei_obj)
 iter_max = 10000
 cost_per_sim = np.inf
-for II in range(load_iter + 1, iter_max):
-    if np.sum(S.todo) == 0:
-        break
+try:
+    for II in range(load_iter + 1, iter_max):
+        if np.sum(S.todo) == 0:
+            break
 
-    print(f"starting iteration {II} with {np.sum(S.todo)} tiles to process")
-    total_effort = np.sum(S.sim_sizes[S.todo])
-    predicted_time = total_effort * cost_per_sim
-    print(f"runtime prediction: {predicted_time:.2f}")
+        print(f"starting iteration {II} with {np.sum(S.todo)} tiles to process")
+        total_effort = np.sum(S.sim_sizes[S.todo])
+        predicted_time = total_effort * cost_per_sim
+        print(f"runtime prediction: {predicted_time:.2f}")
 
-    start = time.time()
-    R.step(P, S, D)
-    cost_per_sim = (time.time() - start) / total_effort
-    print(f"step took {time.time() - start:.2f}s")
+        start = time.time()
+        R.step(P, S, D)
+        cost_per_sim = (time.time() - start) / total_effort
+        print(f"step took {time.time() - start:.2f}s")
 
-    start = time.time()
-    adastate.save(f"{name}/{II}.pkl", S)
-    for old_i in checkpoint.exponential_delete(II, base=1):
-        fp = f"{name}/{old_i}.pkl"
-        if os.path.exists(fp):
-            os.remove(fp)
-    print(f"checkpointing took {time.time() - start:.2f}s")
+        start = time.time()
+        if II % 10 == 0:
+            adastate.save(f"{name}/{II}.pkl", S)
+            for old_i in checkpoint.exponential_delete(II, base=1):
+                fp = f"{name}/{old_i}.pkl"
+                if os.path.exists(fp):
+                    os.remove(fp)
+        print(f"checkpointing took {time.time() - start:.2f}s")
 
-    start = time.time()
-    cr = Criterion(lei_obj, P, S, D)
-    print(f'criterion took {time.time() - start:.2f}s')
-    rprint(cr.report)
+        start = time.time()
+        cr = Criterion(lei_obj, P, S, D)
+        print(f'criterion took {time.time() - start:.2f}s')
+        which_refine = cr.which_refine
+        which_deepen = cr.which_deepen
+        report = cr.report
+        del cr
+        gc.collect()
+        memory_usage = psutil.Process(os.getpid()).memory_info().rss
+        report['memory usage'] = f'{int(memory_usage / 1024 ** 2)} MB'
+        report['memory usage per tile'] = f'{memory_usage / S.g.n_tiles:.0f} B'
+        rprint(report)
 
-    start = time.time()
-    if (np.sum(cr.which_refine) > 0 or np.sum(cr.which_deepen) > 0) and II != iter_max - 1:
-        S.sim_sizes[cr.which_deepen] = S.sim_sizes[cr.which_deepen] * 2
-        S.todo[cr.which_deepen] = True
+        start = time.time()
+        S.todo[:] = False
+        if (np.sum(which_refine) > 0 or np.sum(which_deepen) > 0) and II != iter_max - 1:
+            S.sim_sizes[which_deepen] = S.sim_sizes[which_deepen] * 2
+            S.todo[which_deepen] = True
 
-        S = S.refine(P, cr.which_refine, null_hypos, symmetry)
-        print(f"refinement took {time.time() - start:.2f}s")
+            S = S.refine(P, which_refine, null_hypos, symmetry)
+            gc.collect()
+            print(f"refinement took {time.time() - start:.2f}s")
+except:
+    # TODO: this might fail if the exception occurs during the refinement phase.
+    print('keyboard interrupt, checkpointing before exiting')
+    adastate.save(f"{name}/{II}_exception.pkl", S)
+    print('exiting')
+    raise
 ```
 
 ```python
-typeI_sum = batched_rej(
-    sim_sizes,
-    (np.full(sim_sizes.shape[0], overall_cv),
-    g.theta_tiles,
-    g.null_truth,),
-    unifs,
-    unifs_order,
-)
 
-savedata = [
-    g,
-    sim_sizes,
-    bootstrap_cvs,
-    typeI_sum,
-    hob_upper,
-    pointwise_target_alpha
-]
-with open(f"{name}/final.pkl", "wb") as f:
-    pickle.dump(savedata, f)
-
-# Calculate actual type I errors?
-typeI_est, typeI_CI = binomial.zero_order_bound(
-    typeI_sum, sim_sizes, delta_validate, 1.0
-)
-typeI_bound = typeI_est + typeI_CI
-
-hob_upper = binomial.holder_odi_bound(
-    typeI_bound, g.theta_tiles, g.vertices, n_arm_samples, holderq
-)
-sim_cost = typeI_CI
-hob_empirical_cost = hob_upper - typeI_bound
-worst_idx = np.argmax(typeI_est)
-worst_tile = g.theta_tiles[worst_idx]
-typeI_est[worst_idx], worst_tile
-worst_cv_idx = np.argmin(sim_cvs)
-typeI_est[worst_cv_idx], sim_cvs[worst_cv_idx], g.theta_tiles[worst_cv_idx], pointwise_target_alpha[worst_cv_idx]
-plt.hist(typeI_est, bins=np.linspace(0.02,0.025, 100))
-plt.show()
-
-theta_0 = np.array([-1.0, -1.0, -1.0])      # sim point
-v = 0.1 * np.ones(theta_0.shape[0])     # displacement
-f0 = 0.01                               # Type I Error at theta_0
-fwd_solver = ehbound.ForwardQCPSolver(n=n_arm_samples)
-q_opt = fwd_solver.solve(theta_0=theta_0, v=v, a=f0) # optimal q
-ehbound.q_holder_bound_fwd(q_opt, n_arm_samples, theta_0, v, f0)
 ```

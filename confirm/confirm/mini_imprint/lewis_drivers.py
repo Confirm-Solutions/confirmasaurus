@@ -128,11 +128,11 @@ def one_stat(lei_obj, theta, null_truth, K, unifs, unifs_order):
 statv = jax.jit(jax.vmap(stat, in_axes=(None, 0, 0, None, None)), static_argnums=(0,))
 
 
-def tune(stats, order, alpha):
-    K = stats.shape[0]
-    sorted_stats = jnp.sort(stats[order])
+def tune(sorted_stats, sorted_order, alpha):
+    K = sorted_stats.shape[0]
     cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
-    return sorted_stats[cv_idx]
+    # indexing a sorted array with sorted indices results in a sorted array!!
+    return sorted_stats[sorted_order[cv_idx]]
 
 
 jit_tune = jax.jit(tune)
@@ -151,12 +151,6 @@ def bootstrap_tune_runner(
     sim_batch_size=1024,
     grid_batch_size=64,
 ):
-    batched_tune = batch.batch(
-        batch.batch(tunev, 25, in_axes=(None, 0, None), out_axes=(1,)),
-        grid_batch_size,
-        in_axes=(0, None, 0),
-    )
-
     n_bootstraps = next(iter(bootstrap_idxs.values())).shape[0]
     out = np.empty((sim_sizes.shape[0], n_bootstraps), dtype=float)
     for (size, idx, stats) in _stats_backend(
@@ -169,9 +163,13 @@ def bootstrap_tune_runner(
         sim_batch_size,
         grid_batch_size,
     ):
-        start = time.time()
-        out[idx] = batched_tune(stats, bootstrap_idxs[size], alpha[idx])
-        print("tuning runtime", time.time() - start)
+        print(
+            f"tuning for {size} simulations with {idx.sum()} tiles"
+            f" and batch size ({grid_batch_size}, {sim_batch_size})"
+        )
+        sorted_stats = np.sort(stats, axis=-1)
+        res = tunev(sorted_stats, bootstrap_idxs[size], alpha[idx])
+        out[idx] = res
     return out
 
 
@@ -230,53 +228,3 @@ def _stats_backend(
         print("simulation runtime", time.time() - start)
 
         yield (size, idx, stats)
-
-
-# TODO: adapt to use the bootstrap_tune_runner design. it's better.
-def grouped_by_sim_size(lei_obj, f, max_grid_batch_size, n_out=None):
-    n_arm_samples = int(lei_obj.unifs_shape()[0])
-
-    def internal(sim_sizes, tile_args, sim_args, *other_args):
-        unique_sizes = np.unique(sim_sizes)
-        outs = None
-        _n_out = n_out
-        for size in unique_sizes:
-            idx = sim_sizes == size
-            start = time.time()
-            grid_batch_size = min(int(1e9 / n_arm_samples / size), max_grid_batch_size)
-
-            # batch over the tile args and not the sim args.
-            in_axes = [None] + [0] * len(tile_args) + [None] * len(sim_args) + [None]
-
-            f_batched = batch.batch(f, grid_batch_size, in_axes=in_axes)
-            res = f_batched(
-                lei_obj,
-                *[ta[idx] for ta in tile_args],
-                *[sa[:size] for sa in sim_args],
-                *other_args,
-            )
-
-            if _n_out is None:
-                _n_out = len(res)
-            if outs is None:
-                outs = [None] * _n_out
-            for i in range(_n_out):
-                if outs[i] is None:
-                    outs[i] = np.empty(
-                        (tile_args[0].shape[0], *res[i].shape[1:]), dtype=res[i].dtype
-                    )
-                outs[i][idx] = res[i]
-            end = time.time()
-            print(
-                "running for size",
-                size,
-                "with",
-                np.sum(idx),
-                f"tiles took {end - start:.2f}s",
-            )
-        if _n_out == 1:
-            return outs[0]
-        else:
-            return outs
-
-    return internal
