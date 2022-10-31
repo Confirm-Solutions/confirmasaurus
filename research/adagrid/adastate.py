@@ -56,7 +56,8 @@ class TileDB:
         J = self.n_cols
         new_slices[name] = J if n_cols == 1 else np.s_[J : J + n_cols]
         new_data = np.concatenate(
-            (self.data, np.empty((self.data.shape[0], n_cols))), axis=1
+            (self.data, np.empty((self.data.shape[0], n_cols), dtype=self.data.dtype)),
+            axis=1,
         )
         return TileDB(new_data, new_slices)
 
@@ -98,6 +99,14 @@ class AdaState:
             raise AttributeError
         return self.db.get(attr)
 
+    def index(self, which):
+        return AdaState(
+            grid.index_grid(self.g, which),
+            self.sim_sizes[which],
+            self.todo[which],
+            TileDB(self.db.data[which], self.db.slices),
+        )
+
     def refine(self, P, which_refine, null_hypos, symmetry):
         # TODO: would be nice to wrap null_hypos and symmetry into the grid
         # itself.
@@ -121,7 +130,10 @@ class AdaState:
         g = grid.concat_grids(grid.index_grid(self.g, keep_tile_idxs), new_grid_subset)
 
         sim_sizes = np.concatenate(
-            [self.sim_sizes[keep_tile_idxs], np.full(new_grid_subset.n_tiles, P.init_K)]
+            [
+                self.sim_sizes[keep_tile_idxs],
+                np.full(new_grid_subset.n_tiles, P.init_K, dtype=self.sim_sizes.dtype),
+            ]
         )
         todo = np.concatenate(
             [self.todo[keep_tile_idxs], np.ones(new_grid_subset.n_tiles, dtype=bool)]
@@ -129,7 +141,9 @@ class AdaState:
         new_db_data = np.concatenate(
             (
                 self.db.data[keep_tile_idxs],
-                np.empty((new_grid_subset.n_tiles, self.db.n_cols)),
+                np.empty(
+                    (new_grid_subset.n_tiles, self.db.n_cols), dtype=self.db.data.dtype
+                ),
             )
         )
         new_db = TileDB(new_db_data, self.db.slices)
@@ -146,8 +160,11 @@ def init_data(p, lei_obj, seed):
         K: jnp.concatenate(
             (
                 jnp.arange(K)[None, :],
-                jax.random.choice(
-                    key2, K, shape=(p.nB_global + p.nB_tile, K), replace=True
+                jnp.sort(
+                    jax.random.choice(
+                        key2, K, shape=(p.nB_global + p.nB_tile, K), replace=True
+                    ),
+                    axis=-1,
                 ),
             )
         ).astype(jnp.int32)
@@ -254,4 +271,3 @@ class AdaRunner:
         S.twb_min_lam[S.todo] = twb_lam.min(axis=1)
         S.twb_mean_lam[S.todo] = twb_lam.mean(axis=1)
         S.twb_max_lam[S.todo] = twb_lam.max(axis=1)
-        S.todo[:] = False

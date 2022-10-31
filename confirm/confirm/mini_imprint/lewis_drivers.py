@@ -128,11 +128,11 @@ def one_stat(lei_obj, theta, null_truth, K, unifs, unifs_order):
 statv = jax.jit(jax.vmap(stat, in_axes=(None, 0, 0, None, None)), static_argnums=(0,))
 
 
-def tune(stats, order, alpha):
-    K = stats.shape[0]
-    sorted_stats = jnp.sort(stats[order])
+def tune(sorted_stats, sorted_order, alpha):
+    K = sorted_stats.shape[0]
     cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
-    return sorted_stats[cv_idx]
+    # indexing a sorted array with sorted indices results in a sorted array!!
+    return sorted_stats[sorted_order[cv_idx]]
 
 
 jit_tune = jax.jit(tune)
@@ -160,34 +160,27 @@ def bootstrap_tune_runner(
         in_axes=(None, 0, 0, None, None),
     )
 
-    batched_tune = batch.batch(
-        batch.batch(tunev, 25, in_axes=(None, 0, None), out_axes=(1,)),
-        grid_batch_size,
-        in_axes=(0, None, 0),
-    )
-
     out = np.empty((sim_sizes.shape[0], n_bootstraps), dtype=float)
     for size, idx in get_sim_size_groups(sim_sizes):
-        start = time.time()
         print(
             f"tuning for {size} simulations with {idx.sum()} tiles"
             f" and batch size ({grid_batch_size}, {sim_batch_size})"
         )
+        # TODO: avoid the unifs copy.
         unifs_chunk = unifs[:size]
         stats = batched_statv(
             lei_obj, theta[idx], null_truth[idx], unifs_chunk, unifs_order
         )
-        print(time.time() - start)
-        start = time.time()
         del unifs_chunk
         gc.collect()
-        res = batched_tune(stats, bootstrap_idxs[size], alpha[idx])
+        sorted_stats = np.sort(stats, axis=-1)
+        res = tunev(sorted_stats, bootstrap_idxs[size], alpha[idx])
         out[idx] = res
-        print(time.time() - start)
     return out
 
 
 # TODO: adapt to use the bootstrap_tune_runner design. it's better.
+# TODO: make sure this isn't used anymore.
 def grouped_by_sim_size(lei_obj, f, max_grid_batch_size, n_out=None):
     n_arm_samples = int(lei_obj.unifs_shape()[0])
 

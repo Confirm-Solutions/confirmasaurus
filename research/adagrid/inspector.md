@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.6 ('base')
+    display_name: Python 3.9.6 64-bit
     language: python
     name: python3
 ---
@@ -30,6 +30,54 @@ from confirm.lewislib import lewis
 import adastate
 from criterion import Criterion
 from diagnostics import lamstar_histogram
+```
+
+```python
+# typeI_sum = batched_rej(
+#     sim_sizes,
+#     (np.full(sim_sizes.shape[0], overall_cv),
+#     g.theta_tiles,
+#     g.null_truth,),
+#     unifs,
+#     unifs_order,
+# )
+
+# savedata = [
+#     g,
+#     sim_sizes,
+#     bootstrap_cvs,
+#     typeI_sum,
+#     hob_upper,
+#     pointwise_target_alpha
+# ]
+# with open(f"{name}/final.pkl", "wb") as f:
+#     pickle.dump(savedata, f)
+
+# # Calculate actual type I errors?
+# typeI_est, typeI_CI = binomial.zero_order_bound(
+#     typeI_sum, sim_sizes, delta_validate, 1.0
+# )
+# typeI_bound = typeI_est + typeI_CI
+
+# hob_upper = binomial.holder_odi_bound(
+#     typeI_bound, g.theta_tiles, g.vertices, n_arm_samples, holderq
+# )
+# sim_cost = typeI_CI
+# hob_empirical_cost = hob_upper - typeI_bound
+# worst_idx = np.argmax(typeI_est)
+# worst_tile = g.theta_tiles[worst_idx]
+# typeI_est[worst_idx], worst_tile
+# worst_cv_idx = np.argmin(sim_cvs)
+# typeI_est[worst_cv_idx], sim_cvs[worst_cv_idx], g.theta_tiles[worst_cv_idx], pointwise_target_alpha[worst_cv_idx]
+# plt.hist(typeI_est, bins=np.linspace(0.02,0.025, 100))
+# plt.show()
+
+# theta_0 = np.array([-1.0, -1.0, -1.0])      # sim point
+# v = 0.1 * np.ones(theta_0.shape[0])     # displacement
+# f0 = 0.01                               # Type I Error at theta_0
+# fwd_solver = ehbound.ForwardQCPSolver(n=n_arm_samples)
+# q_opt = fwd_solver.solve(theta_0=theta_0, v=v, a=f0) # optimal q
+# ehbound.q_holder_bound_fwd(q_opt, n_arm_samples, theta_0, v, f0)
 ```
 
 ```python
@@ -63,6 +111,42 @@ with open(f"./{name}/data_params.pkl", "rb") as f:
     P, D = pickle.load(f)
 load_iter = 'latest'
 S, load_iter, fn = adastate.load(name, load_iter)
+```
+
+```python
+S.db.data.dtype
+```
+
+```python
+S.B_lam.min(axis=0)
+```
+
+```python
+S.B_lam.argmin(axis=0)
+```
+
+```python
+S.alpha0[S.B_lam.argmin(axis=0)]
+```
+
+```python
+S.sim_sizes[S.B_lam.argmin(axis=0)]
+```
+
+```python
+S.twb_min_lam.min()
+```
+
+```python
+S.orig_lam.min()
+```
+
+```python
+np.min(S.twb_mean_lam + 3 * (S.twb_max_lam - S.twb_mean_lam))
+```
+
+```python
+np.sum(S.twb_min_lam < np.min(S.twb_max_lam)) / 1e6
 ```
 
 ```python
@@ -126,12 +210,13 @@ S.twb_min_lam[np.argsort(S.orig_lam)[0]]
 
 ```python
 up_next = np.argsort(S.orig_lam)[:10000]
-S.alpha0[up_next].argmax(), S.sim_sizes[up_next].max()
+S.alpha0[up_next].max(), S.sim_sizes[up_next].max()
 ```
 
 ```python
 sorted_ordering = np.sort(cr.inflated_min_lam)
-query = cr.inflated_min_lam[np.argsort(S.orig_lam)[:1000]]
+overall_ordering = np.argsort(S.orig_lam)[:1000]
+query = cr.inflated_min_lam[overall_ordering]
 overall_priority = jnp.searchsorted(sorted_ordering, query)
 print("overall driver priority", overall_priority)
 
@@ -180,7 +265,7 @@ S.db.data[cr.twb_worst_tile, -3:]
 ```
 
 ```python
-S.alpha0[S.twb_min_lam < 0.04359697]
+S.alpha0[S.twb_min_lam < 0.047]
 ```
 
 ```python
