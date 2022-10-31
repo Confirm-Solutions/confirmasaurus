@@ -151,7 +151,66 @@ def bootstrap_tune_runner(
     sim_batch_size=1024,
     grid_batch_size=64,
 ):
+    batched_tune = batch.batch(
+        batch.batch(tunev, 25, in_axes=(None, 0, None), out_axes=(1,)),
+        grid_batch_size,
+        in_axes=(0, None, 0),
+    )
+
     n_bootstraps = next(iter(bootstrap_idxs.values())).shape[0]
+    out = np.empty((sim_sizes.shape[0], n_bootstraps), dtype=float)
+    for (size, idx, stats) in _stats_backend(
+        lei_obj,
+        sim_sizes,
+        theta,
+        null_truth,
+        unifs,
+        unifs_order,
+        sim_batch_size,
+        grid_batch_size,
+    ):
+        start = time.time()
+        out[idx] = batched_tune(stats, bootstrap_idxs[size], alpha[idx])
+        print("tuning runtime", time.time() - start)
+    return out
+
+
+def rej_runner(
+    lei_obj,
+    sim_sizes,
+    lam,
+    theta,
+    null_truth,
+    unifs,
+    unifs_order,
+    sim_batch_size=1024,
+    grid_batch_size=64,
+):
+    out = np.empty(sim_sizes.shape[0], dtype=int)
+    for (_, idx, stats) in _stats_backend(
+        lei_obj,
+        sim_sizes,
+        theta,
+        null_truth,
+        unifs,
+        unifs_order,
+        sim_batch_size,
+        grid_batch_size,
+    ):
+        out[idx] = np.sum(stats < lam, axis=-1)
+    return out
+
+
+def _stats_backend(
+    lei_obj,
+    sim_sizes,
+    theta,
+    null_truth,
+    unifs,
+    unifs_order,
+    sim_batch_size=1024,
+    grid_batch_size=64,
+):
     batched_statv = batch.batch(
         batch.batch(
             statv, sim_batch_size, in_axes=(None, None, None, 0, None), out_axes=(1,)
@@ -160,31 +219,17 @@ def bootstrap_tune_runner(
         in_axes=(None, 0, 0, None, None),
     )
 
-    batched_tune = batch.batch(
-        batch.batch(tunev, 25, in_axes=(None, 0, None), out_axes=(1,)),
-        grid_batch_size,
-        in_axes=(0, None, 0),
-    )
-
-    out = np.empty((sim_sizes.shape[0], n_bootstraps), dtype=float)
     for size, idx in get_sim_size_groups(sim_sizes):
         start = time.time()
-        print(
-            f"tuning for {size} simulations with {idx.sum()} tiles"
-            f" and batch size ({grid_batch_size}, {sim_batch_size})"
-        )
         unifs_chunk = unifs[:size]
         stats = batched_statv(
             lei_obj, theta[idx], null_truth[idx], unifs_chunk, unifs_order
         )
-        print(time.time() - start)
-        start = time.time()
         del unifs_chunk
         gc.collect()
-        res = batched_tune(stats, bootstrap_idxs[size], alpha[idx])
-        out[idx] = res
-        print(time.time() - start)
-    return out
+        print("simulation runtime", time.time() - start)
+
+        yield (size, idx, stats)
 
 
 # TODO: adapt to use the bootstrap_tune_runner design. it's better.
