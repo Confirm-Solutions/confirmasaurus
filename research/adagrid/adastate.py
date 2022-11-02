@@ -218,30 +218,21 @@ class AdaRunner:
             2**6 if jax.devices()[0].device_kind == "cpu" else 2**10
         )
 
-        bwd_solver = ehbound.BackwardQCPSolver(n=self.lei_obj.n_arm_samples)
+        n_arm_samples = self.lei_obj.n_arm_samples
+        bwd_solver = ehbound.TileBackwardQCPSolver(n=n_arm_samples)
 
-        def invert_bound(alpha, theta_0, vertices, n):
-            v = vertices - theta_0
-            # NOTE: OPTIMIZATION POTENTIAL: if we ever need faster EH bounds, then we
-            # can only run the optimizer at a single corner. The bound is still valid
-            # because we're just using a suboptimal q.
+        def backward_bound(t, v):
+            q_opt = bwd_solver.solve(t, v, P.alpha_target)
+            return ehbound.tilt_bound_bwd_tile(
+                q_opt, n_arm_samples, t, v, P.alpha_target
+            )
 
-            q_opt = jax.vmap(bwd_solver.solve, in_axes=(None, 0, None))(
-                theta_0, v, alpha
-            )
-            return jnp.min(
-                jax.vmap(ehbound.q_holder_bound_bwd, in_axes=(0, None, None, 0, None))(
-                    q_opt, n, theta_0, v, alpha
-                )
-            )
+        self.backward_bound = backward_bound
 
         self.batched_invert_bound = batch.batch(
-            jax.jit(
-                jax.vmap(invert_bound, in_axes=(None, 0, 0, None)),
-                static_argnums=(0, 3),
-            ),
+            jax.jit(jax.vmap(backward_bound)),
             5 * self.grid_batch_size,
-            in_axes=(None, 0, 0, None),
+            in_axes=(0, 0),
         )
 
     def step(self, P, S, D):

@@ -71,6 +71,14 @@ assert S.twb_max_lam[cr.twb_worst_tile] == np.min(S.twb_max_lam)
 assert S.twb_min_lam[cr.twb_worst_tile] == np.min(S.twb_min_lam[cr.ties])
 ```
 
+```python
+idxs = cr.dangerous[:10]
+alpha0_new = adastate.AdaRunner(P, lei_obj).batched_invert_bound(
+    S.g.theta_tiles[idxs], S.g.vertices(idxs)
+)
+alpha0_new
+```
+
 ## 11/1/2022
 
 ```python
