@@ -11,6 +11,7 @@ dependencies:
   - typer
   - pytest
   - pre-commit
+  - pip
 
   - pip:
       - -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
