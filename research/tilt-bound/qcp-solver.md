@@ -240,3 +240,78 @@ plt.scatter(vs[i_max, 0], vs[i_max, 1], c='r')
 plt.colorbar(sc)
 plt.show()
 ```
+
+## Tile-based
+
+```python
+tile_solver = binomial.TileForwardQCPSolver(
+    n=350,
+)
+```
+
+```python
+theta_0 = jnp.array([-2., -1., 0.3])
+n = 350
+f0 = 0.025
+radius = 0.05
+v_coords = [[-1., 1.]] * theta_0.shape[0]
+mgrid = np.meshgrid(*v_coords, indexing='ij')
+vs = radius * np.concatenate([coord.reshape(-1,1) for coord in mgrid], axis=1)
+```
+
+```python
+q_opt = tile_solver.solve(
+    theta_0, vs, f0
+)
+```
+
+```python
+qs = jnp.linspace(1, jnp.maximum(2, q_opt) + 10, 1000)
+objs = jax.vmap(
+    binomial.tilt_bound_fwd_tile, 
+    in_axes=(0, None, None, None, None),
+)(qs, n, theta_0, vs, f0)
+plt.plot(qs, objs)
+obj_opt = binomial.tilt_bound_fwd_tile(q_opt, n, theta_0, vs, f0)
+plt.scatter(q_opt, obj_opt, color='r')
+print(jnp.min(objs), obj_opt)
+print(qs[jnp.argmin(objs)], q_opt)
+```
+
+```python
+f_opt = jax.jit(jax.vmap(
+    tile_solver.solve,
+    in_axes=(0, None, None),
+))
+thetas = jnp.repeat(theta_0[None], 10000, axis=0)
+```
+
+```python
+%%time
+f_opt(
+   thetas, vs, f0 
+)
+```
+
+```python
+tile_bwd_solver = binomial.TileBackwardQCPSolver(n=n)
+```
+
+```python
+q_opt = tile_bwd_solver.solve(
+    theta_0, vs, f0,
+)
+```
+
+```python
+qs = jnp.linspace(1, jnp.maximum(2, q_opt) + 10, 1000)
+objs = jax.jit(jax.vmap(
+    binomial.tilt_bound_bwd_tile, 
+    in_axes=(0, None, None, None, None),
+))(qs, n, theta_0, vs, f0)
+plt.plot(qs, objs)
+obj_opt = binomial.tilt_bound_bwd_tile(q_opt, n, theta_0, vs, f0)
+plt.scatter(q_opt, obj_opt, color='r')
+print(jnp.max(objs), obj_opt)
+print(qs[jnp.argmax(objs)], q_opt)
+```
