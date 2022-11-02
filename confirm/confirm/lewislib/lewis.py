@@ -212,6 +212,10 @@ class Lewis45:
                 if cache_is_path:
                     self.save_tables(cache_tables)
 
+    @property
+    def n_arm_samples(self):
+        return int(self.unifs_shape()[0])
+
     def build_tables(self, key, n_table_pts, batch_size, n_pr_sims):
         self.pd_table = self._posterior_difference_table(
             batch_size=batch_size, n_points=n_table_pts

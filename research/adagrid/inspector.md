@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.9.6 64-bit
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---

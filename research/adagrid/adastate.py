@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import confirm.mini_imprint.bound.binomial as ehbound
-import confirm.mini_imprint.lewis_drivers as lts
+import confirm.mini_imprint.lewis_drivers as ld
 from confirm.lewislib import batch
 from confirm.mini_imprint import grid
 
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 class AdaState:
     g: grid.Grid
     sim_sizes: np.ndarray
-    todo: np.ndarray[bool]
+    todo: np.ndarray
     db: TileDB
 
     def __getattr__(self, attr):
@@ -213,13 +213,12 @@ def save(fp, data):
 class AdaRunner:
     def __init__(self, P, lei_obj):
         self.lei_obj = lei_obj
-        self.n_arm_samples = int(lei_obj.unifs_shape()[0])
 
         self.grid_batch_size = (
             2**6 if jax.devices()[0].device_kind == "cpu" else 2**10
         )
 
-        bwd_solver = ehbound.BackwardQCPSolver(n=self.n_arm_samples)
+        bwd_solver = ehbound.BackwardQCPSolver(n=self.lei_obj.n_arm_samples)
 
         def invert_bound(alpha, theta_0, vertices, n):
             v = vertices - theta_0
@@ -250,10 +249,10 @@ class AdaRunner:
             P.alpha_target,
             S.g.theta_tiles[S.todo],
             S.g.vertices(S.todo),
-            self.n_arm_samples,
+            self.lei_obj.n_arm_samples,
         )
 
-        bootstrap_cvs_todo = lts.bootstrap_tune_runner(
+        bootstrap_cvs_todo = ld.bootstrap_tune_runner(
             self.lei_obj,
             S.sim_sizes[S.todo],
             S.alpha0[S.todo],

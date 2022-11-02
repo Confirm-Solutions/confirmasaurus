@@ -1,6 +1,6 @@
 import numpy as np
 
-import confirm.mini_imprint.lewis_drivers as lts
+import confirm.mini_imprint.lewis_drivers as ld
 
 
 class Criterion:
@@ -26,7 +26,7 @@ class Criterion:
         self.overall_lam = S.orig_lam[self.overall_tile]
 
         idxs = [self.twb_worst_tile]
-        self.twb_worst_tile_lams = lts.bootstrap_tune_runner(
+        self.twb_worst_tile_lams = ld.bootstrap_tune_runner(
             self.lei_obj,
             S.sim_sizes[idxs],
             np.full(1, P.alpha_target),
@@ -82,7 +82,7 @@ class Criterion:
             ([self.overall_lam], np.min(S.B_lam, axis=0))
         )
         self.lam_std = self.bootstrap_min_lams.std()
-        self.overall_stats = lts.one_stat(
+        self.overall_stats = ld.one_stat(
             lei_obj,
             S.g.theta_tiles[self.overall_tile],
             S.g.null_truth[self.overall_tile],

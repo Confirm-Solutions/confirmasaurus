@@ -1,6 +1,10 @@
 # from pprint import pformat
+import jax
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.spatial
+
+import confirm.mini_imprint.lewis_drivers as ld
 
 
 # def status_report(adap, sim_sizes, bootstrap_cvs, pointwise_target_alpha):
@@ -39,10 +43,51 @@ def lamstar_histogram(bootstrap_cvs, sim_sizes, xlim=None, weighted=False):
     plt.ylabel("number of tiles")
 
 
-# plt.figure(figsize=(12, 7))
-# plt.suptitle(title)
-# plt.subplot(1, 2, 1)
-# lamstar_histogram(bootstrap_cvs[:, idx], sim_sizes)
-# plt.subplot(1, 2, 2)
-# lamstar_histogram(bootstrap_cvs[:, idx], sim_sizes, weighted=True)
-# plt.show()
+def eval_bound(model, g, sim_sizes, D, eval_pts):
+    tree = scipy.spatial.KDTree(g.theta_tiles)
+    _, idx = tree.query(eval_pts)
+    unique_idx, inverse = np.unique(idx, return_inverse=True)
+    typeI_sum = ld.rej_runner(
+        model,
+        sim_sizes[unique_idx],
+        0.05,
+        g.theta_tiles[unique_idx],
+        g.null_truth[unique_idx],
+        D.unifs,
+        D.unifs_order,
+    )
+    typeI_sum = typeI_sum[inverse]
+    typeI_err = typeI_sum / sim_sizes[idx]
+    import confirm.mini_imprint.binomial as binomial
+
+    delta = 0.01
+    typeI_err, typeI_CI = binomial.zero_order_bound(
+        typeI_sum, sim_sizes[idx], delta, 1.0
+    )
+    typeI_bound = typeI_err + typeI_CI
+
+    import confirm.mini_imprint.bound.binomial as tiltbound
+
+    fwd_solver = tiltbound.ForwardQCPSolver(n=model.n_arm_samples)
+    theta0 = g.theta_tiles[idx]
+    v = eval_pts - theta0
+    q_opt = jax.vmap(fwd_solver.solve, in_axes=(0, 0, 0))(theta0, v, typeI_bound)
+
+    bound = np.array(
+        jax.vmap(tiltbound.q_holder_bound_fwd, in_axes=(0, None, 0, 0, 0))(
+            q_opt, model.n_arm_samples, theta0, v, typeI_bound
+        )
+    )
+    return bound
+
+
+def build_2d_slice(g, pt, plot_dims, slicex=[-1, 1], slicey=[-1, 1], nx=100, ny=100):
+    unplot_dims = list(set(range(g.d)) - set(plot_dims))
+    nx = ny = 200
+    xvs = np.linspace(*slicex, nx)
+    yvs = np.linspace(*slicey, ny)
+    slc2d = np.stack(np.meshgrid(xvs, yvs, indexing="ij"), axis=-1)
+    slc_pts = np.empty((nx, ny, g.d))
+    slc_pts[..., plot_dims] = slc2d
+    slc_pts[..., unplot_dims] = pt[unplot_dims]
+    return slc_pts
