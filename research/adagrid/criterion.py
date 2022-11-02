@@ -101,30 +101,9 @@ class Criterion:
         # Criterion step 3: Refine tiles that are too large, deepen tiles that
         # cause too much bias.
         ########################################
-        self.which_deepen = np.zeros(S.g.n_tiles, dtype=bool)
-        self.which_refine = np.zeros(S.g.n_tiles, dtype=bool)
-
-        if (self.alpha_cost[self.overall_tile] < P.grid_target) and (
-            self.bias < P.bias_target
-        ):
-            return
-
-        # self.inflation_factor = 1
-        # self.inflate_from = S.twb_max_lam[self.twb_worst_tile]
-        # assert self.inflate_from < 1
-        # self.inflated_min_lam = (
-        #     self.inflate_from
-        #     + (S.twb_min_lam - self.inflate_from) * self.inflation_factor
-        # )
-
-        # self.inflated_min_lam = np.empty((S.g.n_tiles,))
-        # temp_inflate = (
-        #     S.twb_mean_lam + (S.twb_min_lam - S.twb_mean_lam) * self.inflation_factor
-        # )
-        # ignore = S.twb_mean_lam >= 1
-        # self.inflated_min_lam[ignore] = 1
-        # self.inflated_min_lam[~ignore] = temp_inflate[~ignore]
-        self.orderer = S.twb_min_lam
+        self.orderer = S.twb_mean_lam + (S.twb_min_lam - S.twb_mean_lam) * 4
+        ignore = S.twb_mean_lam > 0.3
+        self.orderer[ignore] = S.twb_min_lam[ignore]
         self.sorted_ordering = np.argsort(self.orderer)
         self.sorted_orderer = self.orderer[self.sorted_ordering]
 
@@ -137,17 +116,23 @@ class Criterion:
         self.d_should_deepen = (
             self.deepen_likely_to_work & (S.sim_sizes[self.dangerous] < P.max_sim_size)
         ) | (~self.d_should_refine)
-        self.which_refine[self.dangerous] = self.d_should_refine & (
-            ~self.d_should_deepen
-        )
-        self.which_deepen[self.dangerous] = self.d_should_deepen | (
-            self.bias > P.bias_target
-        )
 
-        self.which_refine |= self.impossible_refine
-        self.which_deepen |= self.impossible_sim
-        self.which_deepen &= ~self.which_refine
-        self.which_deepen &= S.sim_sizes < P.max_sim_size
+        self.which_deepen = np.zeros(S.g.n_tiles, dtype=bool)
+        self.which_refine = np.zeros(S.g.n_tiles, dtype=bool)
+        if (self.alpha_cost[self.overall_tile] > P.grid_target) or (
+            self.bias > P.bias_target
+        ):
+            self.which_refine[self.dangerous] = self.d_should_refine & (
+                ~self.d_should_deepen
+            )
+            self.which_deepen[self.dangerous] = self.d_should_deepen | (
+                self.bias > P.bias_target
+            )
+
+            self.which_refine |= self.impossible_refine
+            self.which_deepen |= self.impossible_sim
+            self.which_deepen &= ~self.which_refine
+            self.which_deepen &= S.sim_sizes < P.max_sim_size
 
         self.report = dict(
             overall_lam=f"{self.overall_lam:.5f}",
@@ -164,11 +149,11 @@ class Criterion:
         self.report["min(twb_min_lam)"] = f"{S.twb_min_lam.min():.5f}"
         self.report["min(twb_mean_lam)"] = f"{S.twb_mean_lam.min():.5f}"
         self.report["min(twb_max_lam)"] = f"{S.twb_max_lam.min():.5f}"
-        self.report["twb_min_lam < min(twb_mean_lam)"] = np.sum(
-            S.twb_min_lam < S.twb_mean_lam.min()
+        self.report["orderer < min(twb_mean_lam)"] = np.sum(
+            self.orderer < S.twb_mean_lam.min()
         )
-        self.report["twb_min_lam < min(twb_max_lam)"] = np.sum(
-            S.twb_min_lam < S.twb_max_lam.min()
+        self.report["orderer < min(twb_max_lam)"] = np.sum(
+            self.orderer < S.twb_max_lam.min()
         )
         self.report[
             "max(twb_min_lam[dangerous])"
