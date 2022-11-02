@@ -58,7 +58,7 @@ def test_3_arms_0_interim():
     default_params["n_stage_2_add_per_interim"] = 4
 
     lewis_obj = lewis.Lewis45(**default_params)
-    actual = lewis_obj.make_n_configs__()
+    actual = lewis_obj._make_n_configs()
 
     # expected values
     n_configs_pr_best_pps_1_expected = np.array(
@@ -86,7 +86,7 @@ def test_3_arms_1_interim():
     default_params["n_stage_2_add_per_interim"] = 4
 
     lewis_obj = lewis.Lewis45(**default_params)
-    actual = lewis_obj.make_n_configs__()
+    actual = lewis_obj._make_n_configs()
 
     # expected values
     n_configs_pr_best_pps_1_expected = np.array(
@@ -116,7 +116,7 @@ def test_3_arms_2_interim():
     default_params["n_stage_2_add_per_interim"] = 4
 
     lewis_obj = lewis.Lewis45(**default_params)
-    actual = lewis_obj.make_n_configs__()
+    actual = lewis_obj._make_n_configs()
 
     # expected values
     n_configs_pr_best_pps_1_expected = np.array(
@@ -149,7 +149,7 @@ def test_4_arms_0_interim():
     default_params["n_stage_1_add_per_interim"] = 10
 
     lewis_obj = lewis.Lewis45(**default_params)
-    actual = lewis_obj.make_n_configs__()
+    actual = lewis_obj._make_n_configs()
 
     # expected values
     n_configs_pr_best_pps_1_expected = np.array(
@@ -177,7 +177,7 @@ def test_4_arms_1_interim():
     default_params["n_stage_2_add_per_interim"] = 20
 
     lewis_obj = lewis.Lewis45(**default_params)
-    actual = lewis_obj.make_n_configs__()
+    actual = lewis_obj._make_n_configs()
 
     # expected values
     n_configs_pr_best_pps_1_expected = np.array(
@@ -208,7 +208,7 @@ def test_4_arms_2_interim():
     default_params["n_stage_2_add_per_interim"] = 1
 
     lewis_obj = lewis.Lewis45(**default_params)
-    actual = lewis_obj.make_n_configs__()
+    actual = lewis_obj._make_n_configs()
 
     # expected values
     n_configs_pr_best_pps_1_expected = np.array(

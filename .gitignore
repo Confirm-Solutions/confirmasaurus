@@ -47,3 +47,6 @@ venv
 .terraform
 .terraform.*
 terraform.*
+
+# explicitly ignore a file.
+*.gitignore

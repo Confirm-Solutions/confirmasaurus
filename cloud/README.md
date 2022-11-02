@@ -72,7 +72,10 @@ We have some S3 Buckets. These contain various important data:
 
 - `imprint-dump` - each subfolder here should contain the output of a model run.
 - `aws-cloudtrail-logs-644171722153-2d03f9cb` - AWS access/management logs of everything we've done.
-- `s3-access-logs-111222` - S3 access logs
+
+Pushing data:
+- To push a folder of data to an S3 bucket: `aws s3 sync ./source_foldername s3://imprint-dump/target_foldername`
+- To push a single file to an S3 bucket: `aws s3 cp ./source_file s3://imprint-dump/target_file`
 
 ## Using VSCode Dev Containers
 
@@ -139,10 +142,13 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
 
 - Stop the instance using the AWS CLI or the Console
 - Restart the instance using the AWS CLI or the Console
-- `terraform apply` to update the terraform outputs (the public ipv4 DNS url will have changed)
-- you might need to start docker... `./connect.sh` then `sudo systemctl start docker`. We could integrate this step into `./setup_remotedev.sh`.
-- `./setup_remotedev.sh` to re-initalize the remote machine
-- Open the docker sidebar in VSCode, start the relevant stopped container.
+- Run `terraform apply` . Read the plan carefully to make sure that what you want to happen is going to happen. If you used a variable file when you created the instance, you need to pass the same variable file again here like `terraform apply -var-file="gpumachine.tfvars"`. In most cases, the only thing that will have changed is the public IPv4 DNS URL. 
+- You shouldn't need to start docker since it's setup to start automatically on boot. But, if you do: `./connect.sh` then `sudo systemctl start docker`.
+- If connecting fails there are a few potential explanations:
+	1. Maybe you need to log in to AWS? `aws sso configure`
+	2. Maybe your ssh key is not being recognized. Try running `ssh-add --apple-use-keychain ~/.ssh/aws-key-pair.pem`
+- `./setup_remotedev.sh` to re-initalize the remote docker context.
+- Open the Docker sidebar in VSCode, start the relevant stopped container. It should have a name like `vsc-confirmasaurus-...`.
 - Then, run the VSCode command "Dev Containers: Attach to running container".
 - Once the container has launched, open the existing workspace folder inside the remote docker container. Probably `/workspaces/confirmasaurus`.
 

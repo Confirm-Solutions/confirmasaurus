@@ -25,13 +25,13 @@ def C6(n, p):
 def test_odi_constant():
     """Test holderq=6 against the formula from wikipedia for a variety of (n, p)j"""
     C_f = binomial._build_odi_constant_func(6)
-    # C_fn = binomial._build_odi_constant_func_numerical(6)
+    C_fn = binomial._build_odi_constant_func_numerical(6)
     np.random.seed(0)
     ntest = 5
     n = 51
     p = np.random.uniform(0, 1, ntest)
-    np.testing.assert_allclose(C_f(n, p), C6(n, p))
-    # np.testing.assert_allclose(C_fn(n, p), C6(n, p))
+    np.testing.assert_allclose(C_f(n, p), C6(n, p), rtol=1e-5)
+    np.testing.assert_allclose(C_fn(n, p), C6(n, p), rtol=1e-5)
 
 
 def test_calc_cqpp_05_crossing():
@@ -84,4 +84,9 @@ def test_holder_odi(d):
         typeI_bound, theta_tiles, tile_corners, n_arm_samples, holderq
     )
     correct = {1: 0.04163348, 2: 0.37039003}
-    np.testing.assert_allclose(hob[0], correct[d], rtol=1e-6)
+    np.testing.assert_allclose(hob[0], correct[d], atol=2e-6)
+
+    pointwise_bound = binomial.invert_bound(
+        hob, theta_tiles, tile_corners, n_arm_samples, holderq
+    )
+    np.testing.assert_allclose(pointwise_bound, typeI_bound, atol=1e-7)

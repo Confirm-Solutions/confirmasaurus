@@ -1,3 +1,9 @@
+import os
+import pickle
+import warnings
+from dataclasses import dataclass
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -45,9 +51,60 @@ We define concepts used in the code:
 """
 
 
+@dataclass
+class Lewis45Spec:
+    """
+    The specification of the Lewis45 trial we are simulating.
+
+    This class should not contain execution-related parameters.
+
+    Args:
+        n_arms: number of arms.
+        n_stage_1: number of patients to enroll at stage 1 for each arm.
+        n_stage_2: number of patients to enroll at stage 2 for each arm.
+        n_stage_1_interims: number of interims in stage 1.
+        n_stage_1_add_per_interim: number of total patients to
+                                   add per interim in stage 1.
+        n_stage_2_add_per_interim: number of patients to
+                                   add in stage 2 interim to control
+                                   and the selected treatment arms.
+        futility_threshold: probability cut-off to decide
+                            futility for treatment arms.
+                            If P(arm_i best | data) < futility_threshold,
+                            declare arm_i as futile.
+        pps_threshold_lower: threshold for checking futility:
+                             PPS < pps_threshold_lower <=> futility.
+        pps_threshold_upper: threshold for checking efficacy:
+                             PPS > pps_threshold_upper <=> efficacy.
+        posterior_difference_threshold: threshold to compute posterior difference
+                                        of selected arm p and control arm p.
+        rejection_threshold: threshold for rejection at the final analysis
+                             (if reached):
+                             P(p_selected_treatment_arm - p_control_arm <
+                                posterior_difference_threshold | data)
+                                < rejection_threshold
+                             <=> rejection.
+    """
+
+    n_arms: int
+    n_stage_1: int
+    n_stage_2: int
+    n_stage_1_interims: int
+    n_stage_1_add_per_interim: int
+    n_stage_2_add_per_interim: int
+    stage_1_futility_threshold: float
+    stage_1_efficacy_threshold: float
+    stage_2_futility_threshold: float
+    stage_2_efficacy_threshold: float
+    inter_stage_futility_threshold: float
+    posterior_difference_threshold: float
+    rejection_threshold: float
+
+
 class Lewis45:
     def __init__(
         self,
+        # TODO: replace with just spec?
         n_arms: int,
         n_stage_1: int,
         n_stage_2: int,
@@ -61,42 +118,21 @@ class Lewis45:
         inter_stage_futility_threshold: float,
         posterior_difference_threshold: float,
         rejection_threshold: float,
+        # TODO: refactor to pull the tables out as a separate class. and allow passing
+        # None. then move these params to the tables constructor. Also, reorder
+        # the parameters at that time.
         sig2_int=quad.log_gauss_rule(15, 2e-6, 1e3),
         n_sig2_sims: int = 20,
         dtype=jnp.float64,
         cache_tables=False,
-        **kwargs,
+        key=None,
+        n_table_pts=None,
+        batch_size=None,
+        n_pr_sims=None,
     ):
         """
         Constructs an object to run the Lei example.
 
-        Parameters:
-        -----------
-        n_arms:         number of arms.
-        n_stage_1:      number of patients to enroll at stage 1 for each arm.
-        n_stage_2:      number of patients to enroll at stage 2 for each arm.
-        n_stage_1_interims:     number of interims in stage 1.
-        n_stage_1_add_per_interim:      number of total patients to
-                                        add per interim in stage 1.
-        n_stage_2_add_per_interim:      number of patients to
-                                        add in stage 2 interim to control
-                                        and the selected treatment arms.
-        futility_threshold:     probability cut-off to decide
-                                futility for treatment arms.
-                                If P(arm_i best | data) < futility_threshold,
-                                declare arm_i as futile.
-        pps_threshold_lower:    threshold for checking futility:
-                                PPS < pps_threshold_lower <=> futility.
-        pps_threshold_upper:    threshold for checking efficacy:
-                                PPS > pps_threshold_upper <=> efficacy.
-        posterior_difference_threshold: threshold to compute posterior difference
-                                        of selected arm p and control arm p.
-        rejection_threshold:    threshold for rejection at the final analysis
-                                (if reached):
-                                P(p_selected_treatment_arm - p_control_arm <
-                                    posterior_difference_threshold | data)
-                                    < rejection_threshold
-                                <=> rejection.
         """
         self.n_arms = n_arms
         self.n_stage_1 = n_stage_1
@@ -111,6 +147,21 @@ class Lewis45:
         self.inter_stage_futility_threshold = inter_stage_futility_threshold
         self.posterior_difference_threshold = posterior_difference_threshold
         self.rejection_threshold = rejection_threshold
+        self.spec = Lewis45Spec(
+            n_arms,
+            n_stage_1,
+            n_stage_2,
+            n_stage_1_interims,
+            n_stage_1_add_per_interim,
+            n_stage_2_add_per_interim,
+            stage_1_futility_threshold,
+            stage_1_efficacy_threshold,
+            stage_2_futility_threshold,
+            stage_2_efficacy_threshold,
+            inter_stage_futility_threshold,
+            posterior_difference_threshold,
+            rejection_threshold,
+        )
         self.dtype = dtype
 
         # sig2 for quadrature integration
@@ -134,7 +185,7 @@ class Lewis45:
             self.n_configs_pr_best_pps_1,
             self.n_configs_pps_2,
             self.n_configs_pd,
-        ) = self.make_n_configs__()
+        ) = self._make_n_configs()
 
         # diff_matrix[i]^T p = p[i+1] - p[0]
         self.diff_matrix = np.zeros((self.n_arms - 1, self.n_arms))
@@ -146,32 +197,71 @@ class Lewis45:
         self.order = jnp.arange(0, self.n_arms, dtype=int)
 
         # cache jitted internal functions
-        self.posterior_difference_table_internal_jit__ = None
-        self.pr_best_pps_1_internal_jit__ = None
-        self.pps_2_internal_jit__ = None
+        self._posterior_difference_table_internal_jit = None
+        self._pr_best_pps_1_internal_jit = None
+        self._pps_2_internal_jit = None
 
         # posterior difference tables for every possible combination of n
         if cache_tables:
-            self.pd_table = self.posterior_difference_table__(
-                batch_size=kwargs["batch_size"]
-            )
-            self.pr_best_pps_1_table = self.pr_best_pps_1_table__(
-                key=kwargs["key"],
-                n_pr_sims=kwargs["n_pr_sims"],
-                batch_size=kwargs["batch_size"],
-            )
-            _, key = jax.random.split(kwargs["key"])
-            self.pps_2_table = self.pps_2_table__(
-                key=key,
-                n_pr_sims=kwargs["n_pr_sims"],
-                batch_size=kwargs["batch_size"],
+            self.loaded_tables = False
+            cache_is_path = isinstance(cache_tables, (str, Path))
+            if cache_is_path and os.path.exists(cache_tables):
+                self.loaded_tables = self.load_tables(cache_tables)
+            if not self.loaded_tables:
+                self.build_tables(key, n_table_pts, batch_size, n_pr_sims)
+                if cache_is_path:
+                    self.save_tables(cache_tables)
+
+    @property
+    def n_arm_samples(self):
+        return int(self.unifs_shape()[0])
+
+    def build_tables(self, key, n_table_pts, batch_size, n_pr_sims):
+        self.pd_table = self._posterior_difference_table(
+            batch_size=batch_size, n_points=n_table_pts
+        )
+        self.pr_best_pps_1_table = self._pr_best_pps_1_table(
+            key=key,
+            n_pr_sims=n_pr_sims,
+            batch_size=batch_size,
+            n_points=n_table_pts,
+        )
+        _, key = jax.random.split(key)
+        self.pps_2_table = self._pps_2_table(
+            key=key, n_pr_sims=n_pr_sims, batch_size=batch_size, n_points=n_table_pts
+        )
+
+    def load_tables(self, path):
+        with open(path, "rb") as f:
+            spec, tables = pickle.load(f)
+        # TODO: currently this just checks spec equality before accepting the
+        # cached table as correct. this is risky because the computational
+        # parameters could've also changed. we should add those! it would be
+        # nice to have a more general caching mechanism for lookup and
+        # interpolation tables. This situation of needing to cache simulation
+        # intermediates seems quite common!
+        if spec != self.spec:
+            warnings.warn("Ignoring cached tables due to spec mismatch.")
+            return False
+        self.pd_table, self.pr_best_pps_1_table, self.pps_2_table = tables
+        return True
+
+    def save_tables(self, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump(
+                (
+                    self.spec,
+                    (self.pd_table, self.pr_best_pps_1_table, self.pps_2_table),
+                ),
+                f,
             )
 
     # ===============================================
     # Table caching logic
     # ===============================================
 
-    def make_canonical__(self, data):
+    def _make_canonical(self, data):
         # we use the facts that:
         # - arms that are not dropped always have
         #   n value at least as large as those that were dropped.
@@ -186,7 +276,7 @@ class Lewis45:
         n_order_inverse = jnp.argsort(n_order)[1:] - 1
         return data, n_order_inverse
 
-    def make_n_configs__(self):
+    def _make_n_configs(self):
         """
         Creates two 2-D arrays of all possible configurations of the `n`
         Binomial parameter configurations throughout the trial.
@@ -243,7 +333,7 @@ class Lewis45:
 
         return n_configs_pr_best_pps_1, n_configs_pps_2, n_configs_pd
 
-    def table_data__(self, ns, coords):
+    def _table_data(self, ns, coords):
         """
         Creates a data array used to construct internal tables.
 
@@ -261,7 +351,7 @@ class Lewis45:
         data = jnp.stack((data, n_arr), axis=-1)
         return data
 
-    def make_grid__(self, ns, n_points):
+    def _make_grid(self, ns, n_points):
         """
         Creates a 2-D array of shape (d, n_points)
         where d is n.shape[0].
@@ -286,7 +376,7 @@ class Lewis45:
 
         return jnp.array([internal(n) for n in ns])
 
-    def posterior_difference_table__(
+    def _posterior_difference_table(
         self,
         batch_size,
         n_points=None,
@@ -295,9 +385,9 @@ class Lewis45:
             return jax.vmap(self.posterior_difference, in_axes=(0,))(data)
 
         if n_points:
-            grid = self.make_grid__(self.n_configs_pd, n_points)
+            grid = self._make_grid(self.n_configs_pd, n_points)
 
-        def process_batch__(i, f, batch_size):
+        def _process_batch(i, f, batch_size):
             f_batched = batch.batch_all(
                 f,
                 batch_size,
@@ -311,34 +401,30 @@ class Lewis45:
                     *(jnp.arange(0, n + 1) for n in self.n_configs_pd[i]), indexing="ij"
                 )
 
-            outs, n_padded = f_batched(
-                self.table_data__(self.n_configs_pd[i], meshgrid)
-            )
+            outs, n_padded = f_batched(self._table_data(self.n_configs_pd[i], meshgrid))
             out = jnp.row_stack(outs)
             return out[:(-n_padded)] if n_padded > 0 else out
 
         # if called for the first time, register jitted function
-        if self.posterior_difference_table_internal_jit__ is None:
-            self.posterior_difference_table_internal_jit__ = jax.jit(internal)
+        if self._posterior_difference_table_internal_jit is None:
+            self._posterior_difference_table_internal_jit = jax.jit(internal)
 
         tup_tables = tuple(
-            process_batch__(
-                i, self.posterior_difference_table_internal_jit__, batch_size
-            )
+            _process_batch(i, self._posterior_difference_table_internal_jit, batch_size)
             for i in range(self.n_configs_pd.shape[0])
         )
 
         if n_points:
             return LinearInterpTable(
                 self.n_configs_pd + 1,
-                grid,
-                jnp.array(tup_tables),
+                grid.astype(jnp.int32),
+                jnp.array(tup_tables, dtype=jnp.float32),
             )
 
         else:
             return LookupTable(self.n_configs_pd + 1, tup_tables)
 
-    def pr_best_pps_1_table__(self, key, n_pr_sims, batch_size, n_points=None):
+    def _pr_best_pps_1_table(self, key, n_pr_sims, batch_size, n_points=None):
         unifs = jax.random.uniform(
             key=key,
             shape=(
@@ -356,14 +442,14 @@ class Lewis45:
         normals = jax.random.normal(key, shape=(n_pr_sims, self.n_arms))
 
         if n_points:
-            grid = self.make_grid__(self.n_configs_pr_best_pps_1, n_points)
+            grid = self._make_grid(self.n_configs_pr_best_pps_1, n_points)
 
         def internal(data):
             return jax.vmap(self.pr_best_pps_1, in_axes=(0, None, None, None))(
                 data, normals, unifs_sig2, unifs
             )
 
-        def process_batch__(i, f, batch_size):
+        def _process_batch(i, f, batch_size):
             f_batched = batch.batch_all(
                 f,
                 batch_size,
@@ -379,7 +465,7 @@ class Lewis45:
                 )
 
             outs, n_padded = f_batched(
-                self.table_data__(self.n_configs_pr_best_pps_1[i], meshgrid)
+                self._table_data(self.n_configs_pr_best_pps_1[i], meshgrid)
             )
             pr_best_outs = tuple(t[0] for t in outs)
             pps_outs = tuple(t[1] for t in outs)
@@ -392,11 +478,11 @@ class Lewis45:
             )
 
         # if called for the first time, register jitted function
-        if self.pr_best_pps_1_internal_jit__ is None:
-            self.pr_best_pps_1_internal_jit__ = jax.jit(internal)
+        if self._pr_best_pps_1_internal_jit is None:
+            self._pr_best_pps_1_internal_jit = jax.jit(internal)
 
         tup_tables = tuple(
-            process_batch__(i, self.pr_best_pps_1_internal_jit__, batch_size)
+            _process_batch(i, self._pr_best_pps_1_internal_jit, batch_size)
             for i in range(self.n_configs_pr_best_pps_1.shape[0])
         )
         pr_best_tables = tuple(t[0] for t in tup_tables)
@@ -404,15 +490,18 @@ class Lewis45:
         if n_points:
             return LinearInterpTable(
                 self.n_configs_pr_best_pps_1 + 1,
-                grid,
-                (jnp.array(pr_best_tables), jnp.array(pps_tables)),
+                grid.astype(jnp.int32),
+                (
+                    jnp.array(pr_best_tables, dtype=jnp.float32),
+                    jnp.array(pps_tables, dtype=jnp.float32),
+                ),
             )
         else:
             return LookupTable(
                 self.n_configs_pr_best_pps_1 + 1, (pr_best_tables, pps_tables)
             )
 
-    def pps_2_table__(self, key, n_pr_sims, batch_size, n_points=None):
+    def _pps_2_table(self, key, n_pr_sims, batch_size, n_points=None):
         unifs = jax.random.uniform(
             key=key,
             shape=(
@@ -433,14 +522,14 @@ class Lewis45:
         )
 
         if n_points:
-            grid = self.make_grid__(self.n_configs_pps_2, n_points)
+            grid = self._make_grid(self.n_configs_pps_2, n_points)
 
         def internal(data):
             return jax.vmap(self.pps_2, in_axes=(0, None, None, None))(
                 data, normals, unifs_sig2, unifs
             )
 
-        def process_batch__(i, f, batch_size):
+        def _process_batch(i, f, batch_size):
             f_batched = batch.batch_all(
                 f,
                 batch_size,
@@ -456,39 +545,39 @@ class Lewis45:
                 )
 
             outs, n_padded = f_batched(
-                self.table_data__(self.n_configs_pps_2[i], meshgrid)
+                self._table_data(self.n_configs_pps_2[i], meshgrid)
             )
             out = jnp.row_stack(outs)
             return out[:(-n_padded)] if n_padded > 0 else out
 
         # if called for the first time, register jitted function
-        if self.pps_2_internal_jit__ is None:
-            self.pps_2_internal_jit__ = jax.jit(internal)
+        if self._pps_2_internal_jit is None:
+            self._pps_2_internal_jit = jax.jit(internal)
 
         tup_tables = tuple(
-            process_batch__(i, self.pps_2_internal_jit__, batch_size)
+            _process_batch(i, self._pps_2_internal_jit, batch_size)
             for i in range(self.n_configs_pps_2.shape[0])
         )
         if n_points:
             return LinearInterpTable(
                 self.n_configs_pps_2 + 1,
-                grid,
-                jnp.array(tup_tables),
+                grid.astype(jnp.int32),
+                jnp.array(tup_tables, dtype=jnp.float32),
             )
         else:
             return LookupTable(self.n_configs_pps_2 + 1, tup_tables)
 
-    def get_posterior_difference__(self, data):
-        data, n_order_inverse = self.make_canonical__(data)
+    def _get_posterior_difference(self, data):
+        data, n_order_inverse = self._make_canonical(data)
         return self.pd_table.at(data)[0][n_order_inverse]
 
-    def get_pr_best_pps_1__(self, data):
-        data, n_order_inverse = self.make_canonical__(data)
+    def _get_pr_best_pps_1(self, data):
+        data, n_order_inverse = self._make_canonical(data)
         outs = self.pr_best_pps_1_table.at(data)
         return tuple(out[n_order_inverse] for out in outs)
 
-    def get_pps_2__(self, data):
-        data, n_order_inverse = self.make_canonical__(data)
+    def _get_pps_2(self, data):
+        data, n_order_inverse = self._make_canonical(data)
         return self.pps_2_table.at(data)[0][n_order_inverse]
 
     # ===============================================
@@ -628,7 +717,7 @@ class Lewis45:
             # pool outcomes for each arm
             data = data + new_data
 
-            return self.get_posterior_difference__(data)[arm] < self.rejection_threshold
+            return self._get_posterior_difference(data)[arm] < self.rejection_threshold
 
         # compute p from logit space
         p_samples = jax.scipy.special.expit(thetas)
@@ -764,7 +853,7 @@ class Lewis45:
 
         # auxiliary variables
         non_dropped_idx = jnp.ones(n_arms - 1, dtype=bool)
-        pr_best, pps = self.get_pr_best_pps_1__(data)
+        pr_best, pps = self._get_pr_best_pps_1(data)
 
         # Stage 1:
         def body_func(args):
@@ -809,7 +898,7 @@ class Lewis45:
             data_new = jnp.where(add_idx[:, None], data_new, 0)
             data = data + data_new
 
-            pr_best, pps = self.get_pr_best_pps_1__(data)
+            pr_best, pps = self._get_pr_best_pps_1(data)
 
             return (
                 i + 1,
@@ -857,14 +946,7 @@ class Lewis45:
             berns_start,
         )
 
-    def stage_2(
-        self,
-        data,
-        best_arm,
-        berns,
-        berns_order,
-        berns_start,
-    ):
+    def stage_2(self, data, best_arm, berns, berns_order, berns_start, p):
         """
         Runs a single simulation of stage 2 of the Lei example.
 
@@ -881,13 +963,15 @@ class Lewis45:
 
         Returns:
         --------
-        0 if no rejection, otherwise 1.
+        The test statistic:
+            - 1 for early futility
+            - 0 for early efficacy
+            - posterior difference otherwise.
         """
         n_stage_2 = self.n_stage_2
         n_stage_2_add_per_interim = self.n_stage_2_add_per_interim
         pps_threshold_lower = self.stage_2_futility_threshold
         pps_threshold_upper = self.stage_2_efficacy_threshold
-        rejection_threshold = self.rejection_threshold
 
         non_dropped_idx = (self.order == 0) | (self.order == best_arm)
 
@@ -902,13 +986,12 @@ class Lewis45:
         data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
         data = data + data_new
 
-        pps = self.get_pps_2__(data)[best_arm - 1]
+        pps = self._get_pps_2(data)[best_arm - 1]
 
         # interim: check early-stop based on futility (lower) or efficacy (upper)
         early_exit_futility = pps < pps_threshold_lower
         early_exit_efficacy = pps > pps_threshold_upper
         early_exit = early_exit_futility | early_exit_efficacy
-        early_exit_out = jnp.logical_not(early_exit_futility) | early_exit_efficacy
 
         def final_analysis(data, berns_start):
             data_new, berns_start = self.sample(
@@ -919,19 +1002,22 @@ class Lewis45:
             )
             data_new = jnp.where(non_dropped_idx[:, None], data_new, 0)
             data = data + data_new
-            rej = (
-                self.get_posterior_difference__(data)[best_arm - 1]
-                < rejection_threshold
-            )
-            return (rej, data)
+            test_stat = self._get_posterior_difference(data)[best_arm - 1]
+            return (test_stat, best_arm, self.score(data, p))
 
         return jax.lax.cond(
             early_exit,
-            lambda: (early_exit_out, data),
+            # slightly confusing:
+            # the test stat for an early exit is 0 if efficacy, 1 if futility
+            lambda: (
+                (pps <= pps_threshold_upper).astype(float),
+                best_arm,
+                self.score(data, p),
+            ),
             lambda: final_analysis(data, berns_start),
         )
 
-    def simulate(self, p, null_truths, unifs, unifs_order):
+    def simulate(self, p, unifs, unifs_order):
         """
         Runs a single simulation of both stage 1 and stage 2.
 
@@ -943,7 +1029,14 @@ class Lewis45:
                     and d is the total number of arms.
         unifs_order:            result of calling jnp.arange(0, unifs.shape[0]).
                                 It is made an argument to be able to reuse this array.
+        Returns:
+        --------
+        The test statistic:
+            - 1 for early futility
+            - 0 for early efficacy
+            - posterior difference otherwise.
         """
+
         # construct bernoulli draws
         berns = unifs < p[None]
 
@@ -963,31 +1056,22 @@ class Lewis45:
             pps[best_arm - 1] < self.inter_stage_futility_threshold
         )
 
-        def stage_2_wrap(
-            null_truths, data, p, best_arm, berns, unifs_order, berns_start
-        ):
-            rej, data = self.stage_2(
+        # Stage 2 only if no early termination based on futility
+        return jax.lax.cond(
+            early_exit,
+            lambda: (2.0, best_arm, jnp.zeros(self.n_arms)),
+            lambda: self.stage_2(
                 data=data,
                 best_arm=best_arm,
                 berns=berns,
                 berns_order=unifs_order,
                 berns_start=berns_start,
-            )
-            false_rej = rej * null_truths[best_arm - 1]
-            score = self.score(data, p) * false_rej
-            return (false_rej, score)
-
-        # Stage 2 only if no early termination based on futility
-        return jax.lax.cond(
-            early_exit,
-            lambda: (False, jnp.zeros(self.n_arms)),
-            lambda: stage_2_wrap(
-                null_truths=null_truths,
-                data=data,
                 p=p,
-                best_arm=best_arm,
-                berns=berns,
-                unifs_order=unifs_order,
-                berns_start=berns_start,
             ),
         )
+
+    def simulate_rejection(self, p, null_truth, unifs, unifs_order):
+        test_stat, best_arm, score = self.simulate(p, unifs, unifs_order)[0]
+        rej = test_stat < self.rejection_threshold
+        false_rej = rej * null_truth[best_arm - 1]
+        return false_rej, score

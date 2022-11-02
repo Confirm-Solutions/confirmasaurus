@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.13.8
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.6 ('base')
     language: python
     name: python3
 ---
@@ -541,7 +541,8 @@ p_tiles = jax.scipy.special.expit(theta_tiles)
 ```
 
 ```python
-class LeiSimulator:
+
+class LeiDriver:
     def __init__(
         self,
         lei_obj,
@@ -571,10 +572,16 @@ class LeiSimulator:
         self.typeI_sum = None
         self.typeI_score = None
 
+    def simulate_rejection(self, p, null_truth, unifs, unifs_order):
+        test_stat, best_arm, score = self.lei_obj.simulate(p, unifs, unifs_order)[0]
+        rej = test_stat < self.lei_obj.rejection_threshold
+        false_rej = rej * null_truth[best_arm - 1]
+        return false_rej, score
+
     def f_batch_sim_batch_grid(self, p_batch, null_batch, unifs_batch, unifs_order):
         return jax.vmap(
             jax.vmap(
-                self.lei_obj.simulate,
+                self.simulate_rejection,
                 in_axes=(0, 0, None, None),
             ),
             in_axes=(None, None, 0, None),
@@ -603,7 +610,7 @@ class LeiSimulator:
         scores_reduced = self.reduce_func(scores)
 
         end = time.perf_counter()
-        elapsed_time = (end-start)
+        elapsed_time = end - start
         print(f"Batch {i}: {elapsed_time:.03f}s")
         return rejs_reduced, scores_reduced
 
@@ -622,8 +629,10 @@ class LeiSimulator:
             self.typeI_score += out[1]
         return self.typeI_sum, self.typeI_score
 
+```
 
-simulator = LeiSimulator(
+```python
+simulator = LeiDriver(
     lei_obj=lei_obj,
     p_tiles=p_tiles,
     null_truths=null_truths,

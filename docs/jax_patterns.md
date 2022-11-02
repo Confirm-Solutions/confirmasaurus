@@ -1,5 +1,32 @@
 # JAX development patterns
 
+## Memory
+
+
+This snippet is useful for inspecting the currently allocated device buffers.
+
+```
+client = jax.lib.xla_bridge.get_backend()
+mem_usage = sum([b.nbytes for b in client.live_buffers()]) / 1e9
+print(mem_usage)
+print([b.shape for b in client.live_buffers()])
+```
+
+Also, to clear the compilation cache for a particular function: `f_jit.clear_cache()`
+
+- JAX memory profiling produces output readable by the `pprof` Go program. There's an online hosted version of this here: https://pprofweb.evanjones.ca/pprofweb/
+- **`jax.vmap`** can be dangerous for memory usage. Don't assume that a loop will be ordered in a sane way to minimize memory usage.
+- [Clearing the JAX compilation cache](https://github.com/google/jax/issues/10828)
+- It's possible to run into out of memory errors when too much data is stored in the JAX compilation cache. The error will look like `Execution of replica 0 failed: INTERNAL: Failed to load in-memory CUBIN: CUDA_ERROR_OUT_OF_MEMORY: out of memory` in contrast to the normal JAX out of memory errors.
+
+**Python not knowing about the size of JAX arrays can cause memory leaks**: 
+- python only knows about system RAM, not GPU RAM.
+- so it only schedules "deep" garbage collection (level 2) when memory usage is getting high.
+- but a JAX DeviceArray uses almost no system RAM since it’s all stored on the GPU.
+- so a DeviceArray looks to Python like the kind of thing that doesn’t need to be urgently garbage collected.
+- so, giant 1.5 GB DeviceArrays start to leak every iteration through AdaGrid.
+
+## Miscellaneous
 JAX development patterns that might be useful:
 
 - Pull your `jax.jit` and `jax.vmap` calls into the outermost layer of the code. This has two benefits

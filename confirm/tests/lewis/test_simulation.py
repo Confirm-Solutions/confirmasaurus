@@ -1,8 +1,12 @@
+import os
+from pathlib import Path
+
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
 from confirm.lewislib import lewis
-
 
 default_params = {
     "n_arms": 3,
@@ -18,22 +22,49 @@ default_params = {
     "inter_stage_futility_threshold": 0.8,
     "posterior_difference_threshold": 0.05,
     "rejection_threshold": 0.05,
-    "batch_size": 2**16,
+    "batch_size": 2**4,
     "key": jax.random.PRNGKey(1),
     "n_pr_sims": 100,
     "n_sig2_sims": 20,
-    "cache_tables": True,
+    # NOTE: because we are caching tables, this code *does not* test the table
+    # construction!
+    "cache_tables": Path(__file__).resolve().parent.joinpath("lewis.pkl"),
 }
 
-key = jax.random.PRNGKey(0)
-lewis_obj = lewis.Lewis45(**default_params)
-unifs = jax.random.uniform(key=key, shape=lewis_obj.unifs_shape())
-p = jnp.array([0.25, 0.5, 0.75])
-berns = unifs < p[None]
-berns_order = jnp.arange(0, berns.shape[0])
+
+def lewis_small():
+    key = jax.random.PRNGKey(0)
+    lewis_obj = lewis.Lewis45(**default_params)
+    unifs = jax.random.uniform(key=key, shape=lewis_obj.unifs_shape())
+    p = jnp.array([0.25, 0.5, 0.75])
+    berns = unifs < p[None]
+    berns_order = jnp.arange(0, berns.shape[0])
+    return (lewis_obj, unifs, p, berns, berns_order)
 
 
-def test_stage_1():
+@pytest.fixture(name="lewis_small", scope="session")
+def lewis_small_fixture():
+    return lewis_small()
+
+
+def test_save_load(tmp_path):
+    params = default_params.copy()
+    params["cache_tables"] = False
+    L1 = lewis.Lewis45(**default_params)
+    path = os.path.join(tmp_path, "tables.pkl")
+    if os.path.exists(path):
+        os.remove(path)
+    L1.save_tables(path)
+
+    params = default_params.copy()
+    params["cache_tables"] = path
+    L2 = lewis.Lewis45(**params)
+    assert L2.loaded_tables
+    np.testing.assert_allclose(L1.pd_table.tables[0], L2.pd_table.tables[0])
+
+
+def test_stage_1(lewis_small):
+    lewis_obj, _, _, berns, berns_order = lewis_small
     # actual
     (
         early_exit_futility,
@@ -47,7 +78,7 @@ def test_stage_1():
     early_exit_futility_expected = False
     data_expected = jnp.array([[0, 3], [0, 1], [2, 3]], dtype=int)
     non_dropped_idx_expected = jnp.array([False, True])
-    _, pps_expected = lewis_obj.get_pr_best_pps_1__(data_expected)
+    _, pps_expected = lewis_obj._get_pr_best_pps_1(data_expected)
     berns_start_expected = 3
 
     # test
@@ -58,20 +89,23 @@ def test_stage_1():
     assert jnp.array_equal(berns_start, berns_start_expected)
 
 
-def test_stage_2():
+def test_stage_2(lewis_small):
+    lewis_obj, _, p, berns, berns_order = lewis_small
     # expected stage 1
     data = jnp.array([[1, 3], [0, 1], [2, 3]], dtype=int)
     best_arm = 2
     berns_start = 3
 
     # actual stage 2
-    rej, _ = lewis_obj.stage_2(data, best_arm, berns, berns_order, berns_start)
+    test_stat, best_arm, _ = lewis_obj.stage_2(
+        data, best_arm, berns, berns_order, berns_start, p
+    )
+    np.testing.assert_allclose(test_stat, 1.0)
+    assert best_arm == 2
 
-    # test
-    assert jnp.array_equal(rej, False)
 
-
-def test_inter_stage():
-    null_truths = jnp.zeros(default_params["n_arms"] - 1, dtype=bool)
-    rej, _ = lewis_obj.simulate(p, null_truths, unifs, berns_order)
-    assert jnp.array_equal(rej, False)
+def test_inter_stage(lewis_small):
+    lewis_obj, unifs, p, _, berns_order = lewis_small
+    test_stat, best_arm, _ = lewis_obj.simulate(p, unifs, berns_order)
+    np.testing.assert_allclose(test_stat, 2.0)
+    assert best_arm == 2

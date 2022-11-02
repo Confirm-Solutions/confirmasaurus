@@ -151,6 +151,10 @@ class FastINLA:
         _, exceedance, _, _ = self.inference(data, method)
         return exceedance > self.critical_value
 
+    def test_inference(self, data, method="jax"):
+        _, exceedance, _, _ = self.inference(data, method)
+        return exceedance
+
     def inference(self, data, method="jax"):
         fncs = dict(
             numpy=self.numpy_inference, jax=self.jax_inference, cpp=self.cpp_inference
@@ -173,7 +177,6 @@ class FastINLA:
         if thresh_theta is None:
             thresh_theta = self.thresh_theta
 
-        # TODO: warm start with DB theta ?
         # Step 1) Compute the mode of p(theta, y, sigma^2) holding y and sigma^2 fixed.
         # This is a simple Newton's method implementation.
         theta_max, hess_inv = self.optimize_mode(data)

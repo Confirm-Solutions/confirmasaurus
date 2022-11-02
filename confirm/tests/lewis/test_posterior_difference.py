@@ -22,12 +22,12 @@ default_params = {
 
 def test_get_posterior_difference():
     lewis_obj = lewis.Lewis45(**default_params)
-    lewis_obj.pd_table = lewis_obj.posterior_difference_table__(batch_size=int(2**16))
+    lewis_obj.pd_table = lewis_obj._posterior_difference_table(batch_size=int(2**16))
     n = lewis_obj.n_configs_pd[2]
     y = jnp.array([5, 1, 2])
     data = jnp.stack((y, n), axis=-1)
-    out_1 = lewis_obj.get_posterior_difference__(data)
+    out_1 = lewis_obj._get_posterior_difference(data)
     permute = jnp.array([0, 2, 1])
     data_2 = data[permute]
-    out_2 = lewis_obj.get_posterior_difference__(data_2)
+    out_2 = lewis_obj._get_posterior_difference(data_2)
     assert jnp.array_equal(out_1, out_2[permute[1:] - 1])

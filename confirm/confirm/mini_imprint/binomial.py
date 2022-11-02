@@ -1,8 +1,10 @@
+from functools import partial
 from typing import Callable
 
 import jax.numpy as jnp
 import jax.scipy.special
 import numpy as np
+import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
 import sympy as sp
@@ -10,6 +12,9 @@ import sympy as sp
 
 def binomial_accumulator(rejection_fnc):
     """
+    NOTE: THIS IS DEPRECATED BECAUSE IT DOESN'T TAKE A CRITICAL VALUE AS A
+    PARAMETER.
+
     A simple re-implementation of accumulation. This is useful for distilling
     what is happening during accumulation down to a simple linear sequence of
     operations. Retaining this could be useful for tutorials or conceptual
@@ -211,10 +216,15 @@ def zero_order_bound(typeI_sum, sim_sizes, delta, delta_prop_0to1):
     d0 = typeI_sum / sim_sizes
     # clopper-pearson upper bound in beta form.
     d0u_factor = 1.0 - delta * delta_prop_0to1
+    # NOTE: moving this to JAX is nontrivial and probably best done with
+    # tensorflow_probability:
+    # https://github.com/google/jax/issues/2399#issuecomment-1225990206
+    # https://github.com/pyro-ppl/numpyro/blob/e28a3feaa4f95d76b361101f0c75dcb5add2365e/numpyro/distributions/util.py#L426
+    # Also, probably unnecessary since this is fast!
     d0u = scipy.stats.beta.ppf(d0u_factor, typeI_sum + 1, sim_sizes - typeI_sum) - d0
     # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
     # because there is no way to go higher than 1.0
-    d0u = np.where(np.isnan(d0u), 0, d0u)
+    d0u = jnp.where(jnp.isnan(d0u), 0, d0u)
     return d0, d0u
 
 
@@ -275,32 +285,39 @@ def optimal_centering(f, p):
     return 1 / (1 + ((1 - f) / f) ** (1 / (p - 1)))
 
 
-# def _build_odi_constant_func_numerical(q: float):
-#     """
-#     Fully numerical integration constant evaluator. This can be useful for
-#     non-integer q.
-
-#     Args:
-#         q: The moment to compute. Must be a float greater than 1.
-#     """
-
-#     def f(n, p):
-#         if isinstance(p, float):
-#             pf = np.array([p])
-#         else:
-#             pf = p.flatten()
-#         xs = np.arange(n + 1).astype(np.float64)
-#         eggq = np.abs(xs[None, :] - n * pf[:, None]) ** q
-#         integrand = eggq * scipy.stats.binom.pmf(xs[None, :], n, pf[:, None])
-#         out = np.sum(integrand, axis=-1)
-#         if isinstance(p, float):
-#             return out[0]
-#         else:
-#             return out.reshape(p.shape)
-
-#     return f
+constant_func_cache = {}
 
 
+def _build_odi_constant_func_numerical(q: float):
+    """
+    Fully numerical integration constant evaluator. This can be useful for
+    non-integer q.
+
+    Args:
+        q: The moment to compute. Must be a float greater than 1.
+    """
+
+    def f(n, p):
+        if isinstance(p, float):
+            pf = np.array([p])
+        else:
+            pf = p.flatten()
+        xs = jnp.arange(n + 1).astype(jnp.float64)
+        return jnp.exp(
+            jax.scipy.special.logsumexp(
+                q * jnp.log(jnp.abs(xs - n * pf)) + dist.Binomial(n, pf).log_prob(xs)
+            )
+        )
+
+    if q not in constant_func_cache:
+        constant_func_cache[q] = jax.jit(
+            jax.vmap(f, in_axes=(None, 0)), static_argnums=(0,)
+        )
+
+    return constant_func_cache[q]
+
+
+@partial(jax.jit, static_argnums=(2, 3, 4, 5))
 def _calc_Cqpp(
     theta_tiles,
     tile_corners,
@@ -335,12 +352,13 @@ def _calc_Cqpp(
         raise ValueError("The q parameter must be an even integer less than 16.")
 
     holderp = 1 / (1 - 1.0 / holderq)
-    sup_v = np.max(
-        np.sum(
-            np.where(
-                np.isnan(tile_corners),
+    sup_v = jnp.max(
+        jnp.sum(
+            jnp.where(
+                jnp.isnan(tile_corners),
                 0,
-                np.abs(radius_ratio * (tile_corners - theta_tiles[:, None])) ** holderp,
+                jnp.abs(radius_ratio * (tile_corners - theta_tiles[:, None]))
+                ** holderp,
             ),
             axis=2,
         )
@@ -348,32 +366,34 @@ def _calc_Cqpp(
         axis=1,
     )
 
-    tile_corners_p = scipy.special.expit(tile_corners)
+    tile_corners_p = jax.scipy.special.expit(tile_corners)
 
     # NOTE: we are assuming that we know the supremum occurs at a corner or at
     # p=0.5. This might not be true for other models or for q > 16.
-    C_corners = np.where(
-        np.isnan(tile_corners_p),
+    C_corners = jnp.where(
+        jnp.isnan(tile_corners_p.ravel()),
         0,
-        C_f(n_arm_samples, tile_corners_p),
-    )
+        C_f(n_arm_samples, tile_corners_p.ravel()),
+    ).reshape(tile_corners_p.shape)
 
     # maximum per dimension over the corners of the tile
-    C_max = np.max(C_corners, axis=1)
+    C_max = jnp.max(C_corners, axis=1)
     # if the tile crosses p=0.5, we just set C_max equal to the value at 0.5
-    crosses05 = np.where(
-        np.any(tile_corners_p < 0.5, axis=1) & np.any(tile_corners_p > 0.5, axis=1)
+    C_max = jnp.where(
+        jnp.any(tile_corners_p < 0.5, axis=1) & jnp.any(tile_corners_p > 0.5, axis=1),
+        C_f(n_arm_samples, jnp.array([0.5]))[0],
+        C_max,
     )
-    C_max[crosses05] = C_f(n_arm_samples, 0.5)
 
     # finally, sum across the arms to compute the full multidimensional moment
     # expectation
-    sup_moment = np.sum(C_max, axis=-1) ** (1 / holderq)
+    sup_moment = jnp.sum(C_max, axis=-1) ** (1 / holderq)
 
     # Cq'' from the paper:
     return sup_v * sup_moment
 
 
+@partial(jax.jit, static_argnums=(3, 4, 5, 6))
 def holder_odi_bound(
     typeI_bound,
     theta_tiles,
@@ -381,6 +401,7 @@ def holder_odi_bound(
     n_arm_samples: int,
     holderq: int,
     radius_ratio: float = 1.0,
+    C_f: Callable = None,
 ):
     """
     Compute the Holder-ODI on Type I Error. See the paper for mathematical
@@ -398,7 +419,8 @@ def holder_odi_bound(
     Returns:
         The Holder ODI type I error bound for each tile.
     """
-    C_f = _build_odi_constant_func(holderq)
+    if C_f is None:
+        C_f = _build_odi_constant_func_numerical(holderq)
     Cqpp = _calc_Cqpp(
         theta_tiles,
         tile_corners,
@@ -408,3 +430,11 @@ def holder_odi_bound(
         radius_ratio=radius_ratio,
     )
     return (Cqpp / holderq + typeI_bound ** (1 / holderq)) ** holderq
+
+
+@partial(jax.jit, static_argnums=(3, 4))
+def invert_bound(bound, theta_tiles, vertices, n_arm_samples, holderq):
+    C_f = _build_odi_constant_func_numerical(holderq)
+    Cqpp = _calc_Cqpp(theta_tiles, vertices, n_arm_samples, holderq, C_f)
+    pointwise_bound = (bound ** (1 / holderq) - Cqpp / holderq) ** holderq
+    return jnp.where(pointwise_bound > bound, 0.0, pointwise_bound)
