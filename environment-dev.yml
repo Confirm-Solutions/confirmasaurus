@@ -6,7 +6,6 @@ dependencies:
   - cython
   - radian
   - openjdk<17
-  - bazel
   - ipywidgets
   - pip:
     - memory_profiler

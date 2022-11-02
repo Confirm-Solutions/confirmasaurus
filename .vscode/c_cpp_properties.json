@@ -4,13 +4,7 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/imprint/imprint/include",
-                "${workspaceFolder}/imprint/bazel-imprint/external/eigen",
-                "${workspaceFolder}/imprint/bazel-imprint/external/fmtlib/include",
-                "${workspaceFolder}/imprint/bazel-imprint/external/com_github_scipy_boost/",
-                "${workspaceFolder}/imprint/bazel-imprint/external/pybind11/include",
-                "${workspaceFolder}/imprint/bazel-imprint/external/com_github_google_benchmark/include",
-                "${workspaceFolder}/imprint/bazel-imprint/external/com_google_googletest/googletest/include"
+                "${workspaceFolder}/imprint/imprint/include"
             ],
             "defines": [],
             "cStandard": "c11",

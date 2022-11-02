@@ -173,7 +173,7 @@ def test_inla_properties(method):
     np.testing.assert_allclose(sigma2_integral, 1.0)
 
 
-@pytest.mark.parametrize("method", ["jax", "numpy", "cpp"])
+@pytest.mark.parametrize("method", ["jax", "numpy"])
 def test_fast_inla(method, N=10, iterations=1):
     n_i = np.tile(np.array([20, 20, 35, 35]), (N, 1))
     y_i = np.tile(np.array([0, 1, 9, 10], dtype=np.float64), (N, 1))
@@ -249,87 +249,6 @@ def test_fast_inla_same_results(N=1, iterations=1_000):
             np.testing.assert_allclose(
                 logistic(outs1[2]), logistic(outs2[2]), atol=1e-3
             )
-
-
-def test_py_binomial(n_arms=2, n_theta_1d=16, sim_size=100):
-    """
-    Test against the Imprint accumulation and bound routines.
-    """
-    import pyimprint.grid as grid
-    from pyimprint.bound import TypeIErrorBound
-    from pyimprint.driver import accumulate_process
-    from pyimprint.model.binomial import SimpleSelection
-    from confirm.berrylib.imprint import BerryImprintModel
-
-    n_arm_samples = 35
-    seed = 10
-    # getting an exact match is only possible with n_threads = 1 because
-    # parallelism in the imprint accumulator leads to a different order of random
-    # numbers.
-    n_threads = 1
-
-    # define null hypos
-    null_hypos = []
-    for i in range(n_arms):
-        n = np.zeros(n_arms)
-        # null is:
-        # theta_i <= logit(0.1)
-        # the normal should point towards the negative direction. but that also
-        # means we need to negate the logit(0.1) offset
-        n[i] = -1
-        null_hypos.append(grid.HyperPlane(n, -logit(0.1)))
-    gr = grid.make_cartesian_grid_range(
-        n_theta_1d, np.full(n_arms, -3.5), np.full(n_arms, 1.0), sim_size
-    )
-    gr.create_tiles(null_hypos)
-    gr.prune()
-    n_tiles = gr.n_tiles()
-
-    fi = fast_inla.FastINLA(n_arms=n_arms)
-    b = BerryImprintModel(fi, n_arm_samples, [0.85])
-    acc_o = accumulate_process(b, gr, sim_size, seed, n_threads)
-
-    np.random.seed(seed)
-    samples = np.random.uniform(size=(sim_size, n_arm_samples, n_arms))
-
-    theta_tiles = grid.theta_tiles(gr)
-    nulls = grid.is_null_per_arm(gr)
-
-    accumulator = binomial.binomial_accumulator(fi.rejection_inference)
-    typeI_sum, typeI_score = accumulator(theta_tiles, nulls, samples)
-    assert np.all(typeI_sum.to_py() == acc_o.typeI_sum()[0])
-    np.testing.assert_allclose(
-        typeI_score.to_py(), acc_o.score_sum().reshape(n_tiles, n_arms), 1e-4
-    )
-
-    corners = grid.collect_corners(gr)
-    tile_radii = grid.radii_tiles(gr)
-    sim_sizes = grid.sim_sizes_tiles(gr)
-    total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
-        theta_tiles,
-        tile_radii,
-        corners,
-        sim_sizes,
-        n_arm_samples,
-        typeI_sum.to_py(),
-        typeI_score.to_py(),
-    )
-
-    delta = 0.025
-    critvals = np.array([0.99])
-    simple_selection_model = SimpleSelection(fi.n_arms, n_arm_samples, 1, critvals)
-    simple_selection_model.critical_values([fi.critical_value])
-
-    ub = TypeIErrorBound()
-    kbs = simple_selection_model.make_imprint_bound_state(gr)
-    ub.create(kbs, acc_o, gr, delta)
-
-    np.testing.assert_allclose(d0, ub.delta_0()[0])
-    np.testing.assert_allclose(d0u, ub.delta_0_u()[0])
-    np.testing.assert_allclose(d1w, ub.delta_1()[0], rtol=1e-05)
-    np.testing.assert_allclose(d1uw, ub.delta_1_u()[0])
-    np.testing.assert_allclose(d2uw, ub.delta_2_u()[0])
-    np.testing.assert_allclose(total, ub.get()[0])
 
 
 def test_rejection_table():
