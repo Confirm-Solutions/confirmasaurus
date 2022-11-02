@@ -12,7 +12,7 @@ import numpy as np
 class HyperPlane:
     """
     A plane defined by:
-    x \cdot n - c = 0
+    x.dot(n) - c = 0
 
     Sign convention: When used as the boundary between null hypothesis and
     alternative, the normal should point towards the null hypothesis space.

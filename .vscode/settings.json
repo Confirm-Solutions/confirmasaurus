@@ -1,5 +1,4 @@
 {
-  "bazel-cpp-tools.compileCommands.targets": ["//..."],
   "jupyter.jupyterServerType": "local",
   "files.associations": {
     "functional": "cpp",
