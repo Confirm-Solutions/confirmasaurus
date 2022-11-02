@@ -27,16 +27,6 @@ def test_pad():
     assert out[1][1] == 2
 
 
-def test_pass_interval():
-    def f(s, e, x):
-        return x[s:e] + 1
-
-    batched_f = batch_yield(f, batch_size=3, in_axes=(None,), pass_interval=True)
-    out = list(batched_f(np.array([1, 2, 3, 4])))
-    np.testing.assert_allclose(out[1][0], np.array([5, 5, 5]))
-    assert out[1][1] == 2
-
-
 def test_multidim():
     def f(x):
         return (x.sum(axis=1), x.prod(axis=1))

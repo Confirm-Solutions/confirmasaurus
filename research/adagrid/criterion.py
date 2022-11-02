@@ -51,6 +51,11 @@ class Criterion:
         ########################################
         # Criterion step 1: is tuning impossible?
         ########################################
+
+        # TODO: the impossibility condition only needs to be checked for new
+        # tiles that used to be impossible (or simplifying: new tiles). once a
+        # tile is not impossible, it will never again be impossible.
+
         self.cost_to_refine = 2**lei_obj.n_arms
         self.sims_to_rej_enough = (P.tuning_min_idx + 1) / S.alpha0 - 1
         self.alpha_to_rej_enough = (P.tuning_min_idx + 1) / (S.sim_sizes + 1)
