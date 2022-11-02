@@ -98,11 +98,11 @@ class Criterion:
         ) / S.sim_sizes[self.overall_tile]
 
         ########################################
-        # Criterion step 3: Refine tiles that are too large, deepen tiles that
-        # cause too much bias.
+        # Criterion step 3: Refine and deepen based on inflated bootstrapped
+        # minimum lambda
         ########################################
         self.orderer = S.twb_mean_lam + (S.twb_min_lam - S.twb_mean_lam) * 4
-        ignore = S.twb_mean_lam > 0.3
+        ignore = S.twb_mean_lam > 0.2
         self.orderer[ignore] = S.twb_min_lam[ignore]
         self.sorted_ordering = np.argsort(self.orderer)
         self.sorted_orderer = self.orderer[self.sorted_ordering]
@@ -117,11 +117,24 @@ class Criterion:
             self.deepen_likely_to_work & (S.sim_sizes[self.dangerous] < P.max_sim_size)
         ) | (~self.d_should_refine)
 
+        ########################################
+        # Criterion step 4: Refine based on bootstrapped mean lambda
+        ########################################
+        self.refine_orderer = S.twb_mean_lam
+        self.sorted_refine_ordering = np.argsort(self.refine_orderer)
+        self.sorted_refine_orderer = self.refine_orderer[self.sorted_refine_ordering]
+        self.refine_dangerous = self.sorted_refine_ordering[: P.step_size // 2]
+        self.d_should_refine2 = self.alpha_cost[self.refine_dangerous] > P.grid_target
+
+        ########################################
+        # Criterion step 5: Actually assign refine/deepen decisions.
+        ########################################
         self.which_deepen = np.zeros(S.g.n_tiles, dtype=bool)
         self.which_refine = np.zeros(S.g.n_tiles, dtype=bool)
         if (self.alpha_cost[self.overall_tile] > P.grid_target) or (
             self.bias > P.bias_target
         ):
+            self.which_refine[self.refine_dangerous] = self.d_should_refine2
             self.which_refine[self.dangerous] = self.d_should_refine & (
                 ~self.d_should_deepen
             )
@@ -134,6 +147,9 @@ class Criterion:
             self.which_deepen &= ~self.which_refine
             self.which_deepen &= S.sim_sizes < P.max_sim_size
 
+        ########################################
+        # Criterion step 6: Reporting
+        ########################################
         self.report = dict(
             overall_lam=f"{self.overall_lam:.5f}",
             lam_std=f"{self.lam_std:.4f}",
@@ -145,6 +161,9 @@ class Criterion:
             n_refine_impossible=np.sum(self.impossible_refine),
             n_moresims=np.sum(self.which_deepen),
             n_moresims_impossible=np.sum(self.impossible_sim),
+            twb_worst_tile_lam_min=f"{self.twb_worst_tile_lam_min:.5f}",
+            twb_worst_tile_lam_mean=f"{self.twb_worst_tile_lam_mean:.5f}",
+            twb_worst_tile_lam_max=f"{self.twb_worst_tile_lam_max:.5f}",
         )
         self.report["min(twb_min_lam)"] = f"{S.twb_min_lam.min():.5f}"
         self.report["min(twb_mean_lam)"] = f"{S.twb_mean_lam.min():.5f}"

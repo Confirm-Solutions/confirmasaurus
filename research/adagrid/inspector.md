@@ -33,55 +33,7 @@ from diagnostics import lamstar_histogram
 ```
 
 ```python
-# typeI_sum = batched_rej(
-#     sim_sizes,
-#     (np.full(sim_sizes.shape[0], overall_cv),
-#     g.theta_tiles,
-#     g.null_truth,),
-#     unifs,
-#     unifs_order,
-# )
-
-# savedata = [
-#     g,
-#     sim_sizes,
-#     bootstrap_cvs,
-#     typeI_sum,
-#     hob_upper,
-#     pointwise_target_alpha
-# ]
-# with open(f"{name}/final.pkl", "wb") as f:
-#     pickle.dump(savedata, f)
-
-# # Calculate actual type I errors?
-# typeI_est, typeI_CI = binomial.zero_order_bound(
-#     typeI_sum, sim_sizes, delta_validate, 1.0
-# )
-# typeI_bound = typeI_est + typeI_CI
-
-# hob_upper = binomial.holder_odi_bound(
-#     typeI_bound, g.theta_tiles, g.vertices, n_arm_samples, holderq
-# )
-# sim_cost = typeI_CI
-# hob_empirical_cost = hob_upper - typeI_bound
-# worst_idx = np.argmax(typeI_est)
-# worst_tile = g.theta_tiles[worst_idx]
-# typeI_est[worst_idx], worst_tile
-# worst_cv_idx = np.argmin(sim_cvs)
-# typeI_est[worst_cv_idx], sim_cvs[worst_cv_idx], g.theta_tiles[worst_cv_idx], pointwise_target_alpha[worst_cv_idx]
-# plt.hist(typeI_est, bins=np.linspace(0.02,0.025, 100))
-# plt.show()
-
-# theta_0 = np.array([-1.0, -1.0, -1.0])      # sim point
-# v = 0.1 * np.ones(theta_0.shape[0])     # displacement
-# f0 = 0.01                               # Type I Error at theta_0
-# fwd_solver = ehbound.ForwardQCPSolver(n=n_arm_samples)
-# q_opt = fwd_solver.solve(theta_0=theta_0, v=v, a=f0) # optimal q
-# ehbound.q_holder_bound_fwd(q_opt, n_arm_samples, theta_0, v, f0)
-```
-
-```python
-name = '4d_full'
+name = '4d'
 params = {
     "n_arms": 4,
     "n_stage_1": 50,
@@ -114,121 +66,72 @@ S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
-S.db.data.dtype
-```
-
-```python
-S.B_lam.min(axis=0)
-```
-
-```python
-S.B_lam.argmin(axis=0)
-```
-
-```python
-S.alpha0[S.B_lam.argmin(axis=0)]
-```
-
-```python
-S.sim_sizes[S.B_lam.argmin(axis=0)]
-```
-
-```python
-S.twb_min_lam.min()
-```
-
-```python
-S.orig_lam.min()
-```
-
-```python
-np.min(S.twb_mean_lam + 3 * (S.twb_max_lam - S.twb_mean_lam))
-```
-
-```python
-np.sum(S.twb_min_lam < np.min(S.twb_max_lam)) / 1e6
-```
-
-```python
 cr = Criterion(lei_obj, P, S, D)
-```
-
-```python
-S.sim_sizes[cr.dangerous]
-```
-
-```python
-cr.alpha_cost[cr.dangerous]
-```
-
-```python
-np.sum(cr.impossible_refine_orig)
-```
-
-```python
-cr.twb_worst_tile_lam_max
-```
-
-```python
-cr.twb_worst_tile_lam_min
-```
-
-```python
 assert S.twb_max_lam[cr.twb_worst_tile] == np.min(S.twb_max_lam)
 assert S.twb_min_lam[cr.twb_worst_tile] == np.min(S.twb_min_lam[cr.ties])
 ```
 
+## 11/1/2022
+
 ```python
-S.alpha0[cr.dangerous]
+import pandas as pd
 ```
 
 ```python
-S.B_lam[cr.dangerous].min(axis=1)
+# orderer = combined_mean_idx + inflation * (combined_min_idx - combined_mean_idx)
+# orderer = S.twb_mean_lam + inflation * (S.twb_min_lam - S.twb_mean_lam)
+# orderer[S.twb_mean_lam >= 0.3] = 1.0
+# def explore_orderer():
+#     sorted_ordering = np.argsort(orderer)
+#     sorted_orderer = orderer[sorted_ordering]
+#     print(S.db.data[sorted_ordering[:10], S.db.slices['twb_min_lam']])
+#     print(S.db.data[sorted_ordering[:10], S.db.slices['twb_mean_lam']])
+#     print(S.db.data[sorted_ordering[:1000000], S.db.slices['twb_min_lam']].max())
 ```
 
 ```python
-twb_B_lamss = S.twb_min_lam[cr.B_lamss_idx]
-twb_B_lamss
+from IPython.display import display
+def tile_report(idxs):
+    return pd.DataFrame(
+        dict(
+            order_idx=np.searchsorted(cr.sorted_orderer, cr.orderer[idxs]),
+            twb_min_lam_idx=np.searchsorted(cr.sorted_orderer, S.twb_min_lam[idxs]),
+            orderer=cr.orderer[idxs],
+            B_lams_min=S.B_lam[idxs].min(axis=1),
+            twb_min_lam=S.twb_min_lam[idxs],
+            twb_mean_lam=S.twb_mean_lam[idxs],
+            twb_max_lam=S.twb_max_lam[idxs],
+            orig_lam=S.orig_lam[idxs],
+            sim_size=S.sim_sizes[idxs],
+            alpha0=S.alpha0[idxs],
+            alpha_cost=cr.alpha_cost[idxs]
+        )
+    )
+rpt = tile_report(cr.B_lamss_idx)
+rpt['B_lamss'] = cr.B_lamss
+rpt.sort_values('B_lamss')
 ```
 
 ```python
-S.alpha0[cr.B_lamss_idx]
+display(tile_report([cr.twb_worst_tile]))
+cr.twb_worst_tile_lam_min, cr.twb_worst_tile_lam_mean, cr.twb_worst_tile_lam_max
 ```
 
 ```python
-cr.B_lamss
+tile_report(cr.dangerous)
 ```
 
 ```python
-def find_queue_position(lam):
-    return np.sum(cr.inflated_min_lam[:, None] < lam[None, :], axis=0)
+tile_report(cr.refine_dangerous)['sim_size'].min()
 ```
 
 ```python
-S.twb_min_lam[np.argsort(S.orig_lam)[0]]
-```
-
-```python
-up_next = np.argsort(S.orig_lam)[:10000]
-S.alpha0[up_next].max(), S.sim_sizes[up_next].max()
-```
-
-```python
-sorted_ordering = np.sort(cr.inflated_min_lam)
-overall_ordering = np.argsort(S.orig_lam)[:1000]
-query = cr.inflated_min_lam[overall_ordering]
-overall_priority = jnp.searchsorted(sorted_ordering, query)
-print("overall driver priority", overall_priority)
-
-```
-
-```python
-np.maximum.accumulate(overall_priority)
+overall_rpt = tile_report(S.orig_lam.argsort()[:1000])
+overall_rpt
 ```
 
 ```python
 print('overall_lam', cr.overall_lam)
-print('bias driver priority', find_queue_position(twb_B_lamss))
 B_min = S.B_lam.min(axis=1)
 bias_bad = B_min < cr.overall_lam
 print('n bias bad', np.sum(bias_bad))
@@ -255,21 +158,9 @@ for K in np.unique(S.sim_sizes):
     print(f'    count={count / 1e6:.3f}m')
     print(f'    lambda**B[K]={S.B_lam[sel].min(axis=0)}')
     print(f'    min lambda*B[K]={np.min(S.B_lam[sel].min(axis=1)):.4f}')
-    print(f'    min lambda*b[K]={np.min(S.twb_min_lam):.4f}')
+    print(f'    min lambda*b[K]={np.min(S.twb_min_lam[sel]):.4f}')
     effort = K * count / total_effort
     print(f'    % effort={100 * effort:.4f}') 
-```
-
-```python
-S.db.data[cr.twb_worst_tile, -3:]
-```
-
-```python
-S.alpha0[S.twb_min_lam < 0.047]
-```
-
-```python
-S.twb_min_lam[np.argsort(S.orig_lam)[:1000]]
 ```
 
 ```python
@@ -283,6 +174,9 @@ for i, (field, title) in enumerate([(S.orig_lam, '$\lambda^{*}$'), (S.twb_min_la
     lamstar_histogram(field, S.sim_sizes)
 plt.show()
 ```
+
+## Scratch
+
 
 ## Resimulation
 
@@ -365,103 +259,52 @@ tunev(stats, bootstrap_idxs[1000], np.full(3, 0.025)).shape
 bootstrap_idxs[1000].shape
 ```
 
-## Look at the worst case from bootstrap group 1.
-
-- $\lambda^*$ is the tile-wise threshold
-- $\lambda^{**}$ is the global minimum threshold.
--
-
-- TODO: what is the right notation for the different $\lambda$??
-
-These are points that will drive down $\lambda^*_B$
+## Scratch
 
 ```python
-bootstrap_mins2 = bootstrap_cvs[:,1:-2].min(axis=1)
-trixy = np.argsort(bootstrap_mins2)[:100]
-print(bootstrap_mins2[trixy])
-print(bootstrap_cvs[trixy, 0])
-print(bootstrap_cvs[trixy, -2])
-print(bootstrap_cvs[trixy, -1])
-```
+# typeI_sum = batched_rej(
+#     sim_sizes,
+#     (np.full(sim_sizes.shape[0], overall_cv),
+#     g.theta_tiles,
+#     g.null_truth,),
+#     unifs,
+#     unifs_order,
+# )
 
-```python
-trixy = bootstrap_cvs[:, :-2].argmin(axis=0)
-print(bootstrap_mins2[trixy])
-print(bootstrap_cvs[trixy, 0])
-print(bootstrap_cvs[trixy, -2])
-print(bootstrap_cvs[trixy, -1])
-```
+# savedata = [
+#     g,
+#     sim_sizes,
+#     bootstrap_cvs,
+#     typeI_sum,
+#     hob_upper,
+#     pointwise_target_alpha
+# ]
+# with open(f"{name}/final.pkl", "wb") as f:
+#     pickle.dump(savedata, f)
 
-```python
-pointwise_target_alpha[trixy], sim_sizes[trixy], g.radii[g.grid_pt_idx[trixy]]
-```
+# # Calculate actual type I errors?
+# typeI_est, typeI_CI = binomial.zero_order_bound(
+#     typeI_sum, sim_sizes, delta_validate, 1.0
+# )
+# typeI_bound = typeI_est + typeI_CI
 
-```python
-import scipy.spatial
-tree = scipy.spatial.KDTree(g.theta_tiles)
-```
+# hob_upper = binomial.holder_odi_bound(
+#     typeI_bound, g.theta_tiles, g.vertices, n_arm_samples, holderq
+# )
+# sim_cost = typeI_CI
+# hob_empirical_cost = hob_upper - typeI_bound
+# worst_idx = np.argmax(typeI_est)
+# worst_tile = g.theta_tiles[worst_idx]
+# typeI_est[worst_idx], worst_tile
+# worst_cv_idx = np.argmin(sim_cvs)
+# typeI_est[worst_cv_idx], sim_cvs[worst_cv_idx], g.theta_tiles[worst_cv_idx], pointwise_target_alpha[worst_cv_idx]
+# plt.hist(typeI_est, bins=np.linspace(0.02,0.025, 100))
+# plt.show()
 
-```python
-worst_tile_idx = np.argmin(bootstrap_cvs[:,0])
-worst_tile = g.theta_tiles[worst_tile_idx]
-
-slice_pt = worst_tile
-plot_dims = [0, 1]
-unplot_dims = list(set(range(g.d)) - set(plot_dims))
-
-slicex = [-1, 1]
-slicey = [-1, 1]
-nx = ny = 100
-xvs = np.linspace(*slicex, nx)
-yvs = np.linspace(*slicey, ny)
-grid = np.stack(np.meshgrid(xvs, yvs, indexing='ij'), axis=-1)
-full_grid = np.empty((nx * ny, g.d))
-full_grid[:, plot_dims] = grid.reshape(-1, 2)
-full_grid[:, unplot_dims] = slice_pt[unplot_dims]
-```
-
-```python
-closest_idx[1]
-```
-
-```python
-closest_idx = tree.query(full_grid)
-closest_idx
-```
-
-```python
-eval_pts = 
-```
-
-```python
-# worst_tile_idx = np.argmin(bootstrap_cvs[:,0])
-# worst_tile = g.theta_tiles[worst_tile_idx]
-# # def pandemonium(field):
-# field = bootstrap_cvs[:,0]
-# # for unplot_set in [{0, 1}, {1, 2}]:
-# for unplot_set in [{0}, {1}]:
-#     plot = list(set(range(n_arms)) - unplot_set)
-#     unplot = list(unplot_set)
-#     axis_slice = np.all(np.abs(g.theta_tiles[:, unplot] - (-0.01)) < 0.03, axis=-1)
-#     select = np.where(axis_slice & (field < 0.15))[0]
-
-#     ordered_select = select[np.argsort(field[select])[::-1]]
-#     print(ordered_select.shape[0])
-
-#     plt.figure(figsize=(6, 6))
-#     plt.title(r"$\lambda^{*}$")
-#     plt.scatter(
-#         g.theta_tiles[ordered_select, plot[0]],
-#         g.theta_tiles[ordered_select, plot[1]],
-#         c=field[ordered_select],
-#         vmin=0.05,
-#         vmax=0.15,
-#         s=20,
-#     )
-#     plt.xlim([-1, 1])
-#     plt.ylim([-1, 1])
-#     plt.colorbar()
-#     plt.xlabel(f"$\\theta_{plot[0]}$")
-#     plt.ylabel(f"$\\theta_{plot[1]}$")
-#     plt.show()
+# theta_0 = np.array([-1.0, -1.0, -1.0])      # sim point
+# v = 0.1 * np.ones(theta_0.shape[0])     # displacement
+# f0 = 0.01                               # Type I Error at theta_0
+# fwd_solver = ehbound.ForwardQCPSolver(n=n_arm_samples)
+# q_opt = fwd_solver.solve(theta_0=theta_0, v=v, a=f0) # optimal q
+# ehbound.q_holder_bound_fwd(q_opt, n_arm_samples, theta_0, v, f0)
 ```
