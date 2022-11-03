@@ -10,7 +10,7 @@ Despite being fairly small, we have a somewhat complicated dependency situation 
 4. Testing dependencies (e.g. pytest, pre-commit) beyond the minimal installation necessary.
 5. Extra development dependencies (e.g. jupyter)
 
-- _Why not install all the development dependencies everywhere?_ It's slow! CI runtime is down to 2 minutes when we only install the minimal necessary dependencies. Saving instance start-up time in cloud batch jobs saves annoyance and money!
+- _Why not install all the development dependencies everywhere?_ It's slow! CI test runtime is down to 1.5 minutes when we only install the minimal necessary dependencies. Saving instance start-up time in cloud batch jobs saves annoyance and money!
 - [_Why is python package management so bad??_](https://bbc.github.io/cloudfit-public-docs/packaging/this_way_up.html)
 
 ## What are our goals?
