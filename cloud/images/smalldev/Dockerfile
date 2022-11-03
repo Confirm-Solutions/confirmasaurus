@@ -68,10 +68,10 @@ ENV LD_LIBRARY_PATH /usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvid
 ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
 COPY environment-dev.yml pyproject.toml poetry.lock /tmp/conda-tmp/
-RUN pushd /tmp/conda-tmp/ \
+RUN cd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment-dev.yml \
     && poetry install \
-    && popd \
+    && cd / \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge

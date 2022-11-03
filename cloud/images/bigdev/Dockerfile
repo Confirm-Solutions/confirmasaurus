@@ -172,10 +172,10 @@ RUN mamba create -n sagemath -y sage \
 #
 # NOTE: installing g++ gcc binutils through conda results in conda activate
 # being slightly slow. this is weird and kind of a bummer.
-    && pushd /tmp/conda-tmp/ \
+    && cd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment-dev.yml \
     && poetry install \
-    && popd \
+    && cd / \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge \
