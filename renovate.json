@@ -17,6 +17,10 @@
       "groupName": "precommit"
     },
     {
+      "matchManagers": ["npm"],
+      "groupName": "npm"
+    },
+    {
       "matchManagers": ["bazel", "bazelisk"],
       "groupName": "bazel"
     }
