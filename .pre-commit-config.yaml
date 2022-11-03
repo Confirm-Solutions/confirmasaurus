@@ -5,6 +5,7 @@ repos:
     hooks:
       - id: black-jupyter
         language_version: python3
+        exclude: anarchy
   - repo: https://gitlab.com/pycqa/flake8
     rev: 5.0.4
     hooks:
@@ -13,7 +14,8 @@ repos:
   - repo: https://github.com/asottile/reorder_python_imports
     rev: v3.9.0
     hooks:
-    -   id: reorder-python-imports
+      - id: reorder-python-imports
+        exclude: anarchy
   - repo: https://github.com/mwouts/jupytext
     rev: v1.14.1
     hooks:
