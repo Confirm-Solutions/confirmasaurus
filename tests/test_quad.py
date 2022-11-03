@@ -3,6 +3,10 @@ import numpy as np
 import confirm.outlaw.quad as quad
 
 
+def f():
+    pass
+
+
 def gen_f(scale):
     def f(x):
         return np.sin(x) ** 2 * np.exp(-((x / scale) ** 2))
