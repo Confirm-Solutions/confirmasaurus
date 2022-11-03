@@ -32,25 +32,18 @@ To get a fully functional development environment...
 
 3. Set up your confirm conda environment. The list of
    packages that will be installed inside your conda environment can be seen in
-   the [`environment.yml` file](env/environment.yml).
+   the [`environment-dev.yml` file](environment-dev.yml) (for development
+   dependencies) and in [`pyproject.toml`](pyproject.toml) (for critical
+   dependencies).
 
    ```bash
    cd confirm/env
    mamba update -y conda
-   # replace jaxcpu with jaxcuda here if you want a CUDA-enabled install.
-   cp requirements-jaxcpu.txt requirements-jax.txt
-   mamba env create
+   # create a development virtual environment with useful tools
+   mamba env create -f environment-dev.yml
    conda activate confirm
-   # This final line installs tools that are very helpful for development but
-   # aren't dependencies of any of our main # code. Things like jupyter,
-   # pytest, and black.
-   conda env update -n confirm -f environment-dev.yml
-   ```
-
-4. Get set up with pre-commit and our internal python libraries by running:
-
-   ```bash
-   CONFIRM_IMPRINT_SSH=1 ./install.sh
+   # install the confirm package
+   poetry install
    ```
 
 ## Other useful notes:

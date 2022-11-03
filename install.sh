@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Install our package:
+poetry install
+
 # Set up pre-commit so it's fast the first time it gets used
 pre-commit install --install-hooks
 
