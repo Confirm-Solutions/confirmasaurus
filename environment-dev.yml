@@ -3,7 +3,6 @@ channels:
 dependencies:
   - line_profiler
   - pandas
-  - cython
   - radian
   - openjdk<17
   - ipywidgets
