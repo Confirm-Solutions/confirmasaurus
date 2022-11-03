@@ -1,11 +1,19 @@
 channels:
   - conda-forge
 dependencies:
-  - line_profiler
+  - python=3.10
+  - pip
+  - jupyterlab
+  - matplotlib
   - pandas
-  - cython
-  - radian
-  - openjdk<17
-  - ipywidgets
+  - sympy
+  - pytest
+  - pre-commit
+  - black
+  - flake8
+  - isort
+  - jupytext
+  - line_profiler
   - pip:
+    - poetry==1.2.2
     - memory_profiler

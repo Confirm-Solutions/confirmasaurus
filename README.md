@@ -14,7 +14,7 @@ Directories:
 
 ## Getting set up
 
-See here for a local set up. Look at the [cloud documentation for setting up on AWS or GitHub Codespaces].
+See here for a local set up. Look at the [cloud documentation for setting up on AWS or GitHub Codespaces](cloud/README.md).
 
 To get a fully functional development environment...
 
@@ -30,33 +30,29 @@ To get a fully functional development environment...
    git clone git@github.com:Confirm-Solutions/confirmasaurus.git
    ```
 
-3. Set up your confirm conda environment (note that you may substitute `mamba`
-   here for `conda` and the install will be substantially faster). The list of
+3. Set up your confirm conda environment. The list of
    packages that will be installed inside your conda environment can be seen in
-   the [`environment.yml` file](environment.yml).
+   the [`environment-dev.yml` file](environment-dev.yml) (for development
+   dependencies) and in [`pyproject.toml`](pyproject.toml) (for critical
+   dependencies).
 
    ```bash
-   cd confirm/
+   cd confirm/env
    mamba update -y conda
-   mamba env create
+   # create a development virtual environment with useful tools
+   mamba env create -f environment-dev.yml
    conda activate confirm
-   # This final line is only necessary if you want "extra" tools that are
-   # helpful for development but shouldn't be dependencies of any of our main
-   # code.
-   conda env update -n confirm -f environment-dev.yml
-   ```
-
-4. Get set up with pre-commit and our internal python libraries by running:
-
-   ```bash
-   CONFIRM_IMPRINT_SSH=1 ./install.sh
+   # install the confirm package
+   poetry install
    ```
 
 ## Other useful notes:
 
+- [Packaging and dependency management tools](./docs/packaging.md)
 - [Using our tools on the cloud (AWS, Codespaces)](./cloud/README.md)
 - [Advice for dealing with our imprint subtree](./docs/git_subtree.md)
 - [Very rough coding standards](./docs/standards.md)
+- [Advice for using JAX](./docs/jax_patterns.md)
 
 ## A list of useful notebook:
 

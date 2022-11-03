@@ -1,16 +1,10 @@
 #!/bin/bash
 
-if ! [ -x "$(command -v nvidia-smi)" ] && [[ -z "$CONFIRM_FORCE_JAX_CUDA" ]]; then
-    echo 'No GPUs available. Replacing jax[cuda] with jax[cpu].' >&2
-    pip uninstall -y jax jaxlib numpyro
-    pip install "jax[cpu]" numpyro
-fi
+# Install our package:
+poetry install
 
 # Set up pre-commit so it's fast the first time it gets used
 pre-commit install --install-hooks
-
-# List the internal packages that should be available here.
-pip install --no-deps -e ./confirm
 
 # Set up our imprint remote so we can use subtree. On Codespaces, we need
 # https. Locally, we use ssh.

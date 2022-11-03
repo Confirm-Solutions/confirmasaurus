@@ -25,13 +25,11 @@ def C6(n, p):
 def test_odi_constant():
     """Test holderq=6 against the formula from wikipedia for a variety of (n, p)j"""
     C_f = binomial._build_odi_constant_func(6)
-    C_fn = binomial._build_odi_constant_func_numerical(6)
     np.random.seed(0)
     ntest = 5
     n = 51
     p = np.random.uniform(0, 1, ntest)
-    np.testing.assert_allclose(C_f(n, p), C6(n, p), rtol=1e-5)
-    np.testing.assert_allclose(C_fn(n, p), C6(n, p), rtol=1e-5)
+    np.testing.assert_allclose(C_f(n, p), C6(n, p), rtol=2.5e-5)
 
 
 def test_calc_cqpp_05_crossing():
@@ -46,9 +44,15 @@ def test_calc_cqpp_05_crossing():
     Cqpp = binomial._calc_Cqpp(theta_tiles, tile_corners, 50, 6, C_f)
 
     sup_v = (2 * (R**1.2)) ** (1.0 / 1.2)
-    sup_moment0 = (C_f(50, expit(-0.41)) + C_f(50, expit(-0.41))) ** (1.0 / 6.0)
-    sup_moment1 = (C_f(50, expit(0.01)) + C_f(50, expit(0.0))) ** (1.0 / 6.0)
-    np.testing.assert_allclose(Cqpp, [sup_v * sup_moment0, sup_v * sup_moment1])
+    sup_moment0 = (
+        C_f(50, np.array([expit(-0.41)])) + C_f(50, np.array([expit(-0.41)]))
+    )[0] ** (1.0 / 6.0)
+    sup_moment1 = (C_f(50, np.array([expit(0.01)])) + C_f(50, np.array([expit(0.0)])))[
+        0
+    ] ** (1.0 / 6.0)
+    np.testing.assert_allclose(
+        Cqpp, [sup_v * sup_moment0, sup_v * sup_moment1], rtol=1e-6
+    )
 
 
 @pytest.mark.parametrize("d", [1, 2])

@@ -117,24 +117,24 @@ def test_grad_hess():
     np.testing.assert_allclose(hess[0, 0], hess01[1, [1, 3, 4]], rtol=1e-4)
 
 
-xmax0_12 = np.array([-6.04682818, -2.09586893, -0.21474981, -0.07019088])
+xmax0_12 = np.array([-6.326967, -2.0961611, -0.21439148, -0.06982675])
 sig2_post = np.array(
     [
-        1.25954474e02,
-        4.52520893e02,
-        8.66625278e02,
-        5.08333300e02,
-        1.30365045e02,
-        2.20403048e01,
-        3.15183578e00,
-        5.50967224e-01,
-        2.68365061e-01,
-        1.23585852e-01,
-        1.13330444e-02,
-        5.94800210e-04,
-        4.01075571e-05,
-        4.92782335e-06,
-        1.41605356e-06,
+        1.0543537e02,
+        7.1191078e01,
+        3.5353497e01,
+        1.3260521e01,
+        3.9863932e00,
+        1.0955172e00,
+        3.9049351e-01,
+        2.6951468e-01,
+        1.4512683e-01,
+        2.3521647e-02,
+        1.9889583e-03,
+        1.6686902e-04,
+        1.8990921e-05,
+        3.6219096e-06,
+        1.3671388e-06,
     ]
 )
 
@@ -142,7 +142,7 @@ sig2_post = np.array(
 @pytest.mark.parametrize("dtype", [np.float32, np.float64])
 def test_fast_berry(dtype):
     data = berry.figure2_data().astype(dtype)
-    sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
+    sig2_rule = quad.log_gauss_rule(15, 1e-4, 1e3)
     sig2 = sig2_rule.pts.astype(dtype)
     inla_ops = berry.optimized(sig2, dtype=dtype).config(
         max_iter=10, opt_tol=dtype(1e-6)
@@ -152,11 +152,8 @@ def test_fast_berry(dtype):
     )(np.zeros((15, 4), dtype=dtype), dict(sig2=sig2), data)
 
     post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype)[None, :], axis=1)
-
     np.testing.assert_allclose(x_max[0, 12], xmax0_12, rtol=1e-3)
-    np.testing.assert_allclose(
-        post[0], sig2_post, rtol=5e-3 if dtype is np.float64 else 5e-2
-    )
+    np.testing.assert_allclose(post[0], sig2_post, rtol=1e-3)
     assert post.dtype == dtype
     assert x_max.dtype == dtype
 

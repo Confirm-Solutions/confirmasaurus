@@ -37,6 +37,7 @@ jobs:
         include:
           - NAME: smalldev
           - NAME: clouddev
+          - NAME: tiny
     permissions:
       contents: read
       packages: write

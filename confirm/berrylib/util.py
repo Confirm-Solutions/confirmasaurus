@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 # this let's me leave in the "@profile" lines when I'm not running
@@ -139,6 +138,8 @@ def configure_mpl_fast():
 def configure_mpl_pretty():
     """Retina and Latex matplotlib figures"""
     magic("config InlineBackend.figure_format='retina'")
+    import matplotlib.pyplot as plt
+
     plt.rcParams["text.usetex"] = True
     plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
 
@@ -163,6 +164,8 @@ def setup_nb(text_size_ratio=0.75, pretty=True, autoreload=True):
     else:
         configure_mpl_fast()
 
+    import matplotlib.pyplot as plt
+
     plt.rcParams["axes.facecolor"] = (1.0, 1.0, 1.0, 1.0)
     plt.rcParams["figure.facecolor"] = (1.0, 1.0, 1.0, 1.0)
     plt.rcParams["savefig.transparent"] = False
@@ -172,6 +175,8 @@ def setup_nb(text_size_ratio=0.75, pretty=True, autoreload=True):
 
 
 def scale_text(factor=0.75):
+    import matplotlib.pyplot as plt
+
     plt.rcParams["font.size"] = 20 * factor
     plt.rcParams["axes.labelsize"] = 18 * factor
     plt.rcParams["axes.titlesize"] = 20 * factor
