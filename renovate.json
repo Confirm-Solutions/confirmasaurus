@@ -2,12 +2,23 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:base",
-    "schedule:weekly"
+    "schedule:weekly",
+    "group:nodeJs"
   ],
   "pre-commit": {
     "enabled": true
   },
   "lockFileMaintenance": {
     "enabled": true
-  }
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["pre-commit"],
+      "groupName": "precommit"
+    },
+    {
+      "matchManagers": ["bazel", "bazelisk"],
+      "groupName": "bazel"
+    }
+  ]
 }
