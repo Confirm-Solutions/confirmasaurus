@@ -20,14 +20,6 @@
       "matchManagers": ["pre-commit"],
       "groupName": "precommit",
       "automerge": "true"
-    },
-    {
-      "matchManagers": ["npm"],
-      "groupName": "npm"
-    },
-    {
-      "matchManagers": ["bazel", "bazelisk"],
-      "groupName": "bazel"
     }
   ]
 }
