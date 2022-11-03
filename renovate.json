@@ -9,12 +9,17 @@
     "enabled": true
   },
   "lockFileMaintenance": {
-    "enabled": true
+    "enabled": true,
+    "automerge": true
   },
+  "dependencyDashboard": true,
+  "automergeType": "pr",
+  "platformAutomerge": true,
   "packageRules": [
     {
       "matchManagers": ["pre-commit"],
-      "groupName": "precommit"
+      "groupName": "precommit",
+      "automerge": "true"
     },
     {
       "matchManagers": ["npm"],
