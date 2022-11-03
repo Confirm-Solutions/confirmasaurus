@@ -16,9 +16,10 @@ RUN ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo "conda activate base" >> ~/.bashrc
 
 COPY environment.yml pyproject.toml poetry.lock /tmp/conda-tmp/
-RUN cd /tmp/conda-tmp/ \
+RUN pushd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment.yml \
     && poetry install \
+    && popd \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge
