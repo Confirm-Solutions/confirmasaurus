@@ -12,19 +12,15 @@ python = "~3.10"
 numpy = "^1.23.4"
 scipy = "^1.9.3"
 typer = "^0.6.1"
-jax = [
-    {extras = ["cpu"], version = "^0.3.23", platform = "darwin"},
-    {extras = ["cuda"], version = "^0.3.23", platform = "linux"}
-]
-numpyro = [
-    {extras = ["cpu"], version = "^0.10.1", platform = "darwin"},
-    {extras = ["cuda"], version = "^0.10.1", platform = "linux"}
+jax = "^0.3.23"
+jaxlib = [
+    {version = "0.3.20", platform = "darwin", source="pypi"},
+    {version = "^0.3.22+cuda11.cudnn82", platform = "linux"}
 ]
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.2.0"
 pre-commit = "^2.20.0"
-
 
 [[tool.poetry.source]]
 name = "jax"
