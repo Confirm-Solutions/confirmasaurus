@@ -17,6 +17,7 @@ See the `intro_to_inla.ipynb` notebook for an introduction to the methods and mo
 
 ```python
 import berrylib.util as util
+
 util.setup_nb()
 ```
 
@@ -31,6 +32,7 @@ import berrylib.dirty_bayes as dirty_bayes
 import berrylib.quadrature as quadrature
 import berrylib.mcmc as mcmc
 import berrylib.fast_inla as fast_inla
+
 fi = fast_inla.FastINLA(sigma2_n=90)
 ```
 
@@ -45,6 +47,7 @@ pfinal_thresh = np.full(4, 0.85)
 thresh_interims = np.empty((6, 4))
 thresh_interims[:-1] = pmid_theta
 thresh_interims[-1] = fi.thresh_theta[0]
+
 
 def figure1_plot(b, title, data, stats):
     fig = plt.figure(figsize=(15, 10))
@@ -130,18 +133,33 @@ def figure1_subplot(gridspec0, gridspec1, i, b, data, stats, title=None):
     plt.xlabel("Group")
     plt.ylabel("N")
 
+
 def inla_figure1_data(fi, y, n):
-    sigma2_post, exceedances, theta_max, theta_sigma, _ = fi.numpy_inference(np.stack((y, n), axis=-1), thresh_theta=thresh_interims)
+    sigma2_post, exceedances, theta_max, theta_sigma, _ = fi.numpy_inference(
+        np.stack((y, n), axis=-1), thresh_theta=thresh_interims
+    )
     return dict(
-        theta_map = np.sum(theta_max * sigma2_post[:,:, None] * fi.sigma2_rule.wts[None, :, None], axis=1),
-        cilow = np.sum((theta_max - 2 * theta_sigma) * sigma2_post[:,:, None] * fi.sigma2_rule.wts[None, :, None], axis=1),
-        cihi = np.sum((theta_max + 2 * theta_sigma) * sigma2_post[:,:, None] * fi.sigma2_rule.wts[None, :, None], axis=1),
-        exceedance=exceedances
+        theta_map=np.sum(
+            theta_max * sigma2_post[:, :, None] * fi.sigma2_rule.wts[None, :, None],
+            axis=1,
+        ),
+        cilow=np.sum(
+            (theta_max - 2 * theta_sigma)
+            * sigma2_post[:, :, None]
+            * fi.sigma2_rule.wts[None, :, None],
+            axis=1,
+        ),
+        cihi=np.sum(
+            (theta_max + 2 * theta_sigma)
+            * sigma2_post[:, :, None]
+            * fi.sigma2_rule.wts[None, :, None],
+            axis=1,
+        ),
+        exceedance=exceedances,
     )
 ```
 
 ```python
-
 # I got this data by deconstructing the graphs in in Figure 1 of Berry et al 2013.
 n_i = np.array([[i] * 4 for i in [10, 15, 20, 25, 30, 35]])
 y_i = np.array(
@@ -239,9 +257,7 @@ figure1_subplot(innergs[0], innergs[1], 5, fi, data, inla_stats, title="INLA")
 innergs = outergs[1].subgridspec(2, 1, wspace=0, hspace=0, height_ratios=[0.7, 0.3])
 figure1_subplot(innergs[0], innergs[1], 5, fi, data, db_stats, title="DB")
 innergs = outergs[2].subgridspec(2, 1, wspace=0, hspace=0, height_ratios=[0.7, 0.3])
-figure1_subplot(
-    innergs[0], innergs[1], 5, fi, data, quad_stats, title="Quadrature"
-)
+figure1_subplot(innergs[0], innergs[1], 5, fi, data, quad_stats, title="Quadrature")
 innergs = outergs[3].subgridspec(2, 1, wspace=0, hspace=0, height_ratios=[0.7, 0.3])
 figure1_subplot(innergs[0], innergs[1], 5, fi, data, mcmc_stats, title="MCMC")
 ```

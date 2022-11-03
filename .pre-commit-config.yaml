@@ -3,7 +3,7 @@ repos:
   - repo: https://github.com/psf/black
     rev: 22.10.0
     hooks:
-      - id: black
+      - id: black-jupyter
         language_version: python3
   - repo: https://gitlab.com/pycqa/flake8
     rev: 5.0.4

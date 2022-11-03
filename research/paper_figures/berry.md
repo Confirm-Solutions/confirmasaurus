@@ -100,7 +100,6 @@ def eval_bound(eval_pts):
         a_full[tile_idx != -1] = a
         full_out_arrs.append(a_full)
     return full_out_arrs
-
 ```
 
 ```python
@@ -115,14 +114,17 @@ typeI_range = (0, 0.55)
 
 ```python
 from scipy.special import logit
-scenarios = np.array([
-    [0.05, 0.05, 0.1, 0.2], # Null
-    # [0.2, 0.2, 0.3, 0.4], # Alternative
-    # [0.2, 0.2, 0.2, 0.5], # One in the middle
-    # [0.15, 0.15, 0.2, 0.3], # All in the middle
-    [0.05, 0.05, 0.1, 0.4], # One Nugget
-    [0.05, 0.05, 0.3, 0.4], # 2 Null, 2 Alt
-])
+
+scenarios = np.array(
+    [
+        [0.05, 0.05, 0.1, 0.2],  # Null
+        # [0.2, 0.2, 0.3, 0.4], # Alternative
+        # [0.2, 0.2, 0.2, 0.5], # One in the middle
+        # [0.15, 0.15, 0.2, 0.3], # All in the middle
+        [0.05, 0.05, 0.1, 0.4],  # One Nugget
+        [0.05, 0.05, 0.3, 0.4],  # 2 Null, 2 Alt
+    ]
+)
 p0 = np.array(
     [0.05, 0.05, 0.1, 0.2]
 )  # rate of response below this is the null hypothesis
@@ -162,7 +164,13 @@ def set_domain(cbar_target, skipx=False, skipy=False, cbar=True, cbar_label=True
     plt.axhline(y=scipy.special.logit(0.1), color="k", linestyle="-")
 
 
-def fig1(include_discussion_pts=True, include_berry_pts=False, cmap=None, n_contours=11, **kwargs):
+def fig1(
+    include_discussion_pts=True,
+    include_berry_pts=False,
+    cmap=None,
+    n_contours=11,
+    **kwargs
+):
     t0 = scipy.special.logit(0.1) - 0.001
     n1 = 72
     n2 = n1
@@ -177,11 +185,18 @@ def fig1(include_discussion_pts=True, include_berry_pts=False, cmap=None, n_cont
 
     eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
     simple_slice(eval_pts_2d, bound, **kwargs)
-    if include_discussion_pts: 
-        plt.scatter([-2.2], [-0.9], s=50, marker='>', facecolors='none', edgecolors='k')
-        plt.scatter([-1.1], [-1.1], s=50, marker='*', facecolors='none', edgecolors='k')
+    if include_discussion_pts:
+        plt.scatter([-2.2], [-0.9], s=50, marker=">", facecolors="none", edgecolors="k")
+        plt.scatter([-1.1], [-1.1], s=50, marker="*", facecolors="none", edgecolors="k")
     if include_berry_pts:
-        plt.scatter(mapped_theta[:,-2], mapped_theta[:, -1], s=50, marker='o', facecolors='none', edgecolors='k')
+        plt.scatter(
+            mapped_theta[:, -2],
+            mapped_theta[:, -1],
+            s=50,
+            marker="o",
+            facecolors="none",
+            edgecolors="k",
+        )
     return eval_pts_2d
 
 
@@ -206,6 +221,7 @@ def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
     )
     set_domain(cbar_target, **kwargs)
     return cbar_target
+
 
 ev = fig1(include_discussion_pts=True, include_berry_pts=False)
 plt.show()
@@ -264,6 +280,7 @@ fig3_t12_grid = np.stack(np.meshgrid(t2_unique, t2_unique, indexing="ij"), axis=
 fig3_t12_pts = fig3_t12_grid.reshape((-1, 2))
 fig3_worst_bound, fig3_worst_theta = get_worst(theta_tiles, fig3_t12_pts, (1, 2), 1e-10)
 
+
 def fig3(**kwargs):
     cbar_target = plt.pcolor(
         fig3_t12_grid[..., 0],
@@ -310,7 +327,7 @@ u1u2_pts = np.array(u1u2_pts)
 ```
 
 ```python
-u_worst_bound, u_worst_theta = get_worst(u_tile_centers, u1u2_pts, (0,1), 1e-10)
+u_worst_bound, u_worst_theta = get_worst(u_tile_centers, u1u2_pts, (0, 1), 1e-10)
 ```
 
 ```python
@@ -355,7 +372,6 @@ def fig4(cbar=True, skipx=False, skipy=False):
 
 fig4()
 plt.show()
-
 ```
 
 \begin{align}
@@ -387,8 +403,10 @@ plt.subplot(2, 2, 4)
 cbar_target = fig4(cbar=False)
 plt.text(-3.5, 3.25, "$\mathbf{D}$", fontsize=16)
 
-cbar = fig.colorbar(cbar_target, ax=axes.ravel().tolist(), label="\% Type I error upper bound")
+cbar = fig.colorbar(
+    cbar_target, ax=axes.ravel().tolist(), label="\% Type I error upper bound"
+)
 
-plt.savefig("berry_fig.pdf", bbox_inches='tight')
+plt.savefig("berry_fig.pdf", bbox_inches="tight")
 plt.show()
 ```

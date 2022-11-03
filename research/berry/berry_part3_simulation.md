@@ -15,11 +15,11 @@ jupyter:
 
 ```python
 import berrylib.util as util
+
 util.setup_nb()
 ```
 
 ```python
-
 import matplotlib.pyplot as plt
 import scipy.stats
 import numpy as np
@@ -106,16 +106,20 @@ for k in scenarios:
     stopping_time = np.full((n_sims, 4), -1, dtype=np.int32)
     for look in range(n_looks):
         N_look = N_0 + look * deltaN
-        cur_data = data[:,:N_look,:]
+        cur_data = data[:, :N_look, :]
 
         if look < 5:
-            _, exceedance, _, _, _ = fi.numpy_inference(cur_data, thresh_theta=pmid_theta)
+            _, exceedance, _, _, _ = fi.numpy_inference(
+                cur_data, thresh_theta=pmid_theta
+            )
             stop_success = 0 * (
                 exceedance > pmid_accept
             )  # no early stopping for success
             stop_fail = exceedance < pmid_fail
         else:
-            _, exceedance, _, _, _ = fi.numpy_inference(cur_data[...,0], cur_data[...,1], thresh_theta=p0_theta)
+            _, exceedance, _, _, _ = fi.numpy_inference(
+                cur_data[..., 0], cur_data[..., 1], thresh_theta=p0_theta
+            )
             stop_success = exceedance > pfinal_thresh[None, :]
             stop_fail = exceedance <= pfinal_thresh[None, :]
         success[stop_success] = True

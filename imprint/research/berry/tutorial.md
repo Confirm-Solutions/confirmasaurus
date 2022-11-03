@@ -49,7 +49,6 @@ sim_size = 2000
 theta, radii = grid.make_cartesian_gridpts(
     n_theta_1d, np.full(n_arms, -3.5), np.full(n_arms, 1.0)
 )
-
 ```
 
 Next, we need to define the null hypothesis space. There are built-in tools in imprint for defining a null hypothesis as a domain bounded by planes. In this case, the null hypothesis for each arm is defined by $\theta_i < \mathrm{logit}(0.1)$. For $i = 0$, the plane defining this surface is defined by:
@@ -69,7 +68,7 @@ Once we have defined these planes, we subdivide the cells created above. This su
 null_hypos = [
     grid.HyperPlane([-1, 0, 0], -logit(0.1)),
     grid.HyperPlane([0, -1, 0], -logit(0.1)),
-    grid.HyperPlane([0, 0, -1], -logit(0.1))
+    grid.HyperPlane([0, 0, -1], -logit(0.1)),
 ]
 g = grid.build_grid(theta, radii, null_hypos)
 ```
@@ -90,31 +89,31 @@ theta_tiles.shape
 ```
 
 ```python
-unique_t2 = np.unique(theta_tiles[:,2])
+unique_t2 = np.unique(theta_tiles[:, 2])
 unique_t2
 ```
 
 In the figure below, we plot $\theta_0$ and $\theta_1$ for a couple different values of $\theta_2$. You can see that the shape of the domain in $(\theta_0, \theta_1)$ changes depending on whether $\theta_2$ is in the null space for arm 2 or not. The solid white region without any tile centers in the right figure represents the region where the alternative hypothesis is true for all three arms. The solid black lines represent the boundaries of the arm 0 and the arm 1 null hypothesis boundary planes. 
 
 ```python
-plt.figure(figsize=(6,3))
-plt.subplot(1,2,1)
-plt.title(f'$\\theta_2 = {unique_t2[3]}$')
+plt.figure(figsize=(6, 3))
+plt.subplot(1, 2, 1)
+plt.title(f"$\\theta_2 = {unique_t2[3]}$")
 selection = theta_tiles[:, 2] == unique_t2[3]
-plt.plot(theta_tiles[selection,0], theta_tiles[selection, 1], 'k.')
+plt.plot(theta_tiles[selection, 0], theta_tiles[selection, 1], "k.")
 plt.hlines(logit(0.1), -4, 2)
 plt.vlines(logit(0.1), -4, 2)
-plt.xlim(np.min(theta_tiles[:,0]) - 0.2, np.max(theta_tiles[:,0]) + 0.2)
-plt.ylim(np.min(theta_tiles[:,1]) - 0.2, np.max(theta_tiles[:,1]) + 0.2)
+plt.xlim(np.min(theta_tiles[:, 0]) - 0.2, np.max(theta_tiles[:, 0]) + 0.2)
+plt.ylim(np.min(theta_tiles[:, 1]) - 0.2, np.max(theta_tiles[:, 1]) + 0.2)
 
-plt.subplot(1,2,2)
-plt.title(f'$\\theta_2 = {unique_t2[10]}$')
+plt.subplot(1, 2, 2)
+plt.title(f"$\\theta_2 = {unique_t2[10]}$")
 selection = theta_tiles[:, 2] == unique_t2[10]
-plt.plot(theta_tiles[selection,0], theta_tiles[selection, 1], 'k.')
+plt.plot(theta_tiles[selection, 0], theta_tiles[selection, 1], "k.")
 plt.hlines(logit(0.1), -4, 2)
 plt.vlines(logit(0.1), -4, 2)
-plt.xlim(np.min(theta_tiles[:,0]) - 0.2, np.max(theta_tiles[:,0]) + 0.2)
-plt.ylim(np.min(theta_tiles[:,1]) - 0.2, np.max(theta_tiles[:,1]) + 0.2)
+plt.xlim(np.min(theta_tiles[:, 0]) - 0.2, np.max(theta_tiles[:, 0]) + 0.2)
+plt.ylim(np.min(theta_tiles[:, 1]) - 0.2, np.max(theta_tiles[:, 1]) + 0.2)
 plt.show()
 ```
 
@@ -146,14 +145,13 @@ n_tiles_per_pt[n_tiles_per_pt > 1]
 Let's plot up the number of tiles per cell below for a particularly interesting slice!
 
 ```python
- 
-selection = (g.thetas[:,2] == unique_t2[4])
-plt.title(f'Tile count per cell, $\\theta_2 = {unique_t2[4]}$')
-plt.scatter(g.thetas[selection,0], g.thetas[selection,1], c=n_tiles_per_pt[selection])
+selection = g.thetas[:, 2] == unique_t2[4]
+plt.title(f"Tile count per cell, $\\theta_2 = {unique_t2[4]}$")
+plt.scatter(g.thetas[selection, 0], g.thetas[selection, 1], c=n_tiles_per_pt[selection])
 plt.hlines(logit(0.1), -4, 2)
 plt.vlines(logit(0.1), -4, 2)
-plt.xlim(np.min(g.thetas[:,0]) - 0.2, np.max(g.thetas[:,0]) + 0.2)
-plt.ylim(np.min(g.thetas[:,1]) - 0.2, np.max(g.thetas[:,1]) + 0.2)
+plt.xlim(np.min(g.thetas[:, 0]) - 0.2, np.max(g.thetas[:, 0]) + 0.2)
+plt.ylim(np.min(g.thetas[:, 1]) - 0.2, np.max(g.thetas[:, 1]) + 0.2)
 plt.colorbar()
 plt.show()
 ```
@@ -169,8 +167,9 @@ First, we'll check that the inference does something reasonable. It rejects the 
 
 ```python
 import fast_inla as fast_inla
-y = [[4,5,9]]
-n = [[35,35,35]]
+
+y = [[4, 5, 9]]
+n = [[35, 35, 35]]
 fi = fast_inla.FastINLA(n_arms=n_arms, critical_value=0.95)
 fi.rejection_inference(np.stack((y, n), axis=-1))
 ```
@@ -196,6 +195,7 @@ Here, we are running 2000 simulations for each of 3185 tiles.
 ```python
 %%time
 import binomial as binomial
+
 accumulator = binomial.binomial_accumulator(fi.rejection_inference)
 typeI_sum, typeI_score = accumulator(theta_tiles, g.null_truth, samples)
 ```
@@ -203,38 +203,48 @@ typeI_sum, typeI_score = accumulator(theta_tiles, g.null_truth, samples)
 Before continuing, let's look at a couple slices of this type I error grid:
 
 ```python
-plt.figure(figsize=(8,4), constrained_layout=True)
+plt.figure(figsize=(8, 4), constrained_layout=True)
 for i, t2_idx in enumerate([4, 8]):
     t2 = np.unique(theta_tiles[:, 2])[t2_idx]
-    selection = (theta_tiles[:,2] == t2)
+    selection = theta_tiles[:, 2] == t2
 
-    plt.subplot(1,2,i+1)
-    plt.title(f'slice: $\\theta_2 \\approx$ {t2:.1f}')
-    plt.scatter(theta_tiles[selection,0], theta_tiles[selection,1], c=typeI_sum[selection]/sim_size, s=90)
+    plt.subplot(1, 2, i + 1)
+    plt.title(f"slice: $\\theta_2 \\approx$ {t2:.1f}")
+    plt.scatter(
+        theta_tiles[selection, 0],
+        theta_tiles[selection, 1],
+        c=typeI_sum[selection] / sim_size,
+        s=90,
+    )
     cbar = plt.colorbar()
-    plt.xlabel(r'$\theta_0$')
-    plt.ylabel(r'$\theta_1$')
-    cbar.set_label('Simulated fraction of Type I errors')
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    cbar.set_label("Simulated fraction of Type I errors")
 plt.show()
 ```
 
 Let's also look at the magnitude of the gradient in the arm-(0,1) plane. Note the correspondence with the areas of rapid change in the simulated fraction of type I error above.
 
 ```python
-typeI_grad_mag01 = np.linalg.norm(typeI_score[:,[0,1]], axis=1)/sim_size
+typeI_grad_mag01 = np.linalg.norm(typeI_score[:, [0, 1]], axis=1) / sim_size
 
-plt.figure(figsize=(8,4), constrained_layout=True)
+plt.figure(figsize=(8, 4), constrained_layout=True)
 for i, t2_idx in enumerate([4, 8]):
     t2 = np.unique(theta_tiles[:, 2])[t2_idx]
-    selection = (theta_tiles[:,2] == t2)
+    selection = theta_tiles[:, 2] == t2
 
-    plt.subplot(1,2,i+1)
-    plt.title(f'slice: $\\theta_2 \\approx$ {t2:.1f}')
-    plt.scatter(theta_tiles[selection,0], theta_tiles[selection,1], c=typeI_grad_mag01[selection], s=90)
+    plt.subplot(1, 2, i + 1)
+    plt.title(f"slice: $\\theta_2 \\approx$ {t2:.1f}")
+    plt.scatter(
+        theta_tiles[selection, 0],
+        theta_tiles[selection, 1],
+        c=typeI_grad_mag01[selection],
+        s=90,
+    )
     cbar = plt.colorbar()
-    plt.xlabel(r'$\theta_0$')
-    plt.ylabel(r'$\theta_1$')
-    cbar.set_label('Simulated gradient of Type I error')
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    cbar.set_label("Simulated gradient of Type I error")
 plt.show()
 ```
 
@@ -283,38 +293,45 @@ For this last step, we're going to visualize the bound a couple different ways. 
 Note that the upper bound here is going to be quite loose because we have a very coarse grid. The looseness of the bound will be quadratic in cell size because of the second order term. In addition, there is a lot of error in our pointwise type I error estimate because the number of simulations is only 2000.
 
 ```python
-bound_components = np.array([
-    d0,
-    d0u,
-    d1w,
-    d1uw,
-    d2uw,
-    total,
-]).T
+bound_components = np.array(
+    [
+        d0,
+        d0u,
+        d1w,
+        d1uw,
+        d2uw,
+        total,
+    ]
+).T
 ```
 
 ```python
-plt.figure(figsize=(8,4), constrained_layout=True)
+plt.figure(figsize=(8, 4), constrained_layout=True)
 for i, t2_idx in enumerate([4, 8]):
     t2 = np.unique(theta_tiles[:, 2])[t2_idx]
-    selection = (theta_tiles[:,2] == t2)
+    selection = theta_tiles[:, 2] == t2
 
-    plt.subplot(1,2,i+1)
-    plt.title(f'slice: $\\theta_2 \\approx$ {t2:.1f}')
-    plt.scatter(theta_tiles[selection,0], theta_tiles[selection,1], c=bound_components[selection,5], s=90)
+    plt.subplot(1, 2, i + 1)
+    plt.title(f"slice: $\\theta_2 \\approx$ {t2:.1f}")
+    plt.scatter(
+        theta_tiles[selection, 0],
+        theta_tiles[selection, 1],
+        c=bound_components[selection, 5],
+        s=90,
+    )
     cbar = plt.colorbar()
-    plt.xlabel(r'$\theta_0$')
-    plt.ylabel(r'$\theta_1$')
-    cbar.set_label('Upper bound on type I error')
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    cbar.set_label("Upper bound on type I error")
 plt.show()
 ```
 
 ```python
 t2 = np.unique(theta_tiles[:, 2])[4]
-selection = (theta_tiles[:,2] == t2)
+selection = theta_tiles[:, 2] == t2
 
-np.savetxt('P_tutorial.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
-np.savetxt('B_tutorial.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+np.savetxt("P_tutorial.csv", theta_tiles[selection, :].T, fmt="%s", delimiter=",")
+np.savetxt("B_tutorial.csv", bound_components[selection, :], fmt="%s", delimiter=",")
 ```
 
 <!-- #region -->

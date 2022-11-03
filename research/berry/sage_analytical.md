@@ -19,20 +19,20 @@ from scipy.special import logit
 
 ```sage
 n_arms = 2
-ts = [var(f't_{i}') for i in range(n_arms)]
+ts = [var(f"t_{i}") for i in range(n_arms)]
 mu_0 = -1.34
-mu_0 = var('mu_0')
+mu_0 = var("mu_0")
 logit_p1 = logit(0.3)
-logit_p1 = var('L')
+logit_p1 = var("L")
 
-Q = [[var(f'Q_{i}{j}') for j in range(n_arms)] for i in range(n_arms)]
+Q = [[var(f"Q_{i}{j}") for j in range(n_arms)] for i in range(n_arms)]
 
-y = [var(f'y_{i}') for i in range(4)]
-n = [var(f'n_{i}') for i in range(4)]
+y = [var(f"y_{i}") for i in range(4)]
+n = [var(f"n_{i}") for i in range(4)]
 ```
 
 ```sage
-sig2 = var('S')
+sig2 = var("S")
 cov = [[100 for i in range(4)] for j in range(4)]
 for i in range(4):
     cov[i][i] += sig2
@@ -48,7 +48,12 @@ Q
 theta_m0 = [t - mu_0 for t in ts]
 theta_adj = [t + logit_p1 for t in ts]
 exp_theta_adj = [exp(t) for t in theta_adj]
-quad_term = sum([sum([theta_m0[i] * Q[i][j] * theta_m0[j] / 2 for j in range(n_arms)]) for i in range(n_arms)]).full_simplify()
+quad_term = sum(
+    [
+        sum([theta_m0[i] * Q[i][j] * theta_m0[j] / 2 for j in range(n_arms)])
+        for i in range(n_arms)
+    ]
+).full_simplify()
 ```
 
 ```sage
@@ -56,7 +61,9 @@ quad_term
 ```
 
 ```sage
-bin_term = sum([theta_adj[i] * y[i] - n[i] * log(exp_theta_adj[i] + 1) for i in range(n_arms)]).full_simplify()
+bin_term = sum(
+    [theta_adj[i] * y[i] - n[i] * log(exp_theta_adj[i] + 1) for i in range(n_arms)]
+).full_simplify()
 ```
 
 ```sage
@@ -64,11 +71,11 @@ bin_term
 ```
 
 ```sage
-jll = (quad_term + bin_term)
+jll = quad_term + bin_term
 ```
 
 ```sage
-M = var('M')
+M = var("M")
 nt = 2
 full_taylor = jll
 for i in range(n_arms):
@@ -80,7 +87,7 @@ full_taylor
 ```
 
 ```sage
-A, B = var('A', 'B')
+A, B = var("A", "B")
 integral = exp(full_taylor)
 for i in range(1):
     integral = integrate(integral, ts[i], A, B).full_simplify()

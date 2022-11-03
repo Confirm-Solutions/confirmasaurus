@@ -23,9 +23,8 @@ import matplotlib.pyplot as plt
 
 from berrylib.constants import Y_I, Y_I2, N_I, N_I2
 from jax.config import config
+
 config.update("jax_enable_x64", False)
-
-
 ```
 
 ```python
@@ -36,6 +35,7 @@ from functools import partial
 
 importlib.reload(berrylib.fast_inla)
 from berrylib.fast_inla import FastINLA, jax_opt, jax_faster_inv_product
+
 
 def jax_faster_inv_product(D, S, G):
     """Compute (diag(D)+S)^-1 @ G.
@@ -48,19 +48,20 @@ def jax_faster_inv_product(D, S, G):
     # return D_inverse *(multiplier * jnp.dot(D_inverse, G) +  G)
     D_norm = jnp.abs(D).sum()
     D_normed = D / D_norm
-    return (-S * (G / D_normed).sum() / (D_norm + (S  / D_normed).sum()) + G) / D
+    return (-S * (G / D_normed).sum() / (D_norm + (S / D_normed).sum()) + G) / D
+
 
 Ds = jnp.arange(3, -7, -1)
 S = 100
 G = jnp.arange(1, 5)
 for D in Ds:
     D = 10.0**D
-    print('D', D)
+    print("D", D)
     D = jnp.repeat(D, 4)
     D_inverse = 1.0 / D
     multiplier = -S / (1 + (S / D).sum())
-    d_multiplier = -S / (D + S*len(D))
-    a, b = D_inverse *(multiplier * jnp.dot(D_inverse, G)), D_inverse * G
+    d_multiplier = -S / (D + S * len(D))
+    a, b = D_inverse * (multiplier * jnp.dot(D_inverse, G)), D_inverse * G
     # print("inv", D_inverse)
     # print(multiplier * D_inverse)
     # print(d_multiplier)
@@ -86,7 +87,6 @@ for D in Ds:
 #     fi.tol,
 #     fast_loop=False,
 # )
-
 ```
 
 ```python
@@ -94,7 +94,6 @@ with open("/home/const/imprint/out.txt") as f:
     arr = np.array(eval(f.read()))
 arr.shape
 np.linalg.slogdet(arr)
-
 ```
 
 ```python
@@ -139,7 +138,6 @@ hess = jax.jacobian(grad)
 h = hess(theta, sigma_sq)
 print(h)
 print(jnp.linalg.inv(h))
-
 ```
 
 ```python
@@ -157,7 +155,6 @@ def mcmc_berry_model(y, n):
             dist.BinomialLogits(theta + 0, total_count=n),
             obs=y,
         )
-
 ```
 
 # Stochastic Variational Inference
@@ -187,12 +184,10 @@ svi_result = svi.run(jax.random.PRNGKey(0), 3_000, y, n)
 params = svi_result.params
 predictive = Predictive(guide, params=params, num_samples=100000)
 samples = predictive(jax.random.PRNGKey(1), data)
-
 ```
 
 ```python
 plt.plot(svi_result.losses)
-
 ```
 
 ```python
@@ -203,7 +198,6 @@ for i in range(4):
     plt.hist(s, bins=100, density=True, label=f"$\\theta_{i}$", alpha=0.5)
 plt.legend()
 None
-
 ```
 
 $ P(x_i | x_{-i}, y, \theta) = P(x, y, \theta) / P(x_{-i}, \theta, y) $
@@ -252,7 +246,6 @@ jnp.exp(log_berry_likelihood(vars))
 grad(vars)
 h = hess(vars)
 h
-
 ```
 
 ```python
@@ -302,7 +295,6 @@ def optimize(theta, sigma, mask):
         # assert not jnp.isnan(vars).any()
         # print(jnp.linalg.norm(pvars - vars))
     return vars
-
 ```
 
 ```python
@@ -310,7 +302,6 @@ theta = jnp.zeros(4)
 sigma = 1e-8
 mask = jnp.s_[0:5]
 optimize(theta, sigma, mask)
-
 ```
 
 ```python
@@ -328,12 +319,10 @@ for sigma in sigmas:
         vars = optimize(theta, sigma, mask)
         varss.append(vars)
 varss = jnp.stack(varss)
-
 ```
 
 ```python
 varss.shape
-
 ```
 
 ```python
@@ -341,7 +330,6 @@ sigmas = jnp.log10(varss[:, N_ARMS + 1])
 thetas = varss[:, :N_ARMS]
 plt.scatter(sigmas, jnp.mean(thetas, 1))
 plt.scatter(sigmas, jnp.std(thetas, 1))
-
 ```
 
 ```python
@@ -351,12 +339,10 @@ plt.scatter(sigmas, jnp.std(thetas, 1))
 ```python
 x = 90
 plt.scatter(thetas[x : x + 10, 0], thetas[x : x + 10, 1])
-
 ```
 
 ```python
 thetas[x : x + 10]
-
 ```
 
 ```python
@@ -395,7 +381,6 @@ def do_mcmc(rng_key, y, n):
 
 
 s = do_mcmc(jax.random.PRNGKey(0), jnp.array([4, 8]), jnp.array([35, 35]))
-
 ```
 
 ```python
@@ -409,7 +394,6 @@ fig = plt.figure(figsize=(7, 5))
 plt.hist(sig, bins=10)
 plt.xlabel("log10(sigma^2)")
 fig.patch.set_alpha(1)
-
 ```
 
 ```python
@@ -453,5 +437,4 @@ def jax_calc_posterior_and_exceedances(
         exc_sigma2 * sigma2_post[:, :, None] * sigma2_wts[None, :, None], axis=1
     )
     return sigma2_post, exceedances
-
 ```

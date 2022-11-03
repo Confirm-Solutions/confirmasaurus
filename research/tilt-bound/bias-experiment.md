@@ -40,9 +40,11 @@ $$(b-a) U(\theta_0, v, q, E_{\theta_0}[\tilde{F}(X)]) + a - G(\theta)$$
 def esti(x, a, b):
     return jnp.maximum(a, jnp.minimum(x, b))
 
+
 def esti_tilde(x, a, b):
     return (esti(x, a, b) - a) / (b - a)
-    
+
+
 def G(x):
     return x
 ```
@@ -55,8 +57,7 @@ def exp_esti_tilde(theta, sig, a, b):
     out = out + theta * (cdf_b - cdf_a)
     out = out + sig**2 * (
         jax.scipy.stats.norm.pdf(a, theta, sig)
-        -
-        jax.scipy.stats.norm.pdf(b, theta, sig)
+        - jax.scipy.stats.norm.pdf(b, theta, sig)
     )
     out = out + b * (1 - cdf_b)
     return (out - a) / (b - a)
@@ -66,7 +67,7 @@ def exp_esti_tilde(theta, sig, a, b):
 def tilt_bound_fwd(v, f0):
     logf0 = jnp.log(f0)
     q_opt = jnp.maximum(jnp.sqrt(-2 * logf0) / jnp.abs(v), 1)
-    expo = 0.5 * (q_opt-1) * v ** 2 - logf0 / q_opt
+    expo = 0.5 * (q_opt - 1) * v**2 - logf0 / q_opt
     return f0 * jnp.exp(expo)
 ```
 
@@ -85,8 +86,8 @@ tilt_bound_fwd_jv = jax.jit(jax.vmap(tilt_bound_fwd, in_axes=(0, None)))
 
 ```python
 bounds = tilt_bound_fwd_jv(vs, f0)
-bounds = a + (b-a) * bounds - G(theta_0 + vs)
-true_bias = a + (b-a) * exp_esti_tilde(theta_0 + vs, 1, a, b) - G(theta_0 + vs)
+bounds = a + (b - a) * bounds - G(theta_0 + vs)
+true_bias = a + (b - a) * exp_esti_tilde(theta_0 + vs, 1, a, b) - G(theta_0 + vs)
 ```
 
 ```python

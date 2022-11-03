@@ -14,6 +14,7 @@ jupyter:
 
 ```python
 import confirm.outlaw.nb_util as util
+
 util.setup_nb()
 ```
 
@@ -48,13 +49,11 @@ sig2 = sig2_rule.pts
 ```
 
 ```python
-inla_ops = berry.optimized(sig2, dtype=dtype).config(
-    max_iter=20, opt_tol=dtype(1e-9)
-)
+inla_ops = berry.optimized(sig2, dtype=dtype).config(max_iter=20, opt_tol=dtype(1e-9))
 
-logpost, x_max, hess_info, iters = jax.jit(
-    inla_ops.laplace_logpost
-)(np.zeros((sig2.shape[0], 4), dtype=dtype), dict(sig2=sig2), data)
+logpost, x_max, hess_info, iters = jax.jit(inla_ops.laplace_logpost)(
+    np.zeros((sig2.shape[0], 4), dtype=dtype), dict(sig2=sig2), data
+)
 post = inla.exp_and_normalize(logpost, sig2_rule.wts.astype(dtype), axis=0)
 ```
 
@@ -70,15 +69,13 @@ invv = jax.jit(jax.vmap(inla_ops.invert))
 
 inv_hess = invv(hess_info)
 arm_idx = 0
-cx, wts = inla.gauss_hermite_grid(
-    x_max, inv_hess[..., arm_idx, :], arm_idx, n=25
-)
+cx, wts = inla.gauss_hermite_grid(x_max, inv_hess[..., arm_idx, :], arm_idx, n=25)
 # cx, wts = inla.latent_grid(
-#     x_max, inv_hess[..., arm_idx, :], arm_idx, 
+#     x_max, inv_hess[..., arm_idx, :], arm_idx,
 #     quad.gauss_rule(105, a=-5, b=5)
 # )
-cx = cx[:,0]
-wts = wts[:,0]
+cx = cx[:, 0]
+wts = wts[:, 0]
 
 arm_logpost = arm_logpost_f(
     x_max, inv_hess[:, :, arm_idx], dict(sig2=sig2, theta=None), data, cx, arm_idx, True
@@ -92,7 +89,7 @@ arm_quad = quad.simpson_rule(101, -15, 2)
 interp_vmap = jax.vmap(lambda *args: jnp.interp(*args, 0, 0), in_axes=(None, 1, 1))
 interp_marg_condsig2 = interp_vmap(arm_quad.pts, cx, arm_post).T
 uncon_pdf_interp = np.sum(interp_marg_condsig2 * post * sig2_rule.wts, axis=1)
-plt.plot(arm_quad.pts, uncon_pdf_interp, 'k-.')
+plt.plot(arm_quad.pts, uncon_pdf_interp, "k-.")
 plt.show()
 ```
 
@@ -111,12 +108,12 @@ logpost_arm = cond_laplace_f(
 )
 arm_post = inla.exp_and_normalize(logpost_arm, wts, axis=0)
 
-group_size=20
+group_size = 20
 plt.figure(figsize=(10, 10))
 for subplot_idx, i0 in enumerate(range(0, sig2_rule.pts.shape[0], group_size)):
-    plt.subplot(2,2,subplot_idx + 1)
+    plt.subplot(2, 2, subplot_idx + 1)
     for i in range(i0, min(sig2_rule.pts.shape[0], i0 + group_size), 3):
-        plt.plot(cx[:, i], arm_post[:, i], label='sig2={:.2e}'.format(sig2_rule.pts[i]))
+        plt.plot(cx[:, i], arm_post[:, i], label="sig2={:.2e}".format(sig2_rule.pts[i]))
     plt.legend(fontsize=8)
     # plt.xlim([-10, 1])
 plt.show()
@@ -125,11 +122,16 @@ plt.show()
 ```python
 theta_sigma = np.sqrt(np.diagonal(-inv_hess, axis1=1, axis2=2))
 theta_mu = x_max
-uncon_pdf_gaussian = np.sum(scipy.stats.norm.pdf(
-    arm_quad.pts[:, None],
-    theta_mu[None, :, arm_idx],
-    theta_sigma[None, :, arm_idx],
-) * post * sig2_rule.wts, axis=1)
+uncon_pdf_gaussian = np.sum(
+    scipy.stats.norm.pdf(
+        arm_quad.pts[:, None],
+        theta_mu[None, :, arm_idx],
+        theta_sigma[None, :, arm_idx],
+    )
+    * post
+    * sig2_rule.wts,
+    axis=1,
+)
 ```
 
 ## Dirty Bayes
@@ -147,9 +149,9 @@ for i, thresh in enumerate(arm_quad.pts):
         np.full((1, 4), thresh),
         sig2_rule,
     )
-    uncon_cdf_db[i] = db_out['exceedance'][0,0]
+    uncon_cdf_db[i] = db_out["exceedance"][0, 0]
 pdf = (uncon_cdf_db[2:] - uncon_cdf_db[:-2]) / (arm_quad.pts[2:] - arm_quad.pts[:-2])
-uncon_pdf_db = -np.concatenate(([0], pdf, [0])) 
+uncon_pdf_db = -np.concatenate(([0], pdf, [0]))
 uncon_pdf_db
 ```
 
@@ -157,6 +159,7 @@ uncon_pdf_db
 
 ```python
 import confirm.berrylib.mcmc as mcmc
+
 mcmc_results = mcmc.mcmc_berry(data[None], n_samples=int(1000000))
 ```
 
@@ -197,9 +200,8 @@ plt.ylim([0, 0.35])
 plt.legend(fontsize=10)
 plt.xlabel(r"$\theta_0$")
 plt.ylabel(r"$\mathbb{P}(\theta_0 | Y)$")
-plt.savefig('inla_compare.png', dpi=300, bbox_inches='tight')
+plt.savefig("inla_compare.png", dpi=300, bbox_inches="tight")
 plt.show()
-
 ```
 
 ```python

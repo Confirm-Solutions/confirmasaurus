@@ -56,8 +56,10 @@ Variables subscripted with $S$ are referring to the standard therapy while those
 
 ```python
 import sys
-sys.path.append('../imprint/research/berry/')
+
+sys.path.append("../imprint/research/berry/")
 import berrylib.util as util
+
 util.setup_nb()
 ```
 
@@ -73,7 +75,7 @@ mean_E_true = 7 / np.log(2)
 mean_E_true
 
 N = 1000
-samples = scipy.stats.expon.rvs(scale = mean_E_true, size=N)
+samples = scipy.stats.expon.rvs(scale=mean_E_true, size=N)
 t = np.linspace(0, 50, 1000)
 pdf = scipy.stats.expon.pdf(t, scale=mean_E_true)
 bins = np.linspace(0, 50, 21)
@@ -104,7 +106,7 @@ t = np.linspace(0, 50, 1000)
 pdf = scipy.stats.invgamma.pdf(t, a, scale=b)
 plt.plot(t, pdf)
 plt.show()
-print('prior mean', scipy.stats.invgamma.mean(a, scale=b))
+print("prior mean", scipy.stats.invgamma.mean(a, scale=b))
 ```
 
 ### Version 1: Conjugate prior
@@ -120,7 +122,7 @@ pdf = scipy.stats.invgamma.pdf(t, a_post, scale=b_post)
 plt.plot(t, pdf)
 plt.show()
 exact_mean = scipy.stats.invgamma.mean(a_post, scale=b_post)
-print('posterior mean', exact_mean)
+print("posterior mean", exact_mean)
 ```
 
 ### Version 2: MCMC
@@ -134,6 +136,7 @@ import jax
 import jax.numpy as jnp
 
 from jax.config import config
+
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
 ```
@@ -170,6 +173,7 @@ def sample(YT):
     hazard = numpyro.deterministic("lambda", 1.0 / mean_ttf)
     numpyro.sample("YT", CensoredExponential(hazard, n_samples, start_date), obs=YT)
 
+
 seed = 10
 n_samples = 100000
 nuts_kernel = numpyro.infer.NUTS(sample)
@@ -185,18 +189,18 @@ mcmc.run(rng_key, YT)
 ```
 
 ```python
-mu_samples = mcmc.get_samples()['mu'].to_py()
+mu_samples = mcmc.get_samples()["mu"].to_py()
 plt.hist(mu_samples)
 plt.show()
 mcmc_mean = mu_samples.mean()
-print('mcmc mean', mcmc_mean)
-print('mcmc pct err', 100 * np.abs(mcmc_mean - exact_mean) / exact_mean)
+print("mcmc mean", mcmc_mean)
+print("mcmc pct err", 100 * np.abs(mcmc_mean - exact_mean) / exact_mean)
 ```
 
 ### Version 3: Integration
 
 ```python
-mean_ttf_qr = util.gauss_rule(50, a = 0, b = 30)
+mean_ttf_qr = util.gauss_rule(50, a=0, b=30)
 log_prior = scipy.stats.invgamma.logpdf(mean_ttf_qr.pts, a, scale=b)
 log_prior
 ```
@@ -207,28 +211,29 @@ scipy.stats.invgamma.cdf(mean_ttf_qr.pts[-1], a, scale=b)
 ```
 
 ```python
-n_failures = YT[:,0].sum()
-total_obs_time = YT[:,1].sum()
-def log_likelihood(mean_ttf): 
+n_failures = YT[:, 0].sum()
+total_obs_time = YT[:, 1].sum()
+
+
+def log_likelihood(mean_ttf):
     return -n_failures * np.log(mean_ttf) + -total_obs_time / mean_ttf
 ```
 
 ```python
-logpdf = (log_prior + log_likelihood(mean_ttf_qr.pts))
+logpdf = log_prior + log_likelihood(mean_ttf_qr.pts)
 pdf = np.exp(logpdf)
 pdf /= np.sum(pdf * mean_ttf_qr.wts)
 ```
 
 ```python
-
 plt.plot(mean_ttf_qr.pts, pdf)
 plt.show()
 ```
 
 ```python
 integral_mean = np.sum(mean_ttf_qr.pts * pdf * mean_ttf_qr.wts)
-print('integral mean', integral_mean)
-print('integral pct err', 100 * np.abs(integral_mean - exact_mean) / exact_mean)
+print("integral mean", integral_mean)
+print("integral pct err", 100 * np.abs(integral_mean - exact_mean) / exact_mean)
 ```
 
 ### Version 4: INLA-ish
@@ -239,24 +244,33 @@ This is degenerate in the sense that there is no hyperparameter. So, we just app
 t = np.linspace(0.001, 50, 1000)
 invt = 1.0 / t
 a_g = a / b
-b_g = a / (b ** 2)
+b_g = a / (b**2)
 pdf2 = scipy.stats.invgamma.pdf(t, a, scale=b)
-pdf3 = jnp.exp(-b / t) * (b ** a) * (t ** -(a + 1)) / jnp.exp(jax.scipy.special.gammaln(a))
+pdf3 = (
+    jnp.exp(-b / t) * (b**a) * (t ** -(a + 1)) / jnp.exp(jax.scipy.special.gammaln(a))
+)
 
-plt.plot(t, pdf2, 'k-')
-plt.plot(t, pdf3, 'r-')
+plt.plot(t, pdf2, "k-")
+plt.plot(t, pdf3, "r-")
 plt.show()
 ```
 
 ```python
 # n_failures = YT[:,0].sum()
 # total_obs_time = YT[:,1].sum()
-# def log_likelihood(mean_ttf): 
+# def log_likelihood(mean_ttf):
 #     return -n_failures * np.log(mean_ttf) + -total_obs_time / mean_ttf
 def log_joint(mean_ttf):
-    log_prior = -b / mean_ttf + a * jnp.log(b) - (a+1) * jnp.log(mean_ttf) - jax.scipy.special.gammaln(a)
+    log_prior = (
+        -b / mean_ttf
+        + a * jnp.log(b)
+        - (a + 1) * jnp.log(mean_ttf)
+        - jax.scipy.special.gammaln(a)
+    )
     log_likelihood = -n_failures * jnp.log(mean_ttf) + -total_obs_time / mean_ttf
     return log_prior + log_likelihood
+
+
 log_joint(jnp.linspace(5, 15, 11))
 ```
 
@@ -275,7 +289,7 @@ for i in range(100):
     tff_max += step
     if np.abs(step) < tol:
         break
-print(f'soln={tff_max} took iters={i}')
+print(f"soln={tff_max} took iters={i}")
 ```
 
 ```python
@@ -290,13 +304,13 @@ tff_max, hess
 std_dev = np.sqrt(-1.0 / hess)
 t = np.linspace(0, 50, 1000)
 pdf = scipy.stats.invgamma.pdf(t, a_post, scale=b_post)
-plt.plot(t, pdf, 'r-', label='exact')
-plt.plot(t, scipy.stats.norm.pdf(t, tff_max, scale=std_dev), 'b-', label='gaussian')
+plt.plot(t, pdf, "r-", label="exact")
+plt.plot(t, scipy.stats.norm.pdf(t, tff_max, scale=std_dev), "b-", label="gaussian")
 plt.xlim([4, 16])
-plt.xlabel('$\mu$')
-plt.ylabel('$\mathrm{p}(\mu | y)$')
+plt.xlabel("$\mu$")
+plt.ylabel("$\mathrm{p}(\mu | y)$")
 plt.legend()
-plt.title('pdf of average time to either cancer progression or death')
+plt.title("pdf of average time to either cancer progression or death")
 plt.show()
 ```
 
@@ -315,8 +329,10 @@ skew
 
 ```python
 import sys
-sys.path.append('../imprint/research/berry/')
+
+sys.path.append("../imprint/research/berry/")
 import berrylib.util as util
+
 util.setup_nb()
 ```
 
@@ -332,6 +348,7 @@ import jax
 import jax.numpy as jnp
 
 from jax.config import config
+
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
 ```
@@ -350,7 +367,8 @@ def simulate_dataset(seed, mean_ED_true, mean_EP_true):
     P_date = start_date + ttfP
     D_date = start_date + ttfD
     return np.stack((start_date, D_date, P_date), axis=-1)
-    
+
+
 def sufficient_stats(data, n_months):
     start_date, D_date, P_date = data.T
 
@@ -402,34 +420,37 @@ data = sufficient_stats(raw_data, max_n_months)
 
 ```python
 # Check that we never have progression after death
-prog_after_death = (data[:,0].astype(bool) & data[:,2].astype(bool)) & (data[:,1] >= data[:,3])
-assert(np.all(~prog_after_death))
+prog_after_death = (data[:, 0].astype(bool) & data[:, 2].astype(bool)) & (
+    data[:, 1] >= data[:, 3]
+)
+assert np.all(~prog_after_death)
 ```
 
 ```python
 # Check that last progression observation date is never after death
-assert(np.all(data[:,1] <= data[:,3]))
+assert np.all(data[:, 1] <= data[:, 3])
 ```
 
 ```python
-data[:,0].astype(bool) & (data[:,1] < 2)
+data[:, 0].astype(bool) & (data[:, 1] < 2)
 ```
 
 ```python
-def survivor_fnc(x, ttf): 
+def survivor_fnc(x, ttf):
     return 1.0 - scipy.stats.expon.cdf(x, scale=ttf)
+
 
 def log_likelihood_explicit(data, ttf_da, ttf_p):
     Y_p, tau_k0, Y_da, T0 = data.T
     death_term = np.where(
         Y_da, scipy.stats.expon.pdf(T0, scale=ttf_da), survivor_fnc(T0, ttf_da)
     )
-    pi_k0 = (
-        survivor_fnc(tau_k0 - evaluation_period, ttf_p) 
-        - survivor_fnc(tau_k0, ttf_p)
+    pi_k0 = survivor_fnc(tau_k0 - evaluation_period, ttf_p) - survivor_fnc(
+        tau_k0, ttf_p
     )
     progression_term = np.where(Y_p, pi_k0, survivor_fnc(tau_k0, ttf_p))
     return np.sum(np.log(death_term) + np.log(progression_term))
+
 
 def log_likelihood(data, ttf_da, ttf_p):
     Y_p, tau_k0, Y_da, T0 = data.T
@@ -443,7 +464,10 @@ def log_likelihood(data, ttf_da, ttf_p):
     )
     return death_term + progression_term
 
-log_likelihood(data, mean_ED_true, mean_EP_true), log_likelihood_explicit(data, mean_ED_true, mean_EP_true)
+
+log_likelihood(data, mean_ED_true, mean_EP_true), log_likelihood_explicit(
+    data, mean_ED_true, mean_EP_true
+)
 ```
 
 ```python
@@ -465,7 +489,10 @@ class IntervalCensored(dist.Distribution):
         T_da = T0.sum()
         death_term = -N_da * jnp.log(self.mu_da) + -T_da / self.mu_da
         progression_term = -T_p / self.mu_p + jnp.sum(
-            jnp.log(jnp.exp(-(tau_k0 - evaluation_period) / self.mu_p) - jnp.exp(-tau_k0 / self.mu_p))
+            jnp.log(
+                jnp.exp(-(tau_k0 - evaluation_period) / self.mu_p)
+                - jnp.exp(-tau_k0 / self.mu_p)
+            )
             * Y_p
         )
         return death_term + progression_term
@@ -480,12 +507,15 @@ a_Sp, b_Sp = 20.391, 195.826
 a_Sda, b_Sda = 95.401, 1303.670
 a_Ep, b_Ep = 2.039, 19.583
 a_Eda, b_Eda = 9.540, 130.367
+
+
 def sample(data):
     numpyro.sample("mu_Sp", dist.InverseGamma(a_Sp, b_Sp))
     numpyro.sample("mu_Sda", dist.InverseGamma(a_Sda, b_Sda))
     mean_ttf_Ep = numpyro.sample("mu_Ep", dist.InverseGamma(a_Ep, b_Ep))
     mean_ttf_Eda = numpyro.sample("mu_Eda", dist.InverseGamma(a_Eda, b_Eda))
     numpyro.sample("data", IntervalCensored(mean_ttf_Eda, mean_ttf_Ep), obs=data)
+
 
 seed = 10
 n_samples = 10000
@@ -501,19 +531,19 @@ mcmc.run(rng_key, data)
 ```
 
 ```python
-mu_p_samples = mcmc.get_samples()['mu_Ep'].to_py()
-plt.title('mean time to progression posterior')
+mu_p_samples = mcmc.get_samples()["mu_Ep"].to_py()
+plt.title("mean time to progression posterior")
 plt.hist(mu_p_samples, density=True)
 plt.show()
 mcmc_p_mean = mu_p_samples.mean()
-print('mcmc mean ttf progression', mcmc_p_mean)
+print("mcmc mean ttf progression", mcmc_p_mean)
 
-mu_da_samples = mcmc.get_samples()['mu_Eda'].to_py()
-plt.title('mean time to death posterior')
+mu_da_samples = mcmc.get_samples()["mu_Eda"].to_py()
+plt.title("mean time to death posterior")
 plt.hist(mu_da_samples, density=True)
 plt.show()
 mcmc_da_mean = mu_da_samples.mean()
-print('mcmc mean ttf death', mcmc_da_mean)
+print("mcmc mean ttf death", mcmc_da_mean)
 ```
 
 ```python
@@ -521,7 +551,7 @@ med_EP_true = 6
 med_ED_true = 12
 mean_EP_true = med_EP_true / np.log(2)
 mean_ED_true = med_ED_true / np.log(2)
-print('full ttf', 1.0 / ((1.0 / mean_EP_true) + (1.0 / mean_ED_true)) * np.log(2))
+print("full ttf", 1.0 / ((1.0 / mean_EP_true) + (1.0 / mean_ED_true)) * np.log(2))
 mean_ED_true, mean_EP_true
 ```
 
@@ -533,7 +563,7 @@ mcmc = numpyro.infer.MCMC(
     progress_bar=False,
     num_warmup=100,
     num_samples=n_samples,
-    jit_model_args=True
+    jit_model_args=True,
 )
 ```
 
@@ -544,23 +574,25 @@ means = np.empty((N_sim, 2))
 rng_key = jax.random.PRNGKey(10)
 for i in range(N_sim):
     seed = 10 + i
-    data_i = sufficient_stats(simulate_dataset(seed, mean_ED_true, mean_EP_true), max_n_months)
+    data_i = sufficient_stats(
+        simulate_dataset(seed, mean_ED_true, mean_EP_true), max_n_months
+    )
     mcmc.run(rng_key, data_i)
 
     samples = mcmc.get_samples()
-    mcmc_da_mean = samples['mu_Eda'].mean()
-    mcmc_p_mean = samples['mu_Ep'].mean()
+    mcmc_da_mean = samples["mu_Eda"].mean()
+    mcmc_p_mean = samples["mu_Ep"].mean()
     means[i, :] = (mcmc_da_mean, mcmc_p_mean)
 ```
 
 ```python
-plt.hist(samples['mu_Eda'].to_py(), bins=np.linspace(5, 30, 21), density=True)
+plt.hist(samples["mu_Eda"].to_py(), bins=np.linspace(5, 30, 21), density=True)
 plt.show()
 ```
 
 ```python
-print('est', means[:,0].mean(), means[:,1].mean())
-print('true', mean_ED_true, mean_EP_true)
+print("est", means[:, 0].mean(), means[:, 1].mean())
+print("true", mean_ED_true, mean_EP_true)
 ```
 
 ```python
@@ -579,8 +611,8 @@ for i in range(N_sim):
         suff_ti = sufficient_stats(raw_ti, raw_ti[-1, 0])
         mcmc.run(rng_key, suff_ti)
         samples = mcmc.get_samples()
-        mu_S = 1.0 / (1.0 / samples['mu_Sda'] + 1.0 / samples['mu_Sp'])
-        mu_E = 1.0 / (1.0 / samples['mu_Eda'] + 1.0 / samples['mu_Ep'])
+        mu_S = 1.0 / (1.0 / samples["mu_Sda"] + 1.0 / samples["mu_Sp"])
+        mu_E = 1.0 / (1.0 / samples["mu_Eda"] + 1.0 / samples["mu_Ep"])
         pr_success = jnp.sum(mu_S + 3 < mu_E) / mu_S.shape[0]
         stop = pr_success < p_L
         # print(f'pct chance of success={pr_success * 100:5.2f}% stop={stop}')
@@ -620,8 +652,10 @@ I'm going to ignore these problems for now since the general drift of the result
 
 ```python
 import sys
-sys.path.append('../imprint/research/berry/')
+
+sys.path.append("../imprint/research/berry/")
 import berrylib.util as util
+
 util.setup_nb()
 ```
 
@@ -637,6 +671,7 @@ import jax
 import jax.numpy as jnp
 
 from jax.config import config
+
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
 ```
@@ -645,7 +680,6 @@ config.update("jax_enable_x64", True)
 n_patients = 14 * 6
 max_n_months = 14
 evaluation_period = 2
-
 ```
 
 ```python
@@ -746,13 +780,13 @@ class PiecewiseInterval(dist.Distribution):
         lp = 1.0 / self.mu_p
         la = 1.0 / self.mu_a
         gamma = lp + ld1 - ld2
-        prefix = (1.0 / gamma) * lp * ld2 ** Y_d * jnp.exp(-T0 * ld2)
+        prefix = (1.0 / gamma) * lp * ld2**Y_d * jnp.exp(-T0 * ld2)
         pi_k0_P = prefix * (
             jnp.exp(-(tau_k0 - evaluation_period) * gamma) - jnp.exp(-tau_k0 * gamma)
         )
         pi_k0_NP = prefix * (
             jnp.exp(-tau_k0 * gamma) - jnp.exp(-T0 * gamma)
-        ) + ld1 ** Y_d * jnp.exp(-T0 * (lp + ld1))
+        ) + ld1**Y_d * jnp.exp(-T0 * (lp + ld1))
         a_term = jnp.log(la) * Y_a.sum() + -T_a.sum() * la
         return jnp.sum(Y_p * jnp.log(pi_k0_P) + (1 - Y_p) * jnp.log(pi_k0_NP)) + a_term
 ```
@@ -776,6 +810,7 @@ a_Ea, b_Ea = 55.237, 2646.580
 a_Ed1, b_Ed1 = 18.852, 262.529
 a_Ed2, b_Ed2 = 5.974, 32.053
 
+
 def sample(data):
     numpyro.sample("mu_Sp", dist.InverseGamma(a_Sp, b_Sp))
     numpyro.sample("mu_Sa", dist.InverseGamma(a_Sa, b_Sa))
@@ -787,6 +822,7 @@ def sample(data):
     mu_Ed2 = numpyro.sample("mu_Ed2", dist.InverseGamma(a_Ed2, b_Ed2))
     numpyro.sample("data", PiecewiseInterval(mu_Ed1, mu_Ed2, mu_Ep, mu_Ea), obs=data)
 
+
 seed = 10
 n_samples = 3000
 nuts_kernel = numpyro.infer.NUTS(sample)
@@ -795,7 +831,7 @@ mcmc = numpyro.infer.MCMC(
     progress_bar=False,
     num_warmup=100,
     num_samples=n_samples,
-    jit_model_args=True
+    jit_model_args=True,
 )
 rng_key = jax.random.PRNGKey(seed)
 mcmc.run(rng_key, data)
@@ -803,22 +839,22 @@ mcmc.run(rng_key, data)
 
 ```python
 samples = mcmc.get_samples()
-for name in ['mu_Ep', 'mu_Ea', 'mu_Ed1', 'mu_Ed2']:
+for name in ["mu_Ep", "mu_Ea", "mu_Ed1", "mu_Ed2"]:
     vs = samples[name].to_py()
-    plt.title(f'mean ttf {name}')
+    plt.title(f"mean ttf {name}")
     plt.hist(vs, density=True)
     plt.show()
-    print(f'mcmc mean ttf {name}', vs.mean())
+    print(f"mcmc mean ttf {name}", vs.mean())
 ```
 
 ```python
 samples = mcmc.get_samples()
-mu_S = 1.0 / (1.0 / samples['mu_Sp'] + 1.0 / samples['mu_Sa'] + 1.0 / samples['mu_Sd1'])
+mu_S = 1.0 / (1.0 / samples["mu_Sp"] + 1.0 / samples["mu_Sa"] + 1.0 / samples["mu_Sd1"])
 med_S = mu_S * np.log(2)
 plt.hist(med_S, density=True)
 plt.show()
 print(med_S.mean())
-mu_E = 1.0 / (1.0 / samples['mu_Ep'] + 1.0 / samples['mu_Ea'] + 1.0 / samples['mu_Ed1'])
+mu_E = 1.0 / (1.0 / samples["mu_Ep"] + 1.0 / samples["mu_Ea"] + 1.0 / samples["mu_Ed1"])
 med_E = mu_E * np.log(2)
 plt.hist(med_E, density=True)
 plt.show()
@@ -846,14 +882,18 @@ for i in range(N_sim):
         suff_ti = sufficient_stats(raw_ti, raw_ti[-1, 0])
         mcmc.run(rng_key, suff_ti)
         samples = mcmc.get_samples()
-        mu_S = 1.0 / (1.0 / samples['mu_Sd1'] + 1.0 / samples['mu_Sa'] + 1.0 / samples['mu_Sp'])
-        mu_E = 1.0 / (1.0 / samples['mu_Ed1'] + 1.0 / samples['mu_Ea'] + 1.0 / samples['mu_Ep'])
+        mu_S = 1.0 / (
+            1.0 / samples["mu_Sd1"] + 1.0 / samples["mu_Sa"] + 1.0 / samples["mu_Sp"]
+        )
+        mu_E = 1.0 / (
+            1.0 / samples["mu_Ed1"] + 1.0 / samples["mu_Ea"] + 1.0 / samples["mu_Ep"]
+        )
         pr_success = jnp.sum(mu_S + 3 < mu_E) / mu_S.shape[0]
         stop = pr_success < p_L
         # print(f'pct chance of success={pr_success * 100:5.2f}% stop={stop}')
         n_patients_early[i] = t
         if stop:
-            print(f'stopping after {n_patients_early[i]} patients')
+            print(f"stopping after {n_patients_early[i]} patients")
             break
 ```
 
@@ -870,8 +910,10 @@ np.quantile(n_patients_early, [0.25, 0.5, 0.75])
 
 ```python
 import sys
-sys.path.append('../imprint/research/berry/')
+
+sys.path.append("../imprint/research/berry/")
 import berrylib.util as util
+
 util.setup_nb()
 ```
 
@@ -887,6 +929,7 @@ import jax
 import jax.numpy as jnp
 
 from jax.config import config
+
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
 ```
@@ -897,7 +940,6 @@ config.update("jax_enable_x64", True)
 n_patients = 14 * 6
 max_n_months = 14
 evaluation_period = 2
-
 ```
 
 ```python
@@ -984,22 +1026,27 @@ def log_likelihood_arm(data, ttf_d1, ttf_d2, ttf_p, ttf_a, arm_idx):
     lp = 1.0 / ttf_p
     la = 1.0 / ttf_a
     gamma = lp + ld1 - ld2
-    prefix = (1.0 / gamma) * lp * ld2 ** Y_d * jnp.exp(-T0 * ld2)
+    prefix = (1.0 / gamma) * lp * ld2**Y_d * jnp.exp(-T0 * ld2)
     pi_k0_P = prefix * (
         jnp.exp(-(tau_k0 - evaluation_period) * gamma) - jnp.exp(-tau_k0 * gamma)
     )
     pi_k0_NP = prefix * (
         jnp.exp(-tau_k0 * gamma) - jnp.exp(-T0 * gamma)
-    ) + ld1 ** Y_d * jnp.exp(-T0 * (lp + ld1))
-    
+    ) + ld1**Y_d * jnp.exp(-T0 * (lp + ld1))
+
     include = arm == arm_idx
     a_term = jnp.log(la) * (Y_a * include).sum() + -(T_a * include).sum() * la
-    return jnp.sum(include * (Y_p * jnp.log(pi_k0_P) + (1 - Y_p) * jnp.log(pi_k0_NP))) + a_term
+    return (
+        jnp.sum(include * (Y_p * jnp.log(pi_k0_P) + (1 - Y_p) * jnp.log(pi_k0_NP)))
+        + a_term
+    )
+
 
 def log_likelihood(data, pc, pt):
     return log_likelihood_arm(data, *pc, 0) + log_likelihood_arm(data, *pt, 1)
 
-log_likelihood(data, params[:,0], params[:,1])
+
+log_likelihood(data, params[:, 0], params[:, 1])
 ```
 
 ```python
@@ -1019,7 +1066,7 @@ class Randomized(dist.Distribution):
 ```
 
 ```python
-Randomized(params[:,0], params[:,1]).log_prob(data)
+Randomized(params[:, 0], params[:, 1]).log_prob(data)
 ```
 
 ```python
@@ -1030,13 +1077,17 @@ a_Ea, b_Ea = 55.237, 2646.580
 prior_params = np.array(
     [[18.852, 262.529], [5.974, 32.053], [2.039, 13.574], [55.237, 2646.580]]
 )
-
 ```
 
 ##### Simulating from the prior
 
 ```python
-for name, ls, a, b in [("d1", "b-", a_Ed1, b_Ed1), ("d2", "b-.", a_Ed2, b_Ed2), ("p", "k-", a_Ep, b_Ep), ("a", "r-", a_Ea, b_Ea)]:
+for name, ls, a, b in [
+    ("d1", "b-", a_Ed1, b_Ed1),
+    ("d2", "b-.", a_Ed2, b_Ed2),
+    ("p", "k-", a_Ep, b_Ep),
+    ("a", "r-", a_Ea, b_Ea),
+]:
     plt_vs = np.linspace(0, 30, 1000)
     prior = scipy.stats.invgamma.pdf(plt_vs, a, scale=b)
     plt.plot(plt_vs, prior, ls, label=name)
@@ -1048,9 +1099,11 @@ plt.show()
 seed = 10
 n_samples = 10000
 
+
 def prior_sample():
     numpyro.sample("mu_Cp", dist.InverseGamma(a_Ep, b_Ep))
-    
+
+
 nuts_kernel = numpyro.infer.NUTS(prior_sample)
 mcmc = numpyro.infer.MCMC(
     nuts_kernel,
@@ -1065,11 +1118,15 @@ prior_samples = mcmc.get_samples()
 ```
 
 ```python
-
 plt_vs = np.linspace(0, 30, 1000)
 prior = scipy.stats.invgamma.pdf(plt_vs, a_Ep, scale=b_Ep)
-plt.plot(plt_vs, prior, 'k-', label='analytical')
-plt.plot(plt_vs, scipy.stats.gaussian_kde(prior_samples['mu_Cp'], bw_method=0.01)(plt_vs), "k-.", label="MCMC")
+plt.plot(plt_vs, prior, "k-", label="analytical")
+plt.plot(
+    plt_vs,
+    scipy.stats.gaussian_kde(prior_samples["mu_Cp"], bw_method=0.01)(plt_vs),
+    "k-.",
+    label="MCMC",
+)
 plt.legend()
 plt.show()
 ```
@@ -1077,7 +1134,6 @@ plt.show()
 ##### Sampling from the posterior with numpyro/mcmc
 
 ```python
-
 def sample(data):
     mu_Cp = numpyro.sample("mu_Cp", dist.InverseGamma(a_Ep, b_Ep))
     mu_Ca = numpyro.sample("mu_Ca", dist.InverseGamma(a_Ea, b_Ea))
@@ -1116,8 +1172,8 @@ mcmc.run(rng_key, data)
 
 ```python
 samples = mcmc.get_samples()
-mu_C = 1.0 / (1.0 / samples['mu_Cd1'] + 1.0 / samples['mu_Ca'] + 1.0 / samples['mu_Cp'])
-mu_E = 1.0 / (1.0 / samples['mu_Ed1'] + 1.0 / samples['mu_Ea'] + 1.0 / samples['mu_Ep'])
+mu_C = 1.0 / (1.0 / samples["mu_Cd1"] + 1.0 / samples["mu_Ca"] + 1.0 / samples["mu_Cp"])
+mu_E = 1.0 / (1.0 / samples["mu_Ed1"] + 1.0 / samples["mu_Ea"] + 1.0 / samples["mu_Ep"])
 pr_success = jnp.sum(mu_C + 3 < mu_E) / mu_C.shape[0]
 pr_better = jnp.sum(mu_C < mu_E) / mu_C.shape[0]
 pr_success, pr_better
@@ -1133,13 +1189,13 @@ To approximate, we need an explicit log prior likelihood for
 
 ```python
 import numpyro.handlers
+
 seeded_model = numpyro.handlers.seed(sample, rng_key)
 # subs = numpyro.handlers.substitute(sample, data=rng_key)
 tr = numpyro.handlers.trace(seeded_model)
 trace = tr.get_trace(data[:0])
 for k in trace:
-    print(trace[k]['fn'].log_prob)
-
+    print(trace[k]["fn"].log_prob)
 ```
 
 ```python
@@ -1158,10 +1214,15 @@ def log_prior(pc, pt):
 
 ```python
 p = params.T.flatten()
-obj = jax.jit(lambda params: log_likelihood(data, params[:4], params[4:]) + log_prior(params[:4], params[4:]))
+obj = jax.jit(
+    lambda params: log_likelihood(data, params[:4], params[4:])
+    + log_prior(params[:4], params[4:])
+)
 gradLL = jax.jit(jax.grad(obj))
 hessLL = jax.jit(jax.hessian(obj))
-obj(p), log_likelihood(data, params[:,0], params[:,1]) + log_prior(params[:,0], params[:,1])
+obj(p), log_likelihood(data, params[:, 0], params[:, 1]) + log_prior(
+    params[:, 0], params[:, 1]
+)
 ```
 
 Hessian has a block diagonal structure because:
@@ -1169,15 +1230,17 @@ Hessian has a block diagonal structure because:
 2. The adverse events hazard is independent of the other hazards.
 
 ```python
-
-plt.figure(figsize=(2,2))
+plt.figure(figsize=(2, 2))
 plt.spy(hessLL(p).to_py())
 plt.show()
 ```
 
 ```python
 def gaussian_posteriors(data):
-    obj = jax.jit(lambda params: log_likelihood(data, params[:4], params[4:]) + log_prior(params[:4], params[4:]))
+    obj = jax.jit(
+        lambda params: log_likelihood(data, params[:4], params[4:])
+        + log_prior(params[:4], params[4:])
+    )
     gradLL = jax.jit(jax.grad(obj))
     hessLL = jax.jit(jax.hessian(obj))
 
@@ -1188,9 +1251,11 @@ def gaussian_posteriors(data):
         hess=lambda p: -hessLL(p).to_py(),
         method="newton-cg",
     )
-    mu_gaussian = result['x']
+    mu_gaussian = result["x"]
     sigma_gaussian = np.sqrt(np.diagonal(np.linalg.inv(-hessLL(mu_gaussian))))
     return mu_gaussian, sigma_gaussian
+
+
 mu_gaussian, sigma_gaussian = gaussian_posteriors(data)
 ```
 
@@ -1198,7 +1263,10 @@ mu_gaussian, sigma_gaussian = gaussian_posteriors(data)
 def inla_posteriors(data, mu_gaussian, sigma_gaussian, w=9, N=101):
     def obj(params, i, xi):
         params = params.at[i].set(xi)
-        return log_likelihood(data, params[:4], params[4:]) + log_prior(params[:4], params[4:])
+        return log_likelihood(data, params[:4], params[4:]) + log_prior(
+            params[:4], params[4:]
+        )
+
     obj = jax.jit(obj)
     gradLL = jax.jit(jax.grad(obj))
     hessLL = jax.jit(jax.hessian(obj))
@@ -1221,7 +1289,7 @@ def inla_posteriors(data, mu_gaussian, sigma_gaussian, w=9, N=101):
                 hess=lambda p: -hessLL(p, i, xi).to_py(),
                 method="newton-cg",
             )
-            optimum = result['x']
+            optimum = result["x"]
             optimum[i] = xi
             hess = hessLL(optimum, i, xi)
             hess = np.delete(np.delete(hess.to_py(), i, 0), i, 1)
@@ -1230,6 +1298,8 @@ def inla_posteriors(data, mu_gaussian, sigma_gaussian, w=9, N=101):
     post = np.exp(logpost)
     post /= np.sum(post * pi_wts, axis=1)[:, None]
     return post, logpost, pi_pts, pi_wts
+
+
 inla_post, _, inla_pi_pts, _ = inla_posteriors(data, mu_gaussian, sigma_gaussian)
 ```
 
@@ -1270,7 +1340,12 @@ def single_comparison_plot(
     )
     prior_a, prior_b = prior_params[i, :]
     if include_prior:
-        plt.plot(plt_vs, scipy.stats.invgamma.pdf(plt_vs, prior_a, scale=prior_b), "k-.", label="Prior")
+        plt.plot(
+            plt_vs,
+            scipy.stats.invgamma.pdf(plt_vs, prior_a, scale=prior_b),
+            "k-.",
+            label="Prior",
+        )
     plt.plot(plt_vs, gaussian_pdf, "r-", label="Gaussian")
     plt.plot(inla_pi_pts[j * 4 + i], inla_post[j * 4 + i], "b-", label="INLA")
     if xlim is not None:
@@ -1302,14 +1377,14 @@ def comparison_plots(
                 bw_method,
             )
         plt.show()
-
 ```
 
 ##### Plotting with simple parameters suggested in the paper
 
 ```python
-
-comparison_plots(inla_post, inla_pi_pts, samples, mu_gaussian, sigma_gaussian, bw_method=0.05)
+comparison_plots(
+    inla_post, inla_pi_pts, samples, mu_gaussian, sigma_gaussian, bw_method=0.05
+)
 ```
 
 ##### What if patients never progress?
@@ -1331,7 +1406,7 @@ mu1_true = np.array([32, 12, 800, 48])
 params = np.stack((mu0_true, mu1_true), axis=-1)
 rawdata = simulate_dataset(10, *params)
 data = sufficient_stats(rawdata, max_n_months)
-print(data[:,1].sum())
+print(data[:, 1].sum())
 ```
 
 ```python
@@ -1345,7 +1420,9 @@ mu_gaussian, sigma_gaussian = gaussian_posteriors(data)
 ```
 
 ```python
-inla_post, _, inla_pi_pts, _ = inla_posteriors(data, mu_gaussian, sigma_gaussian, w=30, N=501)
+inla_post, _, inla_pi_pts, _ = inla_posteriors(
+    data, mu_gaussian, sigma_gaussian, w=30, N=501
+)
 ```
 
 ```python
@@ -1365,15 +1442,14 @@ single_comparison_plot(
     mu_gaussian,
     sigma_gaussian,
     bw_method=0.002,
-    xlim=[0, 200]
+    xlim=[0, 200],
 )
 plt.show()
-
 ```
 
 ```python
-arm = 'C'
-p_name = 'd2'
+arm = "C"
+p_name = "d2"
 i = 1
 j = 0
 plt.figure(figsize=(6, 6))
@@ -1389,18 +1465,19 @@ single_comparison_plot(
     sigma_gaussian,
     bw_method=0.05,
     xlim=[0, 25],
-    include_prior=True
+    include_prior=True,
 )
 plt.show()
 ```
 
 ```python
-
 # Note that the "Progression" plots here are wrong because bw_method is too
 # high, but if we use a bw_method low enough for those figures, it'll break the
 # other plots. The simple solution is to use a per-plot bw_method value, but
 # that is more work.
-comparison_plots(inla_post, inla_pi_pts, samples, mu_gaussian, sigma_gaussian, bw_method=0.01)
+comparison_plots(
+    inla_post, inla_pi_pts, samples, mu_gaussian, sigma_gaussian, bw_method=0.01
+)
 ```
 
 ##### What if patients all die very quickly before progression?
@@ -1413,14 +1490,18 @@ mu1_true = np.array([1.0, 12, 12.25, 48])
 params = np.stack((mu0_true, mu1_true), axis=-1)
 rawdata = simulate_dataset(10, *params)
 data = sufficient_stats(rawdata, max_n_months)
-print(data[:,1].sum())
+print(data[:, 1].sum())
 # data = data[:0]
 mcmc.run(rng_key, data)
 samples = mcmc.get_samples()
 mu_gaussian, sigma_gaussian = gaussian_posteriors(data)
-inla_post, _, inla_pi_pts, _ = inla_posteriors(data, mu_gaussian, sigma_gaussian, w=30, N=501)
+inla_post, _, inla_pi_pts, _ = inla_posteriors(
+    data, mu_gaussian, sigma_gaussian, w=30, N=501
+)
 ```
 
 ```python
-comparison_plots(inla_post, inla_pi_pts, samples, mu_gaussian, sigma_gaussian, bw_method=0.01)
+comparison_plots(
+    inla_post, inla_pi_pts, samples, mu_gaussian, sigma_gaussian, bw_method=0.01
+)
 ```

@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 n = 50
 p = 0.2
 thresh = 16
-print('true type I error', 1 - scipy.stats.binom.cdf(thresh - 1, n, p))
+print("true type I error", 1 - scipy.stats.binom.cdf(thresh - 1, n, p))
 
 niter = 1
 ntests = 100000
@@ -46,10 +46,14 @@ for i in range(niter):
     reject = samples >= thresh
     typeI_sum = jnp.sum(reject)
     typeI_est = typeI_sum / nsims
-    typeI_CI = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum) - typeI_est
+    typeI_CI = (
+        scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum) - typeI_est
+    )
     upper99 = typeI_est + typeI_CI
 
-    test_ests[i, :] = jnp.mean(scipy.stats.binom.rvs(n, p, size=(ntests,nsims)) > thresh, axis=-1)
+    test_ests[i, :] = jnp.mean(
+        scipy.stats.binom.rvs(n, p, size=(ntests, nsims)) > thresh, axis=-1
+    )
     n_failures[i] = jnp.sum(test_ests > upper99)
 ```
 
@@ -77,11 +81,11 @@ typeI_est, typeI_CI
 
 ```python
 plt.hist(test_ests.flatten())
-plt.axvline(upper99, color='r', label='CP bound')
-plt.axvline(upper99_2, color='r', label='CP bound 2')
-plt.axvline(empirical99, color='k', label='empirical 99th percentile')
-plt.xlabel('type I error')
-plt.ylabel('count')
+plt.axvline(upper99, color="r", label="CP bound")
+plt.axvline(upper99_2, color="r", label="CP bound 2")
+plt.axvline(empirical99, color="k", label="empirical 99th percentile")
+plt.xlabel("type I error")
+plt.ylabel("count")
 plt.legend()
 plt.show()
 ```
@@ -118,10 +122,22 @@ def C_numerical(t, p, holderq):
     eggq = jnp.abs(dg_vmap(t, xs)) ** holderq
     return sum(eggq * scipy.stats.binom.pmf(xs, n, p)) ** (1 / holderq)
 
+
 # Formula for C with q = 6 from wikipedia
 def C_wiki(p):
-    assert(holderq == 6)
-    return (n * p * (1 - p) * (1 - 30 * p * (1 - p) * (1 - 4 * p * (1 - p)) + 5 * n * p * (1 - p) * (5 - 26 * p * (1 - p)) + 15 * n ** 2 * p ** 2 * (1 - p) ** 2)) ** (1 / 6)
+    assert holderq == 6
+    return (
+        n
+        * p
+        * (1 - p)
+        * (
+            1
+            - 30 * p * (1 - p) * (1 - 4 * p * (1 - p))
+            + 5 * n * p * (1 - p) * (5 - 26 * p * (1 - p))
+            + 15 * n**2 * p**2 * (1 - p) ** 2
+        )
+    ) ** (1 / 6)
+
 
 # p = 0.2 corresponds to t=-1.386
 # choose theta = -1.1 as the edge of our tile.
@@ -139,7 +155,7 @@ C_numerical(tmax, pmax, holderq), C_wiki(pmax)
 np.random.seed(0)
 thresh = 20
 nsims = 500000
-print('true type I error', 1 - scipy.stats.binom.cdf(thresh - 1, n, p))
+print("true type I error", 1 - scipy.stats.binom.cdf(thresh - 1, n, p))
 samples = scipy.stats.binom.rvs(n, p, size=nsims)
 reject = samples >= thresh
 typeI_sum = jnp.sum(reject)
@@ -174,7 +190,7 @@ np.where(grad_est > min(grad_bound))
 ```python
 plt.hist(grad_est)
 for i in range(len(grad_bound)):
-    plt.axvline(grad_bound[i], color='r')
+    plt.axvline(grad_bound[i], color="r")
 plt.show()
 ```
 

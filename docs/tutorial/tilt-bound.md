@@ -53,22 +53,26 @@ where $H$ is the rectangular tile associated with $\theta_0$.
 Suppose that the test has a Type I Error of $f(\theta_0)$.
 
 ```python
-n = 350                                 # size
-theta_0 = np.array([-1., 0., 0.5])      # sim point
-f0 = 0.01                               # Type I Error at theta_0
+n = 350  # size
+theta_0 = np.array([-1.0, 0.0, 0.5])  # sim point
+f0 = 0.01  # Type I Error at theta_0
 
 # Create corners of the tile with a given max radius.
 radius = 0.1
-v_coords = [[-1., 1.]] * theta_0.shape[0]
-mgrid = np.meshgrid(*v_coords, indexing='ij')
-vs = radius * np.concatenate([coord.reshape(-1,1) for coord in mgrid], axis=1)
+v_coords = [[-1.0, 1.0]] * theta_0.shape[0]
+mgrid = np.meshgrid(*v_coords, indexing="ij")
+vs = radius * np.concatenate([coord.reshape(-1, 1) for coord in mgrid], axis=1)
 ```
 
 We can compute the forward Tilt-Bound by calling `tilt_bound_fwd_tile` with the above information and the hyperparameter $q$.
 
 ```python
 binomial.tilt_bound_fwd_tile(
-    q=2.5, n=n, theta_0=theta_0, vs=vs, f0=f0,
+    q=2.5,
+    n=n,
+    theta_0=theta_0,
+    vs=vs,
+    f0=f0,
 )
 ```
 
@@ -78,7 +82,11 @@ but if we changed $q$ to a different value, the bound could potentially explode.
 
 ```python
 binomial.tilt_bound_fwd_tile(
-    q=10, n=n, theta_0=theta_0, vs=vs, f0=f0,
+    q=10,
+    n=n,
+    theta_0=theta_0,
+    vs=vs,
+    f0=f0,
 )
 ```
 
@@ -87,7 +95,7 @@ based on the other inputs.
 
 ```python
 fwd_solver = binomial.TileForwardQCPSolver(n=n, tol=1e-6)
-q_opt = fwd_solver.solve(theta_0=theta_0, vs=vs, a=f0) # optimal q
+q_opt = fwd_solver.solve(theta_0=theta_0, vs=vs, a=f0)  # optimal q
 q_opt
 ```
 
@@ -96,12 +104,16 @@ indeed achieves the minimum value.
 
 ```python
 def _sanity_check_fwd_solver():
-    q_grid = np.linspace(1+1e-6, 4, 1000)
-    bound_vmap = jax.vmap(binomial.tilt_bound_fwd_tile, in_axes=(0, None, None, None, None))
+    q_grid = np.linspace(1 + 1e-6, 4, 1000)
+    bound_vmap = jax.vmap(
+        binomial.tilt_bound_fwd_tile, in_axes=(0, None, None, None, None)
+    )
     bounds = bound_vmap(q_grid, n, theta_0, vs, f0)
     opt_bound = binomial.tilt_bound_fwd_tile(q_opt, n, theta_0, vs, f0)
-    plt.plot(q_grid, bounds, '--')
-    plt.plot(q_opt, opt_bound, 'r.')
+    plt.plot(q_grid, bounds, "--")
+    plt.plot(q_opt, opt_bound, "r.")
+
+
 _sanity_check_fwd_solver()
 ```
 
@@ -120,10 +132,10 @@ Assume that we have access to the Type I Error values at each of the `thetas`.
 
 ```python
 gr = pygrid.make_cartesian_grid_range(
-    size=100, 
-    lower=-np.ones(2), 
-    upper=np.ones(2), 
-    grid_sim_size=0, # dummy for now
+    size=100,
+    lower=-np.ones(2),
+    upper=np.ones(2),
+    grid_sim_size=0,  # dummy for now
 )
 thetas = gr.thetas().T
 subset = thetas[:, 0] >= thetas[:, 1]
@@ -139,11 +151,12 @@ def simple_TIE(n, theta, alpha):
     z_crit = scipy.stats.norm.isf(alpha)
     return scipy.stats.norm.sf(z_crit - mean)
 
-f0s = simple_TIE(n, thetas, 0.025) 
+
+f0s = simple_TIE(n, thetas, 0.025)
 ```
 
 ```python
-sc = plt.scatter(thetas[:, 0], thetas[:, 1], c=f0s, marker='.')
+sc = plt.scatter(thetas[:, 0], thetas[:, 1], c=f0s, marker=".")
 plt.colorbar(sc)
 ```
 
@@ -165,20 +178,26 @@ def tilt_bound_fwd_tile_opt(n, t, v, f0, fwd_solver):
     q_opt = fwd_solver.solve(t, v, f0)
     return q_opt, binomial.tilt_bound_fwd_tile(q_opt, n, t, v, f0)
 
-tilt_bound_fwd_tile_jvmap = jax.jit(jax.vmap(
-    lambda n, t, v, f0: tilt_bound_fwd_tile_opt(n, t, v, f0, fwd_solver)[-1],
-    in_axes=(None, 0, 0, 0),
-))
-```
 
-```python
-bounds = tilt_bound_fwd_tile_jvmap(
-    n, thetas, vertices, f0s,
+tilt_bound_fwd_tile_jvmap = jax.jit(
+    jax.vmap(
+        lambda n, t, v, f0: tilt_bound_fwd_tile_opt(n, t, v, f0, fwd_solver)[-1],
+        in_axes=(None, 0, 0, 0),
+    )
 )
 ```
 
 ```python
-sc = plt.scatter(thetas[:,0], thetas[:,1], c=bounds, marker='.')
+bounds = tilt_bound_fwd_tile_jvmap(
+    n,
+    thetas,
+    vertices,
+    f0s,
+)
+```
+
+```python
+sc = plt.scatter(thetas[:, 0], thetas[:, 1], c=bounds, marker=".")
 plt.colorbar(sc)
 ```
 
@@ -196,13 +215,17 @@ bwd_solver = binomial.TileBackwardQCPSolver(n=n)
 
 ```python
 def _sanity_check_bwd_solver():
-    q_grid = np.linspace(1+1e-6, 4, 1000)
-    bound_vmap = jax.vmap(binomial.tilt_bound_bwd_tile, in_axes=(0, None, None, None, None))
+    q_grid = np.linspace(1 + 1e-6, 4, 1000)
+    bound_vmap = jax.vmap(
+        binomial.tilt_bound_bwd_tile, in_axes=(0, None, None, None, None)
+    )
     bounds = bound_vmap(q_grid, n, theta_0, vs, f0)
     q_opt = bwd_solver.solve(theta_0, vs, f0)
     opt_bound = binomial.tilt_bound_bwd_tile(q_opt, n, theta_0, vs, f0)
-    plt.plot(q_grid, bounds, '--')
-    plt.plot(q_opt, opt_bound, 'r.')
+    plt.plot(q_grid, bounds, "--")
+    plt.plot(q_opt, opt_bound, "r.")
+
+
 _sanity_check_bwd_solver()
 ```
 
@@ -222,20 +245,26 @@ def tilt_bound_bwd_tile_opt(n, t, v, alpha, bwd_solver):
     q_opt = bwd_solver.solve(t, v, alpha)
     return q_opt, binomial.tilt_bound_bwd_tile(q_opt, n, t, v, alpha)
 
-tilt_bound_bwd_tile_jvmap = jax.jit(jax.vmap(
-    lambda n, t, v, alpha: tilt_bound_bwd_tile_opt(n, t, v, alpha, bwd_solver)[-1],
-    in_axes=(None, 0, 0, 0),
-))
+
+tilt_bound_bwd_tile_jvmap = jax.jit(
+    jax.vmap(
+        lambda n, t, v, alpha: tilt_bound_bwd_tile_opt(n, t, v, alpha, bwd_solver)[-1],
+        in_axes=(None, 0, 0, 0),
+    )
+)
 ```
 
 ```python
 alphas = jnp.full(thetas.shape[0], 0.025)
 bounds_bwd = tilt_bound_bwd_tile_jvmap(
-    n, thetas, vertices, alphas,
+    n,
+    thetas,
+    vertices,
+    alphas,
 )
 ```
 
 ```python
-sc = plt.scatter(thetas[:,0], thetas[:,1], c=bounds_bwd, marker='.')
+sc = plt.scatter(thetas[:, 0], thetas[:, 1], c=bounds_bwd, marker=".")
 plt.colorbar(sc)
 ```

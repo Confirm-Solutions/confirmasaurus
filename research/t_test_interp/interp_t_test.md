@@ -15,6 +15,7 @@ jupyter:
 ```python
 # this sets up autoreload and some plotting configurations
 import outlaw.nb_util as nb_util
+
 nb_util.setup_nb()
 ```
 
@@ -35,10 +36,13 @@ import scipy.stats
 ```python
 # simulate 20 gaussians as our data
 n = 20
+
+
 def simulate(nsims, mu, sig):
     arm1 = np.random.normal(0, 1, size=(nsims, n))
     arm2 = np.random.normal(mu, sig, size=(nsims, n))
     return arm1, arm2
+
 
 # we're going to use the scipy.stats.ttest_ind function as the baseline correct
 # answer to make sure the jax implementation is correct
@@ -89,7 +93,6 @@ scipy_res = scipy.stats.ttest_ind(arm1, arm2, equal_var=False, axis=1)
 my_t, my_p = jax.jit(jax_ttest)(arm1[0], arm2[0])
 np.testing.assert_allclose(my_t, scipy_res[0], atol=1e-5)
 np.testing.assert_allclose(my_p, scipy_res[1], atol=1e-5)
-
 ```
 
 ```python
@@ -101,12 +104,21 @@ def sim_and_compute(key, nsims, mu2, sig2):
     n_rejections = jnp.sum(reject)
     return n_rejections
 
+
 nsims = 10000
 # Construct a grid mu in [-1, 2] and sig in [0.1, 3]
 mus = np.linspace(-1, 2, 31)
 sigs = np.linspace(0.1, 3, 30)
-jax_reject_f = jax.jit(jax.vmap(jax.vmap(sim_and_compute, in_axes=(0, None, None, 0)), in_axes=(0, None, 0, None)), static_argnums=(1,))
-keys = jax.random.split(jax.random.PRNGKey(0), mus.shape[0] * sigs.shape[0]).reshape((mus.shape[0], sigs.shape[0], 2))
+jax_reject_f = jax.jit(
+    jax.vmap(
+        jax.vmap(sim_and_compute, in_axes=(0, None, None, 0)),
+        in_axes=(0, None, 0, None),
+    ),
+    static_argnums=(1,),
+)
+keys = jax.random.split(jax.random.PRNGKey(0), mus.shape[0] * sigs.shape[0]).reshape(
+    (mus.shape[0], sigs.shape[0], 2)
+)
 reject_grid = jax_reject_f(keys, nsims, mus, sigs)
 ```
 
@@ -127,7 +139,7 @@ plt.show()
 # a distribution of the error for these points.
 n_test = 2000
 rand_pts = np.random.uniform(size=(n_test, 2))
-# The sigma 
+# The sigma
 rand_pts[:, 1] += 0.1
 ```
 
@@ -138,14 +150,20 @@ rand_pts[:, 1] += 0.1
 nsims_test = nsims * 50
 test_reject = np.empty(n_test)
 keys_test = jax.random.split(jax.random.PRNGKey(1), n_test)
-jax_test_f = jax.jit(jax.vmap(sim_and_compute, in_axes=(0, None, 0, 0)), static_argnums=(1,))
+jax_test_f = jax.jit(
+    jax.vmap(sim_and_compute, in_axes=(0, None, 0, 0)), static_argnums=(1,)
+)
 test_reject = np.empty(n_test)
 baseline_reject = np.empty(n_test)
 chunk_size = 10
 for i in range(0, n_test, chunk_size):
     end = min(n_test, i + chunk_size)
-    test_reject[i:end] = jax_test_f(keys_test[i:end], nsims_test, rand_pts[i:end, 0], rand_pts[i:end, 1])
-    baseline_reject[i:end] = jax_test_f(keys_test[i:end], nsims, rand_pts[i:end, 0], rand_pts[i:end, 1])
+    test_reject[i:end] = jax_test_f(
+        keys_test[i:end], nsims_test, rand_pts[i:end, 0], rand_pts[i:end, 1]
+    )
+    baseline_reject[i:end] = jax_test_f(
+        keys_test[i:end], nsims, rand_pts[i:end, 0], rand_pts[i:end, 1]
+    )
 ```
 
 ```python
@@ -155,16 +173,18 @@ for i in range(0, n_test, chunk_size):
 # 3) RBF interpolation
 
 interp_reject_linear = scipy.interpolate.interpn(
-    (mus, sigs), reject_grid, rand_pts, method='linear'
+    (mus, sigs), reject_grid, rand_pts, method="linear"
 )
 interp_reject_spline = scipy.interpolate.interpn(
-    (mus, sigs), reject_grid, rand_pts, method='splinef2d'
+    (mus, sigs), reject_grid, rand_pts, method="splinef2d"
 )
-mu_grid, sig_grid = np.meshgrid(mus, sigs, indexing='ij')
+mu_grid, sig_grid = np.meshgrid(mus, sigs, indexing="ij")
 grid = np.stack((mu_grid.ravel(), sig_grid.ravel()), axis=1)
 
 interp_rbf = scipy.interpolate.RBFInterpolator(
-    grid, reject_grid.ravel(), neighbors=30, #, kernel="quintic"
+    grid,
+    reject_grid.ravel(),
+    neighbors=30,  # , kernel="quintic"
 )(rand_pts)
 ```
 
@@ -177,16 +197,16 @@ from scipy.stats import gaussian_kde
 
 linear_err = (test_reject / nsims_test) - (interp_reject_linear / nsims)
 spline_err = (test_reject / nsims_test) - (interp_reject_spline / nsims)
-rbf_err = (test_reject / nsims_test) - (interp_rbf / nsims) 
-baseline_err = (test_reject / nsims_test) - (baseline_reject / nsims) 
+rbf_err = (test_reject / nsims_test) - (interp_rbf / nsims)
+baseline_err = (test_reject / nsims_test) - (baseline_reject / nsims)
 xs = np.linspace(-0.015, 0.015, 200)
-plt.plot(xs, gaussian_kde(linear_err)(xs), label='linear')
-plt.plot(xs, gaussian_kde(spline_err)(xs), label='spline')
-plt.plot(xs, gaussian_kde(rbf_err)(xs), label='rbf')
-plt.plot(xs, gaussian_kde(baseline_err)(xs), 'k-', label='sims')
+plt.plot(xs, gaussian_kde(linear_err)(xs), label="linear")
+plt.plot(xs, gaussian_kde(spline_err)(xs), label="spline")
+plt.plot(xs, gaussian_kde(rbf_err)(xs), label="rbf")
+plt.plot(xs, gaussian_kde(baseline_err)(xs), "k-", label="sims")
 plt.legend()
-plt.ylabel('density')
-plt.xlabel('fractional error in rejection rate')
+plt.ylabel("density")
+plt.xlabel("fractional error in rejection rate")
 plt.show()
 ```
 
@@ -212,7 +232,6 @@ plt.show()
 ```
 
 ```python
-
 # kde_reject = scipy.stats.gaussian_kde(dataset.T, weights=reject_grid.ravel())
 # kde_interp_reject = kde_reject(rand_pts.T)
 # kde_err = (sample_reject / nsims_test) - (kde_interp_reject / nsims)

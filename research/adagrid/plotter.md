@@ -14,6 +14,7 @@ jupyter:
 
 ```python
 import confirm.outlaw.nb_util as nb_util
+
 nb_util.setup_nb()
 
 import matplotlib.pyplot as plt
@@ -22,7 +23,8 @@ import jax.numpy as jnp
 import jax
 import scipy.spatial
 import pickle
-jax.config.update('jax_platform_name', 'cpu')
+
+jax.config.update("jax_platform_name", "cpu")
 import confirm.mini_imprint.lewis_drivers as lts
 import adastate
 import diagnostics
@@ -30,6 +32,7 @@ import diagnostics
 
 ```python
 from confirm.lewislib import lewis, batch
+
 name = "play"
 params = {
     "n_arms": 3,
@@ -53,7 +56,7 @@ params = {
     "cache_tables": f"./{name}/lei_cache.pkl",
 }
 lei_obj = lewis.Lewis45(**params)
-data, II, fp = adastate.load(name, 'latest')
+data, II, fp = adastate.load(name, "latest")
 ```
 
 ```python
@@ -66,7 +69,7 @@ P = adastate.AdaParams(
     nB_global=50,
     nB_tile=50,
     step_size=2**14,
-    tuning_min_idx=20
+    tuning_min_idx=20,
 )
 D = adastate.init_data(P, lei_obj, 0)
 ```
@@ -76,7 +79,7 @@ g, sim_sizes, bootstrap_cvs, _, _, alpha0 = data
 ```
 
 ```python
-worst_tile_idx = np.argmin(bootstrap_cvs[:,0])
+worst_tile_idx = np.argmin(bootstrap_cvs[:, 0])
 worst_tile = g.theta_tiles[worst_tile_idx]
 ```
 
@@ -96,15 +99,17 @@ tb = tb.reshape((nx, ny))
 
 ```python
 alt = np.logical_and(*[slc.dot(H.n) - H.c < 0 for H in g.null_hypos])
-plt.figure(figsize=(10,10))
+plt.figure(figsize=(10, 10))
 plt.scatter(slc_ravel[:, plot_dims[0]], slc_ravel[:, plot_dims[1]], c=alt, s=14)
 plt.colorbar()
 plt.show()
 ```
 
 ```python
-alt_space = (slc[...,1] > slc[...,0]) & (slc[...,2] > slc[...,0])
+alt_space = (slc[..., 1] > slc[..., 0]) & (slc[..., 2] > slc[..., 0])
 sym = slc[..., 2] > slc[..., 1]
+
+
 def alt_and_sym(f):
     f[alt_space] = np.nan
     f2d = f.reshape((nx, ny))
@@ -112,13 +117,13 @@ def alt_and_sym(f):
 ```
 
 ```python
-lamstar = bootstrap_cvs[idx,0]
+lamstar = bootstrap_cvs[idx, 0]
 alt_and_sym(lamstar)
 alt_and_sym(tb)
 ```
 
 ```python
-plt.figure(figsize=(10,10))
+plt.figure(figsize=(10, 10))
 plt.scatter(full_grid[:, plot_dims[0]], full_grid[:, plot_dims[1]], c=tb, s=14)
 plt.colorbar()
 plt.show()
@@ -134,7 +139,7 @@ z = tb.reshape((nx, ny)) * 100
 levels = np.linspace(0, 2.5, 11)
 
 cmap = None
-plt.figure(figsize=(6,6), constrained_layout=True)
+plt.figure(figsize=(6, 6), constrained_layout=True)
 cbar_target = plt.contourf(x, y, z, levels=levels, extend="both", cmap=cmap)
 plt.contour(
     x,
@@ -147,7 +152,7 @@ plt.contour(
     extend="both",
 )
 cbar = plt.colorbar(cbar_target)
-cbar.set_label('\% Type I Error')
+cbar.set_label("\% Type I Error")
 plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
 plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
 plt.xlabel(r"$\theta_1$")
@@ -158,8 +163,15 @@ plt.show()
 ```
 
 ```python
-plt.figure(figsize=(10,10))
-plt.scatter(full_grid[:, plot_dims[0]], full_grid[:, plot_dims[1]], c=lamstar, vmin=0, vmax=0.2, s=14)
+plt.figure(figsize=(10, 10))
+plt.scatter(
+    full_grid[:, plot_dims[0]],
+    full_grid[:, plot_dims[1]],
+    c=lamstar,
+    vmin=0,
+    vmax=0.2,
+    s=14,
+)
 plt.colorbar()
 plt.show()
 ```
