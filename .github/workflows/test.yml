@@ -56,7 +56,7 @@ jobs:
         run: poetry install
 
       - name: Run all pre-commit checks on the full repo!
-        run: poetry run pre-commit run --all-files
+        run: poetry run pre-commit run --color=always --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
 
       - name: Pytest
         run: poetry run pytest ./tests
