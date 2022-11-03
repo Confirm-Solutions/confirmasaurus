@@ -5,6 +5,7 @@ dependencies:
   - pip
   - jupyterlab
   - matplotlib
+  - pandas
   - sympy
   - pytest
   - pre-commit
@@ -13,9 +14,6 @@ dependencies:
   - isort
   - jupytext
   - line_profiler
-  - pandas
-  - radian # used for VSCode + R
-  - ipywidgets
   - pip:
-    - poetry=1.2.2
+    - poetry==1.2.2
     - memory_profiler

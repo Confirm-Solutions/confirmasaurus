@@ -15,12 +15,10 @@ RUN ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh \
     && echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc \
     && echo "conda activate base" >> ~/.bashrc
 
-RUN mamba install --yes --freeze-installed \
-        typer numpy scipy sympy matplotlib pip \
-    && pip install \
-        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
-          "jax[cuda]" \
-          "numpyro[cuda]" \
+COPY environment.yml pyproject.toml poetry.lock /tmp/conda-tmp/
+RUN mamba env update -n base -f /tmp/conda-tmp/environment.yml \
+    && poetry install \
+    && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge
 

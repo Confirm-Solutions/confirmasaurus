@@ -161,7 +161,7 @@ RUN mkdir -p $NVM_DIR \
 # Create a sagemath conda environment.
 # Since the environment is part of our conda installation, the resulting
 # jupyter kernel can be selected from VSCode's kernel selector.
-COPY environment*.yml /tmp/conda-tmp/
+COPY environment-dev.yml pyproject.toml poetry.lock /tmp/conda-tmp/
 RUN mamba create -n sagemath -y sage \
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
@@ -172,8 +172,8 @@ RUN mamba create -n sagemath -y sage \
 #
 # NOTE: installing g++ gcc binutils through conda results in conda activate
 # being slightly slow. this is weird and kind of a bummer.
-    && mamba env update -n base -f /tmp/conda-tmp/environment.yml \
     && mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml \
+    && poetry install \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge \

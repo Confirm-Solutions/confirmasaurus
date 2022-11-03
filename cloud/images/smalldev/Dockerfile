@@ -67,9 +67,9 @@ ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
 ENV LD_LIBRARY_PATH /usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
 ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
-COPY environment*.yml /tmp/conda-tmp/
-RUN mamba env update -n base -f /tmp/conda-tmp/environment.yml \
-    && mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml \
+COPY environment-dev.yml pyproject.toml poetry.lock /tmp/conda-tmp/
+RUN mamba env update -n base -f /tmp/conda-tmp/environment-dev.yml \
+    && poetry install \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
     && pip cache purge
