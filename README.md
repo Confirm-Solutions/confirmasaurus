@@ -14,7 +14,7 @@ Directories:
 
 ## Getting set up
 
-See here for a local set up. Look at the [cloud documentation for setting up on AWS or GitHub Codespaces].
+See here for a local set up. Look at the [cloud documentation for setting up on AWS or GitHub Codespaces](cloud/README.md).
 
 To get a fully functional development environment...
 
@@ -30,19 +30,20 @@ To get a fully functional development environment...
    git clone git@github.com:Confirm-Solutions/confirmasaurus.git
    ```
 
-3. Set up your confirm conda environment (note that you may substitute `mamba`
-   here for `conda` and the install will be substantially faster). The list of
+3. Set up your confirm conda environment. The list of
    packages that will be installed inside your conda environment can be seen in
-   the [`environment.yml` file](environment.yml).
+   the [`environment.yml` file](env/environment.yml).
 
    ```bash
-   cd confirm/
+   cd confirm/env
    mamba update -y conda
+   # replace jaxcpu with jaxcuda here if you want a CUDA-enabled install.
+   cp requirements-jaxcpu.txt requirements-jax.txt
    mamba env create
    conda activate confirm
-   # This final line is only necessary if you want "extra" tools that are
-   # helpful for development but shouldn't be dependencies of any of our main
-   # code.
+   # This final line installs tools that are very helpful for development but
+   # aren't dependencies of any of our main # code. Things like jupyter,
+   # pytest, and black.
    conda env update -n confirm -f environment-dev.yml
    ```
 

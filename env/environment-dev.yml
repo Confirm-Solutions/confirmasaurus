@@ -1,0 +1,18 @@
+channels:
+  - conda-forge
+dependencies:
+  - jupyterlab
+  - matplotlib
+  - sympy
+  - pytest
+  - pre-commit
+  - black
+  - flake8
+  - isort
+  - jupytext
+  - line_profiler
+  - pandas
+  - radian # used for VSCode + R
+  - ipywidgets
+  - pip:
+    - memory_profiler
