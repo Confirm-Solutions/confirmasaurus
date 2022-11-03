@@ -25,9 +25,6 @@ jobs:
         python-version: ["3.10"]
     name: Test (${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash -l {0}
     steps:
 
       - uses: actions/checkout@v3
@@ -36,7 +33,7 @@ jobs:
         run: pipx install poetry
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'poetry'
@@ -53,7 +50,8 @@ jobs:
         id: precommitcache
 
       - name: Update environment
-        run: poetry install
+        run: |
+          poetry env use ${{ matrix.python-version }} && poetry install
 
       - name: Run all pre-commit checks on the full repo!
         run: poetry run pre-commit run --all-files
