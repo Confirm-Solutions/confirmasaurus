@@ -13,25 +13,25 @@ http_archive(
 # GoogleTest/GoogleMock framework. Used by most unit-tests
 http_archive(
     name = "com_google_googletest",
-    sha256 = "205ddbea89a0dff059cd681f3ec9b0a6c12de7036a04cd57f0254105257593d9",
-    strip_prefix = "googletest-13a433a94dd9c7e55907d7a9b75f44ff82f309eb",
-    urls = ["https://github.com/google/googletest/archive/13a433a94dd9c7e55907d7a9b75f44ff82f309eb.zip"],
+    sha256 = "8ed50f019870705ad681bde9131c7d2e3dae8431d837733bd163492d9a99bcd8",
+    strip_prefix = "googletest-66366cea569337c53c7ef1c72f84b566746e465e",
+    urls = ["https://github.com/google/googletest/archive/66366cea569337c53c7ef1c72f84b566746e465e.zip"],
 )
 
 # Google benchmark
 http_archive(
     name = "com_github_google_benchmark",
-    sha256 = "59f918c8ccd4d74b6ac43484467b500f1d64b40cc1010daa055375b322a43ba3",
-    strip_prefix = "benchmark-16703ff83c1ae6d53e5155df3bb3ab0bc96083be",
-    urls = ["https://github.com/google/benchmark/archive/16703ff83c1ae6d53e5155df3bb3ab0bc96083be.zip"],
+    sha256 = "8019aa35e81e666fccd6815af6bae52b1b59fb756faad887d46ccaed9d37cef6",
+    strip_prefix = "benchmark-398a8ac2e8e0b852fa1568dc1c8ebdfc743a380a",
+    urls = ["https://github.com/google/benchmark/archive/398a8ac2e8e0b852fa1568dc1c8ebdfc743a380a.zip"],
 )
 
 # Rules CC
 http_archive(
     name = "rules_cc",
-    sha256 = "9a446e9dd9c1bb180c86977a8dc1e9e659550ae732ae58bd2e8fd51e15b2c91d",
-    strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
-    urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
+    sha256 = "30c28683e4406e49795750162fe2c7be5f503f72d8c708b75f06d36b0c1e91ed",
+    strip_prefix = "rules_cc-35fb29866e9833ed918f422215155b8bafddb356",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/35fb29866e9833ed918f422215155b8bafddb356.zip"],
 )
 
 # PyBind11 Bazel
@@ -79,9 +79,9 @@ http_archive(
 
 http_archive(
     name = "rules_fuzzing",
-    sha256 = "a5734cb42b1b69395c57e0bbd32ade394d5c3d6afbfe782b24816a96da24660d",
-    strip_prefix = "rules_fuzzing-0.1.1",
-    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.1.1.zip"],
+    sha256 = "d9002dd3cd6437017f08593124fdd1b13b3473c7b929ceb0e60d317cb9346118",
+    strip_prefix = "rules_fuzzing-0.3.2",
+    urls = ["https://github.com/bazelbuild/rules_fuzzing/archive/v0.3.2.zip"],
 )
 
 # Protobuf
@@ -102,9 +102,9 @@ http_archive(
 
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "2e5e6755e02b0275b1333199c2a128a57c0d48ec8838fdca9baccf3b0e939ad6",
-    strip_prefix = "tcmalloc-a3717bc4fcade63c642f9b991fbdd64299896762",
-    urls = ["https://github.com/google/tcmalloc/archive/a3717bc4fcade63c642f9b991fbdd64299896762.zip"],
+    sha256 = "9263a4f25cca9b896cf503431ced512b1a272f1a3bf036c33f90e3060904031d",
+    strip_prefix = "tcmalloc-293b24d62f07c27e1aedb2e1c3fd57c6b23b632f",
+    urls = ["https://github.com/google/tcmalloc/archive/293b24d62f07c27e1aedb2e1c3fd57c6b23b632f.zip"],
 )
 
 # ====================================
