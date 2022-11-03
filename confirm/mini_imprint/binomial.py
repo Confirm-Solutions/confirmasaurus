@@ -7,7 +7,6 @@ import numpy as np
 import numpyro.distributions as dist
 import scipy.special
 import scipy.stats
-import sympy as sp
 
 
 def binomial_accumulator(rejection_fnc):
@@ -259,28 +258,6 @@ def second_order_bound(v_sq, theta_tiles, tile_radii, n_arm_samples):
     return d2u
 
 
-def _build_odi_constant_func(q: int):
-    """
-    Construct an evaluator for the 1D integration constant of the Holder ODI:
-
-    E[||grad log p_theta (X)||^q]
-
-    This is specialized to the binomial case and would need to be re-derived
-    for another model.
-
-    Args:
-        q: The moment to compute. Must be an integer greater than 1.
-    """
-    sp_p, sp_t, sp_n = sp.var("p, t, n")
-    binomial_mgf = (1 - sp_p + sp_p * sp.exp(sp_t)) ** sp_n
-    mean = sp.diff(binomial_mgf, sp_t).subs(sp_t, 0)
-    central_moment = (
-        sp.diff(sp.exp(-mean * sp_t) * binomial_mgf, sp_t, q).subs(sp_t, 0).simplify()
-    )
-    lambdify_args = [sp_n, sp_p]
-    return sp.lambdify(lambdify_args, central_moment, "numpy")
-
-
 def optimal_centering(f, p):
     return 1 / (1 + ((1 - f) / f) ** (1 / (p - 1)))
 
@@ -288,7 +265,7 @@ def optimal_centering(f, p):
 constant_func_cache = {}
 
 
-def _build_odi_constant_func_numerical(q: float):
+def _build_odi_constant_func(q: float):
     """
     Fully numerical integration constant evaluator. This can be useful for
     non-integer q.
@@ -420,7 +397,7 @@ def holder_odi_bound(
         The Holder ODI type I error bound for each tile.
     """
     if C_f is None:
-        C_f = _build_odi_constant_func_numerical(holderq)
+        C_f = _build_odi_constant_func(holderq)
     Cqpp = _calc_Cqpp(
         theta_tiles,
         tile_corners,
@@ -434,7 +411,7 @@ def holder_odi_bound(
 
 @partial(jax.jit, static_argnums=(3, 4))
 def invert_bound(bound, theta_tiles, vertices, n_arm_samples, holderq):
-    C_f = _build_odi_constant_func_numerical(holderq)
+    C_f = _build_odi_constant_func(holderq)
     Cqpp = _calc_Cqpp(theta_tiles, vertices, n_arm_samples, holderq, C_f)
     pointwise_bound = (bound ** (1 / holderq) - Cqpp / holderq) ** holderq
     return jnp.where(pointwise_bound > bound, 0.0, pointwise_bound)
