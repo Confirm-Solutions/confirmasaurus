@@ -48,9 +48,11 @@ To get a fully functional development environment...
 
 ## Other useful notes:
 
+- [Packaging and dependency management tools](./docs/packaging.md)
 - [Using our tools on the cloud (AWS, Codespaces)](./cloud/README.md)
 - [Advice for dealing with our imprint subtree](./docs/git_subtree.md)
 - [Very rough coding standards](./docs/standards.md)
+- [Advice for using JAX](./docs/jax_patterns.md)
 
 ## A list of useful notebook:
 

@@ -31,19 +31,15 @@ jobs:
     steps:
 
       - uses: actions/checkout@v2
+      
+      - name: Install poetry
+        run: pipx install poetry
 
-      # The conda setup follows the directions given here on how to cache
-      # environments.
-      # https://github.com/conda-incubator/setup-miniconda#caching-environments
-      - name: Setup Mambaforge
-        uses: conda-incubator/setup-miniconda@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
         with:
-          miniforge-variant: Mambaforge
-          miniforge-version: latest
-          auto-update-conda: true
-          activate-environment: anaconda-client-env
-          use-mamba: true
           python-version: ${{ matrix.python-version }}
+          cache: 'poetry'
 
       # Cache pre-commit files so it's fast!
       # based on https://pre-commit.com/#github-actions-example 
@@ -56,36 +52,14 @@ jobs:
           key: pre-commit|${{ env.PY }}|${{ hashFiles('.pre-commit-config.yaml') }}
         id: precommitcache
 
-      # We separately cache the environment because it's more volatile and we
-      # don't want to invalidate the pre-commit cache everytime the environment
-      # changes.
-      # NOTE: compared to the directions here, we do not include the date in
-      # the cache key because we are locking packages via poetry.lock. So,
-      # day-to-day updates will not affect us.
-      # https://github.com/conda-incubator/setup-miniconda#caching-environments
-      - name: Cache Packages
-        uses: actions/cache@v2
-        with:
-          path: ${{ env.CONDA }}/envs
-          key: conda-${{ runner.os }}--${{ runner.arch }}-${{ hashFiles('environment.yml', 'poetry.lock') }}-${{ env.CACHE_NUMBER }}
-        env:
-          # Increase this value to reset cache if environment.yml and poetry.lock have not changed.
-          CACHE_NUMBER: 1
-        id: packagecache
-
       - name: Update environment
-        run: |
-          mamba env update -n anaconda-client-env -f environment.yml
-          poetry install
-        if: steps.packagecache.outputs.cache-hit != 'true'
+        run: poetry install
 
       - name: Run all pre-commit checks on the full repo!
-        run: |
-          pre-commit run --all-files
+        run: poetry run pre-commit run --all-files
 
       - name: Pytest
-        run: |
-          pytest ./tests
+        run: poetry run pytest ./tests
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack
       #   if: failure() && github.event.repository.default_branch == github.event.workflow_run.head_branch
