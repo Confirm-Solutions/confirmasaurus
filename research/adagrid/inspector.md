@@ -35,7 +35,7 @@ from diagnostics import lamstar_histogram
 ```
 
 ```python
-name = "4d"
+name = "4d_full"
 params = {
     "n_arms": 4,
     "n_stage_1": 50,
@@ -79,6 +79,10 @@ alpha0_new = adastate.AdaRunner(P, lei_obj).batched_invert_bound(
     S.g.theta_tiles[idxs], S.g.vertices(idxs)
 )
 alpha0_new
+```
+
+```python
+alpha0_new, alpha0_new - S.alpha0[idxs]
 ```
 
 ## 11/1/2022
@@ -136,7 +140,7 @@ tile_report(cr.dangerous)
 ```
 
 ```python
-tile_report(cr.refine_dangerous)["sim_size"].min()
+tile_report(cr.refine_dangerous)
 ```
 
 ```python

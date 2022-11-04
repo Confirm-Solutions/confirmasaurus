@@ -163,7 +163,7 @@ TGF = TG.reshape(-1, 3)
 ```
 
 ```python
-nearby = tree.query_ball_point(TGF, 0.05)
+nearby = tree.query_ball_point(tgf, 0.05)
 nearby_count = [len(n) for n in nearby]
 ```
 

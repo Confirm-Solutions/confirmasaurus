@@ -26,6 +26,7 @@ import pickle
 
 jax.config.update("jax_platform_name", "cpu")
 import confirm.mini_imprint.lewis_drivers as lts
+from confirm.mini_imprint import grid
 import adastate
 import diagnostics
 ```
@@ -33,9 +34,9 @@ import diagnostics
 ```python
 from confirm.lewislib import lewis, batch
 
-name = "play"
+name = "4d_full"
 params = {
-    "n_arms": 3,
+    "n_arms": 4,
     "n_stage_1": 50,
     "n_stage_2": 100,
     "n_stage_1_interims": 2,
@@ -56,40 +57,119 @@ params = {
     "cache_tables": f"./{name}/lei_cache.pkl",
 }
 lei_obj = lewis.Lewis45(**params)
-data, II, fp = adastate.load(name, "latest")
 ```
 
 ```python
-P = adastate.AdaParams(
-    init_K=2**11,
-    n_K_double=8,
-    alpha_target=0.025,
-    grid_target=0.002,
-    bias_target=0.002,
-    nB_global=50,
-    nB_tile=50,
-    step_size=2**14,
-    tuning_min_idx=20,
+with open(f"./{name}/data_params.pkl", "rb") as f:
+    P, D = pickle.load(f)
+load_iter = "latest"
+S, load_iter, fn = adastate.load(name, load_iter)
+```
+
+```python
+with open(f"./{name}/storage_0.075.pkl", "rb") as f:
+    S_load = pickle.load(f)
+```
+
+```python
+S = adastate.AdaState(
+    grid.concat_grids(S.g, S_load.g),
+    np.concatenate((S.sim_sizes, S_load.sim_sizes), dtype=np.int32),
+    np.concatenate((S.todo, S_load.todo), dtype=bool),
+    adastate.TileDB(
+        np.concatenate((S.db.data, S_load.db.data), dtype=np.float32), S.db.slices
+    ),
 )
-D = adastate.init_data(P, lei_obj, 0)
 ```
 
 ```python
-g, sim_sizes, bootstrap_cvs, _, _, alpha0 = data
+worst_tile_idx = np.argmin(S.orig_lam)
+worst_tile = S.g.theta_tiles[worst_tile_idx]
+```
+
+## Tile density
+
+```python
+plot_dims = [2, 3]
+slc = diagnostics.build_2d_slice(S.g, worst_tile, plot_dims)
 ```
 
 ```python
-worst_tile_idx = np.argmin(bootstrap_cvs[:, 0])
-worst_tile = g.theta_tiles[worst_tile_idx]
+theta_tiles2 = S.g.theta_tiles.copy()
+theta_tiles2[:, 2] = S.g.theta_tiles[:, 3]
+theta_tiles2[:, 3] = S.g.theta_tiles[:, 2]
+sym_tiles1 = np.concatenate((S.g.theta_tiles, theta_tiles2))
+
+theta_tiles3 = sym_tiles1.copy()
+theta_tiles3[:, 1] = sym_tiles1[:, 2]
+theta_tiles3[:, 2] = sym_tiles1[:, 1]
+all_tiles = np.concatenate((sym_tiles1, theta_tiles3))
 ```
+
+```python
+tree = scipy.spatial.KDTree(all_tiles)
+```
+
+```python
+nearby = tree.query_ball_point(slc.reshape((-1, 4)), 0.04)
+nearby_count = [len(n) for n in nearby]
+```
+
+```python
+dist, idx = tree.query(slc.reshape((-1, 4)))
+```
+
+```python
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = np.array(dist).reshape(slc.shape[:2])
+z = np.log10(z)
+levels = np.linspace(-3.2, -1.4, 7)
+cntf = plt.contourf(x, y, z, levels=levels, cmap="viridis_r", extend="min")
+plt.contour(
+    x, y, z, levels=levels, colors="k", linestyles="-", linewidths=0.5, extend="min"
+)
+cbar = plt.colorbar(cntf)
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
+plt.show()
+```
+
+```python
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = np.array(nearby_count).reshape(slc.shape[:2])
+# z[z == 0] = z.T[z == 0]
+z = np.log10(z)
+levels = np.linspace(0, 5, 11)
+plt.title("$\log_{10}$(number of nearby tiles)")
+cntf = plt.contourf(x, y, z, levels=levels, extend="both")
+plt.contour(
+    x,
+    y,
+    z,
+    levels=levels,
+    colors="k",
+    linestyles="-",
+    linewidths=0.5,
+    extend="both",
+)
+cbar = plt.colorbar(cntf, ticks=np.arange(6))
+cbar.ax.set_yticklabels(["1", "10", "$10^2$", "$10^3$", "$10^4$", "$10^5$"])
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
+plt.show()
+```
+
+## Type I error
 
 ```python
 plot_dims = [1, 2]
-slc = diagnostics.build_2d_slice(g, worst_tile, plot_dims)
-slc_ravel = slc.reshape((-1, g.d))
+slc = diagnostics.build_2d_slice(S.g, worst_tile, plot_dims)
+slc_ravel = slc.reshape((-1, S.g.d))
 nx, ny, _ = slc.shape
-tb = diagnostics.eval_bound(lei_obj, g, sim_sizes, D, slc_ravel)
-tb = tb.reshape((nx, ny))
+# tb = diagnostics.eval_bound(lei_obj, S.g, S.sim_sizes, D, slc_ravel)
+# tb = tb.reshape((nx, ny))
 ```
 
 ```python
@@ -98,11 +178,15 @@ tb = tb.reshape((nx, ny))
 ```
 
 ```python
-alt = np.logical_and(*[slc.dot(H.n) - H.c < 0 for H in g.null_hypos])
+alt = np.logical_and(*[slc.dot(H.n) - H.c < 0 for H in S.g.null_hypos])
 plt.figure(figsize=(10, 10))
 plt.scatter(slc_ravel[:, plot_dims[0]], slc_ravel[:, plot_dims[1]], c=alt, s=14)
 plt.colorbar()
 plt.show()
+```
+
+```python
+
 ```
 
 ```python
