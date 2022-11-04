@@ -40,8 +40,7 @@
   // "forwardPorts": [],
   // Use 'postCreateCommand' to run commands after the container is created.
   // CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
-  // CONFIRM_FORCE_JAX_CUDA is required to prevent replacing jax[cuda] with jax[cpu] when building on a non-gpu machine
-  "onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 CONFIRM_FORCE_JAX_CUDA=1 ./install.sh",
+  "onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh",
   // Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
   // We are connecting as root because it simplifies things and there is no
   // strong reason to have isolation in this context.
