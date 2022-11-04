@@ -58,7 +58,7 @@ RUN apt-get update \
 # - https://code.visualstudio.com/docs/languages/r
 # the advice here is also useful: https://schiff.co.nz/blog/r-and-vscode/
 # NOTE: this could be easily split out as part of a multistage build
-# NOTE: radian repl is install throughed environment-dev.yml
+# NOTE: radian repl is install later via conda
 # NOTE: it is possible to install R through conda instead. I tried this, but it
 # adds a bunch of code to conda activate that results in conda activate running
 # SHOCKINGLY slowly: https://github.com/conda/conda/issues/8806
@@ -161,7 +161,7 @@ RUN mkdir -p $NVM_DIR \
 # Create a sagemath conda environment.
 # Since the environment is part of our conda installation, the resulting
 # jupyter kernel can be selected from VSCode's kernel selector.
-COPY environment-dev.yml pyproject.toml poetry.lock /tmp/conda-tmp/
+COPY environment.yml pyproject.toml poetry.lock /tmp/conda-tmp/
 RUN mamba create -n sagemath -y sage \
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
@@ -173,7 +173,8 @@ RUN mamba create -n sagemath -y sage \
 # NOTE: installing g++ gcc binutils through conda results in conda activate
 # being slightly slow. this is weird and kind of a bummer.
     && cd /tmp/conda-tmp/ \
-    && mamba env update -n base -f environment-dev.yml \
+    && mamba env update -n base -f environment.yml \
+    && mamba install -y radian \
     && poetry install \
     && cd / \
     && rm -rf /tmp/conda-tmp \

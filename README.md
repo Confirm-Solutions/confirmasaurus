@@ -30,20 +30,18 @@ To get a fully functional development environment...
    git clone git@github.com:Confirm-Solutions/confirmasaurus.git
    ```
 
-3. Set up your confirm conda environment. The list of
-   packages that will be installed inside your conda environment can be seen in
-   the [`environment-dev.yml` file](environment-dev.yml) (for development
-   dependencies) and in [`pyproject.toml`](pyproject.toml) (for critical
-   dependencies).
+3. Set up your confirm conda environment. The list of packages that will be
+   installed inside your conda environment can be seen
+   in [`pyproject.toml`](pyproject.toml).
 
    ```bash
    cd confirm/env
    mamba update -y conda
    # create a development virtual environment with useful tools
-   mamba env create -f environment-dev.yml
+   mamba env create
    conda activate confirm
-   # install the confirm package
-   poetry install
+   # install the confirm package plus development tools
+   poetry install --with=dev,test
    ```
 
 ## Other useful notes:
@@ -53,15 +51,3 @@ To get a fully functional development environment...
 - [Advice for dealing with our imprint subtree](./docs/git_subtree.md)
 - [Very rough coding standards](./docs/standards.md)
 - [Advice for using JAX](./docs/jax_patterns.md)
-
-## A list of useful notebook:
-
-It would be good to organize a little bit.
-
-- [Imprint tutorial](./imprint/research/berry/tutorial.ipynb)
-- [Intro to INLA](./research/berry/intro_to_inla.ipynb)
-- [Berry 2013 Imprint example](./research/berry/berry_imprint.ipynb)
-- [Working through getting the conditional full Laplace INLA working](./anarchy/conditional_inla.ipynb)
-- [Global optimization of the type I error](./anarchy/opt/opt.ipynb)
-- [Comparing against R-INLA](./research/outlaw_vs_rinla/outlaw.ipynb)
-- Messy survival analysis notebooks in research/survival replicating stuff in the Thall 2003 and Thall 2005 papers.

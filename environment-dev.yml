@@ -1,3 +1,4 @@
+name: confirm
 channels:
   - conda-forge
 dependencies:
@@ -7,8 +8,6 @@ dependencies:
   - matplotlib
   - pandas
   - sympy
-  - pytest
-  - pre-commit
   - black-jupyter
   - flake8
   - isort
