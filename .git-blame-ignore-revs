@@ -1,2 +1,5 @@
+# .git-blame-ignore-revs
 # Black + Jupyter (#119)
 b217cb58db62548b521f57578646fb50c57c93fb
+# Update precommit (#108)
+fb154865e816714a87c6a1298dd5718f2a869513
