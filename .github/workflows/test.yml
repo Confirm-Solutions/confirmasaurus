@@ -59,7 +59,7 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v34
 
-      - name: Run all pre-commit checks on the full repo!
+      - name: Run all pre-commit checks on change files.
         run: poetry run pre-commit run --color=always --files ${{ steps.changed-files.outputs.all_changed_files }}
 
       - name: Pytest
