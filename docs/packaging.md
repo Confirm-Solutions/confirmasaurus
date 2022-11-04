@@ -24,7 +24,7 @@ Despite being fairly small, we have a somewhat complicated dependency situation 
 
 1. We use conda/mamba to install python and manage virtual environments. See [`environment.yml`](../environment.yml).
 2. We use poetry to install critical dependencies: numpy, scipy, jax, etc. See [`pyproject.toml`](../pyproject.toml) and [`poetry.lock`](../poetry.lock).
-3. If necessary, we use conda/mamba to install development tools that are more complex and benefit from an OS-aware package manager. See [`environment-dev.yml`](../environment-dev.yml).
+3. If necessary, we use conda/mamba to install development tools that are more complex and benefit from an OS-level package manager.
 4. Docker provides an extra layer of locking and reproducibility, but we are currently not storing images for posterity.
 
 Only step #2 is absolutely necessary.

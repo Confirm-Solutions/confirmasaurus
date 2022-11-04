@@ -12,17 +12,28 @@ python = "~3.10"
 numpy = "^1.23.4"
 scipy = "^1.9.3"
 typer = "^0.6.1"
-jax = "^0.3.23"
+jax = "0.3.24"
 numpyro = "^0.10.1"
 jaxlib = [
-    {version = "0.3.20", platform = "darwin", source="pypi"},
-    {version = "^0.3.22+cuda11.cudnn82", platform = "linux"}
+    {version = "0.3.22", platform = "darwin", source="pypi"},
+    {version = "0.3.24+cuda11.cudnn82", platform = "linux"}
 ]
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.2.0"
 pre-commit = "^2.20.0"
 pytest-xdist = {extras = ["psutil"], version = "^3.0.2"}
+
+[tool.poetry.group.dev.dependencies]
+line-profiler = "^3.5.1"
+jupytext = "^1.14.1"
+reorder-python-imports = "^3.9.0"
+flake8 = "^5.0.4"
+black = {extras = ["jupyter"], version = "^22.10.0"}
+sympy = "^1.11.1"
+pandas = "^1.5.1"
+matplotlib = "^3.6.2"
+jupyter = "^1.0.0"
 
 [[tool.poetry.source]]
 name = "jax"
