@@ -61,7 +61,7 @@ jobs:
         run: poetry run pre-commit run --color=always --files ${{ steps.changed-files.outputs.all_changed_files }}
 
       - name: Pytest
-        run: poetry run pytest ./tests
+        run: poetry run pytest -n auto ./tests
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack
       #   if: failure() && github.event.repository.default_branch == github.event.workflow_run.head_branch
