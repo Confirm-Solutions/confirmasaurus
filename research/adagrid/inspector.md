@@ -14,6 +14,7 @@ jupyter:
 
 ```python
 import confirm.outlaw.nb_util as nb_util
+
 nb_util.setup_nb()
 
 import pickle
@@ -21,8 +22,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import jax.numpy as jnp
 import jax
+
 # Run on CPU because a concurrent process is probably running on GPU.
-jax.config.update('jax_platform_name', 'cpu')
+jax.config.update("jax_platform_name", "cpu")
 
 import confirm.mini_imprint.lewis_drivers as lts
 from confirm.lewislib import lewis
@@ -33,7 +35,7 @@ from diagnostics import lamstar_histogram
 ```
 
 ```python
-name = '4d'
+name = "4d"
 params = {
     "n_arms": 4,
     "n_stage_1": 50,
@@ -61,7 +63,7 @@ lei_obj = lewis.Lewis45(**params)
 ```python
 with open(f"./{name}/data_params.pkl", "rb") as f:
     P, D = pickle.load(f)
-load_iter = 'latest'
+load_iter = "latest"
 S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
@@ -99,6 +101,8 @@ import pandas as pd
 
 ```python
 from IPython.display import display
+
+
 def tile_report(idxs):
     return pd.DataFrame(
         dict(
@@ -112,12 +116,14 @@ def tile_report(idxs):
             orig_lam=S.orig_lam[idxs],
             sim_size=S.sim_sizes[idxs],
             alpha0=S.alpha0[idxs],
-            alpha_cost=cr.alpha_cost[idxs]
+            alpha_cost=cr.alpha_cost[idxs],
         )
     )
+
+
 rpt = tile_report(cr.B_lamss_idx)
-rpt['B_lamss'] = cr.B_lamss
-rpt.sort_values('B_lamss')
+rpt["B_lamss"] = cr.B_lamss
+rpt.sort_values("B_lamss")
 ```
 
 ```python
@@ -130,7 +136,7 @@ tile_report(cr.dangerous)
 ```
 
 ```python
-tile_report(cr.refine_dangerous)['sim_size'].min()
+tile_report(cr.refine_dangerous)["sim_size"].min()
 ```
 
 ```python
@@ -139,14 +145,13 @@ overall_rpt
 ```
 
 ```python
-print('overall_lam', cr.overall_lam)
+print("overall_lam", cr.overall_lam)
 B_min = S.B_lam.min(axis=1)
 bias_bad = B_min < cr.overall_lam
-print('n bias bad', np.sum(bias_bad))
+print("n bias bad", np.sum(bias_bad))
 n_critical = np.sum((S.orig_lam < cr.overall_lam + 0.01))
 n_loose = np.sum(
-    (S.orig_lam < cr.overall_lam + 0.01)
-    & (P.alpha_target - S.alpha0 > P.grid_target)
+    (S.orig_lam < cr.overall_lam + 0.01) & (P.alpha_target - S.alpha0 > P.grid_target)
 )
 print(f"number of tiles near critical: {n_critical}")
 print(f"    and with loose bounds {n_loose}")
@@ -157,27 +162,33 @@ print(f"    and with loose bounds {n_loose}")
 #     print(f'    dangerous tiles caught: {dangerous}')
 #     print(f'    collateral tiles caught: {collateral}')
 
-print('lambda**B', cr.B_lamss)
+print("lambda**B", cr.B_lamss)
 total_effort = np.sum(S.sim_sizes)
 for K in np.unique(S.sim_sizes):
     sel = S.sim_sizes == K
     count = np.sum(sel)
     print(f"K={K}:")
-    print(f'    count={count / 1e6:.3f}m')
-    print(f'    lambda**B[K]={S.B_lam[sel].min(axis=0)}')
-    print(f'    min lambda*B[K]={np.min(S.B_lam[sel].min(axis=1)):.4f}')
-    print(f'    min lambda*b[K]={np.min(S.twb_min_lam[sel]):.4f}')
+    print(f"    count={count / 1e6:.3f}m")
+    print(f"    lambda**B[K]={S.B_lam[sel].min(axis=0)}")
+    print(f"    min lambda*B[K]={np.min(S.B_lam[sel].min(axis=1)):.4f}")
+    print(f"    min lambda*b[K]={np.min(S.twb_min_lam[sel]):.4f}")
     effort = K * count / total_effort
-    print(f'    % effort={100 * effort:.4f}') 
+    print(f"    % effort={100 * effort:.4f}")
 ```
 
 ```python
 plt.figure(figsize=(10, 10), constrained_layout=True)
-plt.subplot(2,2, 1)
-plt.title('$min(\lambda^*_B)$')
+plt.subplot(2, 2, 1)
+plt.title("$min(\lambda^*_B)$")
 lamstar_histogram(S.B_lam.min(axis=1), S.sim_sizes)
-for i, (field, title) in enumerate([(S.orig_lam, '$\lambda^{*}$'), (S.twb_min_lam, '$min(\lambda^*_b)$'), (S.twb_mean_lam, '$mean(\lambda^*_b)$')]):
-    plt.subplot(2,2,i + 2)
+for i, (field, title) in enumerate(
+    [
+        (S.orig_lam, "$\lambda^{*}$"),
+        (S.twb_min_lam, "$min(\lambda^*_b)$"),
+        (S.twb_mean_lam, "$mean(\lambda^*_b)$"),
+    ]
+):
+    plt.subplot(2, 2, i + 2)
     plt.title(title)
     lamstar_histogram(field, S.sim_sizes)
 plt.show()
@@ -190,7 +201,8 @@ plt.show()
 
 ```python
 import pandas as pd
-friends = np.where(bootstrap_cvs[:,0] < 0.045)[0]
+
+friends = np.where(bootstrap_cvs[:, 0] < 0.045)[0]
 print(pd.DataFrame(sim_sizes[friends]).describe())
 print(pd.DataFrame(pointwise_target_alpha[friends]).describe())
 ```
@@ -200,22 +212,26 @@ seed = 0
 src_key = jax.random.PRNGKey(seed)
 key1, key2, key3 = jax.random.split(src_key, 3)
 
-unifs = jax.random.uniform(key=key1, shape=(adap.max_sim_size,) + lei_obj.unifs_shape(), dtype=jnp.float32)
+unifs = jax.random.uniform(
+    key=key1, shape=(adap.max_sim_size,) + lei_obj.unifs_shape(), dtype=jnp.float32
+)
 unifs_order = jnp.arange(0, unifs.shape[1])
 nB_global = 30
 nB_tile = 40
 bootstrap_idxs = {
-    K: jnp.concatenate((
-        jnp.arange(K)[None, :],
-        jax.random.choice(key2, K, shape=(nB_global, K), replace=True),
-        jax.random.choice(key3, K, shape=(nB_tile, K), replace=True)
-    )).astype(jnp.int32)
+    K: jnp.concatenate(
+        (
+            jnp.arange(K)[None, :],
+            jax.random.choice(key2, K, shape=(nB_global, K), replace=True),
+            jax.random.choice(key3, K, shape=(nB_tile, K), replace=True),
+        )
+    ).astype(jnp.int32)
     for K in (adap.init_K * 2 ** np.arange(0, adap.n_sim_double + 1))
 }
 ```
 
 ```python
-print('hi')
+print("hi")
 ```
 
 ```python
@@ -229,7 +245,7 @@ lamstar = lts.bootstrap_tune_runner(
     unifs,
     bootstrap_idxs,
     unifs_order,
-    grid_batch_size=4
+    grid_batch_size=4,
 )
 ```
 
@@ -239,14 +255,22 @@ stats = np.random.rand(3, 1000)
 
 ```python
 from confirm.lewislib import batch
-grid_batch_size=4
+
+grid_batch_size = 4
+
+
 def printer(x, y, z):
     print(x.shape, y.shape, z.shape)
     return 0
-tunev = jax.jit(jax.vmap(jax.vmap(lts.tune, in_axes=(None, 0, None)), in_axes=(0, None, 0)))
+
+
+tunev = jax.jit(
+    jax.vmap(jax.vmap(lts.tune, in_axes=(None, 0, None)), in_axes=(0, None, 0))
+)
 batched_tune = batch.batch(
     batch.batch(tunev, 10, in_axes=(None, 0, None), out_axes=(1,)),
-    grid_batch_size, in_axes=(0, None, 0)
+    grid_batch_size,
+    in_axes=(0, None, 0),
 )
 batched_tune(stats, bootstrap_idxs[1000], np.array([0.025, 0.025, 0.025])).shape
 ```
@@ -256,7 +280,9 @@ bootstrap_idxs[1000].shape
 ```
 
 ```python
-batch.batch(lts.tunev, 10, in_axes=(None, 0, None))(stats[0], bootstrap_idxs[1000], 0.025).shape
+batch.batch(lts.tunev, 10, in_axes=(None, 0, None))(
+    stats[0], bootstrap_idxs[1000], 0.025
+).shape
 ```
 
 ```python

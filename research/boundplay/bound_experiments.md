@@ -50,6 +50,7 @@ def C_numerical(n_arm_samples, t, hp, hq):
     eggq = jnp.abs(dg_vmap(t, n_arm_samples, xs)) ** hq
     return sum(eggq * scipy.stats.binom.pmf(xs, n_arm_samples, p)) ** (1 / hq)
 
+
 def holder_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01):
     hq = 1 / (1 - 1 / hp)
     C = [C_numerical(n_arm_samples, t, hp, hq) for t in t_path]
@@ -65,16 +66,28 @@ def holder_odi_n(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01):
     def derivs(t, y):
         cur_f = y[0]
         return C_numerical(n_arm_samples, t, hp, hq) * cur_f ** (1 / hp)
-    
-    t = t_path[0] 
+
+    t = t_path[0]
     dt = t_path[-1] - t
-    ode = scipy.integrate.solve_ivp(derivs, (t, t+dt), [f0], t_eval=t_path, rtol=1e-10, atol=1e-10)
-    return ode['y'][0]
+    ode = scipy.integrate.solve_ivp(
+        derivs, (t, t + dt), [f0], t_eval=t_path, rtol=1e-10, atol=1e-10
+    )
+    return ode["y"][0]
 ```
 
 ```python
-def taylor(typeI_sum, typeI_score, n_arm_samples, nsims, t_path, delta=0.01, delta_prop_0to1=0.5):
-    f0 = scipy.stats.beta.ppf(1 - (delta * delta_prop_0to1), typeI_sum + 1, nsims - typeI_sum)
+def taylor(
+    typeI_sum,
+    typeI_score,
+    n_arm_samples,
+    nsims,
+    t_path,
+    delta=0.01,
+    delta_prop_0to1=0.5,
+):
+    f0 = scipy.stats.beta.ppf(
+        1 - (delta * delta_prop_0to1), typeI_sum + 1, nsims - typeI_sum
+    )
 
     grad_est = typeI_score / nsims
     covar = n_arm_samples * expit(t_path[0]) * (1 - expit(t_path[0]))
@@ -84,14 +97,28 @@ def taylor(typeI_sum, typeI_score, n_arm_samples, nsims, t_path, delta=0.01, del
     hess_bound = n_arm_samples * p * (1 - p)
 
     t = t_path[0]
-    return f0 + (grad_est + grad_bound) * (t_path - t) + 0.5 * hess_bound * (t_path - t) ** 2
+    return (
+        f0
+        + (grad_est + grad_bound) * (t_path - t)
+        + 0.5 * hess_bound * (t_path - t) ** 2
+    )
 ```
 
 ```python
 def copt(a, p):
-    return 1 / (1 + ((1-a)/a)**(1/(p-1)))
+    return 1 / (1 + ((1 - a) / a) ** (1 / (p - 1)))
 
-def centered_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01, copt_f=copt, constant_c=False):
+
+def centered_odi(
+    typeI_sum,
+    n_arm_samples,
+    nsims,
+    t_path,
+    hp,
+    delta=0.01,
+    copt_f=copt,
+    constant_c=False,
+):
     hq = 1 / (1 - 1 / hp)
     f0 = scipy.stats.beta.ppf(1 - delta, typeI_sum + 1, nsims - typeI_sum)
     c = copt_f(f0, hp) if constant_c else None
@@ -100,13 +127,15 @@ def centered_odi(typeI_sum, n_arm_samples, nsims, t_path, hp, delta=0.01, copt_f
         cur_f = y[0]
         if not constant_c:
             c = copt_f(cur_f, hp)
-        cur_Fc = cur_f * (1 - c) ** hp + (1 - cur_f) * c ** hp
+        cur_Fc = cur_f * (1 - c) ** hp + (1 - cur_f) * c**hp
         return C_numerical(n_arm_samples, t, hp, hq) * cur_Fc ** (1 / hp)
-    
-    t = t_path[0] 
+
+    t = t_path[0]
     dt = t_path[-1] - t
-    centeredode = scipy.integrate.solve_ivp(derivs, (t, t+dt), [f0], t_eval=t_path, rtol=1e-10, atol=1e-10)
-    return centeredode['y'][0]
+    centeredode = scipy.integrate.solve_ivp(
+        derivs, (t, t + dt), [f0], t_eval=t_path, rtol=1e-10, atol=1e-10
+    )
+    return centeredode["y"][0]
 ```
 
 ## Comparing bounds
@@ -120,23 +149,23 @@ def experiment(n, p, dt, nsims, thresh, hp, cp, hp_n=None, include_taylor=True):
 
     if hp is not None:
         hob = holder_odi(typeI_sum, n, nsims, t_path, hp)
-        plt.plot(t_path, hob, 'b-', label=f'holder({hp})')
+        plt.plot(t_path, hob, "b-", label=f"holder({hp})")
 
     if hp_n is not None:
         hobn = holder_odi_n(typeI_sum, n, nsims, t_path, hp_n)
-        plt.plot(t_path, hobn, 'b:', label=f'holder-numerical({hp_n})')
+        plt.plot(t_path, hobn, "b:", label=f"holder-numerical({hp_n})")
 
     if include_taylor:
         tb = taylor(typeI_sum, typeI_score, n, nsims, t_path)
-        plt.plot(t_path, tb, 'r--', label='taylor')
+        plt.plot(t_path, tb, "r--", label="taylor")
 
     if cp is not None:
         cob = centered_odi(typeI_sum, n, nsims, t_path, cp)
-        plt.plot(t_path, cob, 'k:', label=f'centered({cp})')
+        plt.plot(t_path, cob, "k:", label=f"centered({cp})")
 
-    plt.plot(t_path, true_err, 'k-', label='true')
-    plt.xlabel(r'$\theta$')
-    plt.ylabel('type I error')
+    plt.plot(t_path, true_err, "k-", label="true")
+    plt.xlabel(r"$\theta$")
+    plt.ylabel("type I error")
     plt.legend()
 ```
 
@@ -158,17 +187,17 @@ experiment(50, 0.45, 0.05, 10000, 22, 8.0, 8.0)
 
 ```python
 plt.subplots(2, 2, figsize=(8, 8), constrained_layout=True)
-plt.subplot(2,2,1)
-plt.title('large t1e, nsims=10,000')
+plt.subplot(2, 2, 1)
+plt.title("large t1e, nsims=10,000")
 experiment(50, 0.45, 0.05, 10000, 22, None, 10.0)
-plt.subplot(2,2,2)
-plt.title('large t1e, nsims=10,000,000')
+plt.subplot(2, 2, 2)
+plt.title("large t1e, nsims=10,000,000")
 experiment(50, 0.45, 0.05, 10000000, 22, None, 10.0)
-plt.subplot(2,2,3)
-plt.title('small t1e, nsims=10,000')
+plt.subplot(2, 2, 3)
+plt.title("small t1e, nsims=10,000")
 experiment(50, 0.2, 0.05, 10000, 20, 1.1, None, include_taylor=False)
-plt.subplot(2,2,4)
-plt.title('small t1e, nsims=10,000,000')
+plt.subplot(2, 2, 4)
+plt.title("small t1e, nsims=10,000,000")
 experiment(50, 0.2, 0.05, 10000000, 20, 1.1, None, include_taylor=False)
 plt.show()
 ```

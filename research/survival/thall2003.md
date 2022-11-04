@@ -33,7 +33,6 @@ sys.path.append("../imprint/research/berry/")
 import berrylib.util as util
 
 util.setup_nb()
-
 ```
 
 ```python
@@ -51,7 +50,6 @@ from jax.config import config
 
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
-
 ```
 
 ## Checking the distributions are correct.
@@ -68,7 +66,6 @@ gpdf = scipy.stats.gamma.pdf(plt_vs, 1.0, scale=mu_ttf)
 plt.plot(plt_vs, epdf)
 plt.plot(plt_vs, gpdf)
 plt.show()
-
 ```
 
 ```python
@@ -85,7 +82,6 @@ plt.show()
 plt.title("difference")
 plt.plot(plt_vs, trans_gamma - invgamma, "b-")
 plt.show()
-
 ```
 
 ## Setting up priors
@@ -106,7 +102,6 @@ for j in range(3):
     print(f"{mean:5.2f}, {ci}")
 plt.legend()
 plt.show()
-
 ```
 
 ```python
@@ -125,13 +120,11 @@ plt_vs = np.linspace(0, 1, 1000)
 pdf = sig2_dist.pdf(plt_vs)
 plt.plot(plt_vs, pdf)
 plt.show()
-
 ```
 
 ```python
 # What is the support of the prior? (Much nicer than the Berry prior!)
 sig2_dist.ppf([0.0000001, 0.999, 0.99999])
-
 ```
 
 ```python
@@ -173,13 +166,11 @@ plt.title("what quadrature rule should we use?")
 plt.ylabel("log 10 error")
 plt.xlabel("quadrature order")
 plt.show()
-
 ```
 
 ```python
 # 15 points with the log transformation should probably be good enough but we might consider 20 points.
 orders[2], err["log_trans"][2], orders[3], err["log_trans"][3]
-
 ```
 
 ```python
@@ -199,7 +190,6 @@ plt.plot(plt_vs, pdf, "k")
 plt.plot(qr_sigma2.pts, sig2_dist.pdf(qr_sigma2.pts), "bo")
 plt.xlim([0, 1])
 plt.show()
-
 ```
 
 **I could design optimal quadrature rule for the known prior?!**
@@ -219,7 +209,6 @@ plt.plot(mu_vs, rho_pdf, "k-", label="full")
 plt.plot(mu_vs, rho_pdf2, "r-", label="one level")
 plt.legend()
 plt.show()
-
 ```
 
 ```python
@@ -231,12 +220,10 @@ cdf = np.array(cdf)
 cdf_pts = mu_qr.pts[2::2]
 plt.plot(cdf_pts, cdf)
 plt.show()
-
 ```
 
 ```python
 np.exp(cdf_pts[np.argmin(cdf < 0.025)]), np.exp(cdf_pts[np.argmax(cdf > 0.975)])
-
 ```
 
 ```python
@@ -248,17 +235,14 @@ test - correct, test
 
 ```python
 (rho_pdf * np.exp(mu_vs) * mu_qr.wts).sum()
-
 ```
 
 ```python
 (mu_vs * rho_pdf * mu_qr.wts).sum()
-
 ```
 
 ```python
 mu_mean, mu_sig2
-
 ```
 
 There's some bad stuff going on with these priors:
@@ -309,7 +293,6 @@ mcmc.run(rng_key)
 samples = mcmc.get_samples()
 
 print("E(e^rho) = ", np.sum(np.exp(samples["rho0"]), axis=0) / n_samples)
-
 ```
 
 ```python
@@ -318,14 +301,12 @@ plt.plot(mu_qr.pts, rho_pdf, "k-", label="numerical")
 plt.plot(mu_qr.pts, rho_kde, "r-", label="mcmc")
 plt.legend()
 plt.show()
-
 ```
 
 ```python
 ci025 = np.log(0.65)
 ci975 = np.log(2.20)
 np.mean(samples["rho0"] < ci025), np.mean(samples["rho0"] > ci975)
-
 ```
 
 ```python
@@ -347,7 +328,6 @@ print(
     np.exp(samples["rho1"].mean()),
     np.exp(samples["rho2"].mean()),
 )
-
 ```
 
 ## Simulating the trial
@@ -361,7 +341,6 @@ sys.path.append("../imprint/research/berry/")
 import berrylib.util as util
 
 util.setup_nb()
-
 ```
 
 ```python
@@ -379,7 +358,6 @@ from jax.config import config
 
 # This line is critical for enabling 64-bit floats.
 config.update("jax_enable_x64", True)
-
 ```
 
 ```python
@@ -436,15 +414,22 @@ def simulate_known_rho(rho, seed=None):
     )
     is_censored = np.where(event_time + arrival_time > total_time, True, False)
     censored_event_time = np.where(is_censored, total_time - arrival_time, event_time)
-    return time_to_failure, arrival_time, is_censored, censored_event_time, arm_assignments
+    return (
+        time_to_failure,
+        arrival_time,
+        is_censored,
+        censored_event_time,
+        arm_assignments,
+    )
 
 
 ntrials = 5000
 rho = np.zeros((ntrials, narms))
-true_ttf, arrival_time, is_censored, event_time, arm_assignments = simulate_known_rho(rho, seed=None)
+true_ttf, arrival_time, is_censored, event_time, arm_assignments = simulate_known_rho(
+    rho, seed=None
+)
 for arm_idx in range(3):
     print(arm_idx, event_time[arm_assignments == arm_idx].mean(), lambdaj[arm_idx])
-
 ```
 
 ```python
@@ -453,22 +438,30 @@ for arm_idx in range(3):
 # leading to hazard equal to that under past treatment.
 null_rho = np.tile(np.array([0.0, 0.0, 0.0])[None, :], (ntrials, 1))
 
-true_hazard, arrival_time, is_censored, event_time, arm_assignments = simulate_known_rho(null_rho)
+(
+    true_hazard,
+    arrival_time,
+    is_censored,
+    event_time,
+    arm_assignments,
+) = simulate_known_rho(null_rho)
 median_event_times = np.empty((ntrials, narms))
 npatients_per_arm = np.empty((ntrials, narms), dtype=int)
 for i in range(ntrials):
     for arm_idx in range(3):
-        median_event_times[i, arm_idx] = np.median(event_time[i, arm_assignments[i,:] == arm_idx])
-        npatients_per_arm[i, arm_idx] = np.sum(arm_assignments[i,:] == arm_idx)
-plt.figure(figsize=(10,4))
+        median_event_times[i, arm_idx] = np.median(
+            event_time[i, arm_assignments[i, :] == arm_idx]
+        )
+        npatients_per_arm[i, arm_idx] = np.sum(arm_assignments[i, :] == arm_idx)
+plt.figure(figsize=(10, 4))
 for i in range(3):
-    plt.subplot(1,3,1 + i)
-    plt.hist(npatients_per_arm[:,i])
+    plt.subplot(1, 3, 1 + i)
+    plt.hist(npatients_per_arm[:, i])
 plt.show()
-plt.figure(figsize=(10,4))
+plt.figure(figsize=(10, 4))
 for i in range(3):
-    plt.subplot(1,3,1 + i)
-    plt.hist(median_event_times[:,i], bins=20)
+    plt.subplot(1, 3, 1 + i)
+    plt.hist(median_event_times[:, i], bins=20)
 plt.show()
 ```
 
@@ -476,11 +469,13 @@ Event time quantiles are lower than the expected time to event because they are 
 
 ```python
 for j in range(3):
-    print(lambdaj[j], np.quantile(median_event_times[:,j], [0.25, 0.5, 0.75]))
+    print(lambdaj[j], np.quantile(median_event_times[:, j], [0.25, 0.5, 0.75]))
 ```
 
 ```python
-def construct_suff_stats(cur_time, arrival_time, is_censored, event_time, arm_assignments):
+def construct_suff_stats(
+    cur_time, arrival_time, is_censored, event_time, arm_assignments
+):
     cur_arm_assigns = arm_assignments.copy()
     cur_arm_assigns[arrival_time > cur_time] = -1
     cur_is_censored = is_censored | ((event_time + arrival_time) > cur_time)
@@ -494,12 +489,15 @@ def construct_suff_stats(cur_time, arrival_time, is_censored, event_time, arm_as
     for i in range(ntrials):
         for j in range(narms):
             this_arm = cur_arm_assigns[i, :] == j
-            n_events[i,j] = np.sum(np.where(~cur_is_censored[i, this_arm], 1, 0))
-            total_obs_time[i,j] = np.sum(cur_event_time[i, this_arm])
+            n_events[i, j] = np.sum(np.where(~cur_is_censored[i, this_arm], 1, 0))
+            total_obs_time[i, j] = np.sum(cur_event_time[i, this_arm])
             n_patients[i, j] = np.sum(this_arm)
     return np.stack((n_events, total_obs_time, n_patients), axis=-1)
 
-suff_stats = construct_suff_stats(36, arrival_time, is_censored, event_time, arm_assignments)
+
+suff_stats = construct_suff_stats(
+    36, arrival_time, is_censored, event_time, arm_assignments
+)
 ```
 
 ```python
@@ -521,6 +519,7 @@ class CensoredExponential(dist.Distribution):
     def log_prob(self, suff_stats):
         n_events, total_obs_time, _ = suff_stats
         return self.log_hazard * n_events - self.hazard * total_obs_time
+
 
 def sample(suff_stats):
     mu = numpyro.sample("mu", dist.Normal(mu_mean, jnp.sqrt(mu_sig2)))
@@ -553,7 +552,7 @@ def mcmc_run(mcmc, suff_stats):
     samples = mcmc.get_samples()
     rho_samples = np.empty((n_samples, narms))
     for j in range(3):
-        rho_samples[:, j] = samples[f'rho{j}']
+        rho_samples[:, j] = samples[f"rho{j}"]
     return samples, rho_samples
 ```
 
@@ -572,15 +571,15 @@ def mcmc_run(mcmc, suff_stats):
 
 ```python
 samples, rho_samples = mcmc_run(mcmc, suff_stats[0])
-mu_samples = samples['mu']
-sig2_samples = samples['sigma2']
+mu_samples = samples["mu"]
+sig2_samples = samples["sigma2"]
 plt.figure(figsize=(8, 4))
 plt.subplot(1, 2, 1)
 plt.hist(mu_samples, bins=np.linspace(-0.05, 0.35, 101), density=True)
 plt.subplot(1, 2, 2)
 plt.hist(sig2_samples, bins=np.linspace(0, 0.3, 101), density=True)
 plt.show()
-plt.hist(rho_samples[:,0], density=True, bins=np.linspace(-0.6, 0.6, 101))
+plt.hist(rho_samples[:, 0], density=True, bins=np.linspace(-0.6, 0.6, 101))
 plt.show()
 mu_samples.mean(), sig2_samples.mean(), rho_samples.mean(axis=0)
 ```
@@ -630,6 +629,7 @@ hessian_opt = jax.jit(
     )
 )
 
+
 def grad_hess(fi, data, rho, arms_opt):
     grad = grad_opt(rho, fi.neg_precQ, data[..., 0], data[..., 1])
     hess = hessian_opt(rho, fi.neg_precQ, data[..., 0], data[..., 1])
@@ -638,8 +638,10 @@ def grad_hess(fi, data, rho, arms_opt):
 
 import berrylib.fast_inla as fast_inla
 
+
 def log_joint_wrapper(fi, data, rho):
     return log_joint(data, rho, fi.neg_precQ, fi.logprecQdet, fi.log_prior)
+
 
 model = fast_inla.FastINLAModel(log_joint_wrapper, grad_hess)
 fi = fast_inla.FastINLA(
@@ -663,12 +665,12 @@ np.sum(np.any(np_inference[1] > 0.95, axis=1)) / np_inference[1].shape[0]
 ```
 
 ```python
-plt.plot(fi.sigma2_rule.pts, np_inference[0][0], 'ko')
-plt.plot(fi.sigma2_rule.pts, np.exp(fi.log_prior), 'ro')
+plt.plot(fi.sigma2_rule.pts, np_inference[0][0], "ko")
+plt.plot(fi.sigma2_rule.pts, np.exp(fi.log_prior), "ro")
 plt.hist(sig2_samples, bins=np.linspace(0, 0.3, 101), density=True)
 plt.xlim([0, 0.3])
-plt.ylabel('$p(\sigma^2 | \mathrm{data})$')
-plt.xlabel('$\sigma^2$')
+plt.ylabel("$p(\sigma^2 | \mathrm{data})$")
+plt.xlabel("$\sigma^2$")
 plt.show()
 ```
 
@@ -696,7 +698,9 @@ Get rid of $\mu$:
 $\rho_j \sim N(\mu_0, \mu_{\sigma}I + \sigma^2 J)$
 
 ```python
-sample_fixed_sigma2 = numpyro.handlers.condition(sample, dict(sigma2=2.7832934704550967))
+sample_fixed_sigma2 = numpyro.handlers.condition(
+    sample, dict(sigma2=2.7832934704550967)
+)
 n_samples = 100000
 kernel = numpyro.infer.NUTS(sample_fixed_sigma2)
 mcmc_fixed_sigma2 = numpyro.infer.MCMC(
@@ -707,7 +711,7 @@ mcmc_fixed_sigma2 = numpyro.infer.MCMC(
     jit_model_args=True,
 )
 for i in range(3):
-    print(f'dataset {i}')
+    print(f"dataset {i}")
     samples_fixed, rho_samples_fixed = mcmc_run(mcmc_fixed_sigma2, suff_stats[i])
     theta_max = np_inference[2][i]
     theta_sigma = np_inference[3][i]
@@ -715,10 +719,17 @@ for i in range(3):
     plt_vs = np.linspace(-1, 1, 1000)
     for j in range(3):
         plt.subplot(1, 3, 1 + j)
-        plt.hist(rho_samples_fixed[:, j], density=True, bins=np.linspace(-1.0, 1.0, 201))
-        plt.plot(plt_vs, scipy.stats.norm.pdf(plt_vs, theta_max[-1, j], theta_sigma[-1, j]), 'k-', linewidth=3)
-        plt.ylabel(f'$p(\\rho_{j}' + ' | \mathrm{data})$')
-        plt.xlabel(f'$\\rho_{j}$')
+        plt.hist(
+            rho_samples_fixed[:, j], density=True, bins=np.linspace(-1.0, 1.0, 201)
+        )
+        plt.plot(
+            plt_vs,
+            scipy.stats.norm.pdf(plt_vs, theta_max[-1, j], theta_sigma[-1, j]),
+            "k-",
+            linewidth=3,
+        )
+        plt.ylabel(f"$p(\\rho_{j}" + " | \mathrm{data})$")
+        plt.xlabel(f"$\\rho_{j}$")
     plt.show()
 ```
 
@@ -728,7 +739,11 @@ for i in range(3):
 ts = np.linspace(0, 36, 2000)
 suff_stats = []
 for t in ts:
-    suff_stats.append(construct_suff_stats(t, arrival_time[:1], is_censored[:1], event_time[:1], arm_assignments[:1])[0])
+    suff_stats.append(
+        construct_suff_stats(
+            t, arrival_time[:1], is_censored[:1], event_time[:1], arm_assignments[:1]
+        )[0]
+    )
 ```
 
 ```python
@@ -741,11 +756,11 @@ np_inference = fi.numpy_inference(suff_stats, thresh_theta=np.repeat(np.log(1.5)
 ```
 
 ```python
-plt.figure(figsize=(8,6))
+plt.figure(figsize=(8, 6))
 for j in range(3):
-    plt.plot(ts, np_inference[1][:,j], label=f'arm {j}')
-plt.xlabel('$t ~ \mathrm{(months)}$')
-plt.ylabel(f'$p(\\rho > C)$')
+    plt.plot(ts, np_inference[1][:, j], label=f"arm {j}")
+plt.xlabel("$t ~ \mathrm{(months)}$")
+plt.ylabel(f"$p(\\rho > C)$")
 plt.legend()
 plt.show()
 ```
@@ -755,13 +770,17 @@ samples, rho_samples = mcmc_run(mcmc, suff_stats[5])
 ```
 
 ```python
-np.sum(rho_samples[:,:] > np.log(1.5), axis=0) / rho_samples.shape[0], np_inference[1][5]
+np.sum(rho_samples[:, :] > np.log(1.5), axis=0) / rho_samples.shape[0], np_inference[1][
+    5
+]
 ```
 
 ```python
 i = 0
-for sig_idx in [0, -1]:#range(0, 20, 3):
-    sample_fixed_sigma2 = numpyro.handlers.condition(sample, dict(sigma2=fi.sigma2_rule.pts[sig_idx]))
+for sig_idx in [0, -1]:  # range(0, 20, 3):
+    sample_fixed_sigma2 = numpyro.handlers.condition(
+        sample, dict(sigma2=fi.sigma2_rule.pts[sig_idx])
+    )
     n_samples = 100000
     kernel = numpyro.infer.NUTS(sample_fixed_sigma2)
     mcmc_fixed_sigma2 = numpyro.infer.MCMC(
@@ -780,11 +799,20 @@ for sig_idx in [0, -1]:#range(0, 20, 3):
         vmin = theta_max[sig_idx, j] - 3 * theta_sigma[sig_idx, j]
         vmax = theta_max[sig_idx, j] + 3 * theta_sigma[sig_idx, j]
         plt_vs = np.linspace(vmin, vmax, 1000)
-        plt.hist(rho_samples_fixed[:, j], density=True, bins=np.linspace(vmin, vmax, 201))
+        plt.hist(
+            rho_samples_fixed[:, j], density=True, bins=np.linspace(vmin, vmax, 201)
+        )
         # plt.vlines([theta_max[sig_idx, j]], [0], [1], colors='k', linestyles='solid')
-        plt.plot(plt_vs, scipy.stats.norm.pdf(plt_vs, theta_max[sig_idx, j], theta_sigma[sig_idx, j]), 'k-', linewidth=3)
-        plt.ylabel(f'$p(\\rho_{j}' + ' | \mathrm{data})$')
-        plt.xlabel(f'$\\rho_{j}$')
+        plt.plot(
+            plt_vs,
+            scipy.stats.norm.pdf(
+                plt_vs, theta_max[sig_idx, j], theta_sigma[sig_idx, j]
+            ),
+            "k-",
+            linewidth=3,
+        )
+        plt.ylabel(f"$p(\\rho_{j}" + " | \mathrm{data})$")
+        plt.xlabel(f"$\\rho_{j}$")
     plt.show()
 ```
 
@@ -798,7 +826,9 @@ dethess = np.linalg.det(hess)
 
 ```python
 sig_idx = -1
-third_tensor = jax.vmap(jax.jacrev(jax.hessian(scalar_log_joint_opt)), in_axes=(0, None, 0, 0))(
+third_tensor = jax.vmap(
+    jax.jacrev(jax.hessian(scalar_log_joint_opt)), in_axes=(0, None, 0, 0)
+)(
     jnp.array(np_inference[2][:, sig_idx]),
     jnp.array(fi.neg_precQ[sig_idx]),
     jnp.array(suff_stats[:, ..., 0]),
@@ -808,19 +838,19 @@ third_tensor.shape
 ```
 
 ```python
-prod3 = third_tensor[:,0,0,0] * third_tensor[:,1,1,1] * third_tensor[:,2,2,2]
+prod3 = third_tensor[:, 0, 0, 0] * third_tensor[:, 1, 1, 1] * third_tensor[:, 2, 2, 2]
 ```
 
 ```python
-traces = np.trace(hess[:, sig_idx,:,:], axis1=1, axis2=2)
-plt.plot(ts, third_tensor.sum(axis=(1,2,3)))
+traces = np.trace(hess[:, sig_idx, :, :], axis1=1, axis2=2)
+plt.plot(ts, third_tensor.sum(axis=(1, 2, 3)))
 plt.plot(ts, traces)
 plt.show()
 ```
 
 ```python
 plt.plot(ts, prod3)
-plt.plot(ts, dethess[:,sig_idx])
+plt.plot(ts, dethess[:, sig_idx])
 plt.show()
 ```
 
@@ -835,23 +865,29 @@ zero_arms = arm_assignments[:1]
 ts = np.linspace(0, 36, 2000)
 suff_stats = []
 for t in ts:
-    suff_stats.append(construct_suff_stats(t, zero_arrival_time, zero_is_censored, zero_event_time, zero_arms)[0])
+    suff_stats.append(
+        construct_suff_stats(
+            t, zero_arrival_time, zero_is_censored, zero_event_time, zero_arms
+        )[0]
+    )
 suff_stats = np.array(suff_stats)
 np_inference = fi.numpy_inference(suff_stats, thresh_theta=np.repeat(np.log(1.5), 3))
 
-plt.figure(figsize=(8,6))
+plt.figure(figsize=(8, 6))
 for j in range(3):
-    plt.plot(ts, np_inference[1][:,j], label=f'arm {j}')
-plt.xlabel('$t ~ \mathrm{(months)}$')
-plt.ylabel(f'$p(\\rho > C)$')
+    plt.plot(ts, np_inference[1][:, j], label=f"arm {j}")
+plt.xlabel("$t ~ \mathrm{(months)}$")
+plt.ylabel(f"$p(\\rho > C)$")
 plt.legend()
 plt.show()
 ```
 
 ```python
 i = -1
-for sig_idx in [19]:#range(0, 20, 3):
-    sample_fixed_sigma2 = numpyro.handlers.condition(sample, dict(sigma2=fi.sigma2_rule.pts[sig_idx]))
+for sig_idx in [19]:  # range(0, 20, 3):
+    sample_fixed_sigma2 = numpyro.handlers.condition(
+        sample, dict(sigma2=fi.sigma2_rule.pts[sig_idx])
+    )
     n_samples = 100000
     kernel = numpyro.infer.NUTS(sample_fixed_sigma2)
     mcmc_fixed_sigma2 = numpyro.infer.MCMC(
@@ -870,11 +906,20 @@ for sig_idx in [19]:#range(0, 20, 3):
         vmin = theta_max[sig_idx, j] - 5 * theta_sigma[sig_idx, j]
         vmax = theta_max[sig_idx, j] + 5 * theta_sigma[sig_idx, j]
         plt_vs = np.linspace(vmin, vmax, 1000)
-        plt.hist(rho_samples_fixed[:, j], density=True, bins=np.linspace(vmin, vmax, 201))
+        plt.hist(
+            rho_samples_fixed[:, j], density=True, bins=np.linspace(vmin, vmax, 201)
+        )
         # plt.vlines([theta_max[sig_idx, j]], [0], [1], colors='k', linestyles='solid')
-        plt.plot(plt_vs, scipy.stats.norm.pdf(plt_vs, theta_max[sig_idx, j], theta_sigma[sig_idx, j]), 'k-', linewidth=3)
-        plt.ylabel(f'$p(\\rho_{j}' + ' | \mathrm{data})$')
-        plt.xlabel(f'$\\rho_{j}$')
+        plt.plot(
+            plt_vs,
+            scipy.stats.norm.pdf(
+                plt_vs, theta_max[sig_idx, j], theta_sigma[sig_idx, j]
+            ),
+            "k-",
+            linewidth=3,
+        )
+        plt.ylabel(f"$p(\\rho_{j}" + " | \mathrm{data})$")
+        plt.xlabel(f"$\\rho_{j}$")
     plt.show()
 ```
 
@@ -888,7 +933,9 @@ dethess = np.linalg.det(hess)
 
 ```python
 sig_idx = -1
-third_tensor = jax.vmap(jax.jacrev(jax.hessian(scalar_log_joint_opt)), in_axes=(0, None, 0, 0))(
+third_tensor = jax.vmap(
+    jax.jacrev(jax.hessian(scalar_log_joint_opt)), in_axes=(0, None, 0, 0)
+)(
     jnp.array(np_inference[2][:, sig_idx]),
     jnp.array(fi.neg_precQ[sig_idx]),
     jnp.array(suff_stats[:, ..., 0]),
@@ -907,19 +954,19 @@ jax.jacfwd(jax.jacrev(jax.hessian(f)))(1.0)
 ```
 
 ```python
-prod3 = third_tensor[:,0,0,0] * third_tensor[:,1,1,1] * third_tensor[:,2,2,2]
+prod3 = third_tensor[:, 0, 0, 0] * third_tensor[:, 1, 1, 1] * third_tensor[:, 2, 2, 2]
 ```
 
 ```python
-traces = np.trace(hess[:, sig_idx,:,:], axis1=1, axis2=2)
-plt.plot(ts, third_tensor.sum(axis=(1,2,3)))
+traces = np.trace(hess[:, sig_idx, :, :], axis1=1, axis2=2)
+plt.plot(ts, third_tensor.sum(axis=(1, 2, 3)))
 plt.plot(ts, traces)
 plt.show()
 ```
 
 ```python
-plt.plot(ts, prod3, 'k-')
-plt.plot(ts, dethess[:,sig_idx], 'b-')
+plt.plot(ts, prod3, "k-")
+plt.plot(ts, dethess[:, sig_idx], "b-")
 plt.show()
 ```
 
@@ -930,6 +977,7 @@ mu_mean = 0.0
 mu_sig2 = 100.0
 sig2_alpha = 0.0005
 sig2_beta = 0.000005
+
 
 def sample(suff_stats):
     mu = numpyro.sample("mu", dist.Normal(mu_mean, jnp.sqrt(mu_sig2)))
@@ -1001,6 +1049,7 @@ hessian_opt = jax.jit(
     )
 )
 
+
 def grad_hess(fi, data, rho, arms_opt):
     grad = grad_opt(rho, fi.neg_precQ, data[..., 0], data[..., 1])
     hess = hessian_opt(rho, fi.neg_precQ, data[..., 0], data[..., 1])
@@ -1009,8 +1058,10 @@ def grad_hess(fi, data, rho, arms_opt):
 
 import berrylib.fast_inla as fast_inla
 
+
 def log_joint_wrapper(fi, data, rho):
     return log_joint(data, rho, fi.neg_precQ, fi.logprecQdet, fi.log_prior)
+
 
 model = fast_inla.FastINLAModel(log_joint_wrapper, grad_hess)
 fi = fast_inla.FastINLA(
@@ -1035,8 +1086,10 @@ suff_stats[1]
 
 ```python
 i = 100
-for sig_idx in [19]:#range(0, 20, 3):
-    sample_fixed_sigma2 = numpyro.handlers.condition(sample, dict(sigma2=fi.sigma2_rule.pts[sig_idx]))
+for sig_idx in [19]:  # range(0, 20, 3):
+    sample_fixed_sigma2 = numpyro.handlers.condition(
+        sample, dict(sigma2=fi.sigma2_rule.pts[sig_idx])
+    )
     n_samples = 100000
     kernel = numpyro.infer.NUTS(sample_fixed_sigma2)
     mcmc_fixed_sigma2 = numpyro.infer.MCMC(
@@ -1055,10 +1108,19 @@ for sig_idx in [19]:#range(0, 20, 3):
         vmin = theta_max[sig_idx, j] - 5 * theta_sigma[sig_idx, j]
         vmax = theta_max[sig_idx, j] + 5 * theta_sigma[sig_idx, j]
         plt_vs = np.linspace(vmin, vmax, 1000)
-        plt.hist(rho_samples_fixed[:, j], density=True, bins=np.linspace(vmin, vmax, 201))
+        plt.hist(
+            rho_samples_fixed[:, j], density=True, bins=np.linspace(vmin, vmax, 201)
+        )
         # plt.vlines([theta_max[sig_idx, j]], [0], [1], colors='k', linestyles='solid')
-        plt.plot(plt_vs, scipy.stats.norm.pdf(plt_vs, theta_max[sig_idx, j], theta_sigma[sig_idx, j]), 'k-', linewidth=3)
-        plt.ylabel(f'$p(\\rho_{j}' + ' | \mathrm{data})$')
-        plt.xlabel(f'$\\rho_{j}$')
+        plt.plot(
+            plt_vs,
+            scipy.stats.norm.pdf(
+                plt_vs, theta_max[sig_idx, j], theta_sigma[sig_idx, j]
+            ),
+            "k-",
+            linewidth=3,
+        )
+        plt.ylabel(f"$p(\\rho_{j}" + " | \mathrm{data})$")
+        plt.xlabel(f"$\\rho_{j}$")
     plt.show()
 ```

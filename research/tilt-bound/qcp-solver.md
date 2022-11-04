@@ -34,24 +34,22 @@ from pyimprint.grid import make_cartesian_grid_range
 def A_cp(n, t):
     return n * cp.sum(cp.logistic(t))
 
+
 def opt_q_cp(n, theta_0, v, a):
-    '''
+    """
     CVXPY implementation of finding optimal q
-    '''    
+    """
     A0 = binomial.A(n, theta_0)
     q = cp.Variable(pos=True)
-    objective_fn = (
-        (A_cp(n, theta_0 + (q+1) * v) - A0)
-        - np.log(a)
-    ) / (q + 1)
+    objective_fn = ((A_cp(n, theta_0 + (q + 1) * v) - A0) - np.log(a)) / (q + 1)
     objective = cp.Minimize(objective_fn)
     problem = cp.Problem(objective)
     problem.solve(qcp=True)
-    return q.value + 1 
+    return q.value + 1
 ```
 
 ```python
-theta_0 = jnp.array([-2., -1., 0.3])
+theta_0 = jnp.array([-2.0, -1.0, 0.3])
 n = 350
 f0 = 0.025
 v = 0.1 * jnp.array([0.4, 1, -1.32])
@@ -74,17 +72,16 @@ q_opt_qcp_cvxpy = opt_q_cp(n, theta_0, v, f0)
 
 ```python
 qs = jnp.linspace(1.0001, 10, 100)
-phis = np.array([
-    solver.objective(q, theta_0, v, f0) for q in qs
-]) 
+phis = np.array([solver.objective(q, theta_0, v, f0) for q in qs])
 plt.plot(qs, phis)
-plt.plot(q_opt, solver.objective(q_opt, theta_0, v, f0), 'bo')
-plt.plot(q_opt_qcp_cvxpy, solver.objective(q_opt_qcp_cvxpy, theta_0, v, f0), 'r^')
+plt.plot(q_opt, solver.objective(q_opt, theta_0, v, f0), "bo")
+plt.plot(q_opt_qcp_cvxpy, solver.objective(q_opt_qcp_cvxpy, theta_0, v, f0), "r^")
 ```
 
 ```python
 solver = binomial.ForwardQCPSolver(n)
 solve_vmap_jit = jax.jit(jax.vmap(solver.solve, in_axes=(0, 0, None)))
+
 
 def vectorize_run(key, m, d, a=0.025, n=350):
     theta_0 = jax.random.normal(key, (m, d))
@@ -114,10 +111,7 @@ def qcp_solve_bwd(n, theta_0, v, alpha):
     A0 = binomial.A(n, theta_0)
     shift = (binomial.A(n, theta_0 + v) - A0) + np.log(alpha)
     q = cp.Variable(pos=True)
-    objective_fn = (
-        (A_cp(n, theta_0 + (q+1) * v) - A0)
-        - (q+1) * shift
-    ) / q
+    objective_fn = ((A_cp(n, theta_0 + (q + 1) * v) - A0) - (q + 1) * shift) / q
     objective = cp.Minimize(objective_fn)
     problem = cp.Problem(objective)
     problem.solve(qcp=True)
@@ -139,6 +133,7 @@ solve_bwd_jit = jax.jit(solver_bwd.solve)
 ```python
 solve_bwd_vmap_jit = jax.jit(jax.vmap(solver_bwd.solve, in_axes=(0, 0, None)))
 
+
 def vectorize_run_bwd(key, m, d, a=0.025, n=350):
     theta_0 = jax.random.normal(key, (m, d))
     _, key = jax.random.split(key)
@@ -148,11 +143,7 @@ def vectorize_run_bwd(key, m, d, a=0.025, n=350):
 
 ```python
 %%time
-qs = vectorize_run_bwd(
-    jax.random.PRNGKey(69),
-    10000,
-    3
-)
+qs = vectorize_run_bwd(jax.random.PRNGKey(69), 10000, 3)
 ```
 
 ```python
@@ -176,8 +167,8 @@ i_max = np.argmax(bounds)
 
 # plot
 plt.plot(qs, bounds)
-plt.plot(qs[i_max], bounds[i_max], 'r^')
-plt.plot(opt_q, opt_bound, 'b.')
+plt.plot(qs[i_max], bounds[i_max], "r^")
+plt.plot(opt_q, opt_bound, "b.")
 plt.show()
 
 print(bounds[i_max], opt_bound)
@@ -196,14 +187,10 @@ alpha = 0.005
 # Backward solve the implicit bound at theta_0
 solver_bwd = binomial.BackwardQCPSolver(n)
 opt_q_bwd = solver_bwd.solve(theta_0, v, alpha)
-alpha_prime = binomial.q_holder_bound_bwd(
-    opt_q_bwd, n, theta_0, v, alpha
-)
+alpha_prime = binomial.q_holder_bound_bwd(opt_q_bwd, n, theta_0, v, alpha)
 
 # Forward evaluate to get bound on f(theta_0 + v)
-bound = binomial.q_holder_bound_fwd(
-    opt_q_bwd, n, theta_0, v, alpha_prime
-)
+bound = binomial.q_holder_bound_fwd(opt_q_bwd, n, theta_0, v, alpha_prime)
 bound, alpha, alpha_prime
 ```
 
@@ -223,20 +210,28 @@ plt.plot(vs, bound_vs)
 
 ```python
 q = 20
+
+
 def g(v, theta_0, q):
-    return jnp.sum(binomial.logistic(theta_0 + q * v) / q - binomial.logistic(theta_0 + v))
+    return jnp.sum(
+        binomial.logistic(theta_0 + q * v) / q - binomial.logistic(theta_0 + v)
+    )
+
+
 theta_0 = jnp.array([-0.2, -0.1])
 d = theta_0.shape[0]
 v_1d_len = 100
-vs = make_cartesian_grid_range(v_1d_len, -10*np.ones(d), 10*np.ones(d), 0).thetas().T
+vs = (
+    make_cartesian_grid_range(v_1d_len, -10 * np.ones(d), 10 * np.ones(d), 0).thetas().T
+)
 g_vmap = jax.vmap(g, in_axes=(0, None, None))
 gs = g_vmap(vs, theta_0, q)
 
 # find max
 i_max = jnp.argmax(gs)
 
-sc = plt.scatter(vs[:,0], vs[:,1], c=gs)
-plt.scatter(vs[i_max, 0], vs[i_max, 1], c='r')
+sc = plt.scatter(vs[:, 0], vs[:, 1], c=gs)
+plt.scatter(vs[i_max, 0], vs[i_max, 1], c="r")
 plt.colorbar(sc)
 plt.show()
 ```
@@ -250,47 +245,45 @@ tile_solver = binomial.TileForwardQCPSolver(
 ```
 
 ```python
-theta_0 = jnp.array([-2., -1., 0.3])
+theta_0 = jnp.array([-2.0, -1.0, 0.3])
 n = 350
 f0 = 0.025
 radius = 0.05
-v_coords = [[-1., 1.]] * theta_0.shape[0]
-mgrid = np.meshgrid(*v_coords, indexing='ij')
-vs = radius * np.concatenate([coord.reshape(-1,1) for coord in mgrid], axis=1)
+v_coords = [[-1.0, 1.0]] * theta_0.shape[0]
+mgrid = np.meshgrid(*v_coords, indexing="ij")
+vs = radius * np.concatenate([coord.reshape(-1, 1) for coord in mgrid], axis=1)
 ```
 
 ```python
-q_opt = tile_solver.solve(
-    theta_0, vs, f0
-)
+q_opt = tile_solver.solve(theta_0, vs, f0)
 ```
 
 ```python
 qs = jnp.linspace(1, jnp.maximum(2, q_opt) + 10, 1000)
 objs = jax.vmap(
-    binomial.tilt_bound_fwd_tile, 
+    binomial.tilt_bound_fwd_tile,
     in_axes=(0, None, None, None, None),
 )(qs, n, theta_0, vs, f0)
 plt.plot(qs, objs)
 obj_opt = binomial.tilt_bound_fwd_tile(q_opt, n, theta_0, vs, f0)
-plt.scatter(q_opt, obj_opt, color='r')
+plt.scatter(q_opt, obj_opt, color="r")
 print(jnp.min(objs), obj_opt)
 print(qs[jnp.argmin(objs)], q_opt)
 ```
 
 ```python
-f_opt = jax.jit(jax.vmap(
-    tile_solver.solve,
-    in_axes=(0, None, None),
-))
+f_opt = jax.jit(
+    jax.vmap(
+        tile_solver.solve,
+        in_axes=(0, None, None),
+    )
+)
 thetas = jnp.repeat(theta_0[None], 10000, axis=0)
 ```
 
 ```python
 %%time
-f_opt(
-   thetas, vs, f0 
-)
+f_opt(thetas, vs, f0)
 ```
 
 ```python
@@ -299,19 +292,23 @@ tile_bwd_solver = binomial.TileBackwardQCPSolver(n=n)
 
 ```python
 q_opt = tile_bwd_solver.solve(
-    theta_0, vs, f0,
+    theta_0,
+    vs,
+    f0,
 )
 ```
 
 ```python
 qs = jnp.linspace(1, jnp.maximum(2, q_opt) + 10, 1000)
-objs = jax.jit(jax.vmap(
-    binomial.tilt_bound_bwd_tile, 
-    in_axes=(0, None, None, None, None),
-))(qs, n, theta_0, vs, f0)
+objs = jax.jit(
+    jax.vmap(
+        binomial.tilt_bound_bwd_tile,
+        in_axes=(0, None, None, None, None),
+    )
+)(qs, n, theta_0, vs, f0)
 plt.plot(qs, objs)
 obj_opt = binomial.tilt_bound_bwd_tile(q_opt, n, theta_0, vs, f0)
-plt.scatter(q_opt, obj_opt, color='r')
+plt.scatter(q_opt, obj_opt, color="r")
 print(jnp.max(objs), obj_opt)
 print(qs[jnp.argmax(objs)], q_opt)
 ```

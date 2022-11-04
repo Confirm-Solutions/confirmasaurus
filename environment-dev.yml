@@ -9,7 +9,7 @@ dependencies:
   - sympy
   - pytest
   - pre-commit
-  - black
+  - black-jupyter
   - flake8
   - isort
   - jupytext

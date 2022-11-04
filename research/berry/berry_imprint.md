@@ -24,12 +24,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import jax.numpy as jnp
 import warnings
+
 # import pyimprint.grid as grid
 import confirm.berrylib.fast_inla as fast_inla
 import confirm.mini_imprint.binomial as binomial
 import confirm.mini_imprint.grid as grid
 
 import jax
+
 # set to cpu or gpu to run on a specific device.
 # jax.config.update('jax_platform_name', 'gpu')
 ```
@@ -86,7 +88,9 @@ theta_max = 1.0
 null_hypos = [
     grid.HyperPlane(-np.identity(n_arms)[i], -logit(0.1)) for i in range(n_arms)
 ]
-theta1d = [np.linspace(theta_min, theta_max, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)]
+theta1d = [
+    np.linspace(theta_min, theta_max, 2 * n_theta_1d + 1)[1::2] for i in range(n_arms)
+]
 theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
 radii = np.empty(theta.shape)
 for i in range(theta.shape[1]):
@@ -100,12 +104,16 @@ theta_tiles = g.thetas[g.grid_pt_idx]
 ```python
 %%time
 fi = fast_inla.FastINLA(n_arms=n_arms)
-rejection_table = binomial.build_rejection_table(n_arms, n_arm_samples, fi.rejection_inference)
+rejection_table = binomial.build_rejection_table(
+    n_arms, n_arm_samples, fi.rejection_inference
+)
 ```
 
 ```python
 np.random.seed(seed)
-accumulator = binomial.binomial_accumulator(lambda data: binomial.lookup_rejection(rejection_table, data[...,0]))
+accumulator = binomial.binomial_accumulator(
+    lambda data: binomial.lookup_rejection(rejection_table, data[..., 0])
+)
 
 # Chunking improves performance dramatically for larger tile counts:
 # ~6x for a 64^3 grid
@@ -115,7 +123,7 @@ gridpt_chunk_size = 5000
 n_gridpt_chunks = int(np.ceil(theta_tiles.shape[0] / gridpt_chunk_size))
 sim_chunk_size = 50000
 n_sim_chunks = sim_size // sim_chunk_size
-assert(sim_size % sim_chunk_size == 0)
+assert sim_size % sim_chunk_size == 0
 n_sim_chunks, n_gridpt_chunks
 ```
 
@@ -130,7 +138,7 @@ for j in range(n_sim_chunks):
         sum_chunk, score_chunk = accumulator(
             theta_tiles[gridpt_start:gridpt_end],
             g.null_truth[gridpt_start:gridpt_end],
-            samples
+            samples,
         )
         typeI_sum[gridpt_start:gridpt_end] += sum_chunk
         typeI_score[gridpt_start:gridpt_end] += score_chunk
@@ -156,7 +164,10 @@ bound_components = (total, d0, d0u, d1w, d1uw, d2uw)
 ```python
 grid_components = (theta, theta_tiles, tile_radii, corners, g.null_truth)
 sim_components = (sim_sizes, typeI_sum, typeI_score)
-np.save(f"output_{name}.npy", np.array([grid_components, sim_components, bound_components], dtype=object))
+np.save(
+    f"output_{name}.npy",
+    np.array([grid_components, sim_components, bound_components], dtype=object),
+)
 ```
 
 ```python
@@ -164,7 +175,7 @@ np.save(f"output_{name}.npy", np.array([grid_components, sim_components, bound_c
 ```
 
 ```python
-plt.rcParams['text.usetex'] = False
+plt.rcParams["text.usetex"] = False
 ```
 
 ```python
@@ -184,7 +195,6 @@ plt.show()
 ```
 
 ```python
-
 plt.title("Is null for arm 1?")
 plt.scatter(theta[:, 0], theta[:, 1], c=is_null_per_arm_gridpt[:, 1], cmap="Set1")
 plt.hlines(logit(0.1), -4, 2)
@@ -198,7 +208,6 @@ plt.title("Tile count per grid point")
 plt.scatter(theta[:, 0], theta[:, 1], c=n_tiles_per_pt)
 plt.colorbar()
 plt.show()
-
 ```
 
 ```python
@@ -215,7 +224,6 @@ plt.scatter(theta_tiles[:, 0], theta_tiles[:, 1], c=typeI_sum / sim_size > 0.1)
 plt.xlabel(r"$\theta_0$")
 plt.ylabel(r"$\theta_1$")
 plt.show()
-
 ```
 
 ```python
@@ -226,7 +234,6 @@ plt.vlines(logit(0.1), -4, 2, "r")
 plt.xlim(np.min(theta[:, 0]) - 0.2, np.max(theta[:, 0]) + 0.2)
 plt.ylim(np.min(theta[:, 1]) - 0.2, np.max(theta[:, 1]) + 0.2)
 plt.show()
-
 ```
 
 ```python
@@ -255,14 +262,12 @@ This is a check to determine how much of the type I error is real versus an arti
 
 ```python
 import berrylib.mcmc as mcmc
-
 ```
 
 ```python
 sorted_idxs = np.argsort(typeI_sum)
 idx = sorted_idxs[-1]
 theta_tiles[idx]
-
 ```
 
 ```python
@@ -274,7 +279,6 @@ theta_tiles[idx]
 #     data_mcmc[:n_mcmc_sims], fi.logit_p1, np.full(n_mcmc_sims, fi.thresh_theta), n_arms=2
 # )
 # success_mcmc = results_mcmc["exceedance"] > critical_values[0]
-
 ```
 
 ```python
@@ -287,7 +291,6 @@ if load:
 else:
     with open(f"berry_imprint_mcmc{idx}.pkl", "wb") as f:
         pickle.dump(results_mcmc, f)
-
 ```
 
 ```python
@@ -296,7 +299,6 @@ mcmc_typeI = np.sum(
 )
 inla_typeI = typeI_sum[idx]
 mcmc_typeI, inla_typeI
-
 ```
 
 ```python
@@ -328,7 +330,6 @@ print('"true" type I count =', inla_typeI - bad_count)
 #     "unique y where INLA says type 1 but MCMC says not type 1: ",
 #     np.unique(y[idx, bad_sim_idxs], axis=0),
 # )
-
 ```
 
 ```python
@@ -340,7 +341,6 @@ print(
     "unique y where INLA says type 1 and MCMC also says type 1: ",
     np.unique(y[idx, bad_sim_idxs], axis=0),
 )
-
 ```
 
 ```python
@@ -352,28 +352,32 @@ print(
     "unique y where INLA says type 1 and MCMC also says type 1: ",
     np.unique(y[idx, bad_sim_idxs], axis=0),
 )
-
 ```
 
 # Building a rejection table
 
 ```python
 %%time
-rejection_table = binomial.build_rejection_table(n_arms, n_arm_samples, fi.rejection_inference)
+rejection_table = binomial.build_rejection_table(
+    n_arms, n_arm_samples, fi.rejection_inference
+)
 np.random.seed(10)
 typeI_sum = np.zeros(theta_tiles.shape[0])
 typeI_score = np.zeros(theta_tiles.shape)
-accumulator = binomial.binomial_accumulator(lambda y,n: binomial.lookup_rejection(rejection_table, y))
+accumulator = binomial.binomial_accumulator(
+    lambda y, n: binomial.lookup_rejection(rejection_table, y)
+)
 for i in range(sim_size):
     samples = np.random.uniform(0, 1, size=(1, n_arm_samples, fi.n_arms))
-    chunk_typeI_sum, chunk_typeI_score = accumulator(theta_tiles, is_null_per_arm, samples)
+    chunk_typeI_sum, chunk_typeI_score = accumulator(
+        theta_tiles, is_null_per_arm, samples
+    )
     typeI_sum += chunk_typeI_sum
     typeI_score += chunk_typeI_score
 ```
 
 ```python
 typeI_sum.shape, theta_tiles.shape
-
 ```
 
 ```python
@@ -381,7 +385,6 @@ plt.figure(figsize=(8, 8))
 plt.scatter(theta_tiles[:, 0], theta_tiles[:, 1], c=typeI_sum / sim_size)
 plt.colorbar()
 plt.show()
-
 ```
 
 # Running a 4D grid
@@ -433,7 +436,6 @@ seed = 10
 n_arm_samples = 35
 n_theta_1d = 64
 sim_size = 8160
-
 ```
 
 ```python
@@ -459,7 +461,9 @@ for i in range(fi.n_arms):
     n[i] = -1
     null_hypos.append(grid.HyperPlane(n, -logit(0.1)))
 
-gr = grid.make_cartesian_grid_range(n_theta_1d, np.full(fi.n_arms, -3.5), np.full(fi.n_arms, 1.0), sim_size)
+gr = grid.make_cartesian_grid_range(
+    n_theta_1d, np.full(fi.n_arms, -3.5), np.full(fi.n_arms, 1.0), sim_size
+)
 gr.create_tiles(null_hypos)
 gr.prune()
 theta_tiles = grid.theta_tiles(gr)
@@ -481,7 +485,6 @@ import jax.numpy as jnp
 reject_fnc = lambda y, n: binomial.lookup_rejection(table, y, n)
 accum = binomial.binomial_accumulator(reject_fnc)
 paccum = jax.pmap(accum, in_axes=(None, None, 0), out_axes=(0, 0), axis_name="i")
-
 ```
 
 ```python
@@ -500,14 +503,12 @@ for i in range(int(np.ceil(sim_size / n_cores))):
 
 ```python
 i * n_cores, sim_size
-
 ```
 
 ```python
 # If you kill the simulation early, run these lines to accept the smaller sim_size
 # sim_size = (i + 1) * n_cores
 # gr.sim_sizes()[:] = sim_size
-
 ```
 
 ```python
@@ -523,7 +524,6 @@ np.save(
     ),
     allow_pickle=True,
 )
-
 ```
 
 # Making some figures!
@@ -549,7 +549,6 @@ for t2_idx, t3_idx in [(4, 4), (8, 8)]:
     cbar.set_label("Fraction of Type I errors")
     plt.savefig(f"grid_type1_{t2_idx}_{t3_idx}.png", dpi=300, bbox_inches="tight")
     plt.show()
-
 ```
 
 # Compute the bound and save slices for the Plotly frontend
@@ -563,7 +562,6 @@ import utils
 delta = 0.025
 simple_selection_model = SimpleSelection(fi.n_arms, n_arm_samples, 1, [])
 simple_selection_model.critical_values([fi.critical_value])
-
 ```
 
 ```python
@@ -575,12 +573,10 @@ score_sum = typeI_score.flatten()
 acc_o.pool_raw(typeI_sum, score_sum)
 print(np.all(acc_o.typeI_sum() == typeI_sum))
 print(np.all(acc_o.score_sum() == score_sum))
-
 ```
 
 ```python
 P, B = utils.create_ub_plot_inputs(simple_selection_model, acc_o, gr, delta)
-
 ```
 
 ```python
@@ -598,7 +594,6 @@ np.save(
     ),
     allow_pickle=True,
 )
-
 ```
 
 ```python
@@ -614,19 +609,16 @@ for t2_idx, t3_idx in [(40, 40), (32, 32), (24, 24), (16, 16), (8, 8)]:
         Pselect,
         Bselect,
     )
-
 ```
 
 ```python
 import numpy as np
 
 data = np.load("berry2_64_8160.npy", allow_pickle=True)
-
 ```
 
 ```python
 data = data.tolist()
-
 ```
 
 ```python
@@ -634,7 +626,6 @@ p_path = "P4D.csv"
 b_path = "B4D.csv"
 np.savetxt(p_path, data["P"], fmt="%s", delimiter=",")
 np.savetxt(b_path, data["B"], fmt="%s", delimiter=",")
-
 ```
 
 ```python
@@ -644,7 +635,6 @@ p_path = "P3D.csv"
 b_path = "B3D.csv"
 np.savetxt(p_path, data["P"][:, selection], fmt="%s", delimiter=",")
 np.savetxt(b_path, data["B"][selection, :], fmt="%s", delimiter=",")
-
 ```
 
 ```python

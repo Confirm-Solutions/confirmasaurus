@@ -155,15 +155,15 @@ n_arm_samples = int(lei_obj.unifs_shape()[0])
 # D = adastate.init_data(P, lei_obj, 0)
 fp = f"./{name}/data_params.pkl"
 # adastate.save(fp, (P, D))
-with open(fp, 'rb') as f:
+with open(fp, "rb") as f:
     P, D = pickle.load(f)
 ```
 
 ```python
-load_iter = 'latest'
+load_iter = "latest"
 S, load_iter, fn = adastate.load(name, load_iter)
 if S is None:
-    print('initializing')
+    print("initializing")
     S = adastate.init_state(P, g)
 S.todo[0] = True
 S.db.data = S.db.data.astype(np.float32)
@@ -171,24 +171,24 @@ S.db.data = S.db.data.astype(np.float32)
 
 ```python
 (
-    S.db.data.nbytes +
-    S.todo.nbytes + 
-    S.sim_sizes.nbytes + 
-    S.g.thetas.nbytes +
-    S.g.radii.nbytes + 
-    S.g.null_truth.nbytes +
-    S.g.grid_pt_idx.nbytes +
-    D.unifs.nbytes + 
-    sum([v.nbytes for v in D.bootstrap_idxs.values()]) + 
-    sum([t.nbytes for t in lei_obj.pd_table.tables]) + 
-    sum([t.nbytes for t in lei_obj.pr_best_pps_1_table.tables]) +
-    sum([t.nbytes for t in lei_obj.pps_2_table.tables])
+    S.db.data.nbytes
+    + S.todo.nbytes
+    + S.sim_sizes.nbytes
+    + S.g.thetas.nbytes
+    + S.g.radii.nbytes
+    + S.g.null_truth.nbytes
+    + S.g.grid_pt_idx.nbytes
+    + D.unifs.nbytes
+    + sum([v.nbytes for v in D.bootstrap_idxs.values()])
+    + sum([t.nbytes for t in lei_obj.pd_table.tables])
+    + sum([t.nbytes for t in lei_obj.pr_best_pps_1_table.tables])
+    + sum([t.nbytes for t in lei_obj.pps_2_table.tables])
 ) / 1e9, psutil.Process(os.getpid()).memory_info().rss / 1e9
 ```
 
 ```python
-with open('4d_full/storage_0.06375528470923503.pkl', 'rb') as f:
-    S_load = pickle.load(f) 
+with open("4d_full/storage_0.06375528470923503.pkl", "rb") as f:
+    S_load = pickle.load(f)
 ```
 
 ```python
@@ -245,7 +245,7 @@ with open('4d_full/storage_0.06375528470923503.pkl', 'rb') as f:
 
 ```python
 # assign the first tile todo so that we have something to do!
-S.todo[0]=True
+S.todo[0] = True
 
 R = adastate.AdaRunner(P, lei_obj)
 iter_max = 10000
@@ -276,20 +276,22 @@ try:
 
         start = time.time()
         cr = Criterion(lei_obj, P, S, D)
-        print(f'criterion took {time.time() - start:.2f}s')
+        print(f"criterion took {time.time() - start:.2f}s")
         which_refine = cr.which_refine
         which_deepen = cr.which_deepen
         report = cr.report
         del cr
         gc.collect()
         memory_usage = psutil.Process(os.getpid()).memory_info().rss
-        report['memory usage'] = f'{int(memory_usage / 1024 ** 2)} MB'
-        report['memory usage per tile'] = f'{memory_usage / S.g.n_tiles:.0f} B'
+        report["memory usage"] = f"{int(memory_usage / 1024 ** 2)} MB"
+        report["memory usage per tile"] = f"{memory_usage / S.g.n_tiles:.0f} B"
         rprint(report)
 
         start = time.time()
         S.todo[:] = False
-        if (np.sum(which_refine) > 0 or np.sum(which_deepen) > 0) and II != iter_max - 1:
+        if (
+            np.sum(which_refine) > 0 or np.sum(which_deepen) > 0
+        ) and II != iter_max - 1:
             S.sim_sizes[which_deepen] = S.sim_sizes[which_deepen] * 2
             S.todo[which_deepen] = True
 
@@ -298,9 +300,9 @@ try:
             print(f"refinement took {time.time() - start:.2f}s")
 except:
     # TODO: this might fail if the exception occurs during the refinement phase.
-    print('keyboard interrupt, checkpointing before exiting')
+    print("keyboard interrupt, checkpointing before exiting")
     adastate.save(f"{name}/{II}_exception.pkl", S)
-    print('exiting')
+    print("exiting")
     raise
 ```
 

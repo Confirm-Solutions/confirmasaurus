@@ -14,6 +14,7 @@ jupyter:
 
 ```python
 import confirm.berrylib.util as util
+
 util.setup_nb(pretty=False)
 
 import time
@@ -56,12 +57,15 @@ g_raw.n_tiles
 
 ```python
 fi = fast_inla.FastINLA(n_arms=n_arms)
-test_table = binomial_tuning.build_lookup_table(n_arms, n_arm_samples, fi.test_inference)
+test_table = binomial_tuning.build_lookup_table(
+    n_arms, n_arm_samples, fi.test_inference
+)
 ```
 
 ```python
-
-simulator = binomial_tuning.binomial_tuner(lambda data: binomial_tuning.lookup(test_table, data[...,0]))
+simulator = binomial_tuning.binomial_tuner(
+    lambda data: binomial_tuning.lookup(test_table, data[..., 0])
+)
 accumulator = binomial.binomial_accumulator(
     lambda data, cv: binomial_tuning.lookup(test_table, data[..., 0]) > cv
 )
@@ -202,9 +206,9 @@ for II in range(iter_max):
 
 ```python
 %matplotlib inline
-plt.figure(figsize=(4,4))
-plt.title(r'pointwise $\alpha$')
-plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=pointwise_target_alpha, s=20)
+plt.figure(figsize=(4, 4))
+plt.title(r"pointwise $\alpha$")
+plt.scatter(g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=pointwise_target_alpha, s=20)
 plt.colorbar()
 plt.show()
 
@@ -215,15 +219,17 @@ hob = binomial.holder_odi_bound(
     n_arm_samples,
     holderq,
 )
-plt.figure(figsize=(4,4))
-plt.title(r'holder component of $\alpha$')
-plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=hob - pointwise_target_alpha, s=20)
+plt.figure(figsize=(4, 4))
+plt.title(r"holder component of $\alpha$")
+plt.scatter(
+    g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=hob - pointwise_target_alpha, s=20
+)
 plt.colorbar()
 plt.show()
 
-plt.figure(figsize=(4,4))
-plt.title(r'$\hat{f}(\lambda^{*})$')
-plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=typeI_est, s=20)
+plt.figure(figsize=(4, 4))
+plt.title(r"$\hat{f}(\lambda^{*})$")
+plt.scatter(g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=typeI_est, s=20)
 plt.colorbar()
 plt.show()
 # plt.figure(figsize=(4,4))
@@ -233,9 +239,9 @@ plt.show()
 ```
 
 ```python
-%matplotlib inline 
-plt.figure(figsize=(8,8))
-plt.scatter(g.theta_tiles[:,0], g.theta_tiles[:, 1], c=typeI_sum, s=20)
+%matplotlib inline
+plt.figure(figsize=(8, 8))
+plt.scatter(g.theta_tiles[:, 0], g.theta_tiles[:, 1], c=typeI_sum, s=20)
 plt.colorbar()
 plt.show()
 ```
@@ -245,7 +251,7 @@ nsims_base = 50
 cvs = []
 ns = []
 for i in range(10):
-    nsims = nsims_base * (2 ** i)
+    nsims = nsims_base * (2**i)
     np.random.seed(0)
     samples = np.random.uniform(size=(nsims, n_arm_samples, n_arms))
     test_stats = simulator(g.theta_tiles, g.null_truth, samples)
@@ -254,17 +260,17 @@ for i in range(10):
     cv_idx = int(np.floor((nsims + 1) * target_alpha))
     nrejects_max = cv_idx - 1
 
-# sorted_stats = np.sort(test_stats, axis=-1)
-# sim_cv = sorted_stats[:, -cv_idx]
-# np.partition lets us do this in O(n) time instead of O(n log n)
-    partitioned_stats = np.partition(test_stats, nsims-cv_idx, axis=-1)
+    # sorted_stats = np.sort(test_stats, axis=-1)
+    # sim_cv = sorted_stats[:, -cv_idx]
+    # np.partition lets us do this in O(n) time instead of O(n log n)
+    partitioned_stats = np.partition(test_stats, nsims - cv_idx, axis=-1)
     sim_cv = partitioned_stats[:, -cv_idx]
     overall_cv = np.max(sim_cv)
     typeI_sum = np.sum(partitioned_stats[:, -cv_idx:] > overall_cv, axis=1)
-    assert(np.all(typeI_sum <= nrejects_max))
+    assert np.all(typeI_sum <= nrejects_max)
     ns.append(nsims)
     cvs.append(overall_cv)
-plt.plot(np.log10(ns), cvs, 'k-.')
+plt.plot(np.log10(ns), cvs, "k-.")
 plt.show()
 ```
 

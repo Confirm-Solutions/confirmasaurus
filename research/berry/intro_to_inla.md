@@ -15,6 +15,7 @@ jupyter:
 
 ```python
 import berrylib.util
+
 berrylib.util.setup_nb()
 ```
 
@@ -174,7 +175,7 @@ for i in range(100):
     theta_max += step
 
     if np.max(np.linalg.norm(step, axis=-1)) < tol:
-        print('number of newton iterations', i)
+        print("number of newton iterations", i)
         break
 ```
 
@@ -253,16 +254,16 @@ sigma2_post = np.exp(log_sigma2_post)
 sigma2_post /= np.sum(sigma2_post * sigma2_rule.wts)
 
 # Plot the result! This is the posterior distribution of the hyperparameter.
-plt.plot(np.log10(sigma2_rule.pts), sigma2_post, 'k-')
-plt.xlabel('$\log_{10} \sigma^2$')
-plt.ylabel('$p(\sigma^2 | y)$')
+plt.plot(np.log10(sigma2_rule.pts), sigma2_post, "k-")
+plt.xlabel("$\log_{10} \sigma^2$")
+plt.ylabel("$p(\sigma^2 | y)$")
 plt.show()
 
 # We also plot the posterior multiplied by the integration weights. This can be
 # useful since it weights the density by which portion are most "influential".
-plt.plot(np.log10(sigma2_rule.pts), sigma2_post * sigma2_rule.wts, 'k-')
-plt.xlabel('$\log_{10} \sigma^2$')
-plt.ylabel('$p(\sigma^2 | y) * w$')
+plt.plot(np.log10(sigma2_rule.pts), sigma2_post * sigma2_rule.wts, "k-")
+plt.xlabel("$\log_{10} \sigma^2$")
+plt.ylabel("$p(\sigma^2 | y) * w$")
 plt.show()
 ```
 
@@ -284,8 +285,7 @@ import berrylib.quadrature as quadrature
 
 fi = fast_inla.FastINLA(sigma2_n=sigN, n_arms=4)
 quad_p_ti_g_y = quadrature.integrate(
-    fi, y_i, n_i, fixed_arm_dim=arm_idx, fixed_arm_values=ti_rule.pts,
-    n_theta=11
+    fi, y_i, n_i, fixed_arm_dim=arm_idx, fixed_arm_values=ti_rule.pts, n_theta=11
 )
 quad_p_ti_g_y /= np.sum(quad_p_ti_g_y * ti_rule.wts)
 ```
@@ -343,7 +343,6 @@ for arm_idx in range(4):
     plt.plot(ti_rule.pts, quad_p_ti_g_y, "b-o", markersize=3, label="Quad")
     plt.legend()
     plt.show()
-
 ```
 
 ### 2.2: Laplace approximation of $p(\theta_i|y, \sigma^2)$
@@ -354,11 +353,13 @@ Instead of assuming $p(\theta_i|y, \sigma^2)$ is Gaussian, we will compute it us
 
 
 ```python
-y_tiled = np.tile(y_i[None,:], (ti_rule.pts.shape[0], 1))
-n_tiled = np.tile(n_i[None,:], (ti_rule.pts.shape[0], 1))
-ti_pts_tiled = np.tile(ti_rule.pts[:, None], (1, fi.sigma2_n)) 
+y_tiled = np.tile(y_i[None, :], (ti_rule.pts.shape[0], 1))
+n_tiled = np.tile(n_i[None, :], (ti_rule.pts.shape[0], 1))
+ti_pts_tiled = np.tile(ti_rule.pts[:, None], (1, fi.sigma2_n))
 
-ti_max, ti_hess_inv = fi.optimize_mode(y_tiled, n_tiled, fixed_arm_dim=arm_idx, fixed_arm_values=ti_pts_tiled)
+ti_max, ti_hess_inv = fi.optimize_mode(
+    y_tiled, n_tiled, fixed_arm_dim=arm_idx, fixed_arm_values=ti_pts_tiled
+)
 ti_logjoint = fi.log_joint(y_tiled, n_tiled, ti_max)
 
 ti_post = np.exp(ti_logjoint + 0.5 * np.log(np.linalg.det(-ti_hess_inv)))
@@ -454,7 +455,7 @@ thetahat = logit(phat) - logit_p1
 # Step 3 above
 sample_I = n_i * phat * (1 - phat)
 
-mu_post = np.empty((sigN,4))
+mu_post = np.empty((sigN, 4))
 sigma_post = np.empty((sigN, 4))
 joint_sigma2_y = np.empty(sigN)
 for i, sig2 in enumerate(sigma2_rule.pts):
@@ -484,7 +485,7 @@ for i, sig2 in enumerate(sigma2_rule.pts):
     y_given_sig2 = scipy.stats.multivariate_normal.pdf(
         thetahat,
         np.repeat(-1.34, 4),
-        (np.diag(sample_I ** -1) + np.diag(np.repeat(sig2, 4)) + mu_sig_sq),
+        (np.diag(sample_I**-1) + np.diag(np.repeat(sig2, 4)) + mu_sig_sq),
     )
     joint_sigma2_y[i] = prior * y_given_sig2
 ```
@@ -514,14 +515,9 @@ theta_threshold = logit(p_threshold) - logit_p1
 # integration weights
 weights = sigma2_given_y * sigma2_rule.wts
 exceedance_db = np.sum(
-    (
-        1.0
-        - scipy.stats.norm.cdf(
-            theta_threshold, mu_post, sigma_post
-        )
-    )
+    (1.0 - scipy.stats.norm.cdf(theta_threshold, mu_post, sigma_post))
     * weights[:, None],
-    axis=0
+    axis=0,
 )
 exceedance_db
 ```
@@ -530,14 +526,9 @@ exceedance_db
 inla_sigma = np.sqrt(np.diagonal(-np.linalg.inv(hess), axis1=1, axis2=2))
 inla_mu = theta_max
 exceedance_inla = np.sum(
-    (
-        1.0
-        - scipy.stats.norm.cdf(
-            theta_threshold, inla_mu, inla_sigma
-        )
-    )
+    (1.0 - scipy.stats.norm.cdf(theta_threshold, inla_mu, inla_sigma))
     * weights[:, None],
-    axis=0
+    axis=0,
 )
 exceedance_inla
 ```

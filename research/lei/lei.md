@@ -133,13 +133,15 @@ The second term can be estimated by INLA.
 
 ```python
 def pr_normal_best(mean, cov, key, n_sims):
-    '''
+    """
     Estimates P[X_i > max_{j != i} X_j] where X ~ N(mean, cov) via sampling.
-    '''
+    """
     out_shape = (n_sims, *mean.shape[:-1])
     sims = jax.random.multivariate_normal(key, mean, cov, shape=out_shape)
     order = jnp.arange(1, mean.shape[-1])
-    compute_pr_best_all = jax.vmap(lambda i: jnp.mean(jnp.argmax(sims, axis=-1) == i, axis=0))
+    compute_pr_best_all = jax.vmap(
+        lambda i: jnp.mean(jnp.argmax(sims, axis=-1) == i, axis=0)
+    )
     return compute_pr_best_all(order)
 ```
 
@@ -156,9 +158,7 @@ Next, we perform INLA to estimate $p(\sigma^2 | y, n)$ on a grid of values for $
 
 ```python
 sig2_rule = quad.log_gauss_rule(15, 1e-6, 1e3)
-sig2_rule_ops = berry.optimized(sig2_rule.pts, n_arms=4).config(
-    opt_tol=1e-3
-)
+sig2_rule_ops = berry.optimized(sig2_rule.pts, n_arms=4).config(opt_tol=1e-3)
 ```
 
 ```python
@@ -169,13 +169,10 @@ def posterior_sigma_sq(data, sig2_rule, sig2_rule_ops):
     p_pinned = dict(sig2=sig2, theta=None)
 
     f = sig2_rule_ops.laplace_logpost
-    logpost, x_max, hess, iters = f(
-        np.zeros((n_sig2, n_arms)), p_pinned, data
-    )
-    post = inla.exp_and_normalize(
-            logpost, sig2_rule.wts, axis=-1)
+    logpost, x_max, hess, iters = f(np.zeros((n_sig2, n_arms)), p_pinned, data)
+    post = inla.exp_and_normalize(logpost, sig2_rule.wts, axis=-1)
 
-    return post, x_max, hess, iters 
+    return post, x_max, hess, iters
 ```
 
 ```python
@@ -183,7 +180,9 @@ dtype = jnp.float64
 N = 1
 data = berry.figure2_data(N).astype(dtype)[0]
 n_arms, _ = data.shape
-posterior_sigma_sq_jit = jax.jit(lambda data: posterior_sigma_sq(data, sig2_rule, sig2_rule_ops))
+posterior_sigma_sq_jit = jax.jit(
+    lambda data: posterior_sigma_sq(data, sig2_rule, sig2_rule_ops)
+)
 post, _, hess, _ = posterior_sigma_sq_jit(data)
 ```
 
@@ -192,10 +191,12 @@ Putting the two pieces together, we have the following function to compute the p
 ```python
 def pr_best(data, sig2_rule, sig2_rule_ops, key, n_sims):
     n_arms, _ = data.shape
-    post, x_max, hess, _ = posterior_sigma_sq(data, sig2_rule, sig2_rule_ops) 
+    post, x_max, hess, _ = posterior_sigma_sq(data, sig2_rule, sig2_rule_ops)
     mean = x_max
-    hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
-    prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
+    hess_fn = jax.vmap(
+        lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])
+    )
+    prec = -hess_fn(hess)  # (n_sigs, n_arms, n_arms)
     cov = jnp.linalg.inv(prec)
     pr_normal_best_out = pr_normal_best(mean, cov, key=key, n_sims=n_sims)
     return jnp.matmul(pr_normal_best_out, post * sig2_rule.wts)
@@ -234,17 +235,20 @@ rejection_threshold = 0.1
 def posterior_difference(data, arm, sig2_rule, sig2_rule_ops, thresh):
     n_arms, _ = data.shape
     post, x_max, hess, _ = posterior_sigma_sq(data, sig2_rule, sig2_rule_ops)
-    hess_fn = jax.vmap(lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1]))
-    prec = -hess_fn(hess) # (n_sigs, n_arms, n_arms)
+    hess_fn = jax.vmap(
+        lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])
+    )
+    prec = -hess_fn(hess)  # (n_sigs, n_arms, n_arms)
     order = jnp.arange(0, n_arms)
     q1 = jnp.where(order == 0, -1, 0)
     q1 = jnp.where(order == arm, 1, q1)
     loc = x_max @ q1
-    scale = jnp.linalg.solve(prec, q1[None,:]) @ q1
+    scale = jnp.linalg.solve(prec, q1[None, :]) @ q1
     normal_term = jax.scipy.stats.norm.cdf(thresh, loc=loc, scale=scale)
     post_weighted = sig2_rule.wts * post
     out = normal_term @ post_weighted
     return out
+
 
 posterior_difference(data, 1, sig2_rule, sig2_rule_ops, posterior_difference_threshold)
 ```
@@ -305,20 +309,25 @@ non_futile_idx = jnp.array(non_futile_idx)
 
 # create a dense grid of sig2 values
 n_sig2 = 100
-sig2_grid = 10**jnp.linspace(-6, 3, n_sig2)
+sig2_grid = 10 ** jnp.linspace(-6, 3, n_sig2)
 dsig2_grid = jnp.diff(sig2_grid)
-sig2_grid_ops = berry.optimized(sig2_grid, n_arms=data.shape[0]).config(
-    opt_tol=1e-3
-)
+sig2_grid_ops = berry.optimized(sig2_grid, n_arms=data.shape[0]).config(opt_tol=1e-3)
 
 _, key = jax.random.split(key)
 ```
 
 ```python
 def pr_Ai(
-    data, p, key, best_arm, non_futile_idx, 
-    sig2_rule, sig2_rule_ops,
-    sig2_grid, sig2_grid_ops, dsig2_grid,
+    data,
+    p,
+    key,
+    best_arm,
+    non_futile_idx,
+    sig2_rule,
+    sig2_rule_ops,
+    sig2_grid,
+    sig2_grid_ops,
+    dsig2_grid,
 ):
     n_arms, _ = data.shape
 
@@ -340,15 +349,17 @@ def pr_Ai(
     i_star = jnp.searchsorted(Fx, unifs)
 
     # sample theta | y, n, sigma^2
-    mean = x_max[i_star+1]
+    mean = x_max[i_star + 1]
     hess_fn = jax.vmap(
         lambda h: jnp.diag(h[0]) + jnp.full(shape=(n_arms, n_arms), fill_value=h[1])
     )
     prec = -hess_fn(hess)
-    cov = jnp.linalg.inv(prec)[i_star+1]
+    cov = jnp.linalg.inv(prec)[i_star + 1]
     _, key = jax.random.split(key)
     theta = jax.random.multivariate_normal(
-        key=key, mean=mean, cov=cov,
+        key=key,
+        mean=mean,
+        cov=cov,
     )
     p_samples = jax.scipy.special.expit(theta)
 
@@ -363,7 +374,10 @@ def pr_Ai(
         # pool outcomes for each arm
         data = data + jnp.stack((y_new, n_new), axis=-1)
 
-        return posterior_difference(data, best_arm, sig2_rule, sig2_rule_ops, diff_thresh) < rej_thresh
+        return (
+            posterior_difference(data, best_arm, sig2_rule, sig2_rule_ops, diff_thresh)
+            < rej_thresh
+        )
 
     simulate_Ai_vmapped = jax.vmap(
         simulate_Ai, in_axes=(None, None, None, None, None, 0, 0)
@@ -380,15 +394,25 @@ def pr_Ai(
     )
     out = jnp.mean(Ai_indicators)
     return out
-
 ```
 
 ```python
 %%time
-jax.jit(lambda data, p, key, best_arm, non_futile_idx:
-    pr_Ai(data, p, key, best_arm, non_futile_idx, 
-          sig2_rule, sig2_rule_ops, sig2_grid, sig2_grid_ops, dsig2_grid),
-    static_argnums=(3,))(data, p, key, 1, non_futile_idx)
+jax.jit(
+    lambda data, p, key, best_arm, non_futile_idx: pr_Ai(
+        data,
+        p,
+        key,
+        best_arm,
+        non_futile_idx,
+        sig2_rule,
+        sig2_rule_ops,
+        sig2_grid,
+        sig2_grid_ops,
+        dsig2_grid,
+    ),
+    static_argnums=(3,),
+)(data, p, key, 1, non_futile_idx)
 ```
 
 ```python
@@ -397,11 +421,11 @@ n_sims = 1000
 n_unifs = 1000
 key = jax.random.PRNGKey(2)
 
-#x = jnp.linspace(-3, 3, num=n_sims)
-#px_orig = 0.5*jax.scipy.stats.norm.pdf(x, -1, 0.5) + 0.5*jax.scipy.stats.norm.pdf(x, 1, 0.5)
+# x = jnp.linspace(-3, 3, num=n_sims)
+# px_orig = 0.5*jax.scipy.stats.norm.pdf(x, -1, 0.5) + 0.5*jax.scipy.stats.norm.pdf(x, 1, 0.5)
 
-#x = jnp.linspace(0, 10, num=n_sims)
-#px_orig = jax.scipy.stats.gamma.pdf(x, 10)
+# x = jnp.linspace(0, 10, num=n_sims)
+# px_orig = jax.scipy.stats.gamma.pdf(x, 10)
 
 x = jnp.linspace(0, 1, num=n_sims)
 px_orig = jax.scipy.stats.beta.pdf(x, 4, 2)
@@ -416,23 +440,23 @@ unifs = jax.random.uniform(key=key, shape=(n_unifs,))
 i_star = jnp.searchsorted(Fx, unifs)
 
 # point mass approx
-#samples = x[i_star+1]
+# samples = x[i_star+1]
 
 # constant approx
-#samples = x[i_star+1] - (Fx[i_star] - unifs) / px[i_star]
+# samples = x[i_star+1] - (Fx[i_star] - unifs) / px[i_star]
 
 # linear approx
-a = 0.5 * (px[i_star+1] - px[i_star]) / dx[i_star]
+a = 0.5 * (px[i_star + 1] - px[i_star]) / dx[i_star]
 b = px[i_star]
-c = Fx[i_star] - unifs - px[i_star] * dx[i_star] - a * dx[i_star]**2
-discr = jnp.sqrt(jnp.maximum(b**2 - 4*a*c, 0))
-quad_solve = jnp.where(jnp.abs(a) < 1e-8, -c/b, (-b + discr) / (2*a))
+c = Fx[i_star] - unifs - px[i_star] * dx[i_star] - a * dx[i_star] ** 2
+discr = jnp.sqrt(jnp.maximum(b**2 - 4 * a * c, 0))
+quad_solve = jnp.where(jnp.abs(a) < 1e-8, -c / b, (-b + discr) / (2 * a))
 samples = x[i_star] + quad_solve
 
-#plt.plot(x[1:], Fx)
-#plt.plot(x[1:], jax.scipy.stats.norm.cdf(x[1:]))
-plt.hist(x[i_star+1], density=True, alpha=0.5)
-plt.hist(samples, density = True, alpha=0.5)
+# plt.plot(x[1:], Fx)
+# plt.plot(x[1:], jax.scipy.stats.norm.cdf(x[1:]))
+plt.hist(x[i_star + 1], density=True, alpha=0.5)
+plt.hist(samples, density=True, alpha=0.5)
 plt.plot(x, px_orig)
 plt.show()
 ```
@@ -442,24 +466,24 @@ plt.show()
 ```python
 %%time
 params = {
-    "n_arms" : 4,
-    "n_stage_1" : 50,
-    "n_stage_2" : 100,
-    "n_stage_1_interims" : 2,
-    "n_stage_1_add_per_interim" : 100,
-    "n_stage_2_add_per_interim" : 100,
-    "stage_1_futility_threshold" : 0.15,
-    "stage_1_efficacy_threshold" : 0.7,
-    "stage_2_futility_threshold" : 0.2,
-    "stage_2_efficacy_threshold" : 0.95,
-    "inter_stage_futility_threshold" : 0.6,
-    "posterior_difference_threshold" : 0,
-    "rejection_threshold" : 0.05,
-    "key" : jax.random.PRNGKey(0),
-    "n_pr_sims" : 100,
-    "n_sig2_sims" : 20,
-    "batch_size" : int(2**20),
-    "cache_tables" : False,
+    "n_arms": 4,
+    "n_stage_1": 50,
+    "n_stage_2": 100,
+    "n_stage_1_interims": 2,
+    "n_stage_1_add_per_interim": 100,
+    "n_stage_2_add_per_interim": 100,
+    "stage_1_futility_threshold": 0.15,
+    "stage_1_efficacy_threshold": 0.7,
+    "stage_2_futility_threshold": 0.2,
+    "stage_2_efficacy_threshold": 0.95,
+    "inter_stage_futility_threshold": 0.6,
+    "posterior_difference_threshold": 0,
+    "rejection_threshold": 0.05,
+    "key": jax.random.PRNGKey(0),
+    "n_pr_sims": 100,
+    "n_sig2_sims": 20,
+    "batch_size": int(2**20),
+    "cache_tables": False,
 }
 lei_obj = lewis.Lewis45(**params)
 ```
@@ -476,7 +500,7 @@ n_sig2_sim = 20
 %%time
 lei_obj.pd_table = lei_obj.posterior_difference_table__(
     batch_size=batch_size,
-    n_points=n_points, 
+    n_points=n_points,
 )
 lei_obj.pd_table
 ```
@@ -484,7 +508,7 @@ lei_obj.pd_table
 ```python
 %%time
 lei_obj.pr_best_pps_1_table = lei_obj.pr_best_pps_1_table__(
-    key, 
+    key,
     n_pr_sims,
     batch_size=batch_size,
     n_points=n_points,
@@ -496,7 +520,7 @@ lei_obj.pr_best_pps_1_table
 %%time
 _, key = jax.random.split(key)
 lei_obj.pps_2_table = lei_obj.pps_2_table__(
-    key, 
+    key,
     n_pr_sims,
     batch_size=batch_size,
     n_points=n_points,
@@ -505,7 +529,7 @@ lei_obj.pps_2_table
 ```
 
 ```python
-n_arms = params['n_arms']
+n_arms = params["n_arms"]
 size = 52
 lower = np.full(n_arms, -1)
 upper = np.full(n_arms, 1)
@@ -513,15 +537,12 @@ thetas, radii = lewgrid.make_cartesian_grid_range(
     size=size,
     lower=lower,
     upper=upper,
-) 
+)
 ns = np.concatenate(
-    [np.ones(n_arms-1)[:, None], -np.eye(n_arms-1)],
+    [np.ones(n_arms - 1)[:, None], -np.eye(n_arms - 1)],
     axis=-1,
 )
-null_hypos = [
-    grid.HyperPlane(n, 0)
-    for n in ns
-]
+null_hypos = [grid.HyperPlane(n, 0) for n in ns]
 gr = grid.build_grid(
     thetas=thetas,
     radii=radii,
@@ -541,7 +562,6 @@ p_tiles = jax.scipy.special.expit(theta_tiles)
 ```
 
 ```python
-
 class LeiDriver:
     def __init__(
         self,
@@ -628,7 +648,6 @@ class LeiDriver:
             self.typeI_sum += out[0]
             self.typeI_score += out[1]
         return self.typeI_sum, self.typeI_score
-
 ```
 
 ```python
@@ -638,7 +657,6 @@ simulator = LeiDriver(
     null_truths=null_truths,
     grid_batch_size=grid_batch_size,
 )
-
 ```
 
 ```python
@@ -660,18 +678,23 @@ np.savetxt("output_lei4d2/typeI_score.csv", typeI_score, fmt="%s", delimiter=","
 ```python
 sim_size = sim_batch_size * n_sim_batches
 
-plt.figure(figsize=(8,4), constrained_layout=True)
+plt.figure(figsize=(8, 4), constrained_layout=True)
 for i, t2_idx in enumerate([4, 8]):
     t2 = np.unique(theta_tiles[:, 2])[t2_idx]
-    selection = (theta_tiles[:,2] == t2)
+    selection = theta_tiles[:, 2] == t2
 
-    plt.subplot(1,2,i+1)
-    plt.title(f'slice: $\\theta_2 \\approx$ {t2:.1f}')
-    plt.scatter(theta_tiles[selection,0], theta_tiles[selection,1], c=typeI_sum[selection]/sim_size, s=90)
+    plt.subplot(1, 2, i + 1)
+    plt.title(f"slice: $\\theta_2 \\approx$ {t2:.1f}")
+    plt.scatter(
+        theta_tiles[selection, 0],
+        theta_tiles[selection, 1],
+        c=typeI_sum[selection] / sim_size,
+        s=90,
+    )
     cbar = plt.colorbar()
-    plt.xlabel(r'$\theta_0$')
-    plt.ylabel(r'$\theta_1$')
-    cbar.set_label('Simulated fraction of Type I errors')
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    cbar.set_label("Simulated fraction of Type I errors")
 plt.show()
 ```
 
@@ -679,10 +702,10 @@ plt.show()
 tile_radii = gr.radii[gr.grid_pt_idx]
 sim_sizes = np.full(gr.n_tiles, sim_size)
 n_arm_samples = (
-    params['n_stage_1'] +
-    params['n_stage_1_add_per_interim'] // 2 * params['n_stage_1_interims'] + 
-    params['n_stage_2'] +
-    params['n_stage_2_add_per_interim'] // 2
+    params["n_stage_1"]
+    + params["n_stage_1_add_per_interim"] // 2 * params["n_stage_1_interims"]
+    + params["n_stage_2"]
+    + params["n_stage_2_add_per_interim"] // 2
 )
 total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
     theta_tiles,
@@ -693,14 +716,16 @@ total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
     typeI_sum,
     typeI_score,
 )
-bound_components = np.array([
-    d0,
-    d0u,
-    d1w,
-    d1uw,
-    d2uw,
-    total,
-]).T
+bound_components = np.array(
+    [
+        d0,
+        d0u,
+        d1w,
+        d1uw,
+        d2uw,
+        total,
+    ]
+).T
 ```
 
 ```python
@@ -710,8 +735,12 @@ t2 = t2_uniques[8]
 t3 = t3_uniques[8]
 selection = (theta_tiles[:, 2] == t2) & (theta_tiles[:, 3] == t3)
 
-np.savetxt('output_lei4d/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
-np.savetxt('output_lei4d/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
+np.savetxt(
+    "output_lei4d/P_lei.csv", theta_tiles[selection, :].T, fmt="%s", delimiter=","
+)
+np.savetxt(
+    "output_lei4d/B_lei.csv", bound_components[selection, :], fmt="%s", delimiter=","
+)
 ```
 
 ```python

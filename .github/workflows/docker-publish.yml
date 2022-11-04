@@ -12,6 +12,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "environment*.yml"
+      - "pyproject.toml"
+      - "poetry.lock"
       - "cloud/images/**"
       - ".github/**"
   push:
@@ -20,6 +22,8 @@ on:
     tags: ["v*.*.*"]
     paths:
       - "environment*.yml"
+      - "pyproject.toml"
+      - "poetry.lock"
       - "cloud/images/**"
       - ".github/**"
 

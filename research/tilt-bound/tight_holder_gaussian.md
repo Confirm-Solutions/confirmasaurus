@@ -47,11 +47,11 @@ The following are general helper functions that will be used throughout the note
 
 ```python
 def simulate(theta_0, n_sims, alpha):
-    '''
+    """
     Simulates the model described above n_sims times under theta_0
     and computes the Type I sum and score with optimal threshold
     at level alpha.
-    '''
+    """
     xs = np.random.normal(theta_0, 1, n_sims)
     z_crit = norm.ppf(1 - alpha)
     rejs = xs > z_crit
@@ -99,20 +99,25 @@ and $N$ is the number of simulations.
 
 ```python
 def taylor_bound(f0, df0, vs):
-    '''
+    """
     Computes the Taylor upper bound with true Type I Error and its gradient.
-    '''
+    """
     return f0 + df0 * vs + (1 / 2) * vs**2
 
-def taylor_bound_est(typeI_sum, typeI_score, nsims, vs, delta=0.025, delta_prop_0to1=0.5):
-    '''
+
+def taylor_bound_est(
+    typeI_sum, typeI_score, nsims, vs, delta=0.025, delta_prop_0to1=0.5
+):
+    """
     Computes the Taylor upper bound with estimates and accounting for their error.
-    '''
+    """
     f0 = beta.ppf(1 - (delta * delta_prop_0to1), typeI_sum + 1, nsims - typeI_sum)
 
     grad_est = typeI_score / nsims * vs
     covars = vs**2
-    grad_bound = 0.5 * np.sqrt(covars / nsims * (1 / ((1 - delta_prop_0to1) * delta) - 1))
+    grad_bound = 0.5 * np.sqrt(
+        covars / nsims * (1 / ((1 - delta_prop_0to1) * delta) - 1)
+    )
 
     hess_bound = covars / 2
 
@@ -167,26 +172,29 @@ Finally, we have the following as the optimal choice for the centering
 
 ```python
 def z_lq(q):
-    frac = scipy.special.gamma((q+1)/2) / np.sqrt(np.pi)
-    return np.sqrt(2) * frac**(1/q)
+    frac = scipy.special.gamma((q + 1) / 2) / np.sqrt(np.pi)
+    return np.sqrt(2) * frac ** (1 / q)
+
 
 def C_q(vs, q):
     return z_lq(q) * vs
-    
-def copt(f0, p):
-    return 1/(1 + ((1-f0) / f0)**(1/(p-1)))
 
-def holder_bound(f0, vs, hp, hc='opt'):
+
+def copt(f0, p):
+    return 1 / (1 + ((1 - f0) / f0) ** (1 / (p - 1)))
+
+
+def holder_bound(f0, vs, hp, hc="opt"):
     if isinstance(hp, list) or isinstance(hp, np.ndarray):
         bounds = np.array([holder_bound(f0, vs, hpp, hc) for hpp in hp])
         return np.min(bounds, axis=0)
-    if hc == 'opt':
+    if hc == "opt":
         hc = copt(f0, hp)
     hq = 1 / (1 - 1 / hp)
     B = hc**hp
-    A = (1-hc)**hp - B
+    A = (1 - hc) ** hp - B
     C = C_q(vs, hq)
-    return 1/A * (A*C/hq + (A*f0 + B)**(1/hq))**hq - B/A
+    return 1 / A * (A * C / hq + (A * f0 + B) ** (1 / hq)) ** hq - B / A
 ```
 
 ## Exponential H&ouml;lder Bound
@@ -227,7 +235,7 @@ def exp_holder_bound(f0, df0, vs):
 
 ```python
 def exp_holder_impr_bound(f0, vs):
-    return np.exp(-0.5 * (vs - np.sqrt(-2*np.log(f0)))**2)
+    return np.exp(-0.5 * (vs - np.sqrt(-2 * np.log(f0))) ** 2)
 ```
 
 ## Performance Comparison
@@ -240,9 +248,9 @@ alpha = 0.1
 ```
 
 ```python
-z_crit = norm.ppf(1-alpha)
-f0 = 1-norm.cdf(z_crit - theta_0)
-df0 = norm.pdf(z_crit - theta_0) 
+z_crit = norm.ppf(1 - alpha)
+f0 = 1 - norm.cdf(z_crit - theta_0)
+df0 = norm.pdf(z_crit - theta_0)
 vs = np.linspace(0, v_max, n_steps)
 ```
 
@@ -250,7 +258,7 @@ vs = np.linspace(0, v_max, n_steps)
 def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
     # compute true Type I Error
     thetas = theta_0 + vs
-    fs = 1-norm.cdf(z_crit - thetas)
+    fs = 1 - norm.cdf(z_crit - thetas)
 
     # compute taylor bound
     taylor_bounds = taylor_bound(f0, df0, vs)
@@ -260,17 +268,17 @@ def run(theta_0, f0, df0, vs, alpha, z_crit, hp, hc):
 
     # compute exp holder bound
     exp_holder_bounds = exp_holder_bound(f0, df0, vs)
-    
+
     # compute exp holder impr bound
     exp_holder_impr_bounds = exp_holder_impr_bound(f0, vs)
 
     # plot everything
-    plt.plot(thetas, fs, ls='--', color='black', label='True TIE')
-    plt.plot(thetas, taylor_bounds, ls='-', label='taylor')
+    plt.plot(thetas, fs, ls="--", color="black", label="True TIE")
+    plt.plot(thetas, taylor_bounds, ls="-", label="taylor")
     for i, c in enumerate(hc):
-        plt.plot(thetas, holder_bounds[i], ls='--', label=f'centered-holder({c})')
-    plt.plot(thetas, exp_holder_bounds, ls='-.', label='exp-holder')
-    plt.plot(thetas, exp_holder_impr_bounds, ls=':', label='exp-holder-impr')
+        plt.plot(thetas, holder_bounds[i], ls="--", label=f"centered-holder({c})")
+    plt.plot(thetas, exp_holder_bounds, ls="-.", label="exp-holder")
+    plt.plot(thetas, exp_holder_impr_bounds, ls=":", label="exp-holder-impr")
     plt.legend()
     plt.show()
 ```
@@ -288,7 +296,7 @@ run(
     alpha=alpha,
     z_crit=z_crit,
     hp=[1.1, 1.15, 1.2, 1.25, 1.3, 1.35],
-    hc=['opt'],
+    hc=["opt"],
 )
 ```
 
@@ -309,7 +317,7 @@ run(
     alpha=alpha,
     z_crit=z_crit,
     hp=np.arange(1.01, 10, 0.01),
-    hc=['opt'],
+    hc=["opt"],
 )
 ```
 
@@ -329,7 +337,7 @@ run(
     alpha=alpha,
     z_crit=z_crit,
     hp=np.arange(1.01, 10, 0.01),
-    hc=['opt'],
+    hc=["opt"],
 )
 ```
 
@@ -343,8 +351,8 @@ Now, we consider what happens when $\theta_0$ is closer to the boundary (when Ty
 ```python
 theta_0 = -0.01
 v_max = -theta_0
-f0 = 1-norm.cdf(z_crit - theta_0)
-df0 = norm.pdf(z_crit - theta_0) 
+f0 = 1 - norm.cdf(z_crit - theta_0)
+df0 = norm.pdf(z_crit - theta_0)
 vs = np.linspace(0, v_max, n_steps)
 run(
     theta_0=theta_0,
@@ -354,7 +362,7 @@ run(
     alpha=alpha,
     z_crit=z_crit,
     hp=np.arange(1.01, 10, 0.01),
-    hc=['opt'],
+    hc=["opt"],
 )
 ```
 
@@ -363,9 +371,9 @@ Removing the others shows:
 
 ```python
 alpha = 0.3
-z_crit = norm.ppf(1-alpha)
-f0 = 1-norm.cdf(z_crit - theta_0)
-df0 = norm.pdf(z_crit - theta_0) 
+z_crit = norm.ppf(1 - alpha)
+f0 = 1 - norm.cdf(z_crit - theta_0)
+df0 = norm.pdf(z_crit - theta_0)
 run(
     theta_0=theta_0,
     f0=f0,
@@ -374,7 +382,7 @@ run(
     alpha=alpha,
     z_crit=z_crit,
     hp=np.arange(1.01, 10, 0.01),
-    hc=['opt'],
+    hc=["opt"],
 )
 ```
 

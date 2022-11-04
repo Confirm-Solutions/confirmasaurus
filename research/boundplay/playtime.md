@@ -76,7 +76,14 @@ true_second = jax.vmap(jax.grad(jax.grad(true_err)))
 
 # simulating the rejection/type I error
 nsims = 100000
-samples = np.random.normal(mu[:,None], 1, size=(mu.shape[0], nsims,))
+samples = np.random.normal(
+    mu[:, None],
+    1,
+    size=(
+        mu.shape[0],
+        nsims,
+    ),
+)
 reject = samples > z_thresh
 typeI_sum = np.sum(reject, axis=-1)
 typeI_est = typeI_sum / nsims
@@ -96,17 +103,26 @@ hess_bound_true = -scipy.optimize.minimize(lambda x: -true_second(x), 0).fun
 # with different values of mu because the whole integrand is just translated by
 # mu.
 explicit_integral = scipy.integrate.quad(
-    lambda x: scipy.stats.norm.pdf(x, 0) * (x - 0) ** 2, 
-    -10, 
-    10
+    lambda x: scipy.stats.norm.pdf(x, 0) * (x - 0) ** 2, -10, 10
 )
 hess_bound = explicit_integral[0]
 ```
 
 ```python
 # Demonstration that the gradient estimate is very very close to normally distributed. CLT and all that.
-more_samples = np.random.normal(mu[-1,None], 1, size=(1, nsims,))
-plt.hist(np.mean(more_samples[-1, :].reshape((-1, 5)), axis=-1) - mu[-1], bins=100, density=True)
+more_samples = np.random.normal(
+    mu[-1, None],
+    1,
+    size=(
+        1,
+        nsims,
+    ),
+)
+plt.hist(
+    np.mean(more_samples[-1, :].reshape((-1, 5)), axis=-1) - mu[-1],
+    bins=100,
+    density=True,
+)
 plt.show()
 ```
 
@@ -133,22 +149,35 @@ egg2_true = np.array([egg2_f(m) for m in mu])
 
 # For small p, q is large and we should use more precision
 import mpmath as mp
+
 mp.mp.dps = 100
-gaussian_pdf = lambda x: (1 / mp.sqrt(2 * mp.pi)) * mp.exp(-(x ** 2) / 2)
+gaussian_pdf = lambda x: (1 / mp.sqrt(2 * mp.pi)) * mp.exp(-(x**2) / 2)
+
+
 def egQ(q):
-    return float(mp.re(mp.quad(lambda x: gaussian_pdf(x) * np.abs(x) ** q, [-10, 10], error=True)[0]))
+    return float(
+        mp.re(
+            mp.quad(lambda x: gaussian_pdf(x) * np.abs(x) ** q, [-10, 10], error=True)[
+                0
+            ]
+        )
+    )
+
 
 def qf(p):
     return 1 / (1 - 1 / p)
 
+
 def holder_bound(p):
     q = qf(p)
-    return (((typeI_est + typeI_CI) ** (1 / p)) * (egQ(q) ** (1 / q)))
+    return ((typeI_est + typeI_CI) ** (1 / p)) * (egQ(q) ** (1 / q))
+
+
 holder_bound(4)
 ```
 
 ```python
-egQ(1.5) ** (1/1.5)
+egQ(1.5) ** (1 / 1.5)
 ```
 
 ```python
@@ -160,12 +189,12 @@ egQ(3.0)
 ```
 
 ```python
-style = ['b-', 'r--', 'g-.', 'k:']
+style = ["b-", "r--", "g-.", "k:"]
 for i, p in enumerate([1.2, 1.6, 3]):
     print(qf(p))
-    plt.plot(mu, holder_bound(p), style[i], label=f'holder p={p}')
-plt.plot(mu, np.sqrt((typeI_est + typeI_CI) * egg2_uniform), 'k-', label='holder p=2')
-plt.plot(mu[::5], np.full_like(mu, cantelli)[::5], 'ko', label='cantelli')
+    plt.plot(mu, holder_bound(p), style[i], label=f"holder p={p}")
+plt.plot(mu, np.sqrt((typeI_est + typeI_CI) * egg2_uniform), "k-", label="holder p=2")
+plt.plot(mu[::5], np.full_like(mu, cantelli)[::5], "ko", label="cantelli")
 plt.xlabel("$\mu$")
 plt.ylabel("gradient upper bound")
 plt.legend()
@@ -173,7 +202,7 @@ plt.show()
 ```
 
 ```python
-[egQ(qf(p)) ** (1/qf(p)) for p in [1.023, 1.054, 1.09, 1.2]]
+[egQ(qf(p)) ** (1 / qf(p)) for p in [1.023, 1.054, 1.09, 1.2]]
 ```
 
 ```python
@@ -184,7 +213,7 @@ Going below p=1.2 doesn't help for this problem.
 
 ```python
 for i, p in enumerate([1.023, 1.054, 1.09, 1.2]):
-    plt.plot(mu, holder_bound(p), style[i], label=f'holder p={p}')
+    plt.plot(mu, holder_bound(p), style[i], label=f"holder p={p}")
 plt.xlabel("$\mu$")
 plt.ylabel("gradient upper bound")
 plt.legend()
@@ -197,14 +226,16 @@ grad_f = lambda mu: scipy.integrate.quad(
 )[0]
 grad_true = np.array([grad_f(m) for m in mu])
 
-plt.plot(mu, grad_true, label='true')
-plt.plot(mu, grad_est, label='empirical')
+plt.plot(mu, grad_true, label="true")
+plt.plot(mu, grad_est, label="empirical")
 plt.fill_between(mu, grad_true, grad_true + holder_bound(1.2), alpha=0.5)
 plt.show()
 ```
 
 ```python
-C = scipy.integrate.quad(lambda x: scipy.stats.norm.pdf(x, 0) * (x ** 2 + 1) ** 2, -10, 10)[0]
+C = scipy.integrate.quad(
+    lambda x: scipy.stats.norm.pdf(x, 0) * (x**2 + 1) ** 2, -10, 10
+)[0]
 C
 ```
 
@@ -216,23 +247,29 @@ mu = -0.25
 dmu = 0.125
 f0 = float(true_err(np.array([mu])))
 g0 = float(true_gradient(np.array([mu])))
+
+
 def f(t, y):
     return np.array([y[1], C * np.sqrt(y[0])])
+
+
 mu_path = np.linspace(mu, mu + dmu, 100)
-solution = scipy.integrate.solve_ivp(f, (mu, mu+dmu), [f0, g0], t_eval=mu_path)
-plt.plot(mu_path, solution['y'][0,:], 'b-')
+solution = scipy.integrate.solve_ivp(f, (mu, mu + dmu), [f0, g0], t_eval=mu_path)
+plt.plot(mu_path, solution["y"][0, :], "b-")
 plt.show()
 ```
 
 ## Cauchy-Schwartz on the third derivative
 
 ```python
-g = lambda t, x: t * x - t ** 2 / 2
+g = lambda t, x: t * x - t**2 / 2
 dg = jax.grad(g)
 ddg = jax.grad(jax.grad(g))
 dddg = jax.grad(jax.grad(jax.grad(g)))
 t = 0.0
-C = scipy.integrate.quad(lambda x: scipy.stats.norm.pdf(x, 0) * (-3 * x + x ** 3) ** 2, -10, 10)[0]
+C = scipy.integrate.quad(
+    lambda x: scipy.stats.norm.pdf(x, 0) * (-3 * x + x**3) ** 2, -10, 10
+)[0]
 C
 ```
 
@@ -254,7 +291,6 @@ integrand = lambda x, q: np.abs(
 ) ** q * scipy.stats.binom.pmf(x, n, p)
 ugly = (sum([integrand(i, holderq) for i in range(n + 1)])) ** (1 / holderq)
 ugly
-
 ```
 
 ```python
@@ -270,7 +306,7 @@ n * (1 - p) * p
 ```
 
 ```python
-37.5 * 0.05 ** 2 / 2, 72.5 * 0.05 ** 3 / 6
+37.5 * 0.05**2 / 2, 72.5 * 0.05**3 / 6
 ```
 
 ## scrap

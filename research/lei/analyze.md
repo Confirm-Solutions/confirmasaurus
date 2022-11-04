@@ -32,24 +32,24 @@ from confirm.mini_imprint import binomial
 ```python
 # Configuration used during simulation
 params = {
-    "n_arms" : 4,
-    "n_stage_1" : 50,
-    "n_stage_2" : 100,
-    "n_stage_1_interims" : 2,
-    "n_stage_1_add_per_interim" : 100,
-    "n_stage_2_add_per_interim" : 100,
-    "stage_1_futility_threshold" : 0.15,
-    "stage_1_efficacy_threshold" : 0.7,
-    "stage_2_futility_threshold" : 0.2,
-    "stage_2_efficacy_threshold" : 0.95,
-    "inter_stage_futility_threshold" : 0.6,
-    "posterior_difference_threshold" : 0,
-    "rejection_threshold" : 0.05,
-    "key" : jax.random.PRNGKey(0),
-    "n_pr_sims" : 100,
-    "n_sig2_sims" : 20,
-    "batch_size" : int(2**20),
-    "cache_tables" : False,
+    "n_arms": 4,
+    "n_stage_1": 50,
+    "n_stage_2": 100,
+    "n_stage_1_interims": 2,
+    "n_stage_1_add_per_interim": 100,
+    "n_stage_2_add_per_interim": 100,
+    "stage_1_futility_threshold": 0.15,
+    "stage_1_efficacy_threshold": 0.7,
+    "stage_2_futility_threshold": 0.2,
+    "stage_2_efficacy_threshold": 0.95,
+    "inter_stage_futility_threshold": 0.6,
+    "posterior_difference_threshold": 0,
+    "rejection_threshold": 0.05,
+    "key": jax.random.PRNGKey(0),
+    "n_pr_sims": 100,
+    "n_sig2_sims": 20,
+    "batch_size": int(2**20),
+    "cache_tables": False,
 }
 size = 52
 n_sim_batches = 500
@@ -63,7 +63,7 @@ lei_obj = lewis.Lewis45(**params)
 
 ```python
 # construct the same grid used during simulation
-n_arms = params['n_arms']
+n_arms = params["n_arms"]
 lower = np.full(n_arms, -1)
 upper = np.full(n_arms, 1)
 thetas, radii = lewgrid.make_cartesian_grid_range(
@@ -72,13 +72,10 @@ thetas, radii = lewgrid.make_cartesian_grid_range(
     upper=upper,
 )
 ns = np.concatenate(
-    [np.ones(n_arms-1)[:, None], -np.eye(n_arms-1)],
+    [np.ones(n_arms - 1)[:, None], -np.eye(n_arms - 1)],
     axis=-1,
 )
-null_hypos = [
-    grid.HyperPlane(n, 0)
-    for n in ns
-]
+null_hypos = [grid.HyperPlane(n, 0) for n in ns]
 gr = grid.build_grid(
     thetas=thetas,
     radii=radii,
@@ -99,14 +96,14 @@ sim_sizes = np.full(gr.n_tiles, sim_size)
 
 ```python
 # get type I sum and score
-cwd = '.'
-data_dir = os.path.join(cwd, '../data')
-output_dir = os.path.join(data_dir, 'output_1')
-typeI_sum = np.loadtxt(os.path.join(output_dir, 'typeI_sum.csv'), delimiter=',')
-typeI_score = np.loadtxt(os.path.join(output_dir, 'typeI_score.csv'), delimiter=',')
-output_dir = os.path.join(data_dir, 'output_2')
-typeI_sum += np.loadtxt(os.path.join(output_dir, 'typeI_sum.csv'), delimiter=',')
-typeI_score += np.loadtxt(os.path.join(output_dir, 'typeI_score.csv'), delimiter=',')
+cwd = "."
+data_dir = os.path.join(cwd, "../data")
+output_dir = os.path.join(data_dir, "output_1")
+typeI_sum = np.loadtxt(os.path.join(output_dir, "typeI_sum.csv"), delimiter=",")
+typeI_score = np.loadtxt(os.path.join(output_dir, "typeI_score.csv"), delimiter=",")
+output_dir = os.path.join(data_dir, "output_2")
+typeI_sum += np.loadtxt(os.path.join(output_dir, "typeI_sum.csv"), delimiter=",")
+typeI_score += np.loadtxt(os.path.join(output_dir, "typeI_score.csv"), delimiter=",")
 ```
 
 ```python
@@ -118,18 +115,18 @@ tile_corners = gr.vertices
 ```python
 # construct Holder upper bound
 d0, d0u = binomial.zero_order_bound(
-    typeI_sum=typeI_sum, 
-    sim_sizes=sim_sizes, 
-    delta=delta, 
+    typeI_sum=typeI_sum,
+    sim_sizes=sim_sizes,
+    delta=delta,
     delta_prop_0to1=1,
 )
 typeI_bound = d0 + d0u
 
 total_holder = binomial.holder_odi_bound(
-    typeI_bound=typeI_bound, 
+    typeI_bound=typeI_bound,
     theta_tiles=theta_tiles,
     tile_corners=tile_corners,
-    n_arm_samples=n_arm_samples, 
+    n_arm_samples=n_arm_samples,
     holderq=16,
 )
 ```
@@ -151,25 +148,29 @@ total, d0, d0u, d1w, d1uw, d2uw = binomial.upper_bound(
 # prepare bound components
 
 # classical
-bound_components = np.array([
-    d0,
-    d0u,
-    d1w,
-    d1uw,
-    d2uw,
-    total,
-]).T
+bound_components = np.array(
+    [
+        d0,
+        d0u,
+        d1w,
+        d1uw,
+        d2uw,
+        total,
+    ]
+).T
 
 # holder
 dummy = np.zeros_like(d0)
-bound_components_holder = np.array([
-    d0,
-    d0u,
-    dummy,
-    dummy,
-    dummy,
-    total_holder,
-]).T
+bound_components_holder = np.array(
+    [
+        d0,
+        d0u,
+        dummy,
+        dummy,
+        dummy,
+        total_holder,
+    ]
+).T
 ```
 
 ```python
@@ -186,11 +187,20 @@ selection = (theta_tiles[:, 2] == t2) & (theta_tiles[:, 3] == t3)
 ```
 
 ```python
-bound_dir = os.path.join(data_dir, 'bound')
+bound_dir = os.path.join(data_dir, "bound")
 if not os.path.exists(bound_dir):
     os.makedirs(bound_dir)
 
-np.savetxt(f'{bound_dir}/P_lei.csv', theta_tiles[selection, :].T, fmt="%s", delimiter=",")
-np.savetxt(f'{bound_dir}/B_lei.csv', bound_components[selection, :], fmt="%s", delimiter=",")
-np.savetxt(f'{bound_dir}/B_lei_holder.csv', bound_components_holder[selection, :], fmt="%s", delimiter=",")
+np.savetxt(
+    f"{bound_dir}/P_lei.csv", theta_tiles[selection, :].T, fmt="%s", delimiter=","
+)
+np.savetxt(
+    f"{bound_dir}/B_lei.csv", bound_components[selection, :], fmt="%s", delimiter=","
+)
+np.savetxt(
+    f"{bound_dir}/B_lei_holder.csv",
+    bound_components_holder[selection, :],
+    fmt="%s",
+    delimiter=",",
+)
 ```
