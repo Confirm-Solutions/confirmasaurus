@@ -67,6 +67,10 @@ S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
+S.orig_lam.min()
+```
+
+```python
 with open(f"./{name}/storage_0.075.pkl", "rb") as f:
     S_load = pickle.load(f)
 ```
@@ -80,6 +84,14 @@ S = adastate.AdaState(
         np.concatenate((S.db.data, S_load.db.data), dtype=np.float32), S.db.slices
     ),
 )
+```
+
+```python
+S_load.g.theta_tiles[S_load.orig_lam == 0]
+```
+
+```python
+np.sum(S.orig_lam < 0.03)
 ```
 
 ```python
@@ -107,6 +119,10 @@ all_tiles = np.concatenate((sym_tiles1, theta_tiles3))
 ```
 
 ```python
+all_lam = np.concatenate((S.orig_lam, S.orig_lam, S.orig_lam, S.orig_lam))
+```
+
+```python
 tree = scipy.spatial.KDTree(all_tiles)
 ```
 
@@ -116,15 +132,19 @@ nearby_count = [len(n) for n in nearby]
 ```
 
 ```python
-dist, idx = tree.query(slc.reshape((-1, 4)))
+dist1, idx1 = tree.query(slc.reshape((-1, 4)), k=1)
+```
+
+```python
+dist, idx = tree.query(slc.reshape((-1, 4)), k=10)
 ```
 
 ```python
 x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
-z = np.array(dist).reshape(slc.shape[:2])
+z = dist.mean(axis=1).reshape(slc.shape[:2])
 z = np.log10(z)
-levels = np.linspace(-3.2, -1.4, 7)
+levels = np.linspace(-3.2, -1.3, 8)
 cntf = plt.contourf(x, y, z, levels=levels, cmap="viridis_r", extend="min")
 plt.contour(
     x, y, z, levels=levels, colors="k", linestyles="-", linewidths=0.5, extend="min"
@@ -161,7 +181,59 @@ plt.ylabel(f"$\\theta_{plot_dims[1]}$")
 plt.show()
 ```
 
-## Type I error
+## Lambda*
+
+```python
+LL_orig = all_lam[idx]
+LL = LL_orig.copy()
+LL[LL >= 2] = np.nan
+La = np.nanmean(LL, axis=1)
+La[np.isnan(La)] = LL_orig[np.isnan(La)].mean(axis=1)
+```
+
+```python
+La = all_lam[idx].min(axis=1)
+```
+
+```python
+S.twb_min_lam[S.orig_lam == 0]
+```
+
+```python
+S.orig_lam[S.orig_lam.argsort()[:100]]
+```
+
+```python
+plt.imshow(La.reshape(slc.shape[:2]), vmin=0, vmax=1, origin="lower")
+plt.show()
+```
+
+```python
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = np.array(La).reshape(slc.shape[:2])
+z[(dist1 > 0.04).reshape(slc.shape[:2])] = np.nan
+levels = np.linspace(0, 1.0, 21)
+plt.title("$\lambda^*$")
+# cntf = plt.contourf(x, y, z, levels=levels, extend="both")
+# plt.contour(
+#     x,
+#     y,
+#     z,
+#     levels=levels,
+#     colors="k",
+#     linestyles="-",
+#     linewidths=0.5,
+#     extend="both",
+# )
+plt.pcolormesh(x, y, z, vmin=0, vmax=1.0, shading="gouraud")
+cbar = plt.colorbar(cntf, ticks=np.linspace(0, 1, 6))
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
+plt.show()
+```
+
+## Type I error calculate
 
 ```python
 plot_dims = [1, 2]
@@ -170,6 +242,10 @@ slc_ravel = slc.reshape((-1, S.g.d))
 nx, ny, _ = slc.shape
 # tb = diagnostics.eval_bound(lei_obj, S.g, S.sim_sizes, D, slc_ravel)
 # tb = tb.reshape((nx, ny))
+```
+
+```python
+S.sim_sizes[idx1[idx1 < 38624251]]
 ```
 
 ```python

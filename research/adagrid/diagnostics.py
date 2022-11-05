@@ -83,7 +83,6 @@ def eval_bound(model, g, sim_sizes, D, eval_pts):
 
 def build_2d_slice(g, pt, plot_dims, slicex=[-1, 1], slicey=[-1, 1], nx=100, ny=100):
     unplot_dims = list(set(range(g.d)) - set(plot_dims))
-    nx = ny = 200
     xvs = np.linspace(*slicex, nx)
     yvs = np.linspace(*slicey, ny)
     slc2d = np.stack(np.meshgrid(xvs, yvs, indexing="ij"), axis=-1)
