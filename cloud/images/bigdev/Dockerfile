@@ -175,6 +175,7 @@ RUN mamba create -n sagemath -y sage \
     && cd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment.yml \
     && mamba install -y radian \
+    && poetry config virtualenvs.create false \
     && poetry install \
     && cd / \
     && rm -rf /tmp/conda-tmp \

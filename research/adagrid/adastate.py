@@ -238,10 +238,8 @@ class AdaRunner:
 
     def step(self, P, S, D):
         S.alpha0[S.todo] = self.batched_invert_bound(
-            P.alpha_target,
             S.g.theta_tiles[S.todo],
             S.g.vertices(S.todo),
-            self.lei_obj.n_arm_samples,
         )
 
         bootstrap_cvs_todo = ld.bootstrap_tune_runner(

@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.14.1
   kernelspec:
-    display_name: Python 3.10.5 ('confirm')
+    display_name: Python 3.10.6 ('base')
     language: python
     name: python3
 ---
@@ -24,7 +24,7 @@ import jax
 import scipy.spatial
 import pickle
 
-jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_platform_name", "gpu")
 import confirm.mini_imprint.lewis_drivers as lts
 from confirm.mini_imprint import grid
 import adastate
@@ -67,10 +67,6 @@ S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
-S.orig_lam.min()
-```
-
-```python
 with open(f"./{name}/storage_0.075.pkl", "rb") as f:
     S_load = pickle.load(f)
 ```
@@ -87,11 +83,7 @@ S = adastate.AdaState(
 ```
 
 ```python
-S_load.g.theta_tiles[S_load.orig_lam == 0]
-```
-
-```python
-np.sum(S.orig_lam < 0.03)
+overall_lam = S.orig_lam.min()
 ```
 
 ```python
@@ -181,71 +173,78 @@ plt.ylabel(f"$\\theta_{plot_dims[1]}$")
 plt.show()
 ```
 
-## Lambda*
-
-```python
-LL_orig = all_lam[idx]
-LL = LL_orig.copy()
-LL[LL >= 2] = np.nan
-La = np.nanmean(LL, axis=1)
-La[np.isnan(La)] = LL_orig[np.isnan(La)].mean(axis=1)
-```
-
-```python
-La = all_lam[idx].min(axis=1)
-```
-
-```python
-S.twb_min_lam[S.orig_lam == 0]
-```
-
-```python
-S.orig_lam[S.orig_lam.argsort()[:100]]
-```
-
-```python
-plt.imshow(La.reshape(slc.shape[:2]), vmin=0, vmax=1, origin="lower")
-plt.show()
-```
-
-```python
-x = slc[..., plot_dims[0]]
-y = slc[..., plot_dims[1]]
-z = np.array(La).reshape(slc.shape[:2])
-z[(dist1 > 0.04).reshape(slc.shape[:2])] = np.nan
-levels = np.linspace(0, 1.0, 21)
-plt.title("$\lambda^*$")
-# cntf = plt.contourf(x, y, z, levels=levels, extend="both")
-# plt.contour(
-#     x,
-#     y,
-#     z,
-#     levels=levels,
-#     colors="k",
-#     linestyles="-",
-#     linewidths=0.5,
-#     extend="both",
-# )
-plt.pcolormesh(x, y, z, vmin=0, vmax=1.0, shading="gouraud")
-cbar = plt.colorbar(cntf, ticks=np.linspace(0, 1, 6))
-plt.xlabel(f"$\\theta_{plot_dims[0]}$")
-plt.ylabel(f"$\\theta_{plot_dims[1]}$")
-plt.show()
-```
-
 ## Type I error calculate
 
 ```python
-plot_dims = [1, 2]
-slc = diagnostics.build_2d_slice(S.g, worst_tile, plot_dims)
-slc_ravel = slc.reshape((-1, S.g.d))
-nx, ny, _ = slc.shape
-# tb = diagnostics.eval_bound(lei_obj, S.g, S.sim_sizes, D, slc_ravel)
-# tb = tb.reshape((nx, ny))
+import confirm.mini_imprint.lewis_drivers as ld
 ```
 
 ```python
-S.sim_sizes[idx1[idx1 < 38624251]]
+plot_dims = [2, 3]
+slc = diagnostics.build_2d_slice(S.g, worst_tile, plot_dims)
+slc_ravel = slc.reshape((-1, S.g.d))
+nx, ny, _ = slc.shape
+eval_pts = slc.reshape((-1, 4))
+null_truth = np.array([eval_pts.dot(H.n) - H.c >= 0 for H in S.g.null_hypos]).T
+```
+
+```python
+K = 32768
+K * eval_pts.shape[0] * 5e-7
+```
+
+```python
+# typeI_sum = ld.rej_runner(
+#     lei_obj,
+#     np.full(eval_pts.shape[0], K),
+#     overall_lam,
+#     eval_pts,
+#     null_truth,
+#     D.unifs,
+#     D.unifs_order,
+# )
+with open("4d_full/plot.pkl", "rb") as f:
+    slc_load, typeI_sum = pickle.load(f)
+```
+
+```python
+np.testing.assert_allclose(slc, slc_load)
+```
+
+```python
+with open("4d_full/plot.pkl", "wb") as f:
+    pickle.dump((slc, typeI_sum), f)
+```
+
+```python
+typeI_err = typeI_sum / K
+typeI_err[np.all(~null_truth, axis=1)] = np.nan
+import confirm.mini_imprint.binomial as binomial
+
+delta = 0.01
+typeI_err, typeI_CI = binomial.zero_order_bound(typeI_sum, K, delta, 1.0)
+typeI_bound = typeI_err + typeI_CI
+```
+
+```python
+import confirm.mini_imprint.bound.binomial as tiltbound
+
+n_arm_samples = lei_obj.n_arm_samples
+theta0 = eval_pts
+v = eval_pts - theta0
+```
+
+```python
+fwd_solver = tiltbound.ForwardQCPSolver(n=lei_obj.n_arm_samples)
+
+
+def forward_bound(theta0, vertices, f0):
+    v = vertices - theta0
+    q_opt = fwd_solver.solve(theta0, v, f0)
+    return tiltbound.tilt_bound_fwd_tile(q_opt, n_arm_samples, theta0, v, f0)
+
+
+bound = jax.jit(jax.vmap(forward_bound))(theta0, eval_pts, typeI_bound)
 ```
 
 ```python
@@ -254,53 +253,39 @@ S.sim_sizes[idx1[idx1 < 38624251]]
 ```
 
 ```python
-alt = np.logical_and(*[slc.dot(H.n) - H.c < 0 for H in S.g.null_hypos])
+slc1d = slc.reshape((-1, 4))
 plt.figure(figsize=(10, 10))
-plt.scatter(slc_ravel[:, plot_dims[0]], slc_ravel[:, plot_dims[1]], c=alt, s=14)
+plt.scatter(
+    slc1d[:, plot_dims[0]],
+    slc1d[:, plot_dims[1]],
+    c=typeI_err,
+    vmin=0,
+    vmax=0.025,
+    s=14,
+)
 plt.colorbar()
 plt.show()
 ```
 
 ```python
-
+worst_tile
 ```
 
 ```python
-alt_space = (slc[..., 1] > slc[..., 0]) & (slc[..., 2] > slc[..., 0])
-sym = slc[..., 2] > slc[..., 1]
-
-
-def alt_and_sym(f):
-    f[alt_space] = np.nan
-    f2d = f.reshape((nx, ny))
-    f2d[sym] = f2d.T[sym]
+unplot_dims = list(set(range(S.g.d)) - set(plot_dims))
 ```
 
 ```python
-lamstar = bootstrap_cvs[idx, 0]
-alt_and_sym(lamstar)
-alt_and_sym(tb)
-```
-
-```python
-plt.figure(figsize=(10, 10))
-plt.scatter(full_grid[:, plot_dims[0]], full_grid[:, plot_dims[1]], c=tb, s=14)
-plt.colorbar()
-plt.show()
-```
-
-```python
-x = full_grid[:, plot_dims[0]].reshape((nx, ny))
-y = full_grid[:, plot_dims[1]].reshape((nx, ny))
-z = lamstar.reshape((nx, ny))
-levels = np.linspace(0, 0.2, 11)
-
-z = tb.reshape((nx, ny)) * 100
-levels = np.linspace(0, 2.5, 11)
-
-cmap = None
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = typeI_err.reshape(slc.shape[:2])
 plt.figure(figsize=(6, 6), constrained_layout=True)
-cbar_target = plt.contourf(x, y, z, levels=levels, extend="both", cmap=cmap)
+lam_str = "\lambda^{**}" + f" = {overall_lam:.4f}"
+up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
+up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
+plt.title(f"${lam_str} ~~~ {up0_str} ~~~ {up1_str}$")
+levels = np.linspace(0, 2.5, 6)
+cbar_target = plt.contourf(x, y, z * 100, levels=levels, extend="both")
 plt.contour(
     x,
     y,
@@ -313,25 +298,97 @@ plt.contour(
 )
 cbar = plt.colorbar(cbar_target)
 cbar.set_label("\% Type I Error")
-plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
-plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
-plt.xlabel(r"$\theta_1$")
+# plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
+# plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
 plt.xticks(np.linspace(-1, 1, 5))
-plt.ylabel(r"$\theta_2$")
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
 plt.yticks(np.linspace(-1, 1, 5))
 plt.show()
 ```
 
 ```python
-plt.figure(figsize=(10, 10))
-plt.scatter(
-    full_grid[:, plot_dims[0]],
-    full_grid[:, plot_dims[1]],
-    c=lamstar,
-    vmin=0,
-    vmax=0.2,
-    s=14,
+# lamstar = ld.bootstrap_tune_runner(
+#     lei_obj,
+#     np.full(eval_pts.shape[0], 2**16),
+#     np.full(eval_pts.shape[0], 0.025),
+#     eval_pts,
+#     null_truth,
+#     D.unifs,
+#     D.bootstrap_idxs,
+#     D.unifs_order,
+# )
+with open("4d_full/plot_lamstar.pkl", "rb") as f:
+    slc_load, lamstar = pickle.load(f)
+```
+
+```python
+with open("4d_full/plot_lamstar.pkl", "wb") as f:
+    pickle.dump((slc, lamstar), f)
+```
+
+```python
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = lamstar[:, 0].reshape(slc.shape[:2])
+plt.figure(figsize=(6, 6), constrained_layout=True)
+up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
+up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
+plt.title(f"${up0_str} ~~~ {up1_str}$")
+levels = np.linspace(0, 1.0, 21)
+cbar_target = plt.contourf(x, y, z, levels=levels, extend="both")
+plt.contour(
+    x,
+    y,
+    z,
+    levels=levels,
+    colors="k",
+    linestyles="-",
+    linewidths=0.5,
+    extend="both",
 )
-plt.colorbar()
+cbar = plt.colorbar(cbar_target)
+cbar.set_label("$\lambda^*$")
+# plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
+# plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
+plt.xticks(np.linspace(-1, 1, 5))
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
+plt.yticks(np.linspace(-1, 1, 5))
+plt.show()
+```
+
+```python
+lamstar[:, :1].min()
+```
+
+```python
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = lamstar[:, 1:51].min(axis=1).reshape(slc.shape[:2])
+plt.figure(figsize=(6, 6), constrained_layout=True)
+up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
+up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
+plt.title(f"${up0_str} ~~~ {up1_str}$")
+levels = np.linspace(0, 1.0, 21)
+cbar_target = plt.contourf(x, y, z, levels=levels, extend="both")
+plt.contour(
+    x,
+    y,
+    z,
+    levels=levels,
+    colors="k",
+    linestyles="-",
+    linewidths=0.5,
+    extend="both",
+)
+cbar = plt.colorbar(cbar_target)
+cbar.set_label("$\lambda^*$")
+# plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
+# plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
+plt.xticks(np.linspace(-1, 1, 5))
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
+plt.yticks(np.linspace(-1, 1, 5))
 plt.show()
 ```

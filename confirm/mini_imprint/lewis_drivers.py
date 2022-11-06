@@ -163,10 +163,6 @@ def bootstrap_tune_runner(
         sim_batch_size,
         grid_batch_size,
     ):
-        print(
-            f"tuning for {size} simulations with {idx.sum()} tiles"
-            f" and batch size ({grid_batch_size}, {sim_batch_size})"
-        )
         sorted_stats = np.sort(stats, axis=-1)
         res = tunev(sorted_stats, bootstrap_idxs[size], alpha[idx])
         out[idx] = res
@@ -218,6 +214,10 @@ def _stats_backend(
     )
 
     for size, idx in get_sim_size_groups(sim_sizes):
+        print(
+            f"simulating with K={size} and n_tiles={idx.sum()}"
+            f" and batch_size=({grid_batch_size}, {sim_batch_size})"
+        )
         start = time.time()
         unifs_chunk = unifs[:size]
         stats = batched_statv(
