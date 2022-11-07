@@ -49,7 +49,7 @@
     ]
   },
   "devDependencies": {
-    "@types/plotly.js": "^1.54.20",
+    "@types/plotly.js": "^2.0.0",
     "@types/plotly.js-dist": "npm:@types/plotly.js@^1.54.20"
   }
 }
