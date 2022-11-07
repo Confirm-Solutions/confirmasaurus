@@ -67,6 +67,20 @@ S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
+import criterion
+
+cr = criterion.Criterion(lei_obj, P, S, D)
+```
+
+```python
+cr.alpha_cost[cr.overall_tile]
+```
+
+```python
+cr.bias
+```
+
+```python
 with open(f"./{name}/storage_0.075.pkl", "rb") as f:
     S_load = pickle.load(f)
 ```
@@ -91,11 +105,35 @@ worst_tile_idx = np.argmin(S.orig_lam)
 worst_tile = S.g.theta_tiles[worst_tile_idx]
 ```
 
+```python
+worst_tile
+```
+
 ## Tile density
 
 ```python
 plot_dims = [2, 3]
 slc = diagnostics.build_2d_slice(S.g, worst_tile, plot_dims)
+```
+
+```python
+(2.0 / S.g.radii.min()) ** 4 * 10000 / 900e9
+```
+
+```python
+S.g.radii[S.g.grid_pt_idx].max()
+```
+
+```python
+S.g.radii[S.g.grid_pt_idx].min()
+```
+
+```python
+(2.0 / 0.00048828) ** 4 / S.g.n_tiles / 1e6
+```
+
+```python
+S.sim_sizes.max()
 ```
 
 ```python
@@ -132,12 +170,23 @@ dist, idx = tree.query(slc.reshape((-1, 4)), k=10)
 ```
 
 ```python
+1.0 / dist1
+```
+
+```python
+dist.shape
+```
+
+```python
 x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
 z = dist.mean(axis=1).reshape(slc.shape[:2])
+z = np.tril(z)
+z = z + z.T - np.diag(np.diag(z))
+z = (0.01**4) / (z**4)
 z = np.log10(z)
-levels = np.linspace(-3.2, -1.3, 8)
-cntf = plt.contourf(x, y, z, levels=levels, cmap="viridis_r", extend="min")
+levels = np.linspace(-2, 4, 7)
+cntf = plt.contourf(x, y, z, levels=levels, cmap="viridis", extend="min")
 plt.contour(
     x, y, z, levels=levels, colors="k", linestyles="-", linewidths=0.5, extend="min"
 )
@@ -152,6 +201,8 @@ x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
 z = np.array(nearby_count).reshape(slc.shape[:2])
 # z[z == 0] = z.T[z == 0]
+z = np.tril(z)
+z = z + z.T - np.diag(np.diag(z))
 z = np.log10(z)
 levels = np.linspace(0, 5, 11)
 plt.title("$\log_{10}$(number of nearby tiles)")
@@ -194,6 +245,8 @@ K * eval_pts.shape[0] * 5e-7
 ```
 
 ```python
+overall_lam = 0.0625298
+worst_tile = np.array([0.53271484, 0.53271484, 0.53271484, -0.99951172])
 # typeI_sum = ld.rej_runner(
 #     lei_obj,
 #     np.full(eval_pts.shape[0], K),
@@ -214,6 +267,26 @@ np.testing.assert_allclose(slc, slc_load)
 ```python
 with open("4d_full/plot.pkl", "wb") as f:
     pickle.dump((slc, typeI_sum), f)
+```
+
+```python
+# lamstar = ld.bootstrap_tune_runner(
+#     lei_obj,
+#     np.full(eval_pts.shape[0], 2**16),
+#     np.full(eval_pts.shape[0], 0.025),
+#     eval_pts,
+#     null_truth,
+#     D.unifs,
+#     D.bootstrap_idxs,
+#     D.unifs_order,
+# )
+with open("4d_full/plot_lamstar.pkl", "rb") as f:
+    slc, lamstar = pickle.load(f)
+```
+
+```python
+with open("4d_full/plot_lamstar.pkl", "wb") as f:
+    pickle.dump((slc, lamstar), f)
 ```
 
 ```python
@@ -253,39 +326,25 @@ bound = jax.jit(jax.vmap(forward_bound))(theta0, eval_pts, typeI_bound)
 ```
 
 ```python
-slc1d = slc.reshape((-1, 4))
-plt.figure(figsize=(10, 10))
-plt.scatter(
-    slc1d[:, plot_dims[0]],
-    slc1d[:, plot_dims[1]],
-    c=typeI_err,
-    vmin=0,
-    vmax=0.025,
-    s=14,
-)
-plt.colorbar()
-plt.show()
-```
-
-```python
-worst_tile
-```
-
-```python
 unplot_dims = list(set(range(S.g.d)) - set(plot_dims))
+```
+
+```python
+with open("4d_full/plot_all.pkl", "wb") as f:
+    pickle.dump((slc, typeI_err, lamstar, nearby_count), f)
 ```
 
 ```python
 x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
 z = typeI_err.reshape(slc.shape[:2])
-plt.figure(figsize=(6, 6), constrained_layout=True)
-lam_str = "\lambda^{**}" + f" = {overall_lam:.4f}"
-up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
-up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
-plt.title(f"${lam_str} ~~~ {up0_str} ~~~ {up1_str}$")
+plt.figure(figsize=(15, 5), constrained_layout=True)
+# plt.suptitle(f"${up0_str} ~~~ {up1_str}$")
+plt.subplot(1, 3, 1)
+lam_str = ""
+# plt.title(f"Type I error with $\lambda" + f" = {overall_lam:.4f}$")
 levels = np.linspace(0, 2.5, 6)
-cbar_target = plt.contourf(x, y, z * 100, levels=levels, extend="both")
+cbar_target = plt.contourf(x, y, z * 100, levels=levels, cmap="Reds", extend="both")
 plt.contour(
     x,
     y,
@@ -304,39 +363,46 @@ plt.xlabel(f"$\\theta_{plot_dims[0]}$")
 plt.xticks(np.linspace(-1, 1, 5))
 plt.ylabel(f"$\\theta_{plot_dims[1]}$")
 plt.yticks(np.linspace(-1, 1, 5))
-plt.show()
-```
 
-```python
-# lamstar = ld.bootstrap_tune_runner(
-#     lei_obj,
-#     np.full(eval_pts.shape[0], 2**16),
-#     np.full(eval_pts.shape[0], 0.025),
-#     eval_pts,
-#     null_truth,
-#     D.unifs,
-#     D.bootstrap_idxs,
-#     D.unifs_order,
-# )
-with open("4d_full/plot_lamstar.pkl", "rb") as f:
-    slc_load, lamstar = pickle.load(f)
-```
-
-```python
-with open("4d_full/plot_lamstar.pkl", "wb") as f:
-    pickle.dump((slc, lamstar), f)
-```
-
-```python
+plt.subplot(1, 3, 2)
 x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
 z = lamstar[:, 0].reshape(slc.shape[:2])
-plt.figure(figsize=(6, 6), constrained_layout=True)
 up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
 up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
-plt.title(f"${up0_str} ~~~ {up1_str}$")
-levels = np.linspace(0, 1.0, 21)
-cbar_target = plt.contourf(x, y, z, levels=levels, extend="both")
+# plt.title(f"$\lambda^*$")
+levels = np.linspace(0, 0.4, 21)
+cbar_target = plt.contourf(x, y, z, levels=levels, cmap="viridis_r", extend="max")
+plt.contour(
+    x,
+    y,
+    z,
+    levels=levels,
+    colors="k",
+    linestyles="-",
+    linewidths=0.5,
+    extend="max",
+)
+cbar = plt.colorbar(cbar_target, ticks=np.linspace(0, 0.4, 5))
+cbar.set_label("$\lambda^*$")
+plt.axvline(x=slc[0, 0, unplot_dims[0]], color="k", linestyle="-", linewidth=3)
+plt.axhline(y=slc[0, 0, unplot_dims[0]], color="k", linestyle="-", linewidth=3)
+plt.xlabel(f"$\\theta_{plot_dims[0]}$")
+plt.xticks(np.linspace(-1, 1, 5))
+plt.ylabel(f"$\\theta_{plot_dims[1]}$")
+plt.yticks(np.linspace(-1, 1, 5))
+
+plt.subplot(1, 3, 3)
+x = slc[..., plot_dims[0]]
+y = slc[..., plot_dims[1]]
+z = np.array(nearby_count).reshape(slc.shape[:2])
+z[z == 0] = 1
+z = np.tril(z)
+z = z + z.T - np.diag(np.diag(z))
+z = np.log10(z)
+levels = np.linspace(0, 6, 7)
+# plt.title("$\log_{10}$(number of nearby tiles)")
+cntf = plt.contourf(x, y, z, levels=levels, cmap="Greys", extend="both")
 plt.contour(
     x,
     y,
@@ -347,19 +413,12 @@ plt.contour(
     linewidths=0.5,
     extend="both",
 )
-cbar = plt.colorbar(cbar_target)
-cbar.set_label("$\lambda^*$")
-# plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
-# plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
+cbar = plt.colorbar(cntf, ticks=np.arange(7))
+cbar.ax.set_yticklabels(["1", "10", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"])
 plt.xlabel(f"$\\theta_{plot_dims[0]}$")
-plt.xticks(np.linspace(-1, 1, 5))
 plt.ylabel(f"$\\theta_{plot_dims[1]}$")
-plt.yticks(np.linspace(-1, 1, 5))
+plt.savefig("4d_full/lewis.pdf", bbox_inches="tight")
 plt.show()
-```
-
-```python
-lamstar[:, :1].min()
 ```
 
 ```python
