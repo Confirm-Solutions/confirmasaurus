@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 
 
-def _quad_form(self, v, A):
+def _quad_form(v, A):
     return v.dot(A @ v)
 
 
@@ -33,8 +33,8 @@ class BackwardQCPSolver:
     def __init__(self, cov):
         self.cov = cov
 
-    def solve(self, vs, alpha):
-        mv = _quad_form(vs, self.cov)
+    def solve(self, v, alpha):
+        mv = _quad_form(v, self.cov)
         return 1 + jnp.sqrt(-2 * jnp.log(alpha) / mv)
 
 
@@ -71,27 +71,29 @@ class TileBackwardQCPSolver:
 
 
 def tilt_bound_fwd(q, cov, v, f0):
-    expo = 0.5 * (q - 1) * v.dot(cov @ v)
-    return f0 * jnp.exp(expo)
+    p_inv = 1 - 1 / q
+    expo = 0.5 * (q - 1) * _quad_form(v, cov)
+    return f0**p_inv * jnp.exp(expo)
 
 
 def tilt_bound_fwd_tile(q, cov, vs, f0):
     def _compute_expo(v):
-        return 0.5 * (q - 1) * v.dot(cov @ v)
+        return 0.5 * (q - 1) * _quad_form(v, cov)
 
+    p_inv = 1 - 1 / q
     max_expo = jnp.max(jax.vmap(_compute_expo, in_axes=(0,))(vs))
-    return f0 * jnp.exp(max_expo)
+    return f0**p_inv * jnp.exp(max_expo)
 
 
 def tilt_bound_bwd(q, cov, v, alpha):
     p = 1 / (1 - 1 / q)
-    expo = 0.5 * (q - 1) * v.dot(cov @ v)
+    expo = 0.5 * (q - 1) * _quad_form(v, cov)
     return (alpha * jnp.exp(-expo)) ** p
 
 
 def tilt_bound_bwd_tile(q, cov, vs, alpha):
     def _compute_expo(v):
-        return 0.5 * (q - 1) * v.dot(cov @ v)
+        return 0.5 * (q - 1) * _quad_form(v, cov)
 
     p = 1 / (1 - 1 / q)
     max_expo = jnp.max(jax.vmap(_compute_expo, in_axes=(0,))(vs))
