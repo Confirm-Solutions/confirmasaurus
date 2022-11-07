@@ -29,9 +29,9 @@ http_archive(
 # Rules CC
 http_archive(
     name = "rules_cc",
-    sha256 = "9a446e9dd9c1bb180c86977a8dc1e9e659550ae732ae58bd2e8fd51e15b2c91d",
-    strip_prefix = "rules_cc-262ebec3c2296296526740db4aefce68c80de7fa",
-    urls = ["https://github.com/bazelbuild/rules_cc/archive/262ebec3c2296296526740db4aefce68c80de7fa.zip"],
+    sha256 = "30c28683e4406e49795750162fe2c7be5f503f72d8c708b75f06d36b0c1e91ed",
+    strip_prefix = "rules_cc-35fb29866e9833ed918f422215155b8bafddb356",
+    urls = ["https://github.com/bazelbuild/rules_cc/archive/35fb29866e9833ed918f422215155b8bafddb356.zip"],
 )
 
 # PyBind11 Bazel
