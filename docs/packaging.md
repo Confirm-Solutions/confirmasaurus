@@ -57,3 +57,4 @@ However, without conda, we would:
 - conda-lock - tries to solve the package locking issue for conda. Doesn't work well for us because our annoying dependency is jax which is not conda: https://pythonspeed.com/articles/conda-dependency-management/
 - environment.yml doesn't support platform selectors, but it is one of the most requested features. https://github.com/conda/conda/issues/8089 https://stackoverflow.com/questions/32869042/is-there-a-way-to-have-platform-specific-dependencies-in-environment-yml
 - pip-tools (pip-compile) - this partially solves the narrow issue of locking package versions but doesn't do it as well as poetry and doesn't have the broader package building/distribution benefits of poetry.
+- `poetry config virtualenvs.create false` is useful in CI an Docker to use the base conda environment.

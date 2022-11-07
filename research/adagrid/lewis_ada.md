@@ -133,6 +133,10 @@ g = grid.build_grid(
 ```
 
 ```python
+g.theta_tiles[:, 1] > g.theta_tiles[:, 0]
+```
+
+```python
 import adastate
 from criterion import Criterion
 

@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.14.1
   kernelspec:
-    display_name: Python 3.10.6 ('base')
+    display_name: Python 3.10.5 ('confirm')
     language: python
     name: python3
 ---
@@ -163,7 +163,7 @@ TGF = TG.reshape(-1, 3)
 ```
 
 ```python
-nearby = tree.query_ball_point(TGF, 0.05)
+nearby = tree.query_ball_point(tgf, 0.05)
 nearby_count = [len(n) for n in nearby]
 ```
 

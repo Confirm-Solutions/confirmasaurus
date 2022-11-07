@@ -68,22 +68,22 @@ def eval_bound(model, g, sim_sizes, D, eval_pts):
 
     import confirm.mini_imprint.bound.binomial as tiltbound
 
-    fwd_solver = tiltbound.ForwardQCPSolver(n=model.n_arm_samples)
+    n_arm_samples = model.n_arm_samples
     theta0 = g.theta_tiles[idx]
-    v = eval_pts - theta0
-    q_opt = jax.vmap(fwd_solver.solve, in_axes=(0, 0, 0))(theta0, v, typeI_bound)
 
-    bound = np.array(
-        jax.vmap(tiltbound.q_holder_bound_fwd, in_axes=(0, None, 0, 0, 0))(
-            q_opt, model.n_arm_samples, theta0, v, typeI_bound
-        )
-    )
+    fwd_solver = tiltbound.ForwardQCPSolver(n=model.n_arm_samples)
+
+    def forward_bound(theta0, vertices, f0):
+        v = vertices - theta0
+        q_opt = fwd_solver.solve(theta0, v, f0)
+        return tiltbound.tilt_bound_fwd_tile(q_opt, n_arm_samples, theta0, v, f0)
+
+    bound = jax.jit(jax.vmap(forward_bound))(theta0, eval_pts, typeI_bound)
     return bound
 
 
 def build_2d_slice(g, pt, plot_dims, slicex=[-1, 1], slicey=[-1, 1], nx=100, ny=100):
     unplot_dims = list(set(range(g.d)) - set(plot_dims))
-    nx = ny = 200
     xvs = np.linspace(*slicex, nx)
     yvs = np.linspace(*slicey, ny)
     slc2d = np.stack(np.meshgrid(xvs, yvs, indexing="ij"), axis=-1)

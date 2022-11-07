@@ -221,10 +221,11 @@ class AdaRunner:
         n_arm_samples = self.lei_obj.n_arm_samples
         bwd_solver = ehbound.TileBackwardQCPSolver(n=n_arm_samples)
 
-        def backward_bound(t, v):
-            q_opt = bwd_solver.solve(t, v, P.alpha_target)
+        def backward_bound(theta0, vertices):
+            v = vertices - theta0
+            q_opt = bwd_solver.solve(theta0, v, P.alpha_target)
             return ehbound.tilt_bound_bwd_tile(
-                q_opt, n_arm_samples, t, v, P.alpha_target
+                q_opt, n_arm_samples, theta0, v, P.alpha_target
             )
 
         self.backward_bound = backward_bound
@@ -237,10 +238,8 @@ class AdaRunner:
 
     def step(self, P, S, D):
         S.alpha0[S.todo] = self.batched_invert_bound(
-            P.alpha_target,
             S.g.theta_tiles[S.todo],
             S.g.vertices(S.todo),
-            self.lei_obj.n_arm_samples,
         )
 
         bootstrap_cvs_todo = ld.bootstrap_tune_runner(

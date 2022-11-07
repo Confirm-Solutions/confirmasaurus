@@ -70,6 +70,7 @@ ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 COPY environment.yml pyproject.toml poetry.lock /tmp/conda-tmp/
 RUN cd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment.yml \
+    && poetry config virtualenvs.create false \
     && poetry install \
     && cd / \
     && rm -rf /tmp/conda-tmp \
