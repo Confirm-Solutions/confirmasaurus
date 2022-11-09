@@ -142,6 +142,11 @@ def batch(f, batch_size: int, in_axes, out_axes=None):
     specified axis. If the function has multiple outputs, each output is
     concatenated along the corresponding axis.
 
+    NOTE: In performance critical situations, it may be better to use batch_all
+    and decide for yourself how to concatenate or process the output. For
+    example, using np.concatenate can be slower than jnp.concatenate if the
+    batched function is outputting JAX arrays.
+
     Args:
         f: Function to be batched.
         batch_size: The batch size.
@@ -180,13 +185,16 @@ def batch(f, batch_size: int, in_axes, out_axes=None):
             else:
                 return outs[j][i]
 
-        return_vals = [
-            np.concatenate(
-                [entry(i, j) for j in range(len(outs))],
-                axis=internal_out_axes[i],
-            )
-            for i in range(len(outs[0]))
-        ]
+        if len(outs) == 1:
+            return_vals = [entry(i, 0) for i in range(len(outs[0]))]
+        else:
+            return_vals = [
+                np.concatenate(
+                    [entry(i, j) for j in range(len(outs))],
+                    axis=internal_out_axes[i],
+                )
+                for i in range(len(outs[0]))
+            ]
         if return_first:
             return return_vals[0]
         else:
