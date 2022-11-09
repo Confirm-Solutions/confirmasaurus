@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Install our package:
+poetry config virtualenvs.create false
 poetry install
 
 # Set up pre-commit so it's fast the first time it gets used
