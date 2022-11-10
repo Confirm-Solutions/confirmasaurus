@@ -4,20 +4,21 @@ import numpy as np
 # TODO: allow batch to decide internally what batch size to use??
 
 
-def _pad_arg(a, axis, n_pad: int):
+def _pad_arg(a, axis, n_pad: int, module):
     """
     Pads an array:
     - along the specified axis.
     - with the values at index 0
     - by n_pad elements.
+    - using the library "module" (either jnp or np).
 
     Padding with the values at index 0 avoids problems with using a placeholder
     value like 0 in situations where the placeholder value would be invalid.
     """
-    pad_element = np.take(a, indices=0, axis=axis)
-    pad_element = np.expand_dims(pad_element, axis=axis)
+    pad_element = module.take(a, indices=0, axis=axis)
+    pad_element = module.expand_dims(pad_element, axis=axis)
     new_shape = tuple(a.shape[i] if i != axis else n_pad for i in range(a.ndim))
-    return np.concatenate((a, np.full(new_shape, pad_element)), axis=axis)
+    return module.concatenate((a, module.full(new_shape, pad_element)), axis=axis)
 
 
 def _create_batched_args(args, in_axes, start, end, n_pad=None):
@@ -25,16 +26,20 @@ def _create_batched_args(args, in_axes, start, end, n_pad=None):
     Subsets and pads the arguments as specified in in_axes.
     """
 
-    def arg_transform(arg, axis):
-        return _pad_arg(arg, axis, n_pad) if n_pad is not None else arg
+    def arg_take_transform(arg, start, end, axis):
+        # It's very important to check if arg is a jax array or numpy because
+        # we don't want to copy arrays back and forth from GPU to CPU!
+        is_jax = isinstance(arg, jnp.DeviceArray)
+        module = jnp if is_jax else np
+        slc = [slice(None)] * len(arg.shape)
+        slc[axis] = slice(start, end)
+        arg_take = arg[tuple(slc)]
+        return (
+            _pad_arg(arg_take, axis, n_pad, module) if n_pad is not None else arg_take
+        )
 
     return [
-        arg_transform(
-            np.take(arg, indices=range(start, end), axis=axis),
-            axis,
-        )
-        if axis is not None
-        else arg
+        arg_take_transform(arg, start, end, axis) if axis is not None else arg
         for arg, axis in zip(args, in_axes)
     ]
 
@@ -175,21 +180,33 @@ def batch(f, batch_size: int, in_axes, out_axes=None):
                 else tuple(0 for _ in range(len(outs[0])))
             )
 
+        # We should concatenate using the same library as the function output
+        # to avoid accidental GPU to CPU copies.
+        is_jax = isinstance(outs[0][0], jnp.DeviceArray)
+        module = jnp if is_jax else np
+
         def entry(i, j):
             if j == len(outs) - 1 and n_pad > 0:
                 axis = internal_out_axes[i]
                 N = outs[-1][i].shape[axis]
-                return np.take(
-                    outs[-1][i], np.r_[0 : N - n_pad], mode="clip", axis=axis
-                )
+                slc = [slice(None)] * outs[-1][i].ndim
+                slc[axis] = slice(0, N - n_pad)
+                res = outs[-1][i][tuple(slc)]
             else:
-                return outs[j][i]
+                res = outs[j][i]
+
+            # if we're concatenating on an axis that doesn't exist, we need to
+            # create that axis.
+            axis = internal_out_axes[i]
+            while axis >= res.ndim:
+                res = res[..., None]
+            return res
 
         if len(outs) == 1:
             return_vals = [entry(i, 0) for i in range(len(outs[0]))]
         else:
             return_vals = [
-                np.concatenate(
+                module.concatenate(
                     [entry(i, j) for j in range(len(outs))],
                     axis=internal_out_axes[i],
                 )

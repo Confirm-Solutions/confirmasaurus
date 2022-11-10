@@ -1,4 +1,6 @@
+import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from confirm.lewislib.batch import batch
 from confirm.lewislib.batch import batch_yield
@@ -17,24 +19,32 @@ def test_simple():
     assert out[1][1] == 0
 
 
-def test_pad():
+@pytest.mark.parametrize("module", (np, jnp))
+def test_pad(module):
+    inputs = module.array([1, 2, 3, 4])
+
     def f(x):
+        assert type(x) == type(inputs)
         return x + 1
 
     batched_f = batch_yield(f, batch_size=3, in_axes=(0,))
-    out = list(batched_f(np.array([1, 2, 3, 4])))
+    out = list(batched_f(inputs))
+    assert type(out[0][0]) == type(inputs)
     np.testing.assert_allclose(out[1][0], np.array([5, 5, 5]))
     assert out[1][1] == 2
 
 
-def test_multidim():
+@pytest.mark.parametrize("module", (np, jnp))
+def test_multidim(module):
     def f(x):
         return (x.sum(axis=1), x.prod(axis=1))
 
     for d in range(1, 15):
         inputs = np.random.rand(d, 5)
+        inputs = module.array(inputs)
         batched_f = batch(f, batch_size=5, in_axes=(0,))
         out = batched_f(inputs)
+        assert type(out[0]) == type(inputs)
         np.testing.assert_allclose(out[0], inputs.sum(axis=1))
         np.testing.assert_allclose(out[1], inputs.prod(axis=1))
 
