@@ -68,9 +68,75 @@ S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
+plt.hist(S.B_lam.min(axis=0))
+plt.show()
+```
+
+```python
 cr = Criterion(lei_obj, P, S, D)
 assert S.twb_max_lam[cr.twb_worst_tile] == np.min(S.twb_max_lam)
 assert S.twb_min_lam[cr.twb_worst_tile] == np.min(S.twb_min_lam[cr.ties])
+```
+
+```python
+Blamsort = S.B_lam.argsort(axis=0)
+```
+
+```python
+origlamsort = S.orig_lam.argsort()
+```
+
+```python
+Blamsort[0]
+```
+
+```python
+import confirm.mini_imprint.lewis_drivers as ld
+
+for i in [0, 1, 10, 100, 200, 300, 500, 750, 1000, 5000, 10000, 100000]:
+    B_lamss_idx = Blamsort[i, :]
+    B_lamss = S.B_lam[B_lamss_idx, np.arange(S.B_lam.shape[1])]
+    overall_tile = origlamsort[i]
+    overall_lam = S.orig_lam[overall_tile]
+    bootstrap_min_lams = np.concatenate(([overall_lam], B_lamss))
+    overall_stats = ld.one_stat(
+        lei_obj,
+        S.g.theta_tiles[overall_tile],
+        S.g.null_truth[overall_tile],
+        S.sim_sizes[overall_tile],
+        D.unifs,
+        D.unifs_order,
+    )
+    overall_typeI_sum = (overall_stats[None, :] < B_lamss[:, None]).sum(axis=1)
+    bias = (overall_typeI_sum[0] - overall_typeI_sum[1:].mean()) / S.sim_sizes[
+        overall_tile
+    ]
+    print(f"index={i} bias={bias:5f}")
+```
+
+```python
+overall_typeI_sum = (overall_stats[None, :] < bootstrap_min_lams[:, None]).sum(axis=1)
+bias = (overall_typeI_sum[0] - overall_typeI_sum[1:].mean()) / S.sim_sizes[overall_tile]
+```
+
+```python
+cr.bias
+```
+
+```python
+tie = cr.overall_typeI_sum / S.sim_sizes[cr.overall_tile]
+tie[0] - np.mean(tie[1:])
+```
+
+```python
+biases = [tie[i] - np.mean(np.delete(tie, i)) for i in range(1, len(tie))]
+plt.hist(biases)
+plt.show()
+```
+
+```python
+plt.hist()
+plt.show()
 ```
 
 ```python
