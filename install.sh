@@ -2,7 +2,7 @@
 
 # We don't use poetry envs. The caller should have already activated a conda
 # environment.
-poetry config virtualenvs.create false
+poetry config virtualenvs.create false --local
 
 # Install dependencies. This might fail in Codespaces or Dev Containers due to
 # not being run as root. That's okay because in those settings, we've already
