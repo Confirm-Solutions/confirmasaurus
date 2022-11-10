@@ -1,7 +1,7 @@
 # A very small Dockerfile that is sufficient to run our main Python/JAX code.
 FROM condaforge/mambaforge as mambaforge_upstream
 
-FROM nvidia/cuda:11.7.1-devel-ubuntu22.04
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 
 COPY --from=mambaforge_upstream /opt /opt/
 
