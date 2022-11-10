@@ -6,9 +6,10 @@
 Directories:
 
 - `imprint` - our open source tools. [Open source repo](https://github.com/Confirm-Solutions/imprint)
-- `outlaw` - our fast INLA tools.
+- `confirm` - our code base!
+- `tests` - our tests.
+- `docs` - documentation.
 - `research` - Research! Stuff in here might be in various of states of rough/polished.
-- `anarchy` - [Do whatever you want here.](anarchy/README.md)
 - `cloud` - [tools for working on cloud infrastructure including AWS and Codespaces.](cloud/README.md)
 - Doing something new? Just make a new top level folder.
 

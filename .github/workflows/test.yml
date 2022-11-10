@@ -4,14 +4,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore:
-      - "anarchy/**"
+      - "research/**"
       - "**.ipynb"
       - "**.md"
   push:
     branches:
       - main
     paths-ignore:
-      - "anarchy/**"
+      - "research/**"
       - "**.ipynb"
       - "**.md"
 jobs:
