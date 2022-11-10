@@ -8,7 +8,7 @@ I wrote this as a little placeholder because I think it'd be good to have some s
 - Important code should probably be reviewed.
 - You should probably be pair programming more than you are.
 - Iteration time is unimaginably important.
-- Anything goes in the `anarchy` folder.
+- Pretty much anything goes in the `research` folder.
 - Tests are critical to correctness, but try not to let testing get in the way of doing stuff.
 - Use `black` for formatting.
 - Follow PEP8 suggestions where possible. This is almost entirely automated by `flake8`.
