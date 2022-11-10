@@ -18,7 +18,9 @@ import pandas as pd
 import sqlite3
 import pickle
 
-with open("../adagrid/4d/2090.pkl", "rb") as f:
+import adastate
+
+with open("../adagrid/4d_full/3880.pkl", "rb") as f:
     S = pickle.load(f)
 # all_data = np.concatenate((S.db.data, S.sim_sizes[:, None], S.todo[:, None], S.g.grid_pt_idx[:, None], S.g.null_truth), axis=1)
 # np.save('2090.npy', all_data)
@@ -33,13 +35,11 @@ rename_dict = dict()
 for k, v in S.db.slices.items():
     if isinstance(v, slice):
         for i in range(v.start, v.stop, 1 if v.step is None else v.step):
-            rename_dict[i] = k + "_" + str(i)
+            rename_dict[i] = k + "_" + str(i - v.start)
     else:
         rename_dict[v] = k
 df.rename(columns=rename_dict, inplace=True)
-```
 
-```python
 df["sim_sizes"] = S.sim_sizes
 df["todo"] = S.todo
 df["grid_pt_idx"] = S.g.grid_pt_idx
@@ -56,21 +56,7 @@ df.head()
 ```
 
 ```python
-%%time
-RR = df["grid_pt_idx"].sample(frac=0.1)
-```
-
-```python
-%%time
-RR.shape, df["grid_pt_idx"].isin(RR).sum()
-```
-
-```python
-df.columns
-```
-
-```python
-all_data = np.load("2090.npy")
+chunk = df[:100000]
 ```
 
 ## SQLite
@@ -80,73 +66,63 @@ con = sqlite3.connect("tutorial.db")
 ```
 
 ```python
-con.execute("DROP TABLE tiles")
-con.execute("CREATE TABLE tiles(a REAL, b REAL, c REAL)")
-con.execute("CREATE INDEX 'tiles_ordering' ON tiles(b)")
-con.commit()
-```
-
-```python
-rows = all_data[: int(1e6), :3]
-```
-
-```python
 %%time
-con.executemany("INSERT INTO tiles VALUES (?, ?, ?)", rows)
+chunk.to_sql("tiles", con, if_exists="replace")
+```
+
+```python
 con.execute("select count(*) from tiles").fetchall()
-con.commit()
 ```
 
 ```python
 %%time
-np.array(con.execute("select * from tiles order by b limit 1000000").fetchall())
+dfload = pd.read_sql("select * from tiles", con)
 ```
 
 ```python
-all_data[]
+dfload.head()
+```
+
+```python
+%%time
+con.execute(
+    "select " + ",".join([f"min(B_lam_{i})" for i in range(50)]) + " from tiles"
+).fetchall()
 ```
 
 ## duckdb
 
 ```python
+chunk = df[:]
+chunk.shape
+```
+
+```python
 import duckdb
 import pyarrow as pa
 import pandas as pd
+import pickle
 
-con = duckdb.connect(database=":memory:")
-# con.execute("DROP TABLE tiles")
-con.execute("CREATE TABLE tiles(a REAL, b REAL, c REAL)")
-con.execute("CREATE INDEX tiles_ordering ON tiles(b)")
-con.commit()
+con = duckdb.connect()
 ```
 
 ```python
 %%time
-tbl = pa.Table.from_pandas(pd.DataFrame(rows))
-con.execute("insert into tiles select * from tbl").fetchall()
+# con.execute('drop table tiles')
+in_tbl = pa.Table.from_pandas(chunk)
+con.execute("create table tiles as select * from chunk")
+# con.execute('create index twb_min_lam_idx on tiles (twb_min_lam)')
 ```
 
 ```python
 %%time
-con.execute("select * from tiles order by b limit 1000000").fetchnumpy()
-```
-
-## redis??
-
-```python
-import redis
+out = con.execute("select * from tiles order by twb_min_lam limit 10000").fetch_df()
+out.head()
 ```
 
 ```python
-r = redis.Redis(host="localhost", port=6379, db=0)
+%%time
+con.execute(
+    "select " + ",".join([f"min(B_lam_{i})" for i in range(50)]) + " from tiles"
+).fetchall()
 ```
-
-```python
-r.set("foo", "bar")
-```
-
-```python
-r.get("foo")
-```
-
-
