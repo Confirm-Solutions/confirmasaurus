@@ -21,9 +21,9 @@ http_archive(
 # Google benchmark
 http_archive(
     name = "com_github_google_benchmark",
-    sha256 = "59f918c8ccd4d74b6ac43484467b500f1d64b40cc1010daa055375b322a43ba3",
-    strip_prefix = "benchmark-16703ff83c1ae6d53e5155df3bb3ab0bc96083be",
-    urls = ["https://github.com/google/benchmark/archive/16703ff83c1ae6d53e5155df3bb3ab0bc96083be.zip"],
+    sha256 = "4db6d14bd1413e9861dfec7427cd308dd407835aa90a845c6e29ef1e67d95cc6",
+    strip_prefix = "benchmark-2257fa4d6afb8e5a2ccd510a70f38fe7fcdf1edf",
+    urls = ["https://github.com/google/benchmark/archive/2257fa4d6afb8e5a2ccd510a70f38fe7fcdf1edf.zip"],
 )
 
 # Rules CC
