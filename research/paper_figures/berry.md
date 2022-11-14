@@ -67,8 +67,25 @@ null_hypos = [
     for i in range(n_arms)
 ]
 tree = scipy.spatial.KDTree(theta_tiles)
+```
+
+```python
+import jax
+import confirm.mini_imprint.bound.binomial as tiltbound
+
+fwd_solver = tiltbound.TileForwardQCPSolver(n=n_arm_samples)
 
 
+def forward_bound(theta0, vertices, f0):
+    vs = vertices - theta0
+    q_opt = fwd_solver.solve(theta0, vs, f0)
+    return tiltbound.tilt_bound_fwd_tile(q_opt, n_arm_samples, theta0, vs, f0)
+
+
+boundv = jax.jit(jax.vmap(forward_bound))
+```
+
+```python
 def eval_bound(eval_pts):
     dist, idx = tree.query(eval_pts, k=2**n_arms)
     tile_idx = np.full(eval_pts.shape[0], -1, dtype=int)
@@ -85,27 +102,118 @@ def eval_bound(eval_pts):
     # assert(np.all((null_truth[tile_idx] == eval_null).all(axis=1)))
     reduced_tile_idx = tile_idx[tile_idx != -1]
 
-    out_arrs = binomial.upper_bound(
-        theta_tiles[reduced_tile_idx],
-        tile_radii[reduced_tile_idx],
-        eval_pts[tile_idx != -1, None, :],
-        sim_sizes[reduced_tile_idx],
-        n_arm_samples,
-        typeI_sum[reduced_tile_idx],
-        typeI_score[reduced_tile_idx],
+    typeI_err, typeI_CI = binomial.zero_order_bound(
+        typeI_sum[reduced_tile_idx], sim_sizes[reduced_tile_idx], 0.01, 1.0
     )
-    full_out_arrs = []
-    for a in out_arrs:
-        a_full = np.full(eval_pts.shape[0], np.nan)
-        a_full[tile_idx != -1] = a
-        full_out_arrs.append(a_full)
-    return full_out_arrs
+    typeI_bound = typeI_err + typeI_CI
+    bound_null = boundv(
+        theta_tiles[reduced_tile_idx], corners[reduced_tile_idx], typeI_bound
+    )
+    # bound_null = boundv(
+    #     theta_tiles[reduced_tile_idx], eval_pts[tile_idx != -1][:, None, :], typeI_bound
+    # )
+    out = np.full(eval_pts.shape[0], np.nan)
+    out[tile_idx != -1] = bound_null
+    return out
+
+    # out_arrs = binomial.upper_bound(
+    #     theta_tiles[reduced_tile_idx],
+    #     tile_radii[reduced_tile_idx],
+    #     eval_pts[tile_idx != -1, None, :],
+    #     sim_sizes[reduced_tile_idx],
+    #     n_arm_samples,
+    #     typeI_sum[reduced_tile_idx],
+    #     typeI_score[reduced_tile_idx],
+    # )
+    # full_out_arrs = []
+    # for a in out_arrs:
+    #     a_full = np.full(eval_pts.shape[0], np.nan)
+    #     a_full[tile_idx != -1] = a
+    #     full_out_arrs.append(a_full)
+    # return full_out_arrs
 ```
 
 ```python
 theta_range = (-3.5, 1.0, 10)
 typeI_range = (0, np.max(typeI_sum / sim_sizes))
 typeI_range, theta_range
+```
+
+```python
+from confirm.mini_imprint.grid import hypercube_vertices
+
+reduced_tile_idx = np.arange(10)
+theta0 = theta_tiles[reduced_tile_idx]
+radii = tile_radii[reduced_tile_idx]
+print(theta0)
+print(radii)
+vertices = theta0[:, None, :] + hypercube_vertices(4)[None, :, :] * radii[:, None]
+bound_null = boundv(theta0, vertices, np.full(theta0.shape[0], 0.5))
+bound_null
+```
+
+```python
+def set_domain(cbar_target, skipx=False, skipy=False, cbar=True, cbar_label=True):
+    if cbar:
+        cbar = plt.colorbar(cbar_target)
+        if cbar_label:
+            cbar.set_label("% Type I error upper bound")
+    if skipx:
+        plt.tick_params(
+            axis="x", which="both", bottom=False, top=False, labelbottom=False
+        )
+
+    else:
+        plt.xlabel(r"$\theta_1$")
+        plt.xticks(np.linspace(*theta_range))
+    if skipy:
+        plt.tick_params(
+            axis="y", which="both", left=False, right=False, labelleft=False
+        )
+    else:
+        plt.ylabel(r"$\theta_2$")
+        plt.yticks(np.linspace(*theta_range))
+    plt.axvline(x=scipy.special.logit(0.1), color="k", linestyle="-")
+    plt.axhline(y=scipy.special.logit(0.1), color="k", linestyle="-")
+
+
+def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
+    n1, n2 = eval_pts_2d.shape[:2]
+
+    x = eval_pts_2d[:, :, n_arms - 2]
+    y = eval_pts_2d[:, :, n_arms - 1]
+    z = bound.reshape((n1, n2))
+    levels = np.linspace(*typeI_range, n_contours) * 100
+
+    cbar_target = plt.contourf(x, y, z * 100, levels=levels, extend="both", cmap=cmap)
+    plt.contour(
+        x,
+        y,
+        z * 100,
+        levels=levels,
+        colors="k",
+        linestyles="-",
+        linewidths=0.5,
+        extend="both",
+    )
+    set_domain(cbar_target, **kwargs)
+    return cbar_target
+```
+
+```python
+t0 = scipy.special.logit(0.1) - 0.001
+n1 = 200
+n2 = n1
+t1 = np.linspace(*theta_range[:2], n1)
+t2 = np.linspace(*theta_range[:2], n2)
+t12 = np.stack(np.meshgrid(t1, t2, indexing="ij"), axis=-1)
+unplotted = np.full((n1, n2, 1), t0)
+eval_pts = np.concatenate([unplotted] * (n_arms - 2) + [t12], axis=-1)
+eval_pts = eval_pts.reshape((-1, n_arms))
+bound = eval_bound(eval_pts)
+eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
+simple_slice(eval_pts_2d, bound)
+plt.show()
 ```
 
 ```python
@@ -140,30 +248,6 @@ mapped_theta
 ```
 
 ```python
-def set_domain(cbar_target, skipx=False, skipy=False, cbar=True, cbar_label=True):
-    if cbar:
-        cbar = plt.colorbar(cbar_target)
-        if cbar_label:
-            cbar.set_label("% Type I error upper bound")
-    if skipx:
-        plt.tick_params(
-            axis="x", which="both", bottom=False, top=False, labelbottom=False
-        )
-
-    else:
-        plt.xlabel(r"$\theta_1$")
-        plt.xticks(np.linspace(*theta_range))
-    if skipy:
-        plt.tick_params(
-            axis="y", which="both", left=False, right=False, labelleft=False
-        )
-    else:
-        plt.ylabel(r"$\theta_2$")
-        plt.yticks(np.linspace(*theta_range))
-    plt.axvline(x=scipy.special.logit(0.1), color="k", linestyle="-")
-    plt.axhline(y=scipy.special.logit(0.1), color="k", linestyle="-")
-
-
 def fig1(
     include_discussion_pts=True,
     include_berry_pts=False,
@@ -172,7 +256,7 @@ def fig1(
     **kwargs
 ):
     t0 = scipy.special.logit(0.1) - 0.001
-    n1 = 72
+    n1 = 200
     n2 = n1
     t1 = np.linspace(*theta_range[:2], n1)
     t2 = np.linspace(*theta_range[:2], n2)
@@ -184,7 +268,7 @@ def fig1(
     bound = eval_bound(eval_pts)
 
     eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
-    simple_slice(eval_pts_2d, bound, **kwargs)
+    simple_slice(eval_pts_2d, bound, cmap=cmap, **kwargs)
     if include_discussion_pts:
         plt.scatter([-2.2], [-0.9], s=50, marker=">", facecolors="none", edgecolors="k")
         plt.scatter([-1.1], [-1.1], s=50, marker="*", facecolors="none", edgecolors="k")
@@ -200,37 +284,8 @@ def fig1(
     return eval_pts_2d
 
 
-def simple_slice(eval_pts_2d, bound, cmap=None, n_contours=12, **kwargs):
-    n1, n2 = eval_pts_2d.shape[:2]
-
-    x = eval_pts_2d[:, :, n_arms - 2]
-    y = eval_pts_2d[:, :, n_arms - 1]
-    z = bound[0].reshape((n1, n2))
-    levels = np.linspace(*typeI_range, n_contours) * 100
-
-    cbar_target = plt.contourf(x, y, z * 100, levels=levels, extend="both", cmap=cmap)
-    plt.contour(
-        x,
-        y,
-        z * 100,
-        levels=levels,
-        colors="k",
-        linestyles="-",
-        linewidths=0.5,
-        extend="both",
-    )
-    set_domain(cbar_target, **kwargs)
-    return cbar_target
-
-
 ev = fig1(include_discussion_pts=True, include_berry_pts=False)
 plt.show()
-```
-
-```python
-S = np.log(0.1 / (1 - 0.1))
-p1 = np.log(0.1 / (1 - 0.1))
-S - p1
 ```
 
 ```python
@@ -251,7 +306,7 @@ def fig2(cmap=None, n_contours=11, **kwargs):
     bound = eval_bound(eval_pts)
 
     eval_pts_2d = eval_pts.reshape((n1, n2, n_arms))
-    simple_slice(eval_pts_2d, bound, **kwargs)
+    simple_slice(eval_pts_2d, bound, cmap=cmap, **kwargs)
 
 
 fig2()
@@ -281,18 +336,19 @@ fig3_t12_pts = fig3_t12_grid.reshape((-1, 2))
 fig3_worst_bound, fig3_worst_theta = get_worst(theta_tiles, fig3_t12_pts, (1, 2), 1e-10)
 
 
-def fig3(**kwargs):
+def fig3(cmap=None, **kwargs):
     cbar_target = plt.pcolor(
         fig3_t12_grid[..., 0],
         fig3_t12_grid[..., 1],
         fig3_worst_bound.reshape(fig3_t12_grid.shape[:2]),
         vmin=typeI_range[0],
         vmax=typeI_range[1],
+        cmap=cmap,
     )
     set_domain(cbar_target, **kwargs)
 
 
-fig3()
+fig3(cmap="Reds")
 plt.show()
 # cbar_target = plt.tripcolor(t1t2_pts[...,0].ravel(), t1t2_pts[...,1].ravel(), worst_bound.ravel())
 ```
@@ -331,13 +387,15 @@ u_worst_bound, u_worst_theta = get_worst(u_tile_centers, u1u2_pts, (0, 1), 1e-10
 ```
 
 ```python
-def fig4(cbar=True, skipx=False, skipy=False):
+def fig4(cbar=True, skipx=False, skipy=False, cmap=None):
     x = u1u2_pts[..., 0]
     y = u1u2_pts[..., 1]
     z = u_worst_bound
     levels = np.linspace(*typeI_range, 12) * 100
     # cbar_target = plt.tripcolor(x, y, z * 100)
-    cbar_target = plt.tricontourf(x, y, z * 100, levels=levels, extend="both")
+    cbar_target = plt.tricontourf(
+        x, y, z * 100, levels=levels, cmap=cmap, extend="both"
+    )
     plt.tricontour(
         x,
         y,
@@ -388,19 +446,19 @@ fig, axes = plt.subplots(
 )
 
 plt.subplot(2, 2, 1)
-cbar_target = fig1(cbar=False)
+cbar_target = fig1(cbar=False, cmap="Reds")
 plt.text(-3.5, 1.1, "$\mathbf{A}$", fontsize=16)
 
 plt.subplot(2, 2, 2)
-fig2(cbar=False)
+fig2(cbar=False, cmap="Reds")
 plt.text(-3.5, 1.1, "$\mathbf{B}$", fontsize=16)
 
 plt.subplot(2, 2, 3)
-fig3(cbar=False)
+fig3(cbar=False, cmap="Reds")
 plt.text(-3.5, 1.1, "$\mathbf{C}$", fontsize=16)
 
 plt.subplot(2, 2, 4)
-cbar_target = fig4(cbar=False)
+cbar_target = fig4(cbar=False, cmap="Reds")
 plt.text(-3.5, 3.25, "$\mathbf{D}$", fontsize=16)
 
 cbar = fig.colorbar(
