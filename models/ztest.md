@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.6 ('confirm')
-    language: python
-    name: python3
----
-
 ```python
 from confirm.outlaw.nb_util import setup_nb
 
@@ -22,7 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from confirm.mini_imprint import batch, grid, newlib, adagrid, driver
+from confirm.mini_imprint import batch, grid, adagrid, driver, db
 ```
 
 ```python
@@ -62,11 +48,15 @@ model = ZTest1D(seed=0, max_K=K)
 
 N = 100
 theta, radii = grid.cartesian_gridpts([-1], [1], [N])
-g = newlib.init_grid(theta, radii, K).add_null_hypo(0).prune()
+g = grid.init_grid(theta, radii, K).add_null_hypo(0).prune()
 
 # TODO: is there any problem from using the same seed with the bootstrap
 # indices and the simulations?
 dd = driver.Driver(model)
+```
+
+```python
+g.df.nlargest(10, "theta0")
 ```
 
 ```python
@@ -92,7 +82,7 @@ model = ZTest1D(seed=1, max_K=init_K * 2**n_K_double)
 
 N = 10
 theta, radii = grid.cartesian_gridpts([-1], [1], [N])
-g = newlib.init_grid(theta, radii, init_K).add_null_hypo(0).prune()
+g = grid.init_grid(theta, radii, init_K).add_null_hypo(0).prune()
 
 nB = 6
 tuning_min_idx = 20
@@ -101,6 +91,19 @@ ada = adagrid.AdagridDriver(model, init_K, n_K_double, nB, bootstrap_seed=2)
 
 ```python
 df_tune = ada.bootstrap_tune(g)
+g_tune = g.add_cols(df_tune)
+```
+
+```python
+tiledb = db.DuckDBTiles.create(g_tune)
+```
+
+```python
+tiledb.bias()
+```
+
+```python
+
 ```
 
 ```python

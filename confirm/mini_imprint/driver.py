@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import scipy.stats
 
-from . import newlib
+from . import grid
 
 
 # TODO: generalize to other families
@@ -57,7 +57,7 @@ class Driver:
 
     def _stats(self, K_df, g):
         K = K_df["K"].iloc[0]
-        K_g = newlib.Grid(g.d, K_df, g.null_hypos)
+        K_g = grid.Grid(g.d, K_df, g.null_hypos)
         theta = g.get_theta()
         # TODO: batching
         stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
@@ -68,7 +68,7 @@ class Driver:
 
     def _rej(self, K_df, g, lam, delta=0.01):
         K = K_df["K"].iloc[0]
-        K_g = newlib.Grid(g.d, K_df, g.null_hypos)
+        K_g = grid.Grid(g.d, K_df, g.null_hypos)
         theta = g.get_theta()
 
         stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())

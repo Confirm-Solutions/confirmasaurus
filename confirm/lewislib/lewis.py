@@ -11,9 +11,9 @@ import numpy as np
 import confirm.outlaw.berry as berry
 import confirm.outlaw.inla as inla
 import confirm.outlaw.quad as quad
-from confirm.lewislib import batch
 from confirm.lewislib.table import LinearInterpTable
 from confirm.lewislib.table import LookupTable
+from confirm.mini_imprint import batch
 
 
 """

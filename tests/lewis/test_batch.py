@@ -2,8 +2,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from confirm.lewislib.batch import batch
-from confirm.lewislib.batch import batch_yield
+from confirm.mini_imprint.batch import batch
+from confirm.mini_imprint.batch import batch_yield
 
 
 def test_simple():

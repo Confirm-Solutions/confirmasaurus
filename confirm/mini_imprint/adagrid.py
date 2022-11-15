@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from . import driver
-from . import newlib
+from . import grid
 
 
 def tune(sorted_stats, sorted_order, alpha):
@@ -44,7 +44,7 @@ class AdagridDriver:
     def _bootstrap_tune(self, K_df, g, alpha=0.025):
         K = K_df["K"].iloc[0]
         assert all(K_df["K"] == K)
-        K_g = newlib.Grid(g.d, K_df, g.null_hypos)
+        K_g = grid.Grid(g.d, K_df, g.null_hypos)
 
         theta, vertices = K_g.get_theta_and_vertices()
         alpha0 = self.backward_boundv(0.025, theta, vertices)

@@ -56,3 +56,6 @@ terraform.*
 poetry.toml
 
 .ipynb_checkpoints
+
+# duckdb database files
+*.db
