@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.14.1
   kernelspec:
-    display_name: Python 3.10.6 ('base')
+    display_name: Python 3.10.6 ('confirm')
     language: python
     name: python3
 ---
@@ -308,13 +308,13 @@ v = eval_pts - theta0
 ```
 
 ```python
-fwd_solver = tiltbound.ForwardQCPSolver(n=lei_obj.n_arm_samples)
+fwd_solver = tiltbound.TileForwardQCPSolver(n=lei_obj.n_arm_samples)
 
 
 def forward_bound(theta0, vertices, f0):
-    v = vertices - theta0
-    q_opt = fwd_solver.solve(theta0, v, f0)
-    return tiltbound.tilt_bound_fwd_tile(q_opt, n_arm_samples, theta0, v, f0)
+    vs = vertices - theta0
+    q_opt = fwd_solver.solve(theta0, vs, f0)
+    return tiltbound.tilt_bound_fwd_tile(q_opt, n_arm_samples, theta0, vs, f0)
 
 
 bound = jax.jit(jax.vmap(forward_bound))(theta0, eval_pts, typeI_bound)

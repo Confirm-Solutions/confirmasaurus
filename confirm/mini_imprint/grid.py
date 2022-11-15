@@ -479,7 +479,7 @@ def hypercube_vertices(d):
         a numpy array of shape (2**d, d) containing the vertices of the
         hypercube.
     """
-    return np.array(list(product((1, -1), repeat=d)))
+    return np.array(list(product((-1, 1), repeat=d)))
 
 
 def refine_grid(g: Grid, refine_idxs):

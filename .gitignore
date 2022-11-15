@@ -54,3 +54,5 @@ terraform.*
 # poetry.toml should not be committed because it will vary between machines
 # (e.g. CI will want to use virtualenvs but locally we use conda)
 poetry.toml
+
+.ipynb_checkpoints

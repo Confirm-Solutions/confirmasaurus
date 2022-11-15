@@ -67,3 +67,15 @@ def test_out_axes1():
     batched_f = batch(f, batch_size=5, in_axes=(0,), out_axes=(1,))
     out = batched_f(inputs)
     np.testing.assert_allclose(out, inputs.T)
+
+
+# NOTE: this doesn't work! make sure we're not doing this anywhere. i think we
+# might be...
+# def test_out_new_axis():
+#     def f(x):
+#         return x.sum(axis=1)
+
+#     inputs = np.random.rand(6, 7)
+#     batched_f = batch(f, batch_size=5, in_axes=(1,), out_axes=(1,))
+#     out = batched_f(inputs)
+#     np.testing.assert_allclose(out[:,0] + out[:,1], inputs.sum(axis=1))
