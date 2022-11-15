@@ -54,11 +54,13 @@ class ZTest1D:
         return self._sim_batch(self.samples[begin_sim:end_sim], theta, null_truth)
 ```
 
+## Calculate Type I Error
+
 ```python
-K = 8196 * 32
+K = 8192
 model = ZTest1D(seed=0, max_K=K)
 
-N = 500
+N = 100
 theta, radii = grid.cartesian_gridpts([-1], [1], [N])
 g = newlib.init_grid(theta, radii, K).add_null_hypo(0).prune()
 
@@ -68,28 +70,75 @@ dd = driver.Driver(model)
 ```
 
 ```python
-# lam = -1.96 because we negated the statistics so we can do a less than
+# lam = -1.96 because we negated the statistics so we can do a less thanj
 # comparison.
-rej_data = dd.rej(g, -1.96).df
+rej_df = dd.rej(g, -1.96)
 ```
 
 ```python
-plt.plot(rej_data["theta0"], rej_data["TI_est"], "b-")
-plt.plot(rej_data["theta0"], rej_data["TI_cp_bound"], "k-")
-plt.plot(rej_data["theta0"], rej_data["TI_bound"], "r-")
+plt.plot(g.df["theta0"], rej_df["TI_est"], "b-o", markersize=2)
+plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "k-o", markersize=2)
+plt.plot(g.df["theta0"], rej_df["TI_bound"], "r-o", markersize=2)
 plt.show()
 ```
+
+## Adagrid Tuning
 
 ```python
 init_K = 2048
 n_K_double = 4
-nB = 5
-ada = adagrid.AdagridDriver(model, init_K, n_K_double, nB, bootstrap_seed=0)
+model = ZTest1D(seed=1, max_K=init_K * 2**n_K_double)
+
+
+N = 10
+theta, radii = grid.cartesian_gridpts([-1], [1], [N])
+g = newlib.init_grid(theta, radii, init_K).add_null_hypo(0).prune()
+
+nB = 6
+tuning_min_idx = 20
+ada = adagrid.AdagridDriver(model, init_K, n_K_double, nB, bootstrap_seed=2)
 ```
 
 ```python
-%%time
-g_tune = ada.bootstrap_tune(g)
+df_tune = ada.bootstrap_tune(g)
+```
+
+```python
+df_tune.iloc[df_tune["lams"].argmin()]
+```
+
+```python
+lams_bias = (
+    df_tune["lams"].min(axis=0)
+    - df_tune[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0).mean()
+)
+lams_bias
+```
+
+```python
+def f(x):
+    return df_tune.iloc[x]
+```
+
+```python
+dd.stats(g).apply()
+```
+
+```python
+df_tune["impossible"] = df_tune["alpha0"] < (tuning_min_idx + 1) / (g.df["K"] + 1)
+```
+
+```python
+df_tune[["twb_min_lams", "twb_mean_lams", "twb_max_lams", "lams"]]
+```
+
+```python
+plt.plot(g.df["theta0"], df_tune["lams"], "k-o")
+plt.show()
+```
+
+```python
+
 ```
 
 ```python

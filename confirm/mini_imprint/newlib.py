@@ -42,7 +42,7 @@ class Grid:
             [f"null_truth{i}" for i in range(len(self.null_hypos))]
         ].to_numpy()
 
-    def get_theta(self):
+    def get_theta(self, idx):
         return self.df[[f"theta{i}" for i in range(self.d)]].to_numpy()
 
     def get_radii(self):
@@ -54,9 +54,6 @@ class Grid:
             theta[:, None, :]
             + hypercube_vertices(self.d)[None, :, :] * self.get_radii()[:, None, :]
         )
-
-    def update_data(self, df):
-        return Grid(self.d, df, self.null_hypos)
 
 
 def init_grid(theta, radii, init_K):
