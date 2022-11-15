@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.5 ('imprint')
-    language: python
-    name: python3
----
-
 # Thall et al 2003
 
 **Hierarchical Bayesian approaches to phase II trials in diseases with multiple subtypes**
