@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.5 ('confirm')
-    language: python
-    name: python3
----
-
 # Conditional Laplace INLA
 
 Let's first just set up our environment. The dataset is the one from Figure 2 from Berry 2013.

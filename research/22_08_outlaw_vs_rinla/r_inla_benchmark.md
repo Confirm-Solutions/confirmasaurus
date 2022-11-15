@@ -1,23 +1,9 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: R
-    language: R
-    name: ir
----
-
-```R vscode={"languageId": "r"}
+```R
 library(INLA)
 
 ```
 
-```R vscode={"languageId": "r"}
+```R
 n_arms = 4
 y = c(0, 1, 9, 10)
 n = c(20, 20, 35, 35)
@@ -27,7 +13,7 @@ df <- data.frame(y = y, gid = (1:n_arms), const=rep(1, n_arms))
 df
 ```
 
-```R vscode={"languageId": "r"}
+```R
 
 mu_0 = -1.34
 mu_sig2 = 100.0
@@ -36,7 +22,7 @@ sig2_beta = 0.000005
 logit_p1 = rep(qlogis(0.3), n_arms)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # there's a great R-INLA vignette that explains how to use `inla.rgeneric.define(...)`!
 # this is following the instructions there basically to the letter.
 berry.model = function(
@@ -83,7 +69,7 @@ berry.model = function(
 }
 ```
 
-```R vscode={"languageId": "r"}
+```R
 
 model = inla.rgeneric.define(berry.model)
 use_custom = FALSE
@@ -131,7 +117,7 @@ for (i in 1:n_datasets) {
 summary(result)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 c_sig2 = c()
 mean = c()
 for (i in 1:length(result$misc$configs$config)) {
@@ -154,7 +140,7 @@ for (i in 1:4) {
 }
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # grid_opts = c("ccd", "grid", "eb")
 grid_opts = c("grid")
 m.strategy <- lapply(c("gaussian", "simplified.laplace", "laplace"), 
@@ -182,7 +168,7 @@ m.strategy <- lapply(c("gaussian", "simplified.laplace", "laplace"),
 })
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # took this snippet from the source of https://becarioprecario.bitbucket.io/inla-gitbook/ch-INLA.html
 library(ggplot2)
 library("viridis")
@@ -215,6 +201,6 @@ ggplot(marg.theta, aes(x = x, y = y, linetype = strategy, colour = int.strategy)
         legend.title = element_blank())
 ```
 
-```R vscode={"languageId": "r"}
+```R
 write.csv(marg.theta, "latent_data.csv")
 ```

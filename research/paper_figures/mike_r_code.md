@@ -1,18 +1,4 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: R
-    language: R
-    name: ir
----
-
-```R vscode={"languageId": "r"}
+```R
 # This generates the graphics for the FDA talk on September 8, 2021
 # I am now ALSO using it to generate graphics for our submission paper!
 
@@ -40,7 +26,7 @@ lines(x = temp_mu, y = pow_temp_mu, lty = 3)
 abline(a = .025,b =0)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 
 
 ################# Graphic 2: An example of our upper bound
@@ -87,7 +73,7 @@ for(i in 2:npoints){
 
 ```
 
-```R vscode={"languageId": "r"}
+```R
 
 
 ########################################
@@ -123,7 +109,7 @@ lines(x = temp_mu, y = pow_temp_mu, lty = 3, col = "red")
 
 ```
 
-```R vscode={"languageId": "r"}
+```R
 #Graphic 4: Confidence Intervals for the First Derivative
 set.seed(150)
 npoints = 3
@@ -171,7 +157,7 @@ pow_temp_mu = 1 - pnorm(- temp_mu + 1.96)
 lines(x = temp_mu, y = pow_temp_mu, lty = 3, col = "black")
 ```
 
-```R vscode={"languageId": "r"}
+```R
 
 # Graphic 5: pushing down critical value
 

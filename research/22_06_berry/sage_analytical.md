@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: SageMath 9.4
-    language: sage
-    name: sagemath-9.4
----
-
 ```sage
 from sage.all import *
 from scipy.special import logit

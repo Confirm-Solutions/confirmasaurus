@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.2 ('imprint')
-    language: python
-    name: python3
----
-
 ## Exact type I error of low N binomials
 
 For the Berry problem, there are only 36^4 possible datasets. As part of the INLA --> table construction, we enumerate which of these datasets result in a rejection. But, we can actually take this enumeration a step further and calculate the binomial mass function for each dataset given a particular set of true theta parameters. Then, we can just multiply this mass by the precomputed binary rejection.
