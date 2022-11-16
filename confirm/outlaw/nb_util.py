@@ -3,6 +3,7 @@ Tools for setting up nice Jupyter notebooks.
 """
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from IPython import get_ipython
 
 
@@ -55,7 +56,9 @@ def setup_nb(text_size_ratio=0.75, pretty=True, autoreload=True):
     plt.rcParams["mathtext.fontset"] = "cm"
     plt.rcParams["font.family"] = "STIXGeneral"
     scale_text(factor=text_size_ratio)
+
     np.set_printoptions(edgeitems=10, linewidth=100)
+    pd.options.display.max_columns = None
 
 
 def scale_text(factor=0.75):

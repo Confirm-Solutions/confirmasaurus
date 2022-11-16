@@ -50,42 +50,43 @@ def get_bound(model):
     )
 
 
+def clopper_pearson(TI_sum, K, delta):
+    TI_cp_bound = scipy.stats.beta.ppf(1 - delta, TI_sum + 1, K - TI_sum)
+    # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
+    # because there is no way to go higher than 1.0
+    return np.where(np.isnan(TI_cp_bound), 0, TI_cp_bound)
+
+
 class Driver:
     def __init__(self, model):
         self.model = model
         self.forward_boundv, self.backward_boundv = get_bound(model)
 
-    def _stats(self, K_df, g):
+    def _stats(self, K_df):
         K = K_df["K"].iloc[0]
-        K_g = grid.Grid(g.d, K_df, g.null_hypos)
-        theta = g.get_theta()
+        K_g = grid.Grid(K_df)
+        theta = K_g.get_theta()
         # TODO: batching
         stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
         return stats
 
-    def stats(self, g):
-        return g.df.groupby("K", group_keys=False).apply(lambda df: self._stats(df, g))
+    def stats(self, df):
+        return df.groupby("K", group_keys=False).apply(self._stats)
 
-    def _rej(self, K_df, g, lam, delta=0.01):
+    def _rej(self, K_df, lam, delta):
         K = K_df["K"].iloc[0]
-        K_g = grid.Grid(g.d, K_df, g.null_hypos)
-        theta = g.get_theta()
+        K_g = grid.Grid(K_df)
+        theta = K_g.get_theta()
 
         stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
         TI_sum = jnp.sum(stats < lam, axis=-1)
-        TI_est = TI_sum / K
-        TI_cp_bound = scipy.stats.beta.ppf(1 - delta, TI_sum + 1, K - TI_sum)
-        # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
-        # because there is no way to go higher than 1.0
-        TI_cp_bound = np.where(np.isnan(TI_cp_bound), 0, TI_cp_bound)
-        theta, vertices = g.get_theta_and_vertices()
+        TI_cp_bound = clopper_pearson(TI_sum, K, delta)
+        theta, vertices = K_g.get_theta_and_vertices()
         TI_bound = self.forward_boundv(TI_cp_bound, theta, vertices)
 
-        return K_df.assign(
-            TI_sum=TI_sum, TI_est=TI_est, TI_cp_bound=TI_cp_bound, TI_bound=TI_bound
-        )
+        return K_df.assign(TI_sum=TI_sum, TI_cp_bound=TI_cp_bound, TI_bound=TI_bound)
 
-    def rej(self, g, lam, delta=0.01):
-        return g.df.groupby("K", group_keys=False).apply(
-            lambda df: self._rej(df, g, lam, delta)
+    def rej(self, df, lam, delta=0.01):
+        return df.groupby("K", group_keys=False).apply(
+            lambda K_df: self._rej(K_df, lam, delta)
         )

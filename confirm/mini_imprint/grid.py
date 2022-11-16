@@ -7,9 +7,16 @@ import pandas as pd
 
 @dataclass
 class Grid:
-    d: int
     df: pd.DataFrame
-    null_hypos: list
+    null_hypos: list = None
+
+    @property
+    def d(self):
+        if not hasattr(self, "_d"):
+            self._d = (
+                max([int(c[5:]) for c in self.df.columns if c.startswith("theta")]) + 1
+            )
+        return self._d
 
     @property
     def n_tiles(self):
@@ -29,7 +36,7 @@ class Grid:
         offset = np.cumsum(intersects)[which_intersects]
         df_copy.loc[which_intersects + offset - 1, "null_truth0"] = False
         df_copy.loc[which_intersects + offset, "null_truth0"] = True
-        return Grid(self.d, df_copy, self.null_hypos + [null_hypo])
+        return Grid(df_copy, self.null_hypos + [null_hypo])
 
     def prune(self):
         if len(self.null_hypos) == 0:
@@ -38,11 +45,21 @@ class Grid:
         which = (null_truth.any(axis=1)) | (null_truth.shape[1] == 0)
         if np.all(which):
             return self
-        return Grid(self.d, self.df.loc[which].copy(), self.null_hypos)
+        return Grid(self.df.loc[which].copy(), self.null_hypos)
+
+    def add_cols(self, df):
+        return Grid(pd.concat((self.df, df), axis=1), self.null_hypos)
+
+    def subset(self, which):
+        return Grid(self.df.loc[which].copy(), self.null_hypos)
 
     def get_null_truth(self):
         return self.df[
-            [f"null_truth{i}" for i in range(len(self.null_hypos))]
+            [
+                f"null_truth{i}"
+                for i in range(self.df.shape[1])
+                if f"null_truth{i}" in self.df.columns
+            ]
         ].to_numpy()
 
     def get_theta(self):
@@ -58,11 +75,27 @@ class Grid:
             + hypercube_vertices(self.d)[None, :, :] * self.get_radii()[:, None, :]
         )
 
-    def add_cols(self, df):
-        return Grid(self.d, pd.concat((self.df, df), axis=1), self.null_hypos)
+    def refine(self):
+        refine_radii = self.get_radii()[:, None, :] * 0.5
+        refine_theta = self.get_theta()[:, None, :]
+        new_thetas = (
+            refine_theta + hypercube_vertices(self.d)[None, :, :] * refine_radii
+        ).reshape((-1, self.d))
+        new_radii = np.tile(refine_radii, (1, 2**self.d, 1)).reshape((-1, self.d))
+        parent_K = np.repeat(self.df["K"].values, 2**self.d)
+        parent_id = np.repeat(self.df["id"].values, 2**self.d)
+        return init_grid(
+            new_thetas,
+            new_radii,
+            parent_K,
+            parents=parent_id,
+        )
+
+    def concat(self, other):
+        return Grid(pd.concat((self.df, other.df), axis=0), self.null_hypos)
 
 
-def init_grid(theta, radii, init_K):
+def init_grid(theta, radii, init_K, parents=None):
     d = theta.shape[1]
     indict = dict(
         K=init_K,
@@ -71,10 +104,17 @@ def init_grid(theta, radii, init_K):
         indict[f"theta{i}"] = theta[:, i]
     for i in range(d):
         indict[f"radii{i}"] = radii[:, i]
-    indict["grid_pt_idx"] = np.arange(theta.shape[0])
-    indict["parent_idx"] = -1
+    indict["parent_idx"] = parents if parents is not None else -1
     indict["birthday"] = 0
-    return Grid(d, pd.DataFrame(indict), [])
+
+    # Is this a terminal node in the tree?
+    indict["active"] = True
+    # Is this node currently being processed?
+    indict["locked"] = False
+    # Is this node eligible for processing?
+    indict["eligible"] = True
+
+    return Grid(pd.DataFrame(indict), [])
 
 
 def cartesian_gridpts(theta_min, theta_max, n_theta_1d):

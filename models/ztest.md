@@ -53,20 +53,12 @@ g = grid.init_grid(theta, radii, K).add_null_hypo(0).prune()
 # TODO: is there any problem from using the same seed with the bootstrap
 # indices and the simulations?
 dd = driver.Driver(model)
-```
 
-```python
-g.df.nlargest(10, "theta0")
-```
-
-```python
 # lam = -1.96 because we negated the statistics so we can do a less thanj
 # comparison.
-rej_df = dd.rej(g, -1.96)
-```
+rej_df = dd.rej(g.df, -1.96)
 
-```python
-plt.plot(g.df["theta0"], rej_df["TI_est"], "b-o", markersize=2)
+plt.plot(g.df["theta0"], rej_df["TI_sum"] / rej_df["K"], "b-o", markersize=2)
 plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "k-o", markersize=2)
 plt.plot(g.df["theta0"], rej_df["TI_bound"], "r-o", markersize=2)
 plt.show()
@@ -80,75 +72,66 @@ n_K_double = 4
 model = ZTest1D(seed=1, max_K=init_K * 2**n_K_double)
 
 
-N = 10
+N = 4
 theta, radii = grid.cartesian_gridpts([-1], [1], [N])
 g = grid.init_grid(theta, radii, init_K).add_null_hypo(0).prune()
 
 nB = 6
-tuning_min_idx = 20
-ada = adagrid.AdagridDriver(model, init_K, n_K_double, nB, bootstrap_seed=2)
+grid_target = 0.001
+bias_target = 0.001
+iter_size = 20
+max_iter = 100
+ada_driver = adagrid.AdagridDriver(model, init_K, n_K_double, nB, bootstrap_seed=2)
 ```
 
 ```python
-df_tune = ada.bootstrap_tune(g)
-g_tune = g.add_cols(df_tune)
-```
-
-```python
-tiledb = db.DuckDBTiles.create(g_tune)
-```
-
-```python
-tiledb.bias()
-```
-
-```python
-
-```
-
-```python
-df_tune.iloc[df_tune["lams"].argmin()]
-```
-
-```python
-lams_bias = (
-    df_tune["lams"].min(axis=0)
-    - df_tune[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0).mean()
+ada = adagrid.Adagrid(
+    ada_driver, g, db.DuckDBTiles, grid_target, bias_target, iter_size
 )
-lams_bias
 ```
 
 ```python
-def f(x):
-    return df_tune.iloc[x]
+from rich import print as rprint
+
+reports = []
+for ada_iter in range(1, max_iter):
+    done, report = ada.step(ada_iter)
+    rprint(report)
+    reports.append(report)
+    if done:
+        break
 ```
 
 ```python
-dd.stats(g).apply()
+evolution["bias"].astype(float)
 ```
 
 ```python
-df_tune["impossible"] = df_tune["alpha0"] < (tuning_min_idx + 1) / (g.df["K"] + 1)
-```
-
-```python
-df_tune[["twb_min_lams", "twb_mean_lams", "twb_max_lams", "lams"]]
-```
-
-```python
-plt.plot(g.df["theta0"], df_tune["lams"], "k-o")
+evolution = pd.DataFrame(reports)
+plt.plot(evolution["i"], evolution["bias"].astype(float))
+plt.show()
+plt.plot(evolution["i"], evolution["grid_cost"].astype(float))
+plt.show()
+plt.plot(evolution["i"], evolution["std_tie"].astype(float))
 plt.show()
 ```
 
 ```python
-
+all = ada.tiledb.get_all()
+all = all.loc[all["active"]]
+all.nsmallest(10, "orderer")
 ```
 
 ```python
-import matplotlib.pyplot as plt
+all["lams"].min()
+```
 
-stats = dd.stats(g).iloc[0]
-plt.hist(stats[0])
+```python
+plt.plot(all["theta0"], all["lams"], "ko")
+plt.show()
+plt.plot(all["theta0"], all["K"], "ko")
+plt.show()
+plt.plot(all["theta0"], all["alpha0"], "ko")
 plt.show()
 ```
 

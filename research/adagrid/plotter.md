@@ -324,7 +324,7 @@ with open("4d_full/plot_all.pkl", "wb") as f:
 x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
 z = typeI_err.reshape(slc.shape[:2])
-plt.figure(figsize=(15, 5), constrained_layout=True)
+plt.figure(figsize=(10, 5), constrained_layout=True)
 # plt.suptitle(f"${up0_str} ~~~ {up1_str}$")
 plt.subplot(1, 3, 1)
 lam_str = ""
@@ -377,7 +377,11 @@ plt.xlabel(f"$\\theta_{plot_dims[0]}$")
 plt.xticks(np.linspace(-1, 1, 5))
 plt.ylabel(f"$\\theta_{plot_dims[1]}$")
 plt.yticks(np.linspace(-1, 1, 5))
+plt.savefig("4d_full/lewis_tie_lam.pdf", bbox_inches="tight")
+plt.show()
+```
 
+```python
 plt.subplot(1, 3, 3)
 x = slc[..., plot_dims[0]]
 y = slc[..., plot_dims[1]]
