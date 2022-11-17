@@ -1,14 +1,12 @@
 from dataclasses import dataclass
 
 import duckdb
-import numpy as np
 import pandas as pd
 
 
 @dataclass
 class PandasTiles:
     df: pd.DataFrame
-    next_id: int = 1
 
     def get_all(self):
         return self.df
@@ -19,7 +17,6 @@ class PandasTiles:
         )
         self.df.loc[out.index, "locked"] = True
         self.df.loc[out.index, "eligible"] = False
-        out["id"] = out.index
         return out
 
     def finish(self, df):
@@ -39,15 +36,10 @@ class PandasTiles:
         return active_tiles.loc[[active_tiles[order_col].idxmin()]]
 
     def write(self, df):
-        df = df.copy()
-        start_id = self.df["id"].max() + 1
-        df["id"] = np.arange(start_id, start_id + df.shape[0])
         self.df = pd.concat((self.df, df), axis=0, ignore_index=True)
 
     @staticmethod
     def create(df):
-        df = df.copy()
-        df.insert(0, "id", np.arange(df.shape[0]))
         out = PandasTiles(df.reset_index(drop=True))
         return out
 
@@ -60,7 +52,7 @@ class DuckDBTiles:
         return self.con.execute("select * from tiles").df()
 
     def write(self, df):
-        self.con.execute("insert into tiles select nextval('seq_tileid'), * from df")
+        self.con.execute("insert into tiles select * from df")
 
     def next(self, n, order_col):
         # we wrap with a transaction to ensure that concurrent readers don't
@@ -128,11 +120,7 @@ class DuckDBTiles:
             _description_
         """
         con = duckdb.connect(path)
-        df_with_index = df.copy()
-        df_with_index.insert(0, "id", np.arange(df.shape[0]))
-        con.execute("create table tiles as select * from df_with_index")
-        next_seq_val = df.shape[0]
-        con.execute(f"create sequence seq_tileid start {next_seq_val}")
+        con.execute("create table tiles as select * from df")
         return DuckDBTiles(con)
 
     @staticmethod

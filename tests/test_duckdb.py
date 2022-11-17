@@ -10,7 +10,8 @@ from confirm.mini_imprint import grid
 def example_grid(x1, x2):
     N = 10
     theta, radii = grid.cartesian_gridpts([x1], [x2], [N])
-    return grid.init_grid(theta, radii, 50).add_null_hypo(0).prune()
+    H = grid.HyperPlane(np.array([-1]), 0)
+    return grid.init_grid(theta, radii, 50).add_null_hypos([H])
 
 
 def assert_frame_equal_special(pd_df, db_df):
@@ -26,9 +27,7 @@ def prepped_dbs():
 
 def test_create():
     g, pd_tiles, db_tiles = prepped_dbs()
-    pd.testing.assert_frame_equal(
-        pd_tiles.get_all().drop("id", axis=1), g.df.reset_index(drop=True)
-    )
+    pd.testing.assert_frame_equal(pd_tiles.get_all(), g.df.reset_index(drop=True))
     assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
 
 
