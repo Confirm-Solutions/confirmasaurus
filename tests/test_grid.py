@@ -1,9 +1,15 @@
+import copy
 import time
 
 import numpy as np
 import pytest
 
 import confirm.mini_imprint.grid as grid
+
+# NOTE: For developing tests, plotting a 2D grid is very useful:
+# import matplotlib.pyplot as plt
+# grid.plot_grid(g)
+# plt.show()
 
 
 def normalize(n):
@@ -102,6 +108,17 @@ def test_split_angled():
     np.testing.assert_allclose(g.get_radii()[-1], [0.125, 0.25])
 
 
+def test_immutability():
+    Hs = [grid.HyperPlane([2, -1], 0)]
+    in_theta, in_radii = grid.cartesian_gridpts(
+        np.full(2, -1), np.full(2, 1), np.full(4, 4)
+    )
+    g = grid.init_grid(in_theta, in_radii, 1)
+    g_copy = copy.deepcopy(g)
+    _ = g.add_null_hypos(Hs).prune()
+    assert (g.df == g_copy.df).all().all()
+
+
 def test_prune(simple_grid):
     gp = simple_grid.prune()
     assert np.all(
@@ -120,6 +137,7 @@ def test_simple_indices(simple_grid):
     theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [2, 2])
     g = grid.init_grid(theta, radii, 1)
     check_index(g)
+
     check_index(simple_grid)
     gp = simple_grid.prune()
     check_index(gp)

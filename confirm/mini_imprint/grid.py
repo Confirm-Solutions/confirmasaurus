@@ -98,7 +98,7 @@ class Grid:
         return self.concat(new_g)
 
     def add_null_hypos(self, null_hypotheses):
-        g = self
+        g = Grid(self.df.copy(), self.null_hypos)
         for H in null_hypotheses:
             g = g._add_null_hypo(H)
         return g
@@ -213,10 +213,14 @@ def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
         np.linspace(theta_min[i], theta_max[i], 2 * n_theta_1d[i] + 1)[1::2]
         for i in range(n_arms)
     ]
+    radii1d = [
+        np.full(
+            theta1d[i].shape[0], (theta_max[i] - theta_min[i]) / (2 * n_theta_1d[i])
+        )
+        for i in range(n_arms)
+    ]
     theta = np.stack(np.meshgrid(*theta1d), axis=-1).reshape((-1, len(theta1d)))
-    radii = np.empty(theta.shape)
-    for i in range(theta.shape[1]):
-        radii[:, i] = 0.5 * (theta1d[i][1] - theta1d[i][0])
+    radii = np.stack(np.meshgrid(*radii1d), axis=-1).reshape((-1, len(theta1d)))
     return theta, radii
 
 

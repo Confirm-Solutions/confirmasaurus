@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from . import db
 from . import driver
 from . import grid
 
@@ -15,7 +16,7 @@ def tune(sorted_stats, sorted_order, alpha):
 
 
 class AdagridDriver:
-    def __init__(self, model, init_K, n_K_double, nB, bootstrap_seed):
+    def __init__(self, model, *, init_K, n_K_double, nB, bootstrap_seed):
         self.model = model
         self.forward_boundv, self.backward_boundv = driver.get_bound(model)
 
@@ -90,22 +91,26 @@ class Adagrid:
         self,
         ada_driver,
         g,
-        tiledb_type,
-        grid_target=0.001,
-        bias_target=0.001,
-        iter_size=4096,
-        alpha=0.025,
-        tuning_min_idx=40,
+        *,
+        db_type,
+        grid_target,
+        bias_target,
+        std_target,
+        iter_size,
+        alpha,
+        tuning_min_idx,
     ):
         self.ada_driver = ada_driver
         self.alpha = alpha
         self.tuning_min_idx = tuning_min_idx
         self.bias_target = bias_target
         self.grid_target = grid_target
+        self.std_target = std_target
         self.iter_size = iter_size
 
+        self.null_hypos = g.null_hypos
         g_tuned = self.process_tiles(g, 0)
-        self.tiledb = tiledb_type.create(g_tuned.df)
+        self.tiledb = db_type.create(g_tuned.df)
 
     def process_tiles(self, g, i):
         lams_df = self.ada_driver.bootstrap_tune(g.df, self.alpha)
@@ -159,7 +164,7 @@ class Adagrid:
                 g_deepen_in.df["id"],
             )
             g_refine = grid.Grid(work.loc[work["refine"]]).refine()
-            g_new = g_refine.concat(g_deepen).add_null_hypo(0).prune()
+            g_new = g_refine.concat(g_deepen).add_null_hypos(self.null_hypos).prune()
             g_tuned_new = self.process_tiles(g_new, i)
             self.tiledb.write(g_tuned_new.df)
         self.tiledb.finish(work)
@@ -178,7 +183,7 @@ class Adagrid:
         done = (
             (bias_tie < self.bias_target)
             and (grid_cost < self.grid_target)
-            and (std_tie < 0.001)
+            and (std_tie < self.std_target)
         )
         return done, report
 
@@ -197,3 +202,58 @@ class Adagrid:
         spread = worst_tile_TI_est.max() - worst_tile_TI_est.min()
 
         return (bias, std, spread, worst_tile["grid_cost"].iloc[0])
+
+
+def print_report(_iter, report, _ada):
+    from rich import print as rprint
+
+    rprint(report)
+
+
+def adagrid(
+    model,
+    g,
+    *,
+    init_K=2**13,
+    n_K_double=4,
+    nB=50,
+    bootstrap_seed=0,
+    grid_target=0.001,
+    bias_target=0.001,
+    std_target=0.002,
+    iter_size=2**10,
+    alpha=0.025,
+    tuning_min_idx=40,
+    max_iter=100,
+    db_type=db.DuckDBTiles,
+    callback=print_report,
+):
+    ada_driver = AdagridDriver(
+        model,
+        init_K=init_K,
+        n_K_double=n_K_double,
+        nB=nB,
+        bootstrap_seed=bootstrap_seed,
+    )
+
+    ada = Adagrid(
+        ada_driver,
+        g,
+        db_type=db_type,
+        grid_target=grid_target,
+        bias_target=bias_target,
+        std_target=std_target,
+        iter_size=iter_size,
+        alpha=alpha,
+        tuning_min_idx=tuning_min_idx,
+    )
+
+    reports = []
+    for ada_iter in range(1, max_iter):
+        done, report = ada.step(ada_iter)
+        if callback is not None:
+            callback(ada_iter, report, ada)
+        reports.append(report)
+        if done:
+            break
+    return ada, reports

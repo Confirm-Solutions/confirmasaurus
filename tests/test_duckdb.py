@@ -11,7 +11,7 @@ def example_grid(x1, x2):
     N = 10
     theta, radii = grid.cartesian_gridpts([x1], [x2], [N])
     H = grid.HyperPlane(np.array([-1]), 0)
-    return grid.init_grid(theta, radii, 50).add_null_hypos([H])
+    return grid.init_grid(theta, radii, 50).add_null_hypos([H]).prune()
 
 
 def assert_frame_equal_special(pd_df, db_df):
@@ -49,9 +49,7 @@ def test_load():
     db_tiles.close()
 
     db_tiles2 = db.DuckDBTiles.load(str(p))
-    assert_frame_equal_special(
-        g.df.reset_index(drop=True), db_tiles2.get_all().drop("id", axis=1)
-    )
+    assert_frame_equal_special(g.df, db_tiles2.get_all())
 
 
 def test_next_tiles():
@@ -73,11 +71,11 @@ def test_next_tiles():
     assert db_tiles.get_all()["locked"].all()
 
     db_tiles.finish(db_work)
-    pd_tiles.finish(pd_work, pd_work["K"] > 0)
+    pd_tiles.finish(pd_work)
     assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
 
     db_tiles.finish(db_work2)
-    pd_tiles.finish(pd_work2, pd_work2["K"] > 0)
+    pd_tiles.finish(pd_work2)
     assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
     assert not pd_tiles.get_all()["locked"].any()
     assert not db_tiles.get_all()["locked"].any()
@@ -89,7 +87,7 @@ def test_worst_tile():
     g.df.loc[g.df["lams"].idxmin(), "active"] = False
     pd_tiles = db.PandasTiles.create(g.df)
     db_tiles = db.DuckDBTiles.create(g.df)
-    assert_frame_equal_special(pd_tiles.worst_tile(), db_tiles.worst_tile())
+    assert_frame_equal_special(pd_tiles.worst_tile("lams"), db_tiles.worst_tile("lams"))
 
 
 def test_bootstrap_lamss():

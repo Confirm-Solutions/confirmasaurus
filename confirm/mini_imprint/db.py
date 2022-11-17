@@ -93,7 +93,6 @@ class DuckDBTiles:
             + " from tiles where active=true"
         ).fetchall()[0]
 
-        # Calculate the bias in lambda**.
         return lamss
 
     def worst_tile(self, order_col):
