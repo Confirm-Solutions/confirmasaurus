@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from confirm.mini_imprint import batch, grid, adagrid, driver, db
+import confirm.mini_imprint as ip
 ```
 
 ```python
@@ -23,7 +23,7 @@ def _sim(samples, theta, null_truth):
 
 
 class ZTest1D:
-    def __init__(self, seed, max_K, sim_batch_size=2048):
+    def __init__(self, seed, max_K, *, sim_batch_size=2048):
         self.family = "normal"
         self.sim_batch_size = sim_batch_size
         self.dtype = jnp.float32
@@ -32,7 +32,7 @@ class ZTest1D:
         # interval [0, 1]
         key = jax.random.PRNGKey(seed)
         self.samples = jax.random.normal(key, shape=(max_K,), dtype=self.dtype)
-        self._sim_batch = batch.batch(
+        self._sim_batch = ip.batch(
             _sim, self.sim_batch_size, in_axes=(0, None, None), out_axes=(1,)
         )
 
@@ -43,21 +43,10 @@ class ZTest1D:
 ## Calculate Type I Error
 
 ```python
-K = 8192
-model = ZTest1D(seed=0, max_K=K)
-
-N = 100
-theta, radii = grid.cartesian_gridpts([-1], [1], [N])
-Hs = [grid.HyperPlane(np.array([-1]), 0)]
-g = grid.init_grid(theta, radii, K).add_null_hypos(Hs).prune()
-
-# TODO: is there any problem from using the same seed with the bootstrap
-# indices and the simulations?
-dd = driver.Driver(model)
-
+g = ip.cartesian_grid([-1], [1], n=[100], null_hypos=[ip.hypo("x < 0")])
 # lam = -1.96 because we negated the statistics so we can do a less thanj
 # comparison.
-rej_df = dd.rej(g.df, -1.96)
+rej_df = ip.validate(ZTest1D, g, -1.96, K=8192)
 
 plt.plot(g.df["theta0"], rej_df["TI_sum"] / rej_df["K"], "b-o", markersize=2)
 plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "k-o", markersize=2)
@@ -68,17 +57,15 @@ plt.show()
 ## Adagrid Tuning
 
 ```python
-init_K = 2048
-n_K_double = 4
-model = ZTest1D(seed=1, max_K=init_K * 2**n_K_double)
+g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
+ada, reports = ip.ada_tune(ZTest1D, g, nB=5)
+```
 
-
-N = 1
-theta, radii = grid.cartesian_gridpts([-1], [1], [N])
-Hs = [grid.HyperPlane(np.array([-1]), 0)]
-g = grid.init_grid(theta, radii, K).add_null_hypos(Hs).prune()
-
-ada, reports = adagrid.adagrid(model, g, nB=5)
+```python
+# g = grid.Grid(ada.tiledb.get_all())
+ga = g.subset(g.df["active"])
+plt.plot(ga.get_theta()[:, 0], ga.get_radii()[:, 0], "bo", markersize=3)
+plt.show()
 ```
 
 ```python
@@ -112,4 +99,8 @@ plt.plot(all["theta0"], all["K"], "ko")
 plt.show()
 plt.plot(all["theta0"], all["alpha0"], "ko")
 plt.show()
+```
+
+```python
+
 ```

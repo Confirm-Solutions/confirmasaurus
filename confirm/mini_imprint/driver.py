@@ -1,3 +1,5 @@
+import copy
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -86,7 +88,25 @@ class Driver:
 
         return K_df.assign(TI_sum=TI_sum, TI_cp_bound=TI_cp_bound, TI_bound=TI_bound)
 
-    def rej(self, df, lam, delta=0.01):
+    def rej(self, df, lam, *, delta=0.01):
         return df.groupby("K", group_keys=False).apply(
             lambda K_df: self._rej(K_df, lam, delta)
         )
+
+
+def validate(modeltype, g, lam, *, delta=0.01, model_seed=0, K=None, model_kwargs=None):
+    g = copy.deepcopy(g)
+    if K is not None:
+        g.df["K"] = K
+    elif "K" not in g.df.columns:
+        # If K is not specified and the grid doesn't already have a K column,
+        # we just use a default value that's a decent guess.
+        g.df["K"] = 2**14
+
+    if model_kwargs is None:
+        model_kwargs = {}
+    model = modeltype(model_seed, g.df["K"].max(), **model_kwargs)
+
+    driver = Driver(model)
+    rej_df = driver.rej(g.df, lam, delta=delta)
+    return rej_df

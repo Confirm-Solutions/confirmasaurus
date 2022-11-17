@@ -1,3 +1,5 @@
+import copy
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -210,14 +212,15 @@ def print_report(_iter, report, _ada):
     rprint(report)
 
 
-def adagrid(
-    model,
+def ada_tune(
+    modeltype,
     g,
     *,
+    model_seed=0,
+    bootstrap_seed=0,
     init_K=2**13,
     n_K_double=4,
     nB=50,
-    bootstrap_seed=0,
     grid_target=0.001,
     bias_target=0.001,
     std_target=0.002,
@@ -227,7 +230,15 @@ def adagrid(
     max_iter=100,
     db_type=db.DuckDBTiles,
     callback=print_report,
+    model_kwargs=None,
 ):
+    g = copy.deepcopy(g)
+    g["K"] = init_K
+
+    if model_kwargs is None:
+        model_kwargs = {}
+    model = modeltype(seed=model_seed, max_K=init_K * 2**n_K_double, **model_kwargs)
+
     ada_driver = AdagridDriver(
         model,
         init_K=init_K,

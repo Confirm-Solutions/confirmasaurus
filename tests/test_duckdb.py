@@ -9,7 +9,7 @@ from confirm.mini_imprint import grid
 
 def example_grid(x1, x2):
     N = 10
-    theta, radii = grid.cartesian_gridpts([x1], [x2], [N])
+    theta, radii = grid._cartesian_gridpts([x1], [x2], [N])
     H = grid.HyperPlane(np.array([-1]), 0)
     return grid.init_grid(theta, radii, 50).add_null_hypos([H]).prune()
 

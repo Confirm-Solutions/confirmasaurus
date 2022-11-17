@@ -7,9 +7,10 @@ from typing import List
 
 import numpy as np
 import pandas as pd
+import sympy as sp
 
 
-@dataclass
+@dataclass(eq=False)
 class HyperPlane:
     """
     A plane defined by:
@@ -21,6 +22,56 @@ class HyperPlane:
 
     n: np.ndarray
     c: float
+
+    def __eq__(self, other):
+        if not isinstance(other, HyperPlane):
+            return NotImplemented
+        return np.allclose(self.n, other.n) and np.isclose(self.c, other.c)
+
+
+def hypo(str_expr):
+    alias = dict(
+        x="x0",
+        y="x1",
+        z="x2",
+    )
+    expr = sp.parsing.parse_expr(str_expr)
+    if isinstance(expr, sp.StrictLessThan) or isinstance(expr, sp.LessThan):
+        plane = expr.rhs - expr.lhs
+    elif isinstance(expr, sp.StrictGreaterThan) or isinstance(expr, sp.GreaterThan):
+        plane = expr.lhs - expr.rhs
+    else:
+        raise ValueError("Hypothesis expression must be an inequality.")
+
+    symbols = plane.free_symbols
+    coeffs = sp.Poly(plane, *symbols).coeffs()
+    if len(coeffs) > len(symbols):
+        c = -float(coeffs[-1])
+        coeffs = coeffs[:-1]
+    else:
+        c = 0
+
+    symbol_names = [alias.get(s.name, s.name).replace("theta", "x") for s in symbols]
+
+    if any([s[0] != "x" for s in symbol_names]):
+        raise ValueError(
+            f"Hypothesis contains invalid symbols: {symbols}."
+            " Valid symbols are x0..., theta0..., x, y, z."
+        )
+    try:
+        symbol_idxs = [int(s[1:]) for s in symbol_names]
+    except ValueError:
+        raise ValueError(
+            f"Hypothesis contains invalid symbols: {symbols}."
+            " Valid symbols are x0..., theta0..., x, y, z."
+        )
+    coeff_dict = dict(zip(symbol_idxs, coeffs))
+    max_idx = max(symbol_idxs)
+
+    n = [float(coeff_dict.get(i, 0)) for i in range(max_idx + 1)]
+    n /= np.linalg.norm(n)
+
+    return HyperPlane(np.array(n), c)
 
 
 @dataclass
@@ -163,15 +214,15 @@ class Grid:
         )
 
 
-def init_grid(theta, radii, init_K, parents=None):
+def init_grid(theta, radii, init_K=None, parents=None):
     d = theta.shape[1]
-    indict = dict(
-        K=init_K,
-    )
+    indict = dict()
     for i in range(d):
         indict[f"theta{i}"] = theta[:, i]
     for i in range(d):
         indict[f"radii{i}"] = radii[:, i]
+
+    indict["K"] = init_K if init_K is not None else 0
     indict["parent_id"] = (
         parents.astype(np.uint64) if parents is not None else np.uint64(0)
     )
@@ -189,7 +240,21 @@ def init_grid(theta, radii, init_K, parents=None):
     return Grid(pd.DataFrame(indict), [])
 
 
-def cartesian_gridpts(theta_min, theta_max, n_theta_1d):
+def cartesian_grid(theta_min, theta_max, *, n=None, null_hypos=None, prune=True):
+    theta_min = np.asarray(theta_min)
+    theta_max = np.asarray(theta_max)
+
+    if n is None:
+        n = np.full(theta_min.shape[0], 2)
+    g = init_grid(*_cartesian_gridpts(theta_min, theta_max, n))
+    if null_hypos is not None:
+        g = g.add_null_hypos(null_hypos)
+        if prune:
+            g = g.prune()
+    return g
+
+
+def _cartesian_gridpts(theta_min, theta_max, n_theta_1d):
     """
     Produce a grid of points in the hyperrectangle defined by theta_min and
     theta_max.

@@ -5,6 +5,8 @@ import numpy as np
 import pytest
 
 import confirm.mini_imprint.grid as grid
+from confirm.mini_imprint.grid import HyperPlane
+from confirm.mini_imprint.grid import hypo
 
 # NOTE: For developing tests, plotting a 2D grid is very useful:
 # import matplotlib.pyplot as plt
@@ -14,6 +16,26 @@ import confirm.mini_imprint.grid as grid
 
 def normalize(n):
     return n / np.linalg.norm(n)
+
+
+def test_hypo():
+    assert hypo("x < 0") == HyperPlane([-1], 0)
+    assert hypo("x <= 0") == HyperPlane([-1], 0)
+    assert hypo("x > 0") == HyperPlane([1], 0)
+    assert hypo("x >= 0") == HyperPlane([1], 0)
+
+    isq2 = 1.0 / np.sqrt(2)
+    assert hypo("x < 1") == HyperPlane([-1], -1)
+    assert hypo("x >= y") == HyperPlane([isq2, -isq2], 0)
+    assert hypo("x + y < 0") == HyperPlane([-isq2, -isq2], 0)
+    assert hypo("x + y < 1") == HyperPlane([-isq2, -isq2], -1)
+
+    assert hypo("theta0 < 0") == HyperPlane([-1], 0)
+    assert hypo("x0 < 0") == HyperPlane([-1], 0)
+
+    assert hypo("y < 1") == HyperPlane([0, -1], -1)
+    assert hypo("z < 1") == HyperPlane([0, 0, -1], -1)
+    assert hypo("z < 0.2") == HyperPlane([0, 0, -1], -0.2)
 
 
 def test_split1d():
@@ -98,9 +120,17 @@ def test_add_null_hypos(simple_grid):
     assert ((parent == 0) | (parent.isin(simple_grid.df["id"]))).all()
 
 
+def test_one_point_grid():
+    g = grid.init_grid(
+        *grid._cartesian_gridpts(np.array([0]), np.array([1]), np.array([1])), 0
+    )
+    np.testing.assert_allclose(g.get_theta(), np.array([[0.5]]))
+    np.testing.assert_allclose(g.get_radii(), np.array([[0.5]]))
+
+
 def test_split_angled():
     Hs = [grid.HyperPlane([2, -1], 0)]
-    in_theta, in_radii = grid.cartesian_gridpts(
+    in_theta, in_radii = grid._cartesian_gridpts(
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
     g = grid.init_grid(in_theta, in_radii, 1).add_null_hypos(Hs).prune()
@@ -110,7 +140,7 @@ def test_split_angled():
 
 def test_immutability():
     Hs = [grid.HyperPlane([2, -1], 0)]
-    in_theta, in_radii = grid.cartesian_gridpts(
+    in_theta, in_radii = grid._cartesian_gridpts(
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
     g = grid.init_grid(in_theta, in_radii, 1)
@@ -134,8 +164,7 @@ def check_index(g):
 def test_simple_indices(simple_grid):
     # All operations should leave the dataframe with a pandas index equal to
     # np.arange(n_tiles)
-    theta, radii = grid.cartesian_gridpts([-1, -1], [1, 1], [2, 2])
-    g = grid.init_grid(theta, radii, 1)
+    g = grid.cartesian_grid([-1, -1], [1, 1], n=[2, 2])
     check_index(g)
 
     check_index(simple_grid)
@@ -143,6 +172,20 @@ def test_simple_indices(simple_grid):
     check_index(gp)
     gc = gp.concat(g)
     check_index(gc)
+
+
+# def test_birthday(simple_grid):
+#     # All operations should leave the dataframe with a pandas index equal to
+#     # np.arange(n_tiles)
+#     g = grid.cartesian_grid([-1, -1], [1, 1], n=[2, 2])
+#     g.
+#     check_index(g)
+
+#     check_index(simple_grid)
+#     gp = simple_grid.prune()
+#     check_index(gp)
+#     gc = gp.concat(g)
+#     check_index(gc)
 
 
 def test_prune_no_surfaces():
@@ -163,7 +206,7 @@ def test_prune_twice_invariance(simple_grid):
 
 def test_refine():
     n_arms = 2
-    theta, radii = grid.cartesian_gridpts(
+    theta, radii = grid._cartesian_gridpts(
         np.full(n_arms, -3.0), np.full(n_arms, 1.0), np.full(n_arms, 4)
     )
 
@@ -193,7 +236,7 @@ n_theta_1d = 10
 
 def bench_f():
     null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], 2) for i in range(n_arms)]
-    t, r = grid.cartesian_gridpts(
+    t, r = grid._cartesian_gridpts(
         np.full(n_arms, -3.5), np.full(n_arms, 1.0), np.full(n_arms, n_theta_1d)
     )
     g = grid.init_grid(t, r, 0).add_null_hypos(null_hypos).prune()
