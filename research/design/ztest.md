@@ -6,38 +6,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import scipy.stats
 import matplotlib.pyplot as plt
 
 import confirm.mini_imprint as ip
-```
-
-```python
-@jax.jit
-def _sim(samples, theta, null_truth):
-    return jnp.where(
-        null_truth[:, None, 0],
-        # negate so that we can do a less than comparison
-        -(theta[:, None, 0] + samples[None, :]),
-        jnp.inf,
-    )
-
-
-class ZTest1D:
-    def __init__(self, seed, max_K, *, sim_batch_size=2048):
-        self.family = "normal"
-        self.sim_batch_size = sim_batch_size
-        self.dtype = jnp.float32
-
-        # sample normals and then compute the CDF to transform into the
-        # interval [0, 1]
-        key = jax.random.PRNGKey(seed)
-        self.samples = jax.random.normal(key, shape=(max_K,), dtype=self.dtype)
-        self._sim_batch = ip.batch(
-            _sim, self.sim_batch_size, in_axes=(0, None, None), out_axes=(1,)
-        )
-
-    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
-        return self._sim_batch(self.samples[begin_sim:end_sim], theta, null_truth)
+from confirm.models.ztest import ZTest1D
 ```
 
 ## Validation
@@ -46,11 +19,36 @@ class ZTest1D:
 g = ip.cartesian_grid([-1], [1], n=[100], null_hypos=[ip.hypo("x < 0")])
 # lam = -1.96 because we negated the statistics so we can do a less thanj
 # comparison.
-rej_df = ip.validate(ZTest1D, g, -1.96, K=8192)
+lam = -1.96
+K = 8192
+rej_df = ip.validate(ZTest1D, g, lam, K=K)
+true_err = 1 - scipy.stats.norm.cdf(-g.get_theta()[:, 0] - lam)
+TI_est = rej_df["TI_sum"] / rej_df["K"]
 
-plt.plot(g.df["theta0"], rej_df["TI_sum"] / rej_df["K"], "b-o", markersize=2)
-plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "k-o", markersize=2)
-plt.plot(g.df["theta0"], rej_df["TI_bound"], "r-o", markersize=2)
+plt.plot(g.df["theta0"], TI_est, "bo", markersize=2)
+plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "ko", markersize=2)
+plt.plot(g.df["theta0"], rej_df["TI_bound"], "ro", markersize=2)
+plt.plot(g.df["theta0"], true_err, "r-o", markersize=2)
+plt.show()
+```
+
+```python
+std = scipy.stats.binom.std(n=K, p=true_err) / K
+std
+```
+
+```python
+err = np.abs(TI_est - true_err).values
+err
+```
+
+```python
+err / std
+```
+
+```python
+plt.plot(std)
+plt.plot(err)
 plt.show()
 ```
 
