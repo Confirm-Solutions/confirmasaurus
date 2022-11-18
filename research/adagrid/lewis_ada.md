@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.5 ('confirm')
-    language: python
-    name: python3
----
-
 Tuning inside Adagrid is a scary thing to do. This document is a summary of the various problems I've run into. 
 
 First, some basics. We have three different groups of thresholds. $i$ is a tile index, $j$ is a bootstrap index.

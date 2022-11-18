@@ -49,3 +49,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.pytest.ini_options]
 addopts = "-s --tb=short"
 testpaths = ["tests"]
+
+[tool.jupytext]
+notebook_metadata_filter = "-all"
+cell_metadata_filter = "-all"

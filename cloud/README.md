@@ -44,6 +44,19 @@ For personal customizations, you get to do a few things. These are not mutually 
 
 I am happy to share my dotfiles and VSCode settings if you'd like. To share the dotfiles, I'll need to scrub out some passwords first, but that's probably an improvement anyway. :embarrassed:
 
+## Codespaces and Dev Containers bugs
+
+This stuff is on shaky footing. See the issue here: https://github.com/Confirm-Solutions/confirmasaurus/issues/146
+
+If you get the error: 
+
+```
+2022-11-09 19:19:50.047Z: nvidia-container-cli: mount error: file creation failed: /var/lib/docker/overlay2/ec3218afb8e82841b8d25c74cf6c5686c7e7c953e61b9c554c7ec5c73821df87/merged/run/nvidia-persistenced/socket: no such device or address: unknown.
+```
+
+then, it's likely that you did not select the `smalldev`, `bigdev` or `clouddev` container and instead used the default devcontainer. This is a temporary bug and should be fixed by upcoming releases in Codespaces. The blocker is a release of the Dev Containers extension with the outcome of the PR here (https://github.com/devcontainers/cli/pull/173).
+
+
 ## Getting started launching AWS infra
 
 Installing and configuring your tools:

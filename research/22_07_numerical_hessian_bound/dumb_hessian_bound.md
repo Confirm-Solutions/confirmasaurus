@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: SageMath 9.6
-    language: sage
-    name: sagemath
----
-
 ## A dumb hessian bound
 
 
@@ -49,7 +35,7 @@ Then, the second figure shows:
 
 ## Weibull
 
-```sage vscode={"languageId": "python"}
+```sage
 from sage.all import *
 import matplotlib.pyplot as plt
 import numpy as np
@@ -65,7 +51,7 @@ def show_figure(fig):
     fig.set_canvas(new_manager.canvas)
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 x, k, beta, L = var("x, k, beta, L")
 assume(k, "integer")
 assume(k - 1 > 0)
@@ -74,25 +60,25 @@ assume(beta > 0)
 beta = 1
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 p = k * beta * (x * beta) ** (k - 1) * exp(-((x * beta) ** k))
 d2pdk2 = diff(diff(p, k), k)
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 p._sympy_()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 d2pdk2._sympy_()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 pos = p * (1 / k + log(x) * (1 - x**k)) ** 2
 neg = p * (1 / (k**2) + x**k * log(x) ** 2)
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 # check that the pos, neg split matches the full expression
 assert (d2pdk2 - (pos - neg)).full_simplify() == 0
 
@@ -112,7 +98,7 @@ for kv in [0.5, 1.0, 1.5]:
     print(check(kv, 0, 1000))
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 for kv in np.linspace(0.5, 2.5, 6):
     pos_bound = pos.subs(k == kv).nintegral(x, 0, 1000)
     max0_bound = max_symbolic(0, d2pdk2).subs(k == kv).nintegral(x, 0, 1000)
@@ -121,7 +107,7 @@ for kv in np.linspace(0.5, 2.5, 6):
     )
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 # Why does max(0, ...) work well? Lots of integrand lies below zero!
 myplot = plot((pos - neg).subs(k == 0.5), (x, 0, 5))
 pm = myplot.matplotlib()
@@ -130,40 +116,40 @@ show_figure(pm)
 
 ## Binomial
 
-```sage vscode={"languageId": "python"}
+```sage
 n, k, p = var("n, k, p")
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 # pmf = binomial(n, k) * p ** k * (1 - p) ** (n - k)
 pmf = gamma(n + 1) / (gamma(k + 1) * gamma(n - k + 1)) * p**k * (1 - p) ** (n - k)
 H = diff(diff(pmf, p), p)
 boundH = max_symbolic(0, H)
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 eta = var("eta")
 pmf_eta = pmf.subs(p == 1 / (1 + exp(-eta)))
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 Heta = diff(diff(pmf_eta, eta), eta)
 boundHeta = max_symbolic(0, Heta)
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 tx = k
 np = log(p / (1 - p))
 hx = binomial(n, k)
 Ap = -n * log(1 - p)
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 pmf2 = hx * exp(np * tx - Ap)
 H2 = ((tx - diff(Ap, p)) ** 2 - diff(diff(Ap, p), p)) * pmf2
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 # plt.plot([H.subs(n == 100, p == 0.5, k == kv) for kv in range(0, 101)], 'r-')
 # plt.plot([H2.subs(n == 100, p == 0.5, k == kv) for kv in range(0, 101)], 'r-')
 # plt.plot([boundH.subs(n == 100, p == 0.5, k == kv) for kv in range(0, 101)], 'k-')
@@ -177,15 +163,15 @@ plt.plot(
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 float(boundHeta.subs(n == 100, eta == log(0.5 / (1 - 0.5)), k == 40))
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 import numpy as np
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 nv = 100
 for pv in np.linspace(0, 1, 20)[1:-1]:
     bound = np.sum(
@@ -202,7 +188,7 @@ for pv in np.linspace(0, 1, 20)[1:-1]:
 
 yes, sort of.
 
-```sage vscode={"languageId": "python"}
+```sage
 nv = 100
 pv = 0.5
 full_entries = [
@@ -213,11 +199,11 @@ full = np.sum(full_entries)
 full
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 np.arange(0, nv + 1)[np.where(np.array(full_entries) == 0)]
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 ogx, ogw = np.polynomial.legendre.leggauss(10)
 
 
@@ -241,19 +227,19 @@ Note that this numerical integral above *has* converged. The reason it disagrees
 
 Is this useful? Dunno, maybe.
 
-```sage vscode={"languageId": "python"}
+```sage
 show_figure(plot(f, (k, 0, 100)).matplotlib())
 ```
 
 ## JAX stuff
 
-```sage vscode={"languageId": "python"}
+```sage
 import jax
 import numpyro.distributions as dist
 import jax.numpy as jnp
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 def pmf_jax_probs(eta, n, k):
     p = jax.scipy.special.expit(eta)
     return jnp.exp(dist.Binomial(n, probs=p).log_prob(k))
@@ -276,46 +262,46 @@ plt.plot(pmf, "k-")
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 H = jax.hessian(pmf_jax_probs)(jax.scipy.special.logit(p), 100, np.arange(0, 101))
 plt.plot(H)
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 plt.plot(jnp.maximum(H, 0))
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 xs = np.linspace(-4, 4, 100)
 plt.plot(xs, jax.nn.softplus(xs))
 plt.plot(xs, jax.nn.relu(xs))
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 plt.plot(jax.nn.softplus(H), label="fancy softplus")
 plt.plot(jnp.maximum(H, 0), label="max0")
 plt.legend()
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 plt.plot(jax.nn.softplus(H * 3) / 3, label="fancy softplus")
 plt.plot(jnp.maximum(H, 0), label="max0")
 plt.legend()
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 plt.plot(jax.nn.softplus(0.1 * H / pmf) * pmf / 0.1, label="fancy softplus")
 plt.plot(jnp.maximum(H, 0), label="max0")
 plt.legend()
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 H = jax.hessian(pmf_jax_probs)(jax.scipy.special.logit(p), 100, np.arange(0, 101))
 pmf = pmf_jax_probs(jax.scipy.special.logit(p), 100, np.arange(0, 101))
 beta = np.max(pmf)
@@ -329,7 +315,7 @@ plt.ylabel("$p(y|n=100, p=0.3)$")
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 # but max(pmf) is not smooth, so fit a polynomial
 def max_pmf(eta):
     return jnp.max(pmf_jax_probs(eta, 100, np.arange(0, 101)))
@@ -343,7 +329,7 @@ plt.plot(etas, jnp.polyval(max_poly, etas) * 2)
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 p = 0.04
 pmf = pmf_jax_probs(jax.scipy.special.logit(p), 100, np.arange(0, 101))
 H = jax.hessian(pmf_jax_probs)(jax.scipy.special.logit(p), 100, np.arange(0, 101))
@@ -353,11 +339,11 @@ plt.plot(jax.nn.softplus(beta * H / pmf) * pmf / beta)
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 pmf_jax = pmf_jax_probs
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 def bound_max0(eta, n, k):
     H = jax.hessian(pmf_jax)(eta, 100, np.arange(0, 101))
     max0H = jax.nn.relu(H)
@@ -367,7 +353,7 @@ def bound_max0(eta, n, k):
 bound_max0(jax.scipy.special.logit(0.5), 100, np.arange(0, 101))
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 def bound_softplus(eta, n, k):
     H = jax.hessian(pmf_jax)(eta, 100, np.arange(0, 101))
     eps = 1e-10
@@ -382,7 +368,7 @@ def bound_softplus(eta, n, k):
 bound_softplus(jax.scipy.special.logit(0.5), 100, np.arange(0, 101))
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 bound_f = bound_softplus
 ps = np.linspace(0, 1, 200)[1:-1]
 etas = jax.scipy.special.logit(ps)
@@ -393,14 +379,14 @@ hs = jax.vmap(jax.grad(jax.grad(bound_f)), in_axes=(0, None, None))(
 )
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 import pandas as pd
 
 df = pd.DataFrame(dict(p=ps, eta=etas, bound=bs, grad=gs, hess=hs))
 df
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 plt.figure(figsize=(8, 8))
 plt.title("n=100 binomial bounds")
 plt.plot(df["eta"], 0.5 * 100 * df["p"] * (1 - df["p"]), label="cov bound")
@@ -412,6 +398,6 @@ plt.xlabel("$\eta$")
 plt.show()
 ```
 
-```sage vscode={"languageId": "python"}
+```sage
 
 ```
