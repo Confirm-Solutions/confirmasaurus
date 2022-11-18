@@ -3,6 +3,7 @@ import copy
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import scipy.stats
 
 from . import grid
@@ -59,10 +60,24 @@ def clopper_pearson(TI_sum, K, delta):
     return np.where(np.isnan(TI_cp_bound), 0, TI_cp_bound)
 
 
+def calc_tuning_threshold(sorted_stats, sorted_order, alpha):
+    K = sorted_stats.shape[0]
+    cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
+    # indexing a sorted array with sorted indices results in a sorted array!!
+    return sorted_stats[sorted_order[cv_idx]]
+
+
 class Driver:
     def __init__(self, model):
         self.model = model
         self.forward_boundv, self.backward_boundv = get_bound(model)
+
+        self.tunev = jax.jit(
+            jax.vmap(
+                calc_tuning_threshold,
+                in_axes=(0, None, 0),
+            )
+        )
 
     def _stats(self, K_df):
         K = K_df["K"].iloc[0]
@@ -75,7 +90,7 @@ class Driver:
     def stats(self, df):
         return df.groupby("K", group_keys=False).apply(self._stats)
 
-    def _rej(self, K_df, lam, delta):
+    def _validate(self, K_df, lam, delta):
         K = K_df["K"].iloc[0]
         K_g = grid.Grid(K_df)
         theta = K_g.get_theta()
@@ -88,25 +103,54 @@ class Driver:
 
         return K_df.assign(TI_sum=TI_sum, TI_cp_bound=TI_cp_bound, TI_bound=TI_bound)
 
-    def rej(self, df, lam, *, delta=0.01):
+    def validate(self, df, lam, *, delta=0.01):
         return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._rej(K_df, lam, delta)
+            lambda K_df: self._validate(K_df, lam, delta)
+        )
+
+    def _tune(self, K_df, alpha):
+        K = K_df["K"].iloc[0]
+        K_g = grid.Grid(K_df)
+
+        theta, vertices = K_g.get_theta_and_vertices()
+        alpha0 = self.backward_boundv(alpha, theta, vertices)
+
+        stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
+        sorted_stats = jnp.sort(stats, axis=-1)
+        bootstrap_lams = self.tunev(sorted_stats, np.arange(K), alpha0)
+        return pd.DataFrame(bootstrap_lams, columns=["lams"])
+
+    def tune(self, df, alpha):
+        return df.groupby("K", group_keys=False).apply(
+            lambda K_df: self._tune(K_df, alpha)
         )
 
 
-def validate(modeltype, g, lam, *, delta=0.01, model_seed=0, K=None, model_kwargs=None):
+def _setup(modeltype, g, model_seed, K, model_kwargs):
     g = copy.deepcopy(g)
     if K is not None:
         g.df["K"] = K
-    elif "K" not in g.df.columns:
-        # If K is not specified and the grid doesn't already have a K column,
-        # we just use a default value that's a decent guess.
-        g.df["K"] = 2**14
+    else:
+        # If K is not specified we just use a default value that's a decent
+        # guess.
+        default_K = 2**14
+        if "K" not in g.df.columns:
+            g.df["K"] = default_K
+        g.df.loc[g.df["K"] == 0, "K"] = default_K
 
     if model_kwargs is None:
         model_kwargs = {}
     model = modeltype(model_seed, g.df["K"].max(), **model_kwargs)
+    return Driver(model), g
 
-    driver = Driver(model)
-    rej_df = driver.rej(g.df, lam, delta=delta)
+
+def validate(modeltype, g, lam, *, delta=0.01, model_seed=0, K=None, model_kwargs=None):
+    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    rej_df = driver.validate(g.df, lam, delta=delta)
     return rej_df
+
+
+def tune(modeltype, g, *, model_seed=0, alpha=0.025, K=None, model_kwargs=None):
+    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    tune_df = driver.tune(g.df, alpha)
+    return tune_df

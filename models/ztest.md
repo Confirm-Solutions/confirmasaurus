@@ -40,7 +40,7 @@ class ZTest1D:
         return self._sim_batch(self.samples[begin_sim:end_sim], theta, null_truth)
 ```
 
-## Calculate Type I Error
+## Validation
 
 ```python
 g = ip.cartesian_grid([-1], [1], n=[100], null_hypos=[ip.hypo("x < 0")])
@@ -54,6 +54,15 @@ plt.plot(g.df["theta0"], rej_df["TI_bound"], "r-o", markersize=2)
 plt.show()
 ```
 
+## Tuning
+
+```python
+tune_df = ip.tune(ZTest1D, g)
+print("lambda**: ", tune_df["lams"].min())
+plt.plot(g.df["theta0"], tune_df["lams"], "k-o", markersize=2)
+plt.show()
+```
+
 ## Adagrid Tuning
 
 ```python
@@ -62,45 +71,30 @@ ada, reports = ip.ada_tune(ZTest1D, g, nB=5)
 ```
 
 ```python
-# g = grid.Grid(ada.tiledb.get_all())
-ga = g.subset(g.df["active"])
-plt.plot(ga.get_theta()[:, 0], ga.get_radii()[:, 0], "bo", markersize=3)
-plt.show()
-```
-
-```python
-evolution = pd.DataFrame(reports)
-plt.plot(evolution["i"], evolution["bias"].astype(float))
-plt.show()
-plt.plot(evolution["i"], evolution["grid_cost"].astype(float))
-plt.show()
-plt.plot(evolution["i"], evolution["std_tie"].astype(float))
-plt.show()
-```
-
-```python
-all = ada.tiledb.get_all()
-all = all.loc[all["active"]]
-all.nsmallest(10, "orderer")
-```
-
-```python
 import scipy.stats
 
-lamss = all["lams"].min()
+g = ip.Grid(ada.tiledb.get_all())
+ga = g.subset(g.df["active"])
+lamss = ga.df["lams"].min()
 true_err = 1 - scipy.stats.norm.cdf(-lamss)
 lamss, true_err
 ```
 
 ```python
-plt.plot(all["theta0"], all["lams"], "ko")
+evolution = pd.DataFrame(reports)
+# Figure plotting bias, grid_cost and std_tie
+fig, ax = plt.subplots(3, 2, figsize=(8, 12), constrained_layout=True)
+ax[0][0].plot(evolution["i"], evolution["bias_tie"], "o-")
+ax[0][0].set_title("Bias")
+ax[0][1].plot(evolution["i"], evolution["grid_cost"], "o-")
+ax[0][1].set_title("Grid Cost")
+ax[1][0].plot(evolution["i"], evolution["std_tie"], "o-")
+ax[1][0].set_title("Std Tie")
+ax[1][1].plot(ga.get_theta()[:, 0], ga.get_radii()[:, 0], "bo", markersize=3)
+ax[1][1].set_title("Radius")
+ax[2][0].plot(ga.get_theta()[:, 0], ga.df["K"], "bo", markersize=3)
+ax[2][0].set_title("K")
+ax[2][1].plot(ga.get_theta()[:, 0], ga.df["alpha0"], "bo", markersize=3)
+ax[2][1].set_title("alpha0")
 plt.show()
-plt.plot(all["theta0"], all["K"], "ko")
-plt.show()
-plt.plot(all["theta0"], all["alpha0"], "ko")
-plt.show()
-```
-
-```python
-
 ```

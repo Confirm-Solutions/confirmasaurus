@@ -28,7 +28,7 @@ def test_hypo():
     assert hypo("x < 1") == HyperPlane([-1], -1)
     assert hypo("x >= y") == HyperPlane([isq2, -isq2], 0)
     assert hypo("x + y < 0") == HyperPlane([-isq2, -isq2], 0)
-    assert hypo("x + y < 1") == HyperPlane([-isq2, -isq2], -1)
+    assert hypo("x + y < 1") == HyperPlane([-isq2, -isq2], -isq2)
 
     assert hypo("theta0 < 0") == HyperPlane([-1], 0)
     assert hypo("x0 < 0") == HyperPlane([-1], 0)
@@ -36,6 +36,9 @@ def test_hypo():
     assert hypo("y < 1") == HyperPlane([0, -1], -1)
     assert hypo("z < 1") == HyperPlane([0, 0, -1], -1)
     assert hypo("z < 0.2") == HyperPlane([0, 0, -1], -0.2)
+
+    assert hypo("2*x < 0.2") == HyperPlane([-1], -0.1)
+    assert hypo("2.1*x < 0.2") == HyperPlane([-1], -0.2 / 2.1)
 
 
 def test_split1d():
@@ -174,18 +177,18 @@ def test_simple_indices(simple_grid):
     check_index(gc)
 
 
-# def test_birthday(simple_grid):
-#     # All operations should leave the dataframe with a pandas index equal to
-#     # np.arange(n_tiles)
-#     g = grid.cartesian_grid([-1, -1], [1, 1], n=[2, 2])
-#     g.
-#     check_index(g)
+def test_birthday():
+    # All operations should leave the dataframe with a pandas index equal to
+    # np.arange(n_tiles)
+    g = grid.cartesian_grid([-1, -1], [1, 1], n=[2, 2])
+    g.df["birthday"] = 1
 
-#     check_index(simple_grid)
-#     gp = simple_grid.prune()
-#     check_index(gp)
-#     gc = gp.concat(g)
-#     check_index(gc)
+    gs = g.add_null_hypos([grid.hypo("x < 0.1")])
+    assert (gs.df["birthday"] == 1).all()
+    gp = gs.prune()
+    assert (gp.df["birthday"] == 1).all()
+    gc = gp.concat(g)
+    assert (gc.df["birthday"] == 1).all()
 
 
 def test_prune_no_surfaces():

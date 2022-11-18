@@ -69,7 +69,9 @@ def hypo(str_expr):
     max_idx = max(symbol_idxs)
 
     n = [float(coeff_dict.get(i, 0)) for i in range(max_idx + 1)]
-    n /= np.linalg.norm(n)
+    n_norm = np.linalg.norm(n)
+    n /= n_norm
+    c /= n_norm
 
     return HyperPlane(np.array(n), c)
 
@@ -131,11 +133,9 @@ class Grid:
 
         parent_K = np.repeat(self.df["K"].values[intersects], 2)
         parent_id = np.repeat(self.df["id"].values[intersects], 2)
+        birthday = np.repeat(self.df["birthday"].values[intersects], 2)
         new_g = init_grid(
-            new_theta,
-            new_radii,
-            parent_K,
-            parents=parent_id,
+            new_theta, new_radii, parent_K, parents=parent_id, birthday=birthday
         )
         for i in range(hypo_idx):
             new_g.df[f"null_truth{i}"] = np.repeat(
@@ -148,10 +148,12 @@ class Grid:
         self.df["eligible"].values[intersects] = False
         return self.concat(new_g)
 
-    def add_null_hypos(self, null_hypotheses):
+    def add_null_hypos(self, null_hypos):
         g = Grid(self.df.copy(), self.null_hypos)
-        for H in null_hypotheses:
-            g = g._add_null_hypo(H)
+        for H in null_hypos:
+            Hn = np.asarray(H.n)
+            Hpad = HyperPlane(np.pad(Hn, (0, g.d - Hn.shape[0])), H.c)
+            g = g._add_null_hypo(Hpad)
         return g
 
     def prune(self):
@@ -214,7 +216,7 @@ class Grid:
         )
 
 
-def init_grid(theta, radii, init_K=None, parents=None):
+def init_grid(theta, radii, init_K=None, parents=None, birthday=0):
     d = theta.shape[1]
     indict = dict()
     for i in range(d):
@@ -226,7 +228,7 @@ def init_grid(theta, radii, init_K=None, parents=None):
     indict["parent_id"] = (
         parents.astype(np.uint64) if parents is not None else np.uint64(0)
     )
-    indict["birthday"] = 0
+    indict["birthday"] = birthday
 
     # Is this a terminal node in the tree?
     indict["active"] = True

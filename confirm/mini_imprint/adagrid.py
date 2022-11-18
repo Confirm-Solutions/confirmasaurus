@@ -10,20 +10,16 @@ from . import driver
 from . import grid
 
 
-def tune(sorted_stats, sorted_order, alpha):
-    K = sorted_stats.shape[0]
-    cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
-    # indexing a sorted array with sorted indices results in a sorted array!!
-    return sorted_stats[sorted_order[cv_idx]]
-
-
 class AdagridDriver:
     def __init__(self, model, *, init_K, n_K_double, nB, bootstrap_seed):
         self.model = model
         self.forward_boundv, self.backward_boundv = driver.get_bound(model)
 
-        self.tunev = jax.jit(
-            jax.vmap(jax.vmap(tune, in_axes=(None, 0, None)), in_axes=(0, None, 0))
+        self.tunevv = jax.jit(
+            jax.vmap(
+                jax.vmap(driver.calc_tuning_threshold, in_axes=(None, 0, None)),
+                in_axes=(0, None, 0),
+            )
         )
 
         bootstrap_key = jax.random.PRNGKey(bootstrap_seed)
@@ -51,11 +47,11 @@ class AdagridDriver:
         K_g = grid.Grid(K_df)
 
         theta, vertices = K_g.get_theta_and_vertices()
-        alpha0 = self.backward_boundv(0.025, theta, vertices)
+        alpha0 = self.backward_boundv(alpha, theta, vertices)
         # TODO: batching
         stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
         sorted_stats = jnp.sort(stats, axis=-1)
-        bootstrap_lams = self.tunev(sorted_stats, self.bootstrap_idxs[K], alpha0)
+        bootstrap_lams = self.tunevv(sorted_stats, self.bootstrap_idxs[K], alpha0)
         cols = ["lams"]
         for i in range(self.nB):
             cols.append(f"B_lams{i}")
@@ -136,7 +132,19 @@ class Adagrid:
         return g_tuned
 
     def step(self, i):
-        (bias_tie, std_tie, spread_tie, grid_cost) = self.calc_convergence()
+        worst_tile = self.tiledb.worst_tile("lams")
+        lamss = worst_tile["lams"].iloc[0]
+        B_lamss = self.tiledb.bootstrap_lamss()
+
+        worst_tile_TI_sum = self.ada_driver.many_rej(
+            worst_tile, np.array([lamss] + list(B_lamss))
+        ).iloc[0][0]
+
+        worst_tile_TI_est = worst_tile_TI_sum / worst_tile["K"].iloc[0]
+        bias_tie = worst_tile_TI_est[0] - worst_tile_TI_est[1:].mean()
+        std_tie = worst_tile_TI_est.std()
+        spread_tie = worst_tile_TI_est.max() - worst_tile_TI_est.min()
+        grid_cost = worst_tile["grid_cost"].iloc[0]
 
         self.tiledb.unlock_all()
         work = self.tiledb.next(self.iter_size, "orderer")
@@ -173,15 +181,20 @@ class Adagrid:
 
         report = dict(
             i=i,
-            bias=f"{bias_tie:.5f}",
-            std_tie=f"{std_tie:.5f}",
-            spread_tie=f"{spread_tie:.4f}",
-            grid_cost=f"{grid_cost:.4f}",
+            bias_tie=bias_tie,
+            std_tie=std_tie,
+            spread_tie=spread_tie,
+            grid_cost=grid_cost,
             n_refine=n_refine,
             n_deepen=n_deepen,
             n_finished=work["active"].sum(),
             n_impossible=work["impossible"].sum(),
+            lamss=lamss,
+            B_lamss_min=min(B_lamss),
+            B_lamss_max=max(B_lamss),
         )
+        report["tie_{k}(lamss)"] = worst_tile_TI_est[0]
+
         done = (
             (bias_tie < self.bias_target)
             and (grid_cost < self.grid_target)
@@ -189,27 +202,15 @@ class Adagrid:
         )
         return done, report
 
-    def calc_convergence(self):
-        worst_tile = self.tiledb.worst_tile("lams")
-        lamss = worst_tile["lams"].iloc[0]
-        B_lamss = self.tiledb.bootstrap_lamss()
-
-        worst_tile_TI_sum = self.ada_driver.many_rej(
-            worst_tile, np.array([lamss] + list(B_lamss))
-        ).iloc[0][0]
-
-        worst_tile_TI_est = worst_tile_TI_sum / worst_tile["K"].iloc[0]
-        bias = worst_tile_TI_est[0] - worst_tile_TI_est[1:].mean()
-        std = worst_tile_TI_est.std()
-        spread = worst_tile_TI_est.max() - worst_tile_TI_est.min()
-
-        return (bias, std, spread, worst_tile["grid_cost"].iloc[0])
-
 
 def print_report(_iter, report, _ada):
     from rich import print as rprint
 
-    rprint(report)
+    ready = report.copy()
+    for k in ready:
+        if isinstance(ready[k], float) or isinstance(ready[k], jnp.DeviceArray):
+            ready[k] = f"{ready[k]:.6f}"
+    rprint(ready)
 
 
 def ada_tune(
@@ -233,7 +234,7 @@ def ada_tune(
     model_kwargs=None,
 ):
     g = copy.deepcopy(g)
-    g["K"] = init_K
+    g.df["K"] = init_K
 
     if model_kwargs is None:
         model_kwargs = {}
