@@ -36,7 +36,7 @@ plt.subplot(1, 2, 1)
 lam_str = ""
 # plt.title(f"Type I error with $\lambda" + f" = {overall_lam:.4f}$")
 levels = np.linspace(0, 2.5, 6)
-cbar_target = plt.contourf(x, y, z * 100, levels=levels, cmap="Reds", extend="both")
+cbar_target = plt.contourf(x, y, z * 100, levels=levels, cmap="Reds", extend="neither")
 plt.contour(
     x,
     y,
