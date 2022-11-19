@@ -1,3 +1,30 @@
+"""
+Here you will find tools for snapshot testing. Snapshot testing is a way to
+check that the output of a function is the same as it used to be. This is
+particularly useful for end to end tests where we don't have a comparison point
+for the end result but we want to know when the result changes. Snapshot
+testing is very common in numerical computing.
+
+Usage example:
+
+```
+def test_foo(snapshot):
+    K = 8000
+    result = scipy.stats.binom.std(n=K, p=np.linspace(0.4, 0.6, 100)) / K
+    snapshot(result, rtol=1e-7, atol=1e-7)
+```
+
+If you run `pytest --snapshot-update test_file.py::test_foo`, the snapshot will
+be saved to disk. Then later when you run `pytest test_file.py::test_foo`, the
+`snapshot(...)` call will automatically load that object and compare against it.
+
+It's fine to call `snapshot(...)` multiple times in a test. The snapshot
+filename will have an incremented counter indicating which call it is.
+
+When debugging a snapshot test, you can use `snapshot.get(...)` to get the
+value of the snapshot. If you are using the `TextSerializer`, you can also
+look at the snapshot file directly. Pandas DataFrame objects are saved as csv
+"""
 import os
 import pickle
 from pathlib import Path
@@ -8,7 +35,7 @@ import pandas as pd
 import pytest
 
 
-def pytest_addoption(parser) -> None:
+def pytest_addoption(parser):
     """
     Exposes snapshot plugin configuration to pytest.
     https://docs.pytest.org/en/latest/reference.html#_pytest.hookspec.pytest_addoption
@@ -22,6 +49,14 @@ def pytest_addoption(parser) -> None:
     )
 
 
+def check_exists(snapshot_path):
+    if not os.path.exists(snapshot_path):
+        raise FileNotFoundError(
+            f"Snapshot file not found: {snapshot_path}."
+            " Did you forget to run with --snapshot-update?"
+        )
+
+
 class Pickler:
     @staticmethod
     def serialize(filebase, obj):
@@ -31,11 +66,7 @@ class Pickler:
     @staticmethod
     def deserialize(filebase, obj):
         filename = filebase + ".pkl"
-        if not os.path.exists(filename):
-            raise FileNotFoundError(
-                f"Snapshot file not found: {filename}."
-                " Did you forget to run with --snapshot-update?"
-            )
+        check_exists(filename)
         with open(filename, "rb") as f:
             return pickle.load(f)
 
@@ -44,9 +75,13 @@ class TextSerializer:
     @staticmethod
     def serialize(filebase, obj):
         if isinstance(obj, pd.DataFrame):
-            obj.to_csv(filebase + ".csv")
+            filename = filebase + ".csv"
+            # in all our dataframes, the index is meaningless, so we do not
+            # save it here.
+            obj.to_csv(filename, index=False)
         elif isinstance(obj, np.ndarray) or isinstance(obj, jax.numpy.DeviceArray):
-            np.savetxt(filebase + ".txt", obj)
+            filename = filebase + ".txt"
+            np.savetxt(filename, obj)
         else:
             raise ValueError(
                 f"TextSerializer cannot serialize {type(obj)}."
@@ -56,9 +91,13 @@ class TextSerializer:
     @staticmethod
     def deserialize(filebase, obj):
         if isinstance(obj, pd.DataFrame):
-            return pd.read_csv(filebase + ".csv")
+            filename = filebase + ".csv"
+            check_exists(filename)
+            return pd.read_csv(filename)
         elif isinstance(obj, np.ndarray) or isinstance(obj, jax.numpy.DeviceArray):
-            return np.loadtxt(filebase + ".txt")
+            filename = filebase + ".txt"
+            check_exists(filename)
+            return np.loadtxt(filename)
         else:
             raise ValueError(
                 f"TextSerializer cannot deserialize {type(obj)}."
@@ -68,7 +107,9 @@ class TextSerializer:
 
 def pd_np_compare(actual, expected, **kwargs):
     if isinstance(actual, pd.DataFrame):
-        pd.testing.assert_frame_equal(actual, expected, **kwargs)
+        # check_dtype=False is needed when we're using TextSerializer because
+        # uint64 will be reloaded as int64
+        pd.testing.assert_frame_equal(actual, expected, check_dtype=False, **kwargs)
     elif isinstance(actual, np.ndarray) or isinstance(actual, jax.numpy.DeviceArray):
         np.testing.assert_allclose(actual, expected, **kwargs)
     else:
@@ -137,15 +178,6 @@ class SnapshotAssertion:
 
 @pytest.fixture
 def snapshot(request):
-    """
-    _summary_
-
-    Args:
-        request: _description_
-
-    Returns:
-        _description_
-    """
     return SnapshotAssertion(
         update_snapshots=request.config.option.update_snapshots,
         request=request,
