@@ -1,8 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
 
-# TODO: allow batch to decide internally what batch size to use??
-
 
 def _pad_arg(a, axis, n_pad: int, module):
     """

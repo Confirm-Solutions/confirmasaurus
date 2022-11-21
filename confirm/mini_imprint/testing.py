@@ -11,19 +11,20 @@ Usage example:
 def test_foo(snapshot):
     K = 8000
     result = scipy.stats.binom.std(n=K, p=np.linspace(0.4, 0.6, 100)) / K
-    snapshot(result, rtol=1e-7, atol=1e-7)
+    np.testing.assert_allclose(result, snapshot(result))
 ```
 
 If you run `pytest --snapshot-update test_file.py::test_foo`, the snapshot will
 be saved to disk. Then later when you run `pytest test_file.py::test_foo`, the
-`snapshot(...)` call will automatically load that object and compare against it.
+`snapshot(...)` call will automatically load that object so that you can
+compare against the loaded object.
 
 It's fine to call `snapshot(...)` multiple times in a test. The snapshot
-filename will have an incremented counter indicating which call it is.
+filename will have an incremented counter indicating which call index is next.
 
-When debugging a snapshot test, you can use `snapshot.get(...)` to get the
-value of the snapshot. If you are using the `TextSerializer`, you can also
-look at the snapshot file directly. Pandas DataFrame objects are saved as csv
+When debugging a snapshot test, you can directly view the snapshot file if you
+are using the `TextSerializer`. This is the default. Pandas DataFrame objects
+are saved as csv and numpy arrays are saved as txt files.
 """
 import os
 import pickle

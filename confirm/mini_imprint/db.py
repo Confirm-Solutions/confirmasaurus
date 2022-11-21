@@ -127,7 +127,6 @@ class DuckDBTiles:
             _description_
         """
         con = duckdb.connect(path)
-        print(df.columns)
         con.execute("create table tiles as select * from df")
         return DuckDBTiles(con)
 
