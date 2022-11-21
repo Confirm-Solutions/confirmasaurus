@@ -1,3 +1,48 @@
+"""
+Broadly speaking, the adaptive tuning algorithm refines and deepens tiles until
+the type I error, max(f_hat(lambda**)), is close to the type I error control
+level, alpha.
+
+The core tool to decide whether a tile has a sufficient number of simulations
+is to calculate lambda* from several bootstrap resamples of the test
+statistics. Deciding whether a tile needs to be refined is easier because we
+can directly calculate the type I error slack from continuous simulation
+extension: alpha - alpha0
+
+The remaining tricky part then is deciding which tiles to refine/deepen
+*first*! We primarily do this based on a second bootstrap resampling of
+lambda*. This second bootstrap is called the "twb" bootstrap. The tiles with
+the smallest min_{twb}(lambda*) are processed first.
+TODO: we would like to inflate these minima.
+TODO: discuss the issues of many near-critical tiles. minimum of gaussian
+draws as a useful model.
+
+See the comments in Adagrid.step for a detailed understanding of the algorithm.
+
+The great glossary of adagrid:
+- K: the number of simulations to use for this tile.
+- tie: (T)ype (I) (E)rror
+- alpha: the type I error control level. Typically 0.025.
+- deepen: add more simulations. We normally double the number of simulations.
+- refine: replace a tile with 2^d children that have half the radius.
+- twb: "tilewise bootstrap"
+- f_hat(lambda**): the type I error with lambda=lambda**
+- B: "bias bootstrap". The set of bootstrap resamples used for computing the
+  bias in f_hat(lambda**)
+- lams aka "lambda*" "lambda star": The tuning threshold for a given tile.
+- twb_lams, B_lams: the lambda star from each bootstrap for this tile.
+- `twb_[min, mean, max]_lams`: The minimum lambda* for this tile across the twb
+  bootstraps
+- lamss aka "lambda**": The minimum tuning threshold over the whole grid.
+- alpha0: backward_cse(this_tile, alpha)
+- grid_cost: alpha - alpha0
+- impossible tiles are those for which K and alpha0 are not large enough to
+  satisfy the tuning_min_idx constraint.
+- orderer: the value by which we decide the next tiles to "process"
+- processing tiles: deciding to refine or deepen and then simulating for those
+  new tiles that resulted from refining or deepening.
+- worst tile: the tile for which lams is smallest. `lams[worst_tile] == lamss`
+"""
 import copy
 
 import jax
@@ -12,15 +57,16 @@ from . import grid
 
 class AdagridDriver:
     """
-    This driver has two entrypoints:
-    1. `bootstrap_tune(...)`: tunes to calculate lambda* for every tile in a
-       grid. Bootstrap resampling of the simulated test statistics gives a picture
-       of the distribution of lambda*.
-    2. `many_rej(...)`: calculates the number of rejections for many different
-       values values of lambda*.
-
     Driver classes are the layer of imprint that is directly responsible for
     asking the Model for simulations.
+
+    This driver has two entrypoints:
+    1. `bootstrap_tune(...)`: tunes (calculating lambda*) for every tile in a
+       grid. The tuning is performed for many bootstrap resamplings of the
+       simulated test statistics. This bootstrap gives a picture of the
+       distribution of lambda*.
+    2. `many_rej(...)`: calculates the number of rejections for many different
+       values values of lambda*.
 
     For the basic `validate` and `tune` drivers, see `driver.py`.
     """
@@ -90,8 +136,8 @@ class AdagridDriver:
         K_g = grid.Grid(K_df)
         theta = K_g.get_theta()
         stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-        TI_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
-        return TI_sum
+        tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
+        return tie_sum
 
     def many_rej(self, df, lams_arr):
         return df.groupby("K", group_keys=False).apply(
@@ -123,6 +169,9 @@ class _Adagrid:
 
         self.null_hypos = g.null_hypos
         g.df["K"] = self.ada_driver.init_K
+
+        # We process the tiles before adding them to the database so that the
+        # database will be initialized with the correct set of columns.
         g_tuned = self._process_tiles(g, 0)
         self.tiledb = db_type.create(g_tuned.df)
 
@@ -157,58 +206,142 @@ class _Adagrid:
         return g_tuned
 
     def step(self, i):
+        """
+        One iteration of the adagrid algorithm.
+
+        Args:
+            i: The iteration number.
+
+        Returns:
+            done: True if the algorithm has converged.
+            report: A dictionary of information about the iteration.
+        """
+        ########################################
+        # Step 1: Calculate bias and standard deviation of TIE
+        ########################################
         worst_tile = self.tiledb.worst_tile("lams")
         lamss = worst_tile["lams"].iloc[0]
-        B_lamss = self.tiledb.bootstrap_lamss()
 
-        worst_tile_TI_sum = self.ada_driver.many_rej(
+        # We determine the bias by comparing the Type I error at the worst
+        # tile for each lambda**_B:
+        B_lamss = self.tiledb.bootstrap_lamss()
+        worst_tile_tie_sum = self.ada_driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0][0]
+        worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
 
-        worst_tile_TI_est = worst_tile_TI_sum / worst_tile["K"].iloc[0]
-        bias_tie = worst_tile_TI_est[0] - worst_tile_TI_est[1:].mean()
-        std_tie = worst_tile_TI_est.std()
-        spread_tie = worst_tile_TI_est.max() - worst_tile_TI_est.min()
+        # Given these TIE values, we can compute bias, standard deviation and
+        # spread.
+        bias_tie = worst_tile_tie_est[0] - worst_tile_tie_est[1:].mean()
+        std_tie = worst_tile_tie_est.std()
+        spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
         grid_cost = worst_tile["grid_cost"].iloc[0]
 
+        ########################################
+        # Step 2: Get the next batch of tiles to process. We do this before
+        # checking for convergence because part of the convergence criterion is
+        # whether there are any impossible tiles .
+        ########################################
         work = self.tiledb.next(self.iter_size, "orderer")
 
+        ########################################
+        # Step 3: Convergence criterion! In terms of:
+        # - bias
+        # - standard deviation
+        # - grid cost (i.e. alpha - alpha0)
+        ########################################
+        done = (
+            (bias_tie < self.bias_target)
+            and (std_tie < self.std_target)
+            and (grid_cost < self.grid_target)
+            # if there are any impossible tiles left, we keep going!
+            and (~work["impossible"]).all()
+        )
+
+        report = dict(
+            i=i,
+            bias_tie=bias_tie,
+            std_tie=std_tie,
+            spread_tie=spread_tie,
+            grid_cost=grid_cost,
+            lamss=lamss,
+        )
+        report["min(B_lamss)"] = min(B_lamss)
+        report["max(B_lamss)"] = max(B_lamss)
+        report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
+        report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
+        report["n_impossible"] = work["impossible"].sum()
+        if done:
+            return True, report
+
+        ########################################
+        # Step 4: Is deepening likely to be enough?
+        ########################################
+
+        # When we are deciding to refine or deepen, it's helpful to know
+        # whether a tile is ever going to "important". That is, will the
+        # tile ever be the worst tile?
+        #
+        # This is useful because deepening is normally cheaper than refinement.
+        # In cases where it seems like a tile would be unimportant if variance
+        # were reduced, then we can probably save effort by deepening instead
+        # of refining.
+        #
+        # To answer whether a tile might ever be the worst tile, we compare the
+        # given tile's bootstrapped mean lambda* against the bootstrapped mean
+        # lambda* of the tile with the lowest mean lambda*
+        # - recomputed with zero grid_cost (that is: alpha = alpha0)
+        #   by specifying a tiny radius
+        # - recomputed with the maximum allowed K
+        #
+        # If the tile's mean lambda* is less the mean lambda* of this modified
+        # tile, then the tile actually has a chance of being the worst tile. In
+        # which case, we prefer to refine it.
         twb_worst_tile = self.tiledb.worst_tile("twb_mean_lams")
-        twb_worst_tile_g = grid.Grid(twb_worst_tile)
-        for d in range(twb_worst_tile_g.d):
-            twb_worst_tile[f"radii{d}"] = 1e-6
+        for col in twb_worst_tile.columns:
+            if col.startswith("radii"):
+                twb_worst_tile[col] = 1e-6
+        twb_worst_tile["K"] = self.ada_driver.max_K
         twb_worst_tile_lams = self.ada_driver.bootstrap_tune(twb_worst_tile, self.alpha)
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = work["twb_mean_lams"] > twb_worst_tile_mean_lams
-        work["refine"] = work["grid_cost"] > self.grid_target
-        work["deepen"] = (deepen_likely_to_work | (~work["refine"])) & (
-            work["K"] < self.ada_driver.max_K
-        )
-        work["refine"] &= ~work["deepen"]
+
+        ########################################
+        # Step 5: Decide whether to refine or deepen
+        # THIS IS IT! This is where we decide whether to refine or deepen.
+        ########################################
+        at_max_K = work["K"] == self.ada_driver.max_K
+        work["refine"] = at_max_K
+        work["refine"] |= (grid_cost > self.grid_target) & (~deepen_likely_to_work)
+        work["deepen"] = ~work["refine"]
         work["active"] = ~(work["refine"] | work["deepen"])
 
+        ########################################
+        # Step 6: Deepen and refine tiles.
+        ########################################
         n_refine = work["refine"].sum()
         n_deepen = work["deepen"].sum()
         nothing_to_do = n_refine == 0 and n_deepen == 0
         if not nothing_to_do:
-            ########################################
-            # Deepen tiles.
-            ########################################
-            # We just multiply K by 2 for these tiles.
             g_deepen_in = grid.Grid(work.loc[work["deepen"]])
             g_deepen = grid.init_grid(
                 g_deepen_in.get_theta(),
                 g_deepen_in.get_radii(),
                 g_deepen_in.df["id"],
             )
+            # We just multiply K by 2 to deepen.
+            # TODO: it's possible to do better by multiplying by 4 or 8
+            # sometimes when a tile clearly needs *way* more sims. how to
+            # determine this?
             g_deepen.df["K"] = g_deepen_in.df["K"] * 2
 
-            ########################################
-            # Refine tiles.
-            ########################################
             g_refine_in = grid.Grid(work.loc[work["refine"]])
             inherit_cols = ["K"]
             g_refine = g_refine_in.refine(inherit_cols)
+
+            ########################################
+            # Step 7: Simulate the new tiles and write to the DB.
+            ########################################
             g_new = (
                 g_refine.concat(g_deepen)
                 .add_null_hypos(self.null_hypos, inherit_cols)
@@ -217,37 +350,22 @@ class _Adagrid:
             g_tuned_new = self._process_tiles(g_new, i)
             self.tiledb.write(g_tuned_new.df)
 
+        ########################################
+        # Step 8: Finish up!
+        ########################################
         # We need to report back to the TileDB that we're done with this batch
         # of tiles and whether any of the tiles are still active.
         self.tiledb.finish(work)
 
-        report = dict(
-            i=i,
-            bias_tie=bias_tie,
-            std_tie=std_tie,
-            spread_tie=spread_tie,
-            grid_cost=grid_cost,
-            n_refine=n_refine,
-            n_deepen=n_deepen,
-            n_finished=work["active"].sum(),
-            n_impossible=work["impossible"].sum(),
-            lamss=lamss,
+        report.update(
+            dict(
+                n_refine=n_refine,
+                n_deepen=n_deepen,
+                n_complete=work["active"].sum(),
+            )
         )
-        report["min(B_lamss)"] = min(B_lamss)
-        report["max(B_lamss)"] = max(B_lamss)
-        report["tie_{k}(lamss)"] = worst_tile_TI_est[0]
 
-        # The convergence criterion.
-        # TODO: should we move to run before the adagrid step? It's using
-        # values from before the step!
-        done = (
-            (bias_tie < self.bias_target)
-            and (grid_cost < self.grid_target)
-            and (std_tie < self.std_target)
-            # if there are any impossible tiles left, we keep going!
-            and (nothing_to_do or (~g_tuned_new.df["impossible"]).all())
-        )
-        return done, report
+        return False, report
 
 
 def print_report(_iter, report, _ada):
@@ -301,7 +419,11 @@ def ada_tune(
                     bootstrap. Defaults to 0.002.
         iter_size: The number of tiles to process per iteration. Defaults to 2**10.
         alpha: The target type I error control level. Defaults to 0.025.
-        tuning_min_idx: The minimum select . Defaults to 40.
+        tuning_min_idx: The minimum tuning selection index. We enforce that:
+                        `alpha0 >= (tuning_min_idx + 1) / (K + 1)`
+                        A larger value will reduce the variance of lambda* but
+                        will require more computational effort because K and/or
+                        alpha0 will need to be larger. Defaults to 40.
         max_iter: The maximum number of adagrid iterations to run.
                   Defaults to 100.
         db_type: The database backend to use. Defaults to db.DuckDBTiles.
@@ -312,19 +434,21 @@ def ada_tune(
                   object. Defaults to None.
 
     Returns:
-        ada: The Adagrid object at the final iteration.
-        reports: A list of report dicts from each iteration.
+        ada_iter: The final iteration number.
+        reports: A list of the report dicts from each iteration.
+        ada: The Adagrid object after the final iteration.
     """
+
+    # Copy the input grid so that the caller is not surprised by any changes.
     g = copy.deepcopy(g)
     g.df["K"] = init_K
-
-    if model_kwargs is None:
-        model_kwargs = {}
 
     # Why initialize the model here rather than relying on the user to pass an
     # already constructed model object?
     # 1. We can pass the seed here.
     # 2. We can pass the correct max_K and avoid a class of errors.
+    if model_kwargs is None:
+        model_kwargs = {}
     model = modeltype(seed=model_seed, max_K=init_K * 2**n_K_double, **model_kwargs)
 
     ada_driver = AdagridDriver(
@@ -348,6 +472,7 @@ def ada_tune(
     )
 
     reports = []
+    # We start at iteration 1 because the initial grid is iteration 0.
     for ada_iter in range(1, max_iter):
         done, report = ada.step(ada_iter)
         if callback is not None:
@@ -355,4 +480,4 @@ def ada_tune(
         reports.append(report)
         if done:
             break
-    return ada, reports
+    return ada_iter, reports, ada

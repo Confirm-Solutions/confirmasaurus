@@ -7,6 +7,14 @@ import pandas as pd
 
 @dataclass
 class PandasTiles:
+    """
+    A tile database built on top of Pandas DataFrames.
+
+    This is not very efficient because every write call will copy the entire
+    database. But it's a useful reference implementation for testing and
+    demonstration.
+    """
+
     df: pd.DataFrame
 
     def get_all(self):
@@ -40,6 +48,11 @@ class PandasTiles:
 
 @dataclass
 class DuckDBTiles:
+    """
+    A tile database built on top of DuckDB. This should be very fast and
+    robust and is the default database for confirm.
+    """
+
     con: duckdb.DuckDBPyConnection
     columns: List[str]
     column_order: str
@@ -106,8 +119,8 @@ class DuckDBTiles:
         tiles table with the same set of columns as the grid dataframe
 
         Args:
-            g: _description_
-            path: _description_. Defaults to ":memory:".
+            df: DataFrame containing the initial tiles.
+            path: The filepath to the database. Defaults to ":memory:".
 
         Returns:
             _description_
@@ -118,5 +131,14 @@ class DuckDBTiles:
 
     @staticmethod
     def load(path):
+        """
+        Load a tile database from a file.
+
+        Args:
+            path: The filepath to the database.
+
+        Returns:
+            The tile database.
+        """
         con = duckdb.connect(path)
         return DuckDBTiles(con)

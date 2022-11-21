@@ -23,11 +23,11 @@ lam = -1.96
 K = 8192
 rej_df = ip.validate(ZTest1D, g, lam, K=K)
 true_err = 1 - scipy.stats.norm.cdf(-g.get_theta()[:, 0] - lam)
-TI_est = rej_df["TI_sum"] / K
+tie_est = rej_df["tie_sum"] / K
 
-plt.plot(g.df["theta0"], TI_est, "bo", markersize=2)
-plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "ko", markersize=2)
-plt.plot(g.df["theta0"], rej_df["TI_bound"], "ro", markersize=2)
+plt.plot(g.df["theta0"], tie_est, "bo", markersize=2)
+plt.plot(g.df["theta0"], rej_df["tie_cp_bound"], "ko", markersize=2)
+plt.plot(g.df["theta0"], rej_df["tie_bound"], "ro", markersize=2)
 plt.plot(g.df["theta0"], true_err, "r-o", markersize=2)
 plt.show()
 ```
@@ -38,7 +38,7 @@ std
 ```
 
 ```python
-err = np.abs(TI_est - true_err).values
+err = np.abs(tie_est - true_err).values
 err
 ```
 
@@ -65,7 +65,7 @@ plt.show()
 
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-ada, reports = ip.ada_tune(ZTest1D, g, nB=5)
+n_iter, reports, ada = ip.ada_tune(ZTest1D, g, nB=5)
 ```
 
 ```python

@@ -17,7 +17,7 @@ def test_ztest(snapshot):
 
     true_err = 1 - scipy.stats.norm.cdf(-g.get_theta()[:, 0] - lam)
 
-    tie_est = rej_df["TI_sum"] / K
+    tie_est = rej_df["tie_sum"] / K
     tie_std = scipy.stats.binom.std(n=K, p=true_err) / K
     n_stds = (tie_est - true_err) / tie_std
     assert np.all(np.abs(n_stds) < 1.2)

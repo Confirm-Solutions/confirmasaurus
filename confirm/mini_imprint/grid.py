@@ -30,6 +30,32 @@ class HyperPlane:
 
 
 def hypo(str_expr):
+    """
+    Define a hyperplane from a sympy expression.
+
+    For example:
+    >>> hypo("2*theta1 < 1")
+    HyperPlane(n=array([ 0., -1.]), c=-0.5)
+
+    >>> hypo("x - y >= 0")
+    HyperPlane(n=array([ 0.70710678, -0.70710678]), c=0.0)
+
+    Valid comparison operators are <, >, <=, >=.
+
+    The left hand and right hand sides must be linear in theta.
+
+    Aliases:
+        - theta{i}: x{i}
+        - x: x0
+        - y: x1
+        - z: x2
+
+    Args:
+        str_expr: The expression defining the hypothesis plane.
+
+    Returns:
+        The HyperPlane object corresponding to the sympy expression.
+    """
     alias = dict(
         x="x0",
         y="x1",
@@ -84,13 +110,15 @@ class Grid:
     tile. The columns are:
     - id: A unique identifier for the tile. See gen_short_uuids for details on
       these ids.
-    - theta{i} and radii{i}: The center and half-width of the tile in the i-th
-      dimension.
-    - parent_id: The id of the parent tile if the tile has been split. This is
-      0 for tiles with no parent.
     - active: Whether the tile is active. A tile is active if it has not been
       split.
-    - eligible:
+    - eligible: A tile is eligible if it is active and has not been processed.
+      This is useful for coordinating multiple workers processing tiles from
+      the same grid.
+    - parent_id: The id of the parent tile if the tile has been split. This is
+      0 for tiles with no parent.
+    - theta{i} and radii{i}: The center and half-width of the tile in the i-th
+      dimension.
 
     Other columns may be added by other code. All columns will automatically be
     inherited in refinement and splitting operations.
@@ -121,26 +149,43 @@ class Grid:
         hypo_idx = len(self.null_hypos)
         self.null_hypos.append(H)
 
+        ########################################
+        # Step 1: Assign tile centers
+        ########################################
+        # Assign tiles to the null/alt hypothesis space depending on which side
+        # of the plane the tile lies. At the moment, we only check the tile
+        # centers. Any tiles that intersect the plane will be handled next.
         theta, vertices = self.get_theta_and_vertices()
         radii = self.get_radii()
-
         gridpt_dist = theta.dot(H.n) - H.c
         self.df[f"null_truth{hypo_idx}"] = gridpt_dist >= 0
 
+        ########################################
+        # Step 2: Check for intersection
+        ########################################
+        # If a tile is close to the plane, we need to check for intersection.
+        # "close" is defined by whether the bounding ball of the tile
+        # intersects the plane.
         close = np.abs(gridpt_dist) <= np.sqrt(np.sum(self.get_radii() ** 2, axis=-1))
-        # Ignore intersections of inactive tiles.
+        # We ignore intersections of inactive tiles.
         close &= self.df["active"].values
 
+        # For each tile that is close to the plane, we check each vertex to
+        # find which side of the plane the vertex lies on.
         vertex_dist = vertices[close].dot(H.n) - H.c
         all_above = (vertex_dist >= -eps).all(axis=-1)
         all_below = (vertex_dist <= eps).all(axis=-1)
+        # If all vertices are above or all the vertices are below the plane, we
+        # can ignore the tile.
         close_intersects = ~(all_above | all_below)
         if close_intersects.sum() == 0:
             return self
-
         intersects = np.zeros(self.n_tiles, dtype=bool)
         intersects[close] = close_intersects
 
+        ########################################
+        # Step 3: Split intersecting tiles
+        ########################################
         new_theta, new_radii = split(
             theta[intersects],
             radii[intersects],
@@ -152,7 +197,6 @@ class Grid:
         parent_id = np.repeat(self.df["id"].values[intersects], 2)
         new_g = init_grid(new_theta, new_radii, parents=parent_id)
         _inherit(new_g.df, self.df[intersects], 2, inherit_cols)
-
         for i in range(hypo_idx):
             new_g.df[f"null_truth{i}"] = np.repeat(
                 self.df[f"null_truth{i}"].values[intersects], 2
@@ -160,11 +204,29 @@ class Grid:
         new_g.df[f"null_truth{hypo_idx}"] = True
         new_g.df[f"null_truth{hypo_idx}"].values[1::2] = False
 
+        # Any tile that has been split should be ignored going forward.
+        # We're done with these tiles!
         self.df["active"].values[intersects] = False
         self.df["eligible"].values[intersects] = False
+
         return self.concat(new_g)
 
     def add_null_hypos(self, null_hypos, inherit_cols=[]):
+        """
+        Add null hypotheses to the grid. This will split any tiles that
+        intersect the null hypotheses and assign the tiles to the null/alt
+        hypothesis space depending on which side of the null hypothesis the
+        tile lies. These assignments will be stored in the null_truth{i}
+        columns in the tile dataframe.
+
+        Args:
+            null_hypos: The null hypotheses to add. List of HyperPlane objects.
+            inherit_cols: Columns that should be inherited by split
+                tiles (e.g. K). Defaults to [].
+
+        Returns:
+            The grid with the null hypotheses added.
+        """
         g = Grid(self.df.copy(), self.null_hypos)
         for H in null_hypos:
             Hn = np.asarray(H.n)
@@ -173,6 +235,13 @@ class Grid:
         return g
 
     def prune(self):
+        """
+        Remove tiles that are not in the null hypothesis space for any
+        hypothesis.
+
+        Returns:
+            The pruned grid.
+        """
         if len(self.null_hypos) == 0:
             return self
         null_truth = self.get_null_truth()
@@ -185,10 +254,25 @@ class Grid:
         return Grid(pd.concat((self.df, df), axis=1), self.null_hypos)
 
     def subset(self, which):
+        """
+        Subset a grid by some indexer.
+
+        Args:
+            which: The indexer.
+
+        Returns:
+            The grid subset.
+        """
         df = self.df.loc[which].reset_index(drop=True)
         return Grid(df, self.null_hypos)
 
     def active(self):
+        """
+        Get the active subset of the grid.
+
+        Returns:
+            A grid composed of only the active tiles.
+        """
         return self.subset(self.df["active"])
 
     def get_null_truth(self):
@@ -258,23 +342,40 @@ def init_grid(theta, radii, parents=None):
     indict = dict()
     indict["id"] = gen_short_uuids(len(theta))
 
-    for i in range(d):
-        indict[f"theta{i}"] = theta[:, i]
-    for i in range(d):
-        indict[f"radii{i}"] = radii[:, i]
+    # Is this a terminal tile in the tree?
+    indict["active"] = True
+
+    # Is this tile eligible for processing?
+    indict["eligible"] = True
+
     indict["parent_id"] = (
         parents.astype(np.uint64) if parents is not None else np.uint64(0)
     )
 
-    # Is this a terminal node in the tree?
-    indict["active"] = True
-    # Is this node eligible for processing?
-    indict["eligible"] = True
+    for i in range(d):
+        indict[f"theta{i}"] = theta[:, i]
+    for i in range(d):
+        indict[f"radii{i}"] = radii[:, i]
 
     return Grid(pd.DataFrame(indict), [])
 
 
 def cartesian_grid(theta_min, theta_max, *, n=None, null_hypos=None, prune=True):
+    """
+    Produce a grid of points in the hyperrectangle defined by theta_min and
+    theta_max.
+
+    Args:
+        theta_min: The minimum value of theta for each dimension.
+        theta_max: The maximum value of theta for each dimension.
+        n: The number of theta values to use in each dimension.
+        null_hypos: The null hypotheses to add. List of HyperPlane objects.
+        prune: Whether to prune the grid to only include tiles that are in the
+            null hypothesis space.
+
+    Returns:
+        The grid.
+    """
     theta_min = np.asarray(theta_min)
     theta_max = np.asarray(theta_max)
 
@@ -289,20 +390,6 @@ def cartesian_grid(theta_min, theta_max, *, n=None, null_hypos=None, prune=True)
 
 
 def _cartesian_gridpts(theta_min, theta_max, n_theta_1d):
-    """
-    Produce a grid of points in the hyperrectangle defined by theta_min and
-    theta_max.
-
-    Args:
-        theta_min: The minimum value of theta for each dimension.
-        theta_max: The maximum value of theta for each dimension.
-        n_theta_1d: The number of theta values to use in each dimension.
-
-    Returns:
-        theta: A 2D array of shape (n_grid_pts, n_params) containing the grid points.
-        radii: A 2D array of shape (n_grid_pts, n_params) containing the
-            half-width of each grid point in each dimension.
-    """
     theta_min = np.asarray(theta_min)
     theta_max = np.asarray(theta_max)
     n_theta_1d = np.asarray(n_theta_1d)
@@ -378,17 +465,25 @@ def hypercube_vertices(d):
     """
     The corners of a hypercube of dimension d.
 
-    print(vertices(1))
-    >>> [(1,), (-1,)]
+    >>> print(hypercube_vertices(1))
+    [[-1]
+     [ 1]]
 
-    print(vertices(2))
-    >>> [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+    >>> print(hypercube_vertices(2))
+    [[-1 -1]
+     [-1  1]
+     [ 1 -1]
+     [ 1  1]]
 
-    print(vertices(3))
-    >>> [
-        (1, 1, 1), (1, 1, -1), (1, -1, 1), (1, -1, -1),
-        (-1, 1, 1), (-1, 1, -1), (-1, -1, 1), (-1, -1, -1)
-    ]
+    >>> print(hypercube_vertices(3))
+    [[-1 -1 -1]
+     [-1 -1  1]
+     [-1  1 -1]
+     [-1  1  1]
+     [ 1 -1 -1]
+     [ 1 -1  1]
+     [ 1  1 -1]
+     [ 1  1  1]]
 
     Args:
         d: the dimension

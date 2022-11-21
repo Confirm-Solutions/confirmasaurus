@@ -26,6 +26,7 @@ When debugging a snapshot test, you can directly view the snapshot file if you
 are using the `TextSerializer`. This is the default. Pandas DataFrame objects
 are saved as csv and numpy arrays are saved as txt files.
 """
+import glob
 import os
 import pickle
 from pathlib import Path
@@ -113,6 +114,7 @@ class SnapshotAssertion:
         default_serializer=TextSerializer,
     ):
         self.update_snapshots = update_snapshots
+        self.clear_snapshots = update_snapshots
         self.request = request
         self.default_serializer = default_serializer
         self.calls = 0
@@ -154,7 +156,13 @@ class SnapshotAssertion:
         self.calls += 1
         if self.update_snapshots:
             filebase.parent.mkdir(exist_ok=True)
-            serializer.serialize(str(filebase), obj)
+            str_filebase = str(filebase)
+            # Delete any existing snapshots with the same name and index
+            # regardless of the file extension.
+            delete_files = glob.glob(str_filebase + ".*")
+            for f in delete_files:
+                os.remove(f)
+            serializer.serialize(str_filebase, obj)
         return serializer.deserialize(str(filebase), obj)
 
 
