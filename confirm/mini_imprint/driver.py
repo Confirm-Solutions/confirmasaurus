@@ -101,7 +101,9 @@ class Driver:
         theta, vertices = K_g.get_theta_and_vertices()
         TI_bound = self.forward_boundv(TI_cp_bound, theta, vertices)
 
-        return K_df.assign(TI_sum=TI_sum, TI_cp_bound=TI_cp_bound, TI_bound=TI_bound)
+        return pd.DataFrame(
+            dict(TI_sum=TI_sum, TI_cp_bound=TI_cp_bound, TI_bound=TI_bound)
+        )
 
     def validate(self, df, lam, *, delta=0.01):
         return df.groupby("K", group_keys=False).apply(

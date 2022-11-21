@@ -87,6 +87,17 @@ def test_short_uuids():
     assert U2[0] - U[0] == 2 ** (n_bits + host_bits)
 
 
+def test_no_duplicate_uuids():
+    n = int(2 ** (n_bits + 0.5))
+    U = grid.gen_short_uuids(n)
+    assert np.unique(U).shape[0] == n
+
+    n = 1000
+    U = grid.gen_short_uuids(n)
+    U2 = grid.gen_short_uuids(n)
+    assert np.unique(np.concatenate((U, U2))).shape[0] == 2 * n
+
+
 def test_lots_of_short_uuids():
     n = 2**n_bits
     uuids = grid.gen_short_uuids(n)

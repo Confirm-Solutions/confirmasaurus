@@ -557,18 +557,19 @@ def gen_short_uuids(n, host_id=None, t=None):
 def _gen_short_uuids(n, host_id, t):
     n_bits, host_bits = _gen_short_uuids.config
     # time_bits = 64 - n_bits - host_bits
+    assert n < 2**n_bits
+
+    if host_id is None:
+        # host_id == 0 is skipped so that we can use 0 as a sentinel value
+        host_id = 1
+    assert host_id > 0
+    assert host_id < 2**host_bits
 
     if t is None:
         t = np.uint64(int(time.time()))
     if _gen_short_uuids.largest_t is not None and t <= _gen_short_uuids.largest_t:
         t = np.uint64(_gen_short_uuids.largest_t + 1)
     _gen_short_uuids.largest_t = t
-
-    if host_id is None:
-        host_id = 0
-
-    assert n < 2**n_bits
-    assert host_id < 2**host_bits
 
     return (
         (t << np.uint64(n_bits + host_bits))

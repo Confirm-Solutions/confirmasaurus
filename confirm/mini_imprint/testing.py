@@ -105,29 +105,16 @@ class TextSerializer:
             )
 
 
-def pd_np_compare(actual, expected, **kwargs):
-    if isinstance(actual, pd.DataFrame):
-        # check_dtype=False is needed when we're using TextSerializer because
-        # uint64 will be reloaded as int64
-        pd.testing.assert_frame_equal(actual, expected, check_dtype=False, **kwargs)
-    elif isinstance(actual, np.ndarray) or isinstance(actual, jax.numpy.DeviceArray):
-        np.testing.assert_allclose(actual, expected, **kwargs)
-    else:
-        assert actual == expected
-
-
 class SnapshotAssertion:
     def __init__(
         self,
         *,
         update_snapshots,
         request,
-        default_comparator=pd_np_compare,
         default_serializer=TextSerializer,
     ):
         self.update_snapshots = update_snapshots
         self.request = request
-        self.default_comparator = default_comparator
         self.default_serializer = default_serializer
         self.calls = 0
 
@@ -137,8 +124,15 @@ class SnapshotAssertion:
         return test_folder.joinpath("__snapshot__", test_name + f"_{self.calls}")
 
     def get(self, obj, serializer=None):
+        if serializer is None:
+            serializer = self.default_serializer
+
+        return serializer.deserialize(str(self._get_filebase()), obj)
+
+    def __call__(self, obj, serializer=None):
         """
-        This is a debugging helper function to see the values of the snapshot.
+        Return the saved copy of the object. If --snapshot-update is passed,
+        save the object to disk.
 
         Args:
             obj: The object to compare against. This is needed here to
@@ -155,25 +149,14 @@ class SnapshotAssertion:
         if serializer is None:
             serializer = self.default_serializer
 
-        return serializer.deserialize(str(self._get_filebase()), obj)
-
-    def __call__(self, obj, comparator=None, serializer=None, **comparator_kwargs):
-        if comparator is None:
-            comparator = self.default_comparator
-        if serializer is None:
-            serializer = self.default_serializer
-
         # We provide the serializer with a filename without an extension. The
         # serializer can choose what extension to use.
         filebase = self._get_filebase()
+        self.calls += 1
         if self.update_snapshots:
             filebase.parent.mkdir(exist_ok=True)
             serializer.serialize(str(filebase), obj)
-        else:
-            comparator(
-                obj, serializer.deserialize(str(filebase), obj), **comparator_kwargs
-            )
-        self.calls += 1
+        return serializer.deserialize(str(filebase), obj)
 
 
 @pytest.fixture

@@ -1,3 +1,4 @@
+from . import testing
 from .adagrid import ada_tune
 from .batching import batch
 from .batching import batch_all
