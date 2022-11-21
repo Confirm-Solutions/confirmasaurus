@@ -23,7 +23,7 @@ lam = -1.96
 K = 8192
 rej_df = ip.validate(ZTest1D, g, lam, K=K)
 true_err = 1 - scipy.stats.norm.cdf(-g.get_theta()[:, 0] - lam)
-TI_est = rej_df["TI_sum"] / rej_df["K"]
+TI_est = rej_df["TI_sum"] / K
 
 plt.plot(g.df["theta0"], TI_est, "bo", markersize=2)
 plt.plot(g.df["theta0"], rej_df["TI_cp_bound"], "ko", markersize=2)
@@ -72,7 +72,7 @@ ada, reports = ip.ada_tune(ZTest1D, g, nB=5)
 import scipy.stats
 
 g = ip.Grid(ada.tiledb.get_all())
-ga = g.subset(g.df["active"])
+ga = g.active()
 lamss = ga.df["lams"].min()
 true_err = 1 - scipy.stats.norm.cdf(-lamss)
 lamss, true_err

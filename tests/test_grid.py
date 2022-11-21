@@ -106,7 +106,7 @@ def test_lots_of_short_uuids():
 
 
 def test_add_null_hypos(simple_grid):
-    g_active = simple_grid.subset(simple_grid.df["active"])
+    g_active = simple_grid.active()
     np.testing.assert_allclose(
         np.concatenate((g_active.get_theta(), g_active.get_radii()), axis=1),
         np.array(
@@ -148,7 +148,7 @@ def test_split_angled():
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
     g = grid.init_grid(in_theta, in_radii, 1).add_null_hypos(Hs).prune()
-    assert g.subset(g.df["active"]).n_tiles == 10
+    assert g.active().n_tiles == 10
     np.testing.assert_allclose(g.get_radii()[-1], [0.125, 0.25])
 
 
@@ -166,7 +166,7 @@ def test_immutability():
 def test_prune(simple_grid):
     gp = simple_grid.prune()
     assert np.all(
-        gp.subset(gp.df["active"]).get_null_truth()
+        gp.active().get_null_truth()
         == np.array([[[1, 1], [1, 1], [0, 1], [1, 1], [1, 0], [1, 1], [1, 0], [0, 1]]])
     )
 
@@ -226,7 +226,7 @@ def test_refine():
 
     null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], 1.1) for i in range(n_arms)]
     g = grid.init_grid(theta, radii, 0).add_null_hypos(null_hypos).prune()
-    refine_g = g.subset(g.df["active"]).subset(np.array([0, 3, 4, 5]))
+    refine_g = g.active().subset(np.array([0, 3, 4, 5]))
     new_g = refine_g.refine()
     np.testing.assert_allclose(new_g.get_radii()[:12], 0.25)
     np.testing.assert_allclose(new_g.get_radii()[-4:, 0], 0.225)

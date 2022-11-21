@@ -172,6 +172,9 @@ class Grid:
         df = self.df.loc[which].reset_index(drop=True)
         return Grid(df, self.null_hypos)
 
+    def active(self):
+        return self.subset(self.df["active"])
+
     def get_null_truth(self):
         return self.df[
             [
@@ -303,11 +306,12 @@ def plot_grid(g: Grid, only_active=True, dims=(0, 1)):
     import matplotlib as mpl
     import matplotlib.pyplot as plt
 
-    polys = []
     vertices = g.get_theta_and_vertices()[1][..., dims]
-    if only_active:
-        vertices = vertices[g.df["active"].values]
 
+    if only_active:
+        g = g.active()
+
+    polys = []
     for i in range(vertices.shape[0]):
         vs = vertices[i]
         vs = vs[~np.isnan(vs).any(axis=1)]

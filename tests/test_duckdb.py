@@ -82,11 +82,13 @@ def test_next_tiles():
 
 
 def test_worst_tile():
+    np.random.seed(10)
     g = example_grid(-1, 1)
     g.df["lams"] = np.random.rand(g.df.shape[0])
     g.df.loc[g.df["lams"].idxmin(), "active"] = False
     pd_tiles = db.PandasTiles.create(g.df)
     db_tiles = db.DuckDBTiles.create(g.df)
+    np.testing.assert_allclose(pd_tiles.worst_tile("lams").iloc[0]["theta0"], -0.1)
     assert_frame_equal_special(pd_tiles.worst_tile("lams"), db_tiles.worst_tile("lams"))
 
 
