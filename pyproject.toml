@@ -20,6 +20,7 @@ jaxlib = [
     {version = "0.3.24+cuda11.cudnn82", platform = "linux"}
 ]
 rich = "^12.6.0"
+duckdb = "^0.6.0"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^7.2.0"

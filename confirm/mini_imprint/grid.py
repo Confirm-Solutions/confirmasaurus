@@ -78,6 +78,31 @@ def hypo(str_expr):
 
 @dataclass
 class Grid:
+    """
+    A grid is a collection of tiles, each of which is a hyperrectangle in
+    parameter space. The grid is stored as a pandas DataFrame, with one row per
+    tile. The columns are:
+    - id: A unique identifier for the tile. See gen_short_uuids for details on
+      these ids.
+    - theta{i} and radii{i}: The center and half-width of the tile in the i-th
+      dimension.
+    - parent_id: The id of the parent tile if the tile has been split. This is
+      0 for tiles with no parent.
+    - active: Whether the tile is active. A tile is active if it has not been
+      split.
+    - locked:
+    - eligible:
+    - K: The number of simulations to run for this tile.
+
+
+    The tiles are defined by their centers and radii.
+    - theta{i}
+
+
+    Returns:
+        _description_
+    """
+
     df: pd.DataFrame
     null_hypos: List[HyperPlane] = field(default_factory=lambda: [])
 
@@ -133,10 +158,7 @@ class Grid:
 
         parent_K = np.repeat(self.df["K"].values[intersects], 2)
         parent_id = np.repeat(self.df["id"].values[intersects], 2)
-        birthday = np.repeat(self.df["birthday"].values[intersects], 2)
-        new_g = init_grid(
-            new_theta, new_radii, parent_K, parents=parent_id, birthday=birthday
-        )
+        new_g = init_grid(new_theta, new_radii, parent_K, parents=parent_id)
         for i in range(hypo_idx):
             new_g.df[f"null_truth{i}"] = np.repeat(
                 self.df[f"null_truth{i}"].values[intersects], 2
@@ -219,19 +241,20 @@ class Grid:
         )
 
 
-def init_grid(theta, radii, init_K=None, parents=None, birthday=0):
+def init_grid(theta, radii, init_K=None, parents=None):
     d = theta.shape[1]
     indict = dict()
+    indict["id"] = gen_short_uuids(len(theta))
+
     for i in range(d):
         indict[f"theta{i}"] = theta[:, i]
     for i in range(d):
         indict[f"radii{i}"] = radii[:, i]
-
-    indict["K"] = init_K if init_K is not None else 0
     indict["parent_id"] = (
         parents.astype(np.uint64) if parents is not None else np.uint64(0)
     )
-    indict["birthday"] = birthday
+
+    indict["K"] = init_K if init_K is not None else 0
 
     # Is this a terminal node in the tree?
     indict["active"] = True
@@ -239,8 +262,6 @@ def init_grid(theta, radii, init_K=None, parents=None, birthday=0):
     indict["locked"] = False
     # Is this node eligible for processing?
     indict["eligible"] = True
-
-    indict["id"] = gen_short_uuids(len(theta))
 
     return Grid(pd.DataFrame(indict), [])
 
