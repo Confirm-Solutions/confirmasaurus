@@ -8,7 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import confirm.mini_imprint.batching as batching
+import confirm.imprint.batching as batching
 import confirm.outlaw.berry as berry
 import confirm.outlaw.inla as inla
 import confirm.outlaw.quad as quad

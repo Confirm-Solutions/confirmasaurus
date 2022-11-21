@@ -12,10 +12,10 @@ import numpy as np
 import jax.numpy as jnp
 import warnings
 import confirm.berrylib.fast_inla as fast_inla
-import confirm.mini_imprint.binomial as binomial
-import confirm.mini_imprint.binomial_tuning as binomial_tuning
-import confirm.mini_imprint.grid as grid
-import confirm.mini_imprint.execute as execute
+import confirm.imprint.binomial as binomial
+import confirm.imprint.binomial_tuning as binomial_tuning
+import confirm.imprint.grid as grid
+import confirm.imprint.execute as execute
 from rich import print as rprint
 
 import jax

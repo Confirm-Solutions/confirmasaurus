@@ -13,8 +13,8 @@ import warnings
 
 # import pyimprint.grid as grid
 import confirm.berrylib.fast_inla as fast_inla
-import confirm.mini_imprint.binomial as binomial
-import confirm.mini_imprint.grid as grid
+import confirm.imprint.binomial as binomial
+import confirm.imprint.grid as grid
 
 import jax
 

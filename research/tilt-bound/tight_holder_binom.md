@@ -13,7 +13,7 @@ import scipy
 from scipy.stats import norm, beta
 import matplotlib.pyplot as plt
 import cvxpy as cp
-import confirm.mini_imprint.bound.binomial as binomial
+import confirm.imprint.bound.binomial as binomial
 ```
 
 This notebook studies the behavior of a collection of bounds in a simple binomial test setting.

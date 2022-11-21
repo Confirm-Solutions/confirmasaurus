@@ -12,8 +12,8 @@ import typer
 from scipy.special import logit
 
 import confirm.berrylib.fast_inla as fast_inla
-import confirm.mini_imprint.binomial as binomial
-import confirm.mini_imprint.grid as grid
+import confirm.imprint.binomial as binomial
+import confirm.imprint.grid as grid
 
 
 def setup_logging():

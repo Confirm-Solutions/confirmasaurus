@@ -20,9 +20,9 @@ from itertools import combinations
 
 from confirm.lewislib import lewis
 from confirm.lewislib import batch
-from confirm.mini_imprint import grid
+from confirm.imprint import grid
 from confirm.lewislib import grid as lewgrid
-from confirm.mini_imprint import binomial
+from confirm.imprint import binomial
 ```
 
 # Lei Example

@@ -1,4 +1,4 @@
-import confirm.mini_imprint.checkpoint as checkpoint
+import confirm.imprint.checkpoint as checkpoint
 
 
 def test_exponential_27():

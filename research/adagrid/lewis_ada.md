@@ -32,12 +32,12 @@ import numpy as np
 import jax.numpy as jnp
 import scipy.spatial
 import matplotlib.pyplot as plt
-from confirm.mini_imprint import grid
+from confirm.imprint import grid
 from confirm.lewislib import grid as lewgrid
 from confirm.lewislib import lewis, batch
-from confirm.mini_imprint import binomial, checkpoint
+from confirm.imprint import binomial, checkpoint
 
-import confirm.mini_imprint.lewis_drivers as lts
+import confirm.imprint.lewis_drivers as lts
 
 from rich import print as rprint
 

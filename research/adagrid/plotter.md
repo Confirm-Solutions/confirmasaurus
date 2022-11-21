@@ -11,8 +11,8 @@ import scipy.spatial
 import pickle
 
 jax.config.update("jax_platform_name", "gpu")
-import confirm.mini_imprint.lewis_drivers as lts
-from confirm.mini_imprint import grid
+import confirm.imprint.lewis_drivers as lts
+from confirm.imprint import grid
 import adastate
 import diagnostics
 ```
@@ -194,7 +194,7 @@ plt.show()
 ## Type I error calculate
 
 ```python
-import confirm.mini_imprint.lewis_drivers as ld
+import confirm.imprint.lewis_drivers as ld
 ```
 
 ```python
@@ -261,7 +261,7 @@ with open("4d_full/plot_all.pkl", "wb") as f:
 ```python
 typeI_err = typeI_sum / K
 typeI_err[np.all(~null_truth, axis=1)] = np.nan
-import confirm.mini_imprint.binomial as binomial
+import confirm.imprint.binomial as binomial
 
 delta = 0.01
 typeI_err, typeI_CI = binomial.zero_order_bound(typeI_sum, K, delta, 1.0)
@@ -269,7 +269,7 @@ typeI_bound = typeI_err + typeI_CI
 ```
 
 ```python
-import confirm.mini_imprint.bound.binomial as tiltbound
+import confirm.imprint.bound.binomial as tiltbound
 
 n_arm_samples = lei_obj.n_arm_samples
 theta0 = eval_pts
