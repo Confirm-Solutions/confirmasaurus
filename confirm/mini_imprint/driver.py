@@ -8,6 +8,10 @@ import scipy.stats
 
 from . import grid
 
+# NOTE: See these GitHub issues/demo PRs for Model API discussion:
+# https://github.com/Confirm-Solutions/confirmasaurus/pull/92
+# https://github.com/Confirm-Solutions/confirmasaurus/pull/148
+
 
 # TODO: generalize to other families
 # TODO: ideally we'd have a single entrypoint function that does what

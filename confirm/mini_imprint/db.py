@@ -51,6 +51,9 @@ class DuckDBTiles:
     """
     A tile database built on top of DuckDB. This should be very fast and
     robust and is the default database for confirm.
+
+    See this GitHub issue for a discussion of the design:
+    https://github.com/Confirm-Solutions/confirmasaurus/issues/95
     """
 
     con: duckdb.DuckDBPyConnection
