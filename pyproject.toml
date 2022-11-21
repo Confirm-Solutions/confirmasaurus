@@ -48,8 +48,8 @@ requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
-addopts = "-s --tb=short --strict-markers"
-testpaths = ["tests"]
+addopts = "-s --tb=short --strict-markers --doctest-modules"
+testpaths = ["tests", "confirm/mini_imprint", "confirm/outlaw"]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"
