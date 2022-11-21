@@ -49,12 +49,14 @@ def pytest_addoption(parser):
     )
 
 
-def check_exists(snapshot_path):
+def path_and_check(filebase, ext):
+    snapshot_path = filebase + "." + ext
     if not os.path.exists(snapshot_path):
         raise FileNotFoundError(
             f"Snapshot file not found: {snapshot_path}."
             " Did you forget to run with --snapshot-update?"
         )
+    return snapshot_path
 
 
 class Pickler:
@@ -65,9 +67,7 @@ class Pickler:
 
     @staticmethod
     def deserialize(filebase, obj):
-        filename = filebase + ".pkl"
-        check_exists(filename)
-        with open(filename, "rb") as f:
+        with open(path_and_check(filebase, "pkl"), "rb") as f:
             return pickle.load(f)
 
 
@@ -75,13 +75,13 @@ class TextSerializer:
     @staticmethod
     def serialize(filebase, obj):
         if isinstance(obj, pd.DataFrame):
-            filename = filebase + ".csv"
             # in all our dataframes, the index is meaningless, so we do not
             # save it here.
-            obj.to_csv(filename, index=False)
+            obj.to_csv(filebase + ".csv", index=False)
         elif isinstance(obj, np.ndarray) or isinstance(obj, jax.numpy.DeviceArray):
-            filename = filebase + ".txt"
-            np.savetxt(filename, obj)
+            np.savetxt(filebase + ".txt", obj)
+        elif np.isscalar(obj):
+            np.savetxt(filebase + ".txt", np.array([obj]))
         else:
             raise ValueError(
                 f"TextSerializer cannot serialize {type(obj)}."
@@ -91,13 +91,11 @@ class TextSerializer:
     @staticmethod
     def deserialize(filebase, obj):
         if isinstance(obj, pd.DataFrame):
-            filename = filebase + ".csv"
-            check_exists(filename)
-            return pd.read_csv(filename)
+            return pd.read_csv(path_and_check(filebase, "csv"))
         elif isinstance(obj, np.ndarray) or isinstance(obj, jax.numpy.DeviceArray):
-            filename = filebase + ".txt"
-            check_exists(filename)
-            return np.loadtxt(filename)
+            return np.loadtxt(path_and_check(filebase, "txt"))
+        elif np.isscalar(obj):
+            return np.loadtxt(path_and_check(filebase, "txt"))
         else:
             raise ValueError(
                 f"TextSerializer cannot deserialize {type(obj)}."

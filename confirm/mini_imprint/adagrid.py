@@ -23,6 +23,7 @@ class AdagridDriver:
         )
 
         bootstrap_key = jax.random.PRNGKey(bootstrap_seed)
+        self.init_K = init_K
         self.Ks = init_K * 2 ** np.arange(n_K_double + 1)
         self.max_K = self.Ks[-1]
         self.nB = nB
@@ -107,6 +108,7 @@ class Adagrid:
         self.iter_size = iter_size
 
         self.null_hypos = g.null_hypos
+        g.df["K"] = self.ada_driver.init_K
         g_tuned = self.process_tiles(g, 0)
         self.tiledb = db_type.create(g_tuned.df)
 
@@ -170,11 +172,18 @@ class Adagrid:
             g_deepen = grid.init_grid(
                 g_deepen_in.get_theta(),
                 g_deepen_in.get_radii(),
-                g_deepen_in.df["K"] * 2,
                 g_deepen_in.df["id"],
             )
-            g_refine = grid.Grid(work.loc[work["refine"]]).refine()
-            g_new = g_refine.concat(g_deepen).add_null_hypos(self.null_hypos).prune()
+            g_deepen.df["K"] = g_deepen_in.df["K"] * 2
+
+            g_refine_in = grid.Grid(work.loc[work["refine"]])
+            inherit_cols = ["K"]
+            g_refine = g_refine_in.refine(inherit_cols)
+            g_new = (
+                g_refine.concat(g_deepen)
+                .add_null_hypos(self.null_hypos, inherit_cols)
+                .prune()
+            )
             g_tuned_new = self.process_tiles(g_new, i)
             self.tiledb.write(g_tuned_new.df)
         self.tiledb.finish(work)

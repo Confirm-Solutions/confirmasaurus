@@ -11,7 +11,7 @@ def example_grid(x1, x2):
     N = 10
     theta, radii = grid._cartesian_gridpts([x1], [x2], [N])
     H = grid.HyperPlane(np.array([-1]), 0)
-    return grid.init_grid(theta, radii, 50).add_null_hypos([H]).prune()
+    return grid.init_grid(theta, radii).add_null_hypos([H]).prune()
 
 
 def assert_frame_equal_special(pd_df, db_df):
@@ -35,6 +35,20 @@ def test_write():
     g, pd_tiles, db_tiles = prepped_dbs()
 
     g2 = example_grid(-2, -1)
+    pd_tiles.write(g2.df)
+    db_tiles.write(g2.df)
+
+    assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
+
+
+def test_write_column_ordering():
+    g, pd_tiles, db_tiles = prepped_dbs()
+
+    g2 = example_grid(-2, -1)
+    cols = g2.df.columns.tolist()
+    cols.remove("theta0")
+    cols.append("theta0")
+    g2.df = g2.df[cols]
     pd_tiles.write(g2.df)
     db_tiles.write(g2.df)
 

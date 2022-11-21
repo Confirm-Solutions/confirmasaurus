@@ -70,7 +70,7 @@ def simple_grid():
     thetas = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]])
     radii = np.full_like(thetas, 0.5)
     hypos = [grid.HyperPlane(-np.identity(2)[i], -0.1) for i in range(2)]
-    return grid.init_grid(thetas, radii, 1).add_null_hypos(hypos)
+    return grid.init_grid(thetas, radii).add_null_hypos(hypos)
 
 
 n_bits, host_bits = grid._gen_short_uuids.config
@@ -136,7 +136,7 @@ def test_add_null_hypos(simple_grid):
 
 def test_one_point_grid():
     g = grid.init_grid(
-        *grid._cartesian_gridpts(np.array([0]), np.array([1]), np.array([1])), 0
+        *grid._cartesian_gridpts(np.array([0]), np.array([1]), np.array([1]))
     )
     np.testing.assert_allclose(g.get_theta(), np.array([[0.5]]))
     np.testing.assert_allclose(g.get_radii(), np.array([[0.5]]))
@@ -147,7 +147,7 @@ def test_split_angled():
     in_theta, in_radii = grid._cartesian_gridpts(
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
-    g = grid.init_grid(in_theta, in_radii, 1).add_null_hypos(Hs).prune()
+    g = grid.init_grid(in_theta, in_radii).add_null_hypos(Hs).prune()
     assert g.active().n_tiles == 10
     np.testing.assert_allclose(g.get_radii()[-1], [0.125, 0.25])
 
@@ -157,7 +157,7 @@ def test_immutability():
     in_theta, in_radii = grid._cartesian_gridpts(
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
-    g = grid.init_grid(in_theta, in_radii, 1)
+    g = grid.init_grid(in_theta, in_radii)
     g_copy = copy.deepcopy(g)
     _ = g.add_null_hypos(Hs).prune()
     assert (g.df == g_copy.df).all().all()
@@ -188,13 +188,13 @@ def test_simple_indices(simple_grid):
     check_index(gc)
 
 
-def test_birthday():
+def test_column_inheritance():
     # All operations should leave the dataframe with a pandas index equal to
     # np.arange(n_tiles)
     g = grid.cartesian_grid([-1, -1], [1, 1], n=[2, 2])
     g.df["birthday"] = 1
 
-    gs = g.add_null_hypos([grid.hypo("x < 0.1")])
+    gs = g.add_null_hypos([grid.hypo("x < 0.1")], ["birthday"])
     assert (gs.df["birthday"] == 1).all()
     gp = gs.prune()
     assert (gp.df["birthday"] == 1).all()
@@ -205,7 +205,7 @@ def test_birthday():
 def test_prune_no_surfaces():
     thetas = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]])
     radii = np.full_like(thetas, 0.5)
-    g = grid.init_grid(thetas, radii, 0)
+    g = grid.init_grid(thetas, radii)
     gp = g.prune()
     assert g == gp
 
@@ -225,7 +225,7 @@ def test_refine():
     )
 
     null_hypos = [grid.HyperPlane(-np.identity(n_arms)[i], 1.1) for i in range(n_arms)]
-    g = grid.init_grid(theta, radii, 0).add_null_hypos(null_hypos).prune()
+    g = grid.init_grid(theta, radii).add_null_hypos(null_hypos).prune()
     refine_g = g.active().subset(np.array([0, 3, 4, 5]))
     new_g = refine_g.refine()
     np.testing.assert_allclose(new_g.get_radii()[:12], 0.25)
@@ -253,7 +253,7 @@ def bench_f():
     t, r = grid._cartesian_gridpts(
         np.full(n_arms, -3.5), np.full(n_arms, 1.0), np.full(n_arms, n_theta_1d)
     )
-    g = grid.init_grid(t, r, 0).add_null_hypos(null_hypos).prune()
+    g = grid.init_grid(t, r).add_null_hypos(null_hypos).prune()
     return g
 
 

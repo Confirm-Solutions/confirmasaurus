@@ -92,15 +92,9 @@ class Grid:
       split.
     - locked:
     - eligible:
-    - K: The number of simulations to run for this tile.
 
-
-    The tiles are defined by their centers and radii.
-    - theta{i}
-
-
-    Returns:
-        _description_
+    Other columns may be added by other code. All columns will automatically be
+    inherited in refinement and splitting operations.
     """
 
     df: pd.DataFrame
@@ -122,7 +116,7 @@ class Grid:
     def n_active_tiles(self):
         return self.df["active"].sum()
 
-    def _add_null_hypo(self, H):
+    def _add_null_hypo(self, H, inherit_cols):
         eps = 1e-15
 
         hypo_idx = len(self.null_hypos)
@@ -156,9 +150,10 @@ class Grid:
             H,
         )
 
-        parent_K = np.repeat(self.df["K"].values[intersects], 2)
         parent_id = np.repeat(self.df["id"].values[intersects], 2)
-        new_g = init_grid(new_theta, new_radii, parent_K, parents=parent_id)
+        new_g = init_grid(new_theta, new_radii, parents=parent_id)
+        _inherit(new_g.df, self.df[intersects], 2, inherit_cols)
+
         for i in range(hypo_idx):
             new_g.df[f"null_truth{i}"] = np.repeat(
                 self.df[f"null_truth{i}"].values[intersects], 2
@@ -170,12 +165,12 @@ class Grid:
         self.df["eligible"].values[intersects] = False
         return self.concat(new_g)
 
-    def add_null_hypos(self, null_hypos):
+    def add_null_hypos(self, null_hypos, inherit_cols=[]):
         g = Grid(self.df.copy(), self.null_hypos)
         for H in null_hypos:
             Hn = np.asarray(H.n)
             Hpad = HyperPlane(np.pad(Hn, (0, g.d - Hn.shape[0])), H.c)
-            g = g._add_null_hypo(Hpad)
+            g = g._add_null_hypo(Hpad, inherit_cols)
         return g
 
     def prune(self):
@@ -219,21 +214,21 @@ class Grid:
             + hypercube_vertices(self.d)[None, :, :] * self.get_radii()[:, None, :]
         )
 
-    def refine(self):
+    def refine(self, inherit_cols=[]):
         refine_radii = self.get_radii()[:, None, :] * 0.5
         refine_theta = self.get_theta()[:, None, :]
         new_thetas = (
             refine_theta + hypercube_vertices(self.d)[None, :, :] * refine_radii
         ).reshape((-1, self.d))
         new_radii = np.tile(refine_radii, (1, 2**self.d, 1)).reshape((-1, self.d))
-        parent_K = np.repeat(self.df["K"].values, 2**self.d)
         parent_id = np.repeat(self.df["id"].values, 2**self.d)
-        return init_grid(
+        out = init_grid(
             new_thetas,
             new_radii,
-            parent_K,
             parents=parent_id,
         )
+        _inherit(out.df, self.df, 2**self.d, inherit_cols)
+        return out
 
     def concat(self, other):
         return Grid(
@@ -241,7 +236,25 @@ class Grid:
         )
 
 
-def init_grid(theta, radii, init_K=None, parents=None):
+def _inherit(child_df, parent_df, repeat, inherit_cols):
+    assert (child_df["parent_id"] == np.repeat(parent_df["id"].values, repeat)).all()
+    for col in inherit_cols:
+        if col in child_df.columns:
+            continue
+        child_df[col] = np.repeat(parent_df[col].values, repeat)
+    # NOTE: if we ever need a more complex parent-child relationship, we can
+    # use pandas merge.
+    # pd.merge(
+    #     child_df,
+    #     parent_df,
+    #     left_on="parent_id",
+    #     right_on="id",
+    #     how='left',
+    #     validate='many_to_one'
+    # )
+
+
+def init_grid(theta, radii, parents=None):
     d = theta.shape[1]
     indict = dict()
     indict["id"] = gen_short_uuids(len(theta))
@@ -253,8 +266,6 @@ def init_grid(theta, radii, init_K=None, parents=None):
     indict["parent_id"] = (
         parents.astype(np.uint64) if parents is not None else np.uint64(0)
     )
-
-    indict["K"] = init_K if init_K is not None else 0
 
     # Is this a terminal node in the tree?
     indict["active"] = True

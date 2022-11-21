@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 
 import duckdb
 import pandas as pd
@@ -47,12 +48,19 @@ class PandasTiles:
 @dataclass
 class DuckDBTiles:
     con: duckdb.DuckDBPyConnection
+    columns: List[str]
+    column_order: str
+
+    def __init__(self, con):
+        self.con = con
+        self.columns = self.con.execute("select * from tiles limit 0").df().columns
+        self.column_order = ",".join(self.columns)
 
     def get_all(self):
         return self.con.execute("select * from tiles").df()
 
     def write(self, df):
-        self.con.execute("insert into tiles select * from df")
+        self.con.execute(f"insert into tiles select {self.column_order} from df")
 
     def next(self, n, order_col):
         # we wrap with a transaction to ensure that concurrent readers don't
@@ -119,6 +127,7 @@ class DuckDBTiles:
             _description_
         """
         con = duckdb.connect(path)
+        print(df.columns)
         con.execute("create table tiles as select * from df")
         return DuckDBTiles(con)
 
