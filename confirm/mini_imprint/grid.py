@@ -90,7 +90,6 @@ class Grid:
       0 for tiles with no parent.
     - active: Whether the tile is active. A tile is active if it has not been
       split.
-    - locked:
     - eligible:
 
     Other columns may be added by other code. All columns will automatically be
@@ -269,8 +268,6 @@ def init_grid(theta, radii, parents=None):
 
     # Is this a terminal node in the tree?
     indict["active"] = True
-    # Is this node currently being processed?
-    indict["locked"] = False
     # Is this node eligible for processing?
     indict["eligible"] = True
 

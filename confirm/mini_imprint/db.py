@@ -13,19 +13,12 @@ class PandasTiles:
         return self.df
 
     def next(self, n, order_col):
-        out = self.df.loc[(~self.df["locked"]) & (self.df["eligible"])].nsmallest(
-            n, order_col
-        )
-        self.df.loc[out.index, "locked"] = True
+        out = self.df.loc[self.df["eligible"]].nsmallest(n, order_col)
         self.df.loc[out.index, "eligible"] = False
         return out
 
     def finish(self, df):
         self.df.loc[df.index, "active"] = df["active"]
-        self.df.loc[df.index, "locked"] = False
-
-    def unlock_all(self):
-        self.df["locked"] = False
 
     def bootstrap_lamss(self):
         nB = max([int(c[6:]) for c in self.df.columns if c.startswith("B_lams")]) + 1
@@ -67,24 +60,17 @@ class DuckDBTiles:
         # grab the same chunk of work.
         t = self.con.begin()
         out = t.execute(
-            "select * from tiles where locked=false and eligible=true"
+            "select * from tiles where eligible=true"
             f" order by {order_col} asc limit {n}"
         ).df()
-        t.execute(
-            "update tiles set locked=true, eligible=false where id in"
-            " (select id from out)"
-        )
+        t.execute("update tiles set eligible=false where id in" " (select id from out)")
         t.commit()
         return out
 
     def finish(self, which):
         self.con.execute(
-            "update tiles set locked=false, active=w.active from which w"
-            " where tiles.id=w.id"
+            "update tiles set active=w.active from which w" " where tiles.id=w.id"
         )
-
-    def unlock_all(self):
-        self.con.execute("update tiles set locked=false")
 
     def bootstrap_lamss(self):
         # Get the number of bootstrap lambda* columns

@@ -82,17 +82,21 @@ def test_next_tiles():
 
     assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
 
-    assert db_tiles.get_all()["locked"].all()
+    assert (~db_tiles.get_all()["eligible"]).all()
 
+    db_work["active"] = False
+    pd_work["active"] = False
     db_tiles.finish(db_work)
     pd_tiles.finish(pd_work)
     assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
 
+    db_work2["active"] = False
+    pd_work2["active"] = False
     db_tiles.finish(db_work2)
     pd_tiles.finish(pd_work2)
     assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
-    assert not pd_tiles.get_all()["locked"].any()
-    assert not db_tiles.get_all()["locked"].any()
+    assert not pd_tiles.get_all()["active"].any()
+    assert not db_tiles.get_all()["active"].any()
 
 
 def test_worst_tile():

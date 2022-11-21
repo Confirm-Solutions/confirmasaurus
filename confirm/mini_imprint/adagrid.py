@@ -171,7 +171,6 @@ class _Adagrid:
         spread_tie = worst_tile_TI_est.max() - worst_tile_TI_est.min()
         grid_cost = worst_tile["grid_cost"].iloc[0]
 
-        self.tiledb.unlock_all()
         work = self.tiledb.next(self.iter_size, "orderer")
 
         twb_worst_tile = self.tiledb.worst_tile("twb_mean_lams")
