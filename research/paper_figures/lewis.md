@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.6 ('base')
-    language: python
-    name: python3
----
-
 ```python
 import confirm.outlaw.nb_util as nb_util
 
@@ -50,7 +36,7 @@ plt.subplot(1, 2, 1)
 lam_str = ""
 # plt.title(f"Type I error with $\lambda" + f" = {overall_lam:.4f}$")
 levels = np.linspace(0, 2.5, 6)
-cbar_target = plt.contourf(x, y, z * 100, levels=levels, cmap="Reds", extend="both")
+cbar_target = plt.contourf(x, y, z * 100, levels=levels, cmap="Reds", extend="neither")
 plt.contour(
     x,
     y,

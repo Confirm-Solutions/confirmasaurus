@@ -35,8 +35,7 @@ RUN apt-get update \
     && apt-get clean -y \
     && apt-get autoremove -y
 
-ARG CUDA_PKG_VERSION="11-7"
-ENV CUDA_VERSION 11.7.0
+ARG CUDA_PKG_VERSION="11-8"
 ENV NVARCH=x86_64
 RUN curl -fsSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${NVARCH}/cuda-keyring_1.0-1_all.deb \
     && dpkg -i cuda-keyring_1.0-1_all.deb \

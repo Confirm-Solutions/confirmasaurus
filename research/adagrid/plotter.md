@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: Python 3.10.6 ('base')
-    language: python
-    name: python3
----
-
 ```python
 import confirm.outlaw.nb_util as nb_util
 
@@ -62,8 +48,10 @@ lei_obj = lewis.Lewis45(**params)
 ```python
 with open(f"./{name}/data_params.pkl", "rb") as f:
     P, D = pickle.load(f)
-load_iter = "latest"
-S, load_iter, fn = adastate.load(name, load_iter)
+with open(f"./{name}/rerun_final.pkl", "rb") as f:
+    _, S = pickle.load(f)
+# load_iter = "latest"
+# S, load_iter, fn = adastate.load(name, load_iter)
 ```
 
 ```python
@@ -81,32 +69,11 @@ cr.bias
 ```
 
 ```python
-with open(f"./{name}/storage_0.075.pkl", "rb") as f:
-    S_load = pickle.load(f)
-```
-
-```python
-S = adastate.AdaState(
-    grid.concat_grids(S.g, S_load.g),
-    np.concatenate((S.sim_sizes, S_load.sim_sizes), dtype=np.int32),
-    np.concatenate((S.todo, S_load.todo), dtype=bool),
-    adastate.TileDB(
-        np.concatenate((S.db.data, S_load.db.data), dtype=np.float32), S.db.slices
-    ),
-)
-```
-
-```python
 overall_lam = S.orig_lam.min()
 ```
 
 ```python
-worst_tile_idx = np.argmin(S.orig_lam)
-worst_tile = S.g.theta_tiles[worst_tile_idx]
-```
-
-```python
-worst_tile
+worst_tile = np.array([0.53, 0.53, 0.53, -1.0])
 ```
 
 ## Tile density
@@ -245,8 +212,8 @@ K * eval_pts.shape[0] * 5e-7
 ```
 
 ```python
-overall_lam = 0.0625298
-worst_tile = np.array([0.53271484, 0.53271484, 0.53271484, -0.99951172])
+# overall_lam = 0.0625298
+overall_lam = 0.05633
 # typeI_sum = ld.rej_runner(
 #     lei_obj,
 #     np.full(eval_pts.shape[0], K),
@@ -256,37 +223,39 @@ worst_tile = np.array([0.53271484, 0.53271484, 0.53271484, -0.99951172])
 #     D.unifs,
 #     D.unifs_order,
 # )
+```
+
+```python
+lamstar = ld.bootstrap_tune_runner(
+    lei_obj,
+    np.full(eval_pts.shape[0], 2**15),
+    np.full(eval_pts.shape[0], 0.025),
+    eval_pts,
+    null_truth,
+    D.unifs,
+    D.bootstrap_idxs,
+    D.unifs_order,
+)
+```
+
+```python
 with open("4d_full/plot.pkl", "rb") as f:
     slc_load, typeI_sum = pickle.load(f)
-```
-
-```python
 np.testing.assert_allclose(slc, slc_load)
-```
-
-```python
 with open("4d_full/plot.pkl", "wb") as f:
     pickle.dump((slc, typeI_sum), f)
 ```
 
 ```python
-# lamstar = ld.bootstrap_tune_runner(
-#     lei_obj,
-#     np.full(eval_pts.shape[0], 2**16),
-#     np.full(eval_pts.shape[0], 0.025),
-#     eval_pts,
-#     null_truth,
-#     D.unifs,
-#     D.bootstrap_idxs,
-#     D.unifs_order,
-# )
-with open("4d_full/plot_lamstar.pkl", "rb") as f:
-    slc, lamstar = pickle.load(f)
+# with open("4d_full/plot_lamstar.pkl", "rb") as f:
+#     slc, lamstar = pickle.load(f)
+with open("4d_full/plot_lamstar.pkl", "wb") as f:
+    pickle.dump((slc, lamstar), f)
 ```
 
 ```python
-with open("4d_full/plot_lamstar.pkl", "wb") as f:
-    pickle.dump((slc, lamstar), f)
+with open("4d_full/plot_all.pkl", "wb") as f:
+    pickle.dump((slc, typeI_err, lamstar, nearby_count), f)
 ```
 
 ```python
@@ -330,124 +299,14 @@ unplot_dims = list(set(range(S.g.d)) - set(plot_dims))
 ```
 
 ```python
-with open("4d_full/plot_all.pkl", "wb") as f:
-    pickle.dump((slc, typeI_err, lamstar, nearby_count), f)
-```
-
-```python
-x = slc[..., plot_dims[0]]
-y = slc[..., plot_dims[1]]
-z = typeI_err.reshape(slc.shape[:2])
-plt.figure(figsize=(15, 5), constrained_layout=True)
-# plt.suptitle(f"${up0_str} ~~~ {up1_str}$")
-plt.subplot(1, 3, 1)
-lam_str = ""
-# plt.title(f"Type I error with $\lambda" + f" = {overall_lam:.4f}$")
-levels = np.linspace(0, 2.5, 6)
-cbar_target = plt.contourf(x, y, z * 100, levels=levels, cmap="Reds", extend="both")
-plt.contour(
-    x,
-    y,
-    z * 100,
-    levels=levels,
-    colors="k",
-    linestyles="-",
-    linewidths=0.5,
-    extend="both",
-)
-cbar = plt.colorbar(cbar_target)
-cbar.set_label("\% Type I Error")
-# plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
-# plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
-plt.xlabel(f"$\\theta_{plot_dims[0]}$")
-plt.xticks(np.linspace(-1, 1, 5))
-plt.ylabel(f"$\\theta_{plot_dims[1]}$")
-plt.yticks(np.linspace(-1, 1, 5))
-
-plt.subplot(1, 3, 2)
-x = slc[..., plot_dims[0]]
-y = slc[..., plot_dims[1]]
-z = lamstar[:, 0].reshape(slc.shape[:2])
-up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
-up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
-# plt.title(f"$\lambda^*$")
-levels = np.linspace(0, 0.4, 21)
-cbar_target = plt.contourf(x, y, z, levels=levels, cmap="viridis_r", extend="max")
-plt.contour(
-    x,
-    y,
-    z,
-    levels=levels,
-    colors="k",
-    linestyles="-",
-    linewidths=0.5,
-    extend="max",
-)
-cbar = plt.colorbar(cbar_target, ticks=np.linspace(0, 0.4, 5))
-cbar.set_label("$\lambda^*$")
-plt.axvline(x=slc[0, 0, unplot_dims[0]], color="k", linestyle="-", linewidth=3)
-plt.axhline(y=slc[0, 0, unplot_dims[0]], color="k", linestyle="-", linewidth=3)
-plt.xlabel(f"$\\theta_{plot_dims[0]}$")
-plt.xticks(np.linspace(-1, 1, 5))
-plt.ylabel(f"$\\theta_{plot_dims[1]}$")
-plt.yticks(np.linspace(-1, 1, 5))
-
-plt.subplot(1, 3, 3)
-x = slc[..., plot_dims[0]]
-y = slc[..., plot_dims[1]]
-z = np.array(nearby_count).reshape(slc.shape[:2])
-z[z == 0] = 1
-z = np.tril(z)
-z = z + z.T - np.diag(np.diag(z))
-z = np.log10(z)
-levels = np.linspace(0, 6, 7)
-# plt.title("$\log_{10}$(number of nearby tiles)")
-cntf = plt.contourf(x, y, z, levels=levels, cmap="Greys", extend="both")
-plt.contour(
-    x,
-    y,
-    z,
-    levels=levels,
-    colors="k",
-    linestyles="-",
-    linewidths=0.5,
-    extend="both",
-)
-cbar = plt.colorbar(cntf, ticks=np.arange(7))
-cbar.ax.set_yticklabels(["1", "10", "$10^2$", "$10^3$", "$10^4$", "$10^5$", "$10^6$"])
-plt.xlabel(f"$\\theta_{plot_dims[0]}$")
-plt.ylabel(f"$\\theta_{plot_dims[1]}$")
-plt.savefig("4d_full/lewis.pdf", bbox_inches="tight")
-plt.show()
-```
-
-```python
-x = slc[..., plot_dims[0]]
-y = slc[..., plot_dims[1]]
-z = lamstar[:, 1:51].min(axis=1).reshape(slc.shape[:2])
-plt.figure(figsize=(6, 6), constrained_layout=True)
-up0_str = f"\\theta_{unplot_dims[0]} = {slc[0,0,unplot_dims[0]]:.3f}"
-up1_str = f"\\theta_{unplot_dims[1]} = {slc[0,0,unplot_dims[1]]:.3f}"
-plt.title(f"${up0_str} ~~~ {up1_str}$")
-levels = np.linspace(0, 1.0, 21)
-cbar_target = plt.contourf(x, y, z, levels=levels, extend="both")
-plt.contour(
-    x,
-    y,
-    z,
-    levels=levels,
-    colors="k",
-    linestyles="-",
-    linewidths=0.5,
-    extend="both",
-)
-cbar = plt.colorbar(cbar_target)
-cbar.set_label("$\lambda^*$")
-# plt.axvline(x=0, color="k", linestyle="-", linewidth=4)
-# plt.axhline(y=0, color="k", linestyle="-", linewidth=4)
-plt.xlabel(f"$\\theta_{plot_dims[0]}$")
-plt.xticks(np.linspace(-1, 1, 5))
-plt.ylabel(f"$\\theta_{plot_dims[1]}$")
-plt.yticks(np.linspace(-1, 1, 5))
-plt.show()
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
+## See ../paper_figures/lewis.ipynb for the final paper plots!
 ```

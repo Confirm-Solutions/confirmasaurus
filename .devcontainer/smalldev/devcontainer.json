@@ -64,8 +64,6 @@
     "source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"
   ],
   "runArgs": [
-    "--env",
-    "NVIDIA_DISABLE_REQUIRE=1",
     "--cap-add=SYS_PTRACE",
     "--security-opt",
     "seccomp=unconfined",

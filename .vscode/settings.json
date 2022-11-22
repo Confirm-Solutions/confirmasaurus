@@ -8,5 +8,8 @@
   "autoDocstring.docstringFormat": "google-notypes",
   "r.bracketedPaste": true,
   "r.plot.useHttpgd": true,
-  "python.analysis.extraPaths": ["./outlaw"],
+  "python.analysis.extraPaths": [
+    "./outlaw"
+  ],
+  "cmake.configureOnOpen": false,
 }

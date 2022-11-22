@@ -1,22 +1,8 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.14.1
-  kernelspec:
-    display_name: R
-    language: R
-    name: ir
----
-
-```R vscode={"languageId": "r"}
+```R
 library(INLA)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 n_arms = 4
 y = c(0, 1, 9, 10)
 n = c(20, 20, 35, 35)
@@ -32,7 +18,7 @@ logit_p1 = rep(qlogis(0.3), n_arms)
 
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # Run INLA with a model where logit(p) = intercept + random_effect(drawn iid from normal)
 # The prior on the random effect influences the sharing between groups. I
 # haven't tuned this yet.
@@ -72,71 +58,71 @@ hyperpar_data = result$marginals.hyperpar
 write.csv(hyperpar_data[[1]], "hyperpar_data2.csv")
 ```
 
-```R vscode={"languageId": "r"}
+```R
 result$joint.hyper
 ```
 
-```R vscode={"languageId": "r"}
+```R
 exp(-result$mode$theta)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 result$mode$x
 ```
 
-```R vscode={"languageId": "r"}
+```R
 result$mode
 ```
 
-```R vscode={"languageId": "r"}
+```R
 mu_0 + logit_p1
 ```
 
-```R vscode={"languageId": "r"}
+```R
 result$mode$x[5:8] + result$mode$x[9] + mu_0 + logit_p1
 ```
 
-```R vscode={"languageId": "r"}
+```R
 configs = result$misc$configs$config
 names(result$misc$configs)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 length(configs)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 length(configs[[10]]$mean)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 sig2 = exp(-configs[[10]]$theta[[1]])
 ```
 
-```R vscode={"languageId": "r"}
+```R
 diag(sig2)
 ```
 
-```R vscode={"languageId": "r"}
+```R
 cov = matrix(mu_sig2, nrow=4, ncol=4) + diag(sig2)
 cov
 ```
 
-```R vscode={"languageId": "r"}
+```R
 configs[[10]]$Q
 ```
 
-```R vscode={"languageId": "r"}
+```R
 list(1.0 / exp(configs[[1]]$theta[[1]]), configs[[1]]$mean[1:4], configs[[1]]$mean[5:8] + configs[[1]]$mean[9])
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # logprec = sapply(configs, function(x) x$theta[[1]])
 # logpost = sapply(configs, function(x) x$log.posterior[[1]])
 # write.csv(data.frame(logprec = logprec, logpost = logpost), "hyperpar_data.csv")
 ```
 
-```R vscode={"languageId": "r"}
+```R
 sig2_sample = 1.0 / inla.hyperpar.sample(n=100000, result)
 hist(log10(sig2_sample), breaks = 100)
 hyperpar_data = result$marginals.hyperpar
@@ -148,14 +134,14 @@ plot(log10(hypersig2), log10(pdf), type = "l")
 
 ## Old stuff
 
-```R vscode={"languageId": "r"}
+```R
 # result.samp <- inla.posterior.sample(100, result)
 # names(result.samp[[1]])
 # print(result.samp[[1]])
 
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # Plot marginal PDFs.
 # These will depend heavily on hyperparameter priors which I have just left
 # default for now.
@@ -168,7 +154,7 @@ for (i in 1:n_groups) {
 }
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # Print 95% confidence intervals for the linear predictors. 
 # I'm not 100% sure these are correct, but they track correctly with the y_i
 for (i in 1:n_groups) {
@@ -177,14 +163,14 @@ for (i in 1:n_groups) {
 }
 ```
 
-```R vscode={"languageId": "r"}
+```R
 for (i in 1:n_groups) {
     print(y_i[[i]])
     print(inla.pmarginal(0, result$marginals.linear.predictor[[i]]))
 }
 ```
 
-```R vscode={"languageId": "r"}
+```R
 # expr2 = y ~ 0 + offset(mu_0 + logit_p1) + f(
 #     gid, 
 #     model="generic3", 
@@ -197,7 +183,7 @@ for (i in 1:n_groups) {
 # )
 ```
 
-```R vscode={"languageId": "r"}
+```R
 result <- inla(
     y ~ 0,
     data=data.frame(y=c(2,3,4)),
@@ -210,7 +196,7 @@ result <- inla(
 result$mode
 ```
 
-```R vscode={"languageId": "r"}
+```R
 result <- inla(
     y ~ 0 + offset(rep(1,4)),
     data=data.frame(y=c(1,2,3,4)),
