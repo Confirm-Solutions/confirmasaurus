@@ -44,6 +44,7 @@ The great glossary of adagrid:
 - worst tile: the tile for which lams is smallest. `lams[worst_tile] == lamss`
 """
 import copy
+import time
 
 import jax
 import jax.numpy as jnp
@@ -73,7 +74,9 @@ class AdagridDriver:
 
     def __init__(self, model, *, init_K, n_K_double, nB, bootstrap_seed):
         self.model = model
-        self.forward_boundv, self.backward_boundv = driver.get_bound(model)
+        self.forward_boundv, self.backward_boundv = driver.get_bound(
+            model.family, model.family_params if hasattr(model, "family_params") else {}
+        )
 
         self.tunevv = jax.jit(
             jax.vmap(
@@ -216,6 +219,8 @@ class _Adagrid:
             done: True if the algorithm has converged.
             report: A dictionary of information about the iteration.
         """
+
+        start_convergence = time.time()
         ########################################
         # Step 1: Calculate bias and standard deviation of TIE
         ########################################
@@ -271,6 +276,7 @@ class _Adagrid:
         report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
         report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
         report["n_impossible"] = work["impossible"].sum()
+        report["runtime_convergence_check"] = time.time() - start_convergence
         if done:
             return True, report
 
@@ -297,6 +303,7 @@ class _Adagrid:
         # If the tile's mean lambda* is less the mean lambda* of this modified
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we prefer to refine it.
+        start_refine_deepen = time.time()
         twb_worst_tile = self.tiledb.worst_tile("twb_mean_lams")
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
@@ -347,6 +354,9 @@ class _Adagrid:
                 .add_null_hypos(self.null_hypos, inherit_cols)
                 .prune()
             )
+
+            report["runtime_refine_deepen"] = time.time() - start_refine_deepen
+            start_processing = time.time()
             g_tuned_new = self._process_tiles(g_new, i)
             self.tiledb.write(g_tuned_new.df)
 
@@ -356,6 +366,10 @@ class _Adagrid:
         # We need to report back to the TileDB that we're done with this batch
         # of tiles and whether any of the tiles are still active.
         self.tiledb.finish(work)
+        if not nothing_to_do:
+            report["runtime_processing"] = time.time() - start_processing
+        else:
+            report["runtime_refine_deepen"] = time.time() - start_refine_deepen
 
         report.update(
             dict(
@@ -471,13 +485,15 @@ def ada_tune(
         tuning_min_idx=tuning_min_idx,
     )
 
-    reports = []
-    # We start at iteration 1 because the initial grid is iteration 0.
-    for ada_iter in range(1, max_iter):
-        done, report = ada.step(ada_iter)
-        if callback is not None:
-            callback(ada_iter, report, ada)
-        reports.append(report)
-        if done:
-            break
-    return ada_iter, reports, ada
+    try:
+        reports = []
+        # We start at iteration 1 because the initial grid is iteration 0.
+        for ada_iter in range(1, max_iter):
+            done, report = ada.step(ada_iter)
+            if callback is not None:
+                callback(ada_iter, report, ada)
+            reports.append(report)
+            if done:
+                break
+    finally:
+        return ada_iter, reports, ada

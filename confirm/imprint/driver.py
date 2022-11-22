@@ -13,47 +13,24 @@ from . import grid
 # https://github.com/Confirm-Solutions/confirmasaurus/pull/148
 
 
-# TODO: generalize to other families
-# TODO: ideally we'd have a single entrypoint function that does what
-# `get_backward_bound` and `get_forward_bound` do??
-def get_backward_bound(bound_module, family_params):
-    scale = family_params.get("scale", 1.0)
-
-    def backward_bound(alpha_target, theta0, vertices):
-        v = vertices - theta0
-        bwd_solver = bound_module.TileBackwardQCPSolver(scale=scale)
-        q_opt = bwd_solver.solve(v, alpha_target)
-        return bound_module.tilt_bound_bwd_tile(q_opt, scale, v, alpha_target)
-
-    return jax.jit(jax.vmap(backward_bound, in_axes=(None, 0, 0)))
-
-
-def get_forward_bound(bound_module, family_params):
-    scale = family_params.get("scale", 1.0)
-
-    def forward_bound(f0, theta0, vertices):
-        fwd_solver = bound_module.TileForwardQCPSolver(scale=scale)
-        vs = vertices - theta0
-        q_opt = fwd_solver.solve(vs, f0)
-        return bound_module.tilt_bound_fwd_tile(q_opt, scale, vs, f0)
-
-    return jax.jit(jax.vmap(forward_bound))
-
-
-def get_bound(model):
-    family_params = model.family_params if hasattr(model, "family_params") else {}
-
-    if model.family == "normal":
-        import confirm.bound.normal as bound_module
-
-    elif model.family == "binomial":
-        raise Exception("not implemented")
+# TODO: Need to clean up the interface from driver to the bounds.
+# TODO: Need to clean up the interface from driver to the bounds.
+# TODO: Need to clean up the interface from driver to the bounds.
+# TODO: Need to clean up the interface from driver to the bounds.
+# - should the bound classes have staticmethods or should they be objects with
+#   __init__?
+# - can we pass a single vertex array as a substitute for the many vertex case?
+def get_bound(family, family_params):
+    if family == "normal":
+        from confirm.bound.normal import NormalBound as bound_type
+    elif family == "binomial":
+        from confirm.bound.binomial import BinomialBound as bound_type
     else:
         raise Exception("unknown family")
 
     return (
-        get_forward_bound(bound_module, family_params),
-        get_backward_bound(bound_module, family_params),
+        bound_type.get_forward_bound(family_params),
+        bound_type.get_backward_bound(family_params),
     )
 
 
@@ -74,7 +51,9 @@ def calc_tuning_threshold(sorted_stats, sorted_order, alpha):
 class Driver:
     def __init__(self, model):
         self.model = model
-        self.forward_boundv, self.backward_boundv = get_bound(model)
+        self.forward_boundv, self.backward_boundv = get_bound(
+            model.family, model.family_params if hasattr(model, "family_params") else {}
+        )
 
         self.tunev = jax.jit(
             jax.vmap(
