@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 
@@ -87,3 +88,29 @@ def tilt_bound_bwd_tile(q, scale, vs, alpha):
     p = 1 / (1 - 1 / q)
     max_expo = 0.5 * (q - 1) * (scale * jnp.max(jnp.abs(vs))) ** 2
     return (alpha * jnp.exp(-max_expo)) ** p
+
+
+class NormalBound:
+    @staticmethod
+    def get_backward_bound(family_params):
+        scale = family_params.get("scale", 1.0)
+        bwd_solver = TileBackwardQCPSolver(scale)
+
+        def backward_bound(alpha_target, theta0, vertices):
+            v = vertices - theta0
+            q_opt = bwd_solver.solve(v, alpha_target)
+            return tilt_bound_bwd_tile(q_opt, scale, v, alpha_target)
+
+        return jax.jit(jax.vmap(backward_bound, in_axes=(None, 0, 0)))
+
+    @staticmethod
+    def get_forward_bound(family_params):
+        scale = family_params.get("scale", 1.0)
+        fwd_solver = TileForwardQCPSolver(scale)
+
+        def forward_bound(f0, theta0, vertices):
+            vs = vertices - theta0
+            q_opt = fwd_solver.solve(vs, f0)
+            return tilt_bound_fwd_tile(q_opt, scale, vs, f0)
+
+        return jax.jit(jax.vmap(forward_bound))

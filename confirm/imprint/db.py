@@ -6,7 +6,7 @@ import pandas as pd
 
 
 @dataclass
-class PandasTiles:
+class PandasDB:
     """
     A tile database built on top of Pandas DataFrames.
 
@@ -15,7 +15,7 @@ class PandasTiles:
     demonstration.
     """
 
-    df: pd.DataFrame
+    df: pd.DataFrame = None
 
     def get_all(self):
         return self.df
@@ -40,14 +40,12 @@ class PandasTiles:
     def write(self, df):
         self.df = pd.concat((self.df, df), axis=0, ignore_index=True)
 
-    @staticmethod
-    def create(df):
-        out = PandasTiles(df.reset_index(drop=True))
-        return out
+    def init_tiles(self, df):
+        self.df = df.reset_index(drop=True)
 
 
 @dataclass
-class DuckDBTiles:
+class DuckDB:
     """
     A tile database built on top of DuckDB. This should be very fast and
     robust and is the default database for confirm.
@@ -57,19 +55,22 @@ class DuckDBTiles:
     """
 
     con: duckdb.DuckDBPyConnection
-    columns: List[str]
-    column_order: str
+    _columns: List[str] = None
 
     def __init__(self, con):
         self.con = con
-        self.columns = self.con.execute("select * from tiles limit 0").df().columns
-        self.column_order = ",".join(self.columns)
+
+    def columns(self):
+        if self._columns is None:
+            self._columns = self.con.execute("select * from tiles limit 0").df().columns
+        return self._columns
 
     def get_all(self):
         return self.con.execute("select * from tiles").df()
 
     def write(self, df):
-        self.con.execute(f"insert into tiles select {self.column_order} from df")
+        column_order = ",".join(self.columns())
+        self.con.execute(f"insert into tiles select {column_order} from df")
 
     def next(self, n, order_col):
         # we wrap with a transaction to ensure that concurrent readers don't
@@ -113,27 +114,11 @@ class DuckDBTiles:
     def close(self):
         self.con.close()
 
-    @staticmethod
-    def create(df, path=":memory:"):
-        """
-        Creating a database from a grid.
-
-        We include the grid in the connection method so that we can create the
-        tiles table with the same set of columns as the grid dataframe
-
-        Args:
-            df: DataFrame containing the initial tiles.
-            path: The filepath to the database. Defaults to ":memory:".
-
-        Returns:
-            _description_
-        """
-        con = duckdb.connect(path)
-        con.execute("create table tiles as select * from df")
-        return DuckDBTiles(con)
+    def init_tiles(self, df):
+        self.con.execute("create table tiles as select * from df")
 
     @staticmethod
-    def load(path):
+    def connect(path=":memory:"):
         """
         Load a tile database from a file.
 
@@ -143,5 +128,4 @@ class DuckDBTiles:
         Returns:
             The tile database.
         """
-        con = duckdb.connect(path)
-        return DuckDBTiles(con)
+        return DuckDB(duckdb.connect(path))

@@ -1,8 +1,10 @@
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 import scipy.stats
 
 import confirm.imprint as ip
+import confirm.models.fisher_exact as fisher
 from confirm.models.ztest import ZTest1D
 
 
@@ -24,3 +26,29 @@ def test_ztest(snapshot):
 
     tune_df = ip.tune(ZTest1D, g)
     pd.testing.assert_frame_equal(tune_df, snapshot(tune_df))
+
+
+def test_jax_hypergeom():
+    np.testing.assert_allclose(
+        fisher.hypergeom_logpmf(3, 20, 10, 10),
+        scipy.stats.hypergeom.logpmf(3, 20, 10, 10),
+    )
+    np.testing.assert_allclose(
+        fisher.hypergeom_logcdf(3, 20, 10, 10),
+        scipy.stats.hypergeom.logcdf(3, 20, 10, 10),
+    )
+    np.testing.assert_allclose(
+        jnp.exp(fisher.hypergeom_logcdf(3, 20, 10, 10)),
+        scipy.stats.hypergeom.cdf(3, 20, 10, 10),
+    )
+
+
+def test_fisher_exact_jax_vs_scipy():
+    model = fisher.FisherExact(0, 10, n=10)
+    np.random.seed(0)
+    theta = np.random.rand(5, 2)
+    null_truth = np.ones((5, 1), dtype=bool)
+    np.testing.assert_allclose(
+        fisher._sim_scipy(model.samples[0:10], theta, null_truth),
+        model.sim_batch(0, 10, theta, null_truth),
+    )

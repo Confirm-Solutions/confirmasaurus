@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 
+from . import batching
 from . import grid
 
 # NOTE: See these GitHub issues/demo PRs for Model API discussion:
@@ -13,47 +14,24 @@ from . import grid
 # https://github.com/Confirm-Solutions/confirmasaurus/pull/148
 
 
-# TODO: generalize to other families
-# TODO: ideally we'd have a single entrypoint function that does what
-# `get_backward_bound` and `get_forward_bound` do??
-def get_backward_bound(bound_module, family_params):
-    scale = family_params.get("scale", 1.0)
-
-    def backward_bound(alpha_target, theta0, vertices):
-        v = vertices - theta0
-        bwd_solver = bound_module.TileBackwardQCPSolver(scale=scale)
-        q_opt = bwd_solver.solve(v, alpha_target)
-        return bound_module.tilt_bound_bwd_tile(q_opt, scale, v, alpha_target)
-
-    return jax.jit(jax.vmap(backward_bound, in_axes=(None, 0, 0)))
-
-
-def get_forward_bound(bound_module, family_params):
-    scale = family_params.get("scale", 1.0)
-
-    def forward_bound(f0, theta0, vertices):
-        fwd_solver = bound_module.TileForwardQCPSolver(scale=scale)
-        vs = vertices - theta0
-        q_opt = fwd_solver.solve(vs, f0)
-        return bound_module.tilt_bound_fwd_tile(q_opt, scale, vs, f0)
-
-    return jax.jit(jax.vmap(forward_bound))
-
-
-def get_bound(model):
-    family_params = model.family_params if hasattr(model, "family_params") else {}
-
-    if model.family == "normal":
-        import confirm.bound.normal as bound_module
-
-    elif model.family == "binomial":
-        raise Exception("not implemented")
+# TODO: Need to clean up the interface from driver to the bounds.
+# TODO: Need to clean up the interface from driver to the bounds.
+# TODO: Need to clean up the interface from driver to the bounds.
+# TODO: Need to clean up the interface from driver to the bounds.
+# - should the bound classes have staticmethods or should they be objects with
+#   __init__?
+# - can we pass a single vertex array as a substitute for the many vertex case?
+def get_bound(family, family_params):
+    if family == "normal":
+        from confirm.bound.normal import NormalBound as bound_type
+    elif family == "binomial":
+        from confirm.bound.binomial import BinomialBound as bound_type
     else:
         raise Exception("unknown family")
 
     return (
-        get_forward_bound(bound_module, family_params),
-        get_backward_bound(bound_module, family_params),
+        bound_type.get_forward_bound(family_params),
+        bound_type.get_backward_bound(family_params),
     )
 
 
@@ -72,9 +50,12 @@ def calc_tuning_threshold(sorted_stats, sorted_order, alpha):
 
 
 class Driver:
-    def __init__(self, model):
+    def __init__(self, model, *, tile_batch_size):
         self.model = model
-        self.forward_boundv, self.backward_boundv = get_bound(model)
+        self.tile_batch_size = tile_batch_size
+        self.forward_boundv, self.backward_boundv = get_bound(
+            model.family, model.family_params if hasattr(model, "family_params") else {}
+        )
 
         self.tunev = jax.jit(
             jax.vmap(
@@ -94,13 +75,21 @@ class Driver:
     def stats(self, df):
         return df.groupby("K", group_keys=False).apply(self._stats)
 
+    def _batched_validate(self, K, theta, null_truth, lam):
+        stats = self.model.sim_batch(0, K, theta, null_truth)
+        return jnp.sum(stats < lam, axis=-1)
+
     def _validate(self, K_df, lam, delta):
         K = K_df["K"].iloc[0]
         K_g = grid.Grid(K_df)
         theta = K_g.get_theta()
 
-        stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-        tie_sum = jnp.sum(stats < lam, axis=-1)
+        tie_sum = batching.batch(
+            self._batched_validate,
+            self.tile_batch_size,
+            in_axes=(None, 0, 0, None),
+        )(K, theta, K_g.get_null_truth(), lam)
+
         tie_cp_bound = clopper_pearson(tie_sum, K, delta)
         theta, vertices = K_g.get_theta_and_vertices()
         tie_bound = self.forward_boundv(tie_cp_bound, theta, vertices)
@@ -115,20 +104,32 @@ class Driver:
         )
 
     def validate(self, df, lam, *, delta=0.01):
+        # The execution trace of a driver:
+        # entry point: (validate)
+        #     for each K: (_validate)
+        #         for each batch of tiles: (_batched_validate)
+        #             simulate
         return df.groupby("K", group_keys=False).apply(
             lambda K_df: self._validate(K_df, lam, delta)
         )
+
+    def _batched_tune(self, K, theta, vertices, null_truth, alpha):
+        stats = self.model.sim_batch(0, K, theta, null_truth)
+        sorted_stats = jnp.sort(stats, axis=-1)
+        alpha0 = self.backward_boundv(alpha, theta, vertices)
+        bootstrap_lams = self.tunev(sorted_stats, np.arange(K), alpha0)
+        return bootstrap_lams
 
     def _tune(self, K_df, alpha):
         K = K_df["K"].iloc[0]
         K_g = grid.Grid(K_df)
 
         theta, vertices = K_g.get_theta_and_vertices()
-        alpha0 = self.backward_boundv(alpha, theta, vertices)
-
-        stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-        sorted_stats = jnp.sort(stats, axis=-1)
-        bootstrap_lams = self.tunev(sorted_stats, np.arange(K), alpha0)
+        bootstrap_lams = batching.batch(
+            self._batched_tune,
+            self.tile_batch_size,
+            in_axes=(None, 0, 0, 0, None),
+        )(K, theta, vertices, K_g.get_null_truth(), alpha)
         return pd.DataFrame(bootstrap_lams, columns=["lams"])
 
     def tune(self, df, alpha):
@@ -137,7 +138,7 @@ class Driver:
         )
 
 
-def _setup(modeltype, g, model_seed, K, model_kwargs):
+def _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size):
     g = copy.deepcopy(g)
     if K is not None:
         g.df["K"] = K
@@ -152,10 +153,20 @@ def _setup(modeltype, g, model_seed, K, model_kwargs):
     if model_kwargs is None:
         model_kwargs = {}
     model = modeltype(model_seed, g.df["K"].max(), **model_kwargs)
-    return Driver(model), g
+    return Driver(model, tile_batch_size=tile_batch_size), g
 
 
-def validate(modeltype, g, lam, *, delta=0.01, model_seed=0, K=None, model_kwargs=None):
+def validate(
+    modeltype,
+    g,
+    lam,
+    *,
+    delta=0.01,
+    model_seed=0,
+    K=None,
+    tile_batch_size=64,
+    model_kwargs=None
+):
     """
     Calculate the Type I Error bound.
 
@@ -170,6 +181,7 @@ def validate(modeltype, g, lam, *, delta=0.01, model_seed=0, K=None, model_kwarg
         K: The number of simulations. If this is unspecified, it is assumed
            that the grid has a "K" column containing per-tile simulation counts.
            Defaults to None.
+        tile_batch_size: The number of tiles to simulate in a single batch.
         model_kwargs: Keyword arguments passed to the model constructor.
                       Defaults to None.
 
@@ -181,12 +193,21 @@ def validate(modeltype, g, lam, *, delta=0.01, model_seed=0, K=None, model_kwarg
                         simulation point.
         - tie_bound: The bound on the Type I error over the whole tile.
     """
-    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size)
     rej_df = driver.validate(g.df, lam, delta=delta)
     return rej_df
 
 
-def tune(modeltype, g, *, model_seed=0, alpha=0.025, K=None, model_kwargs=None):
+def tune(
+    modeltype,
+    g,
+    *,
+    model_seed=0,
+    alpha=0.025,
+    K=None,
+    tile_batch_size=64,
+    model_kwargs=None
+):
     """
     Tune the critical threshold for a given level of Type I Error control.
 
@@ -198,12 +219,13 @@ def tune(modeltype, g, *, model_seed=0, alpha=0.025, K=None, model_kwargs=None):
         K: The number of simulations. If this is unspecified, it is assumed
            that the grid has a "K" column containing per-tile simulation counts.
            Defaults to None.
+        tile_batch_size: The number of tiles to simulate in a single batch.
         model_kwargs: Keyword arguments passed to the model constructor.
            Defaults to None.
 
     Returns:
         _description_
     """
-    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size)
     tune_df = driver.tune(g.df, alpha)
     return tune_df

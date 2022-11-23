@@ -145,10 +145,8 @@ def batch(f, batch_size: int, in_axes, out_axes=None):
     specified axis. If the function has multiple outputs, each output is
     concatenated along the corresponding axis.
 
-    NOTE: In performance critical situations, it may be better to use batch_all
-    and decide for yourself how to concatenate or process the output. For
-    example, using np.concatenate can be slower than jnp.concatenate if the
-    batched function is outputting JAX arrays.
+    NOTE: In performance critical situations, it might be better to use batch_all
+    and decide for yourself how to concatenate or process the output.
 
     Args:
         f: Function to be batched.

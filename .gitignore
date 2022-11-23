@@ -57,5 +57,6 @@ poetry.toml
 
 .ipynb_checkpoints
 
-# duckdb database files
+# dataframe and database files
 *.db
+*.parquet
