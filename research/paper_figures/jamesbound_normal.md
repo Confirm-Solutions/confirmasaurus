@@ -566,11 +566,11 @@ qsolve = jamesbound.ForwardQCPSolver(scale=1)
 # Plotting the true function in red
 figs, axes = plt.subplots(1, 2, sharey=True, sharex=True)
 for ax in axes:
-    ax.plot(mu_dense10, pow_dense10, "r:", linewidth=2)
+    ax.plot(mu_dense10, pow_dense10 * 100, "r:", linewidth=2)
     ax.errorbar(
         mu,
-        typeI_est,
-        yerr=typeI_CI,
+        typeI_est * 100,
+        yerr=typeI_CI * 100,
         ecolor="k",
         fmt="o",
         capsize=4,
@@ -597,8 +597,8 @@ for i in range(npts):
     axes[1].plot(vadjust[subset], optbound[subset] * 100, "b", linewidth=1)
 
 axes[0].set_xlabel("$\\theta$")
+axes[0].set_ylabel("Type I Error (\%)")
 axes[1].set_xlabel("$\\theta$")
-axes[1].set_ylabel("Type I Error (\%)")
 axes[1].set_xlim(axes[0].get_xlim())
 axes[1].set_ylim(axes[0].get_ylim())
 plt.tight_layout()
