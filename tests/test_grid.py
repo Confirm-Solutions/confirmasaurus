@@ -4,9 +4,9 @@ import time
 import numpy as np
 import pytest
 
-import confirm.mini_imprint.grid as grid
-from confirm.mini_imprint.grid import HyperPlane
-from confirm.mini_imprint.grid import hypo
+import confirm.imprint.grid as grid
+from confirm.imprint.grid import HyperPlane
+from confirm.imprint.grid import hypo
 
 # NOTE: For developing tests, plotting a 2D grid is very useful:
 # import matplotlib.pyplot as plt

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.spatial
 
-import confirm.mini_imprint.lewis_drivers as ld
+import confirm.imprint.lewis_drivers as ld
 
 
 # def status_report(adap, sim_sizes, bootstrap_cvs, pointwise_target_alpha):
@@ -58,7 +58,7 @@ def eval_bound(model, g, sim_sizes, D, eval_pts):
     )
     typeI_sum = typeI_sum[inverse]
     typeI_err = typeI_sum / sim_sizes[idx]
-    import confirm.mini_imprint.binomial as binomial
+    import confirm.imprint.binomial as binomial
 
     delta = 0.01
     typeI_err, typeI_CI = binomial.zero_order_bound(
@@ -66,7 +66,7 @@ def eval_bound(model, g, sim_sizes, D, eval_pts):
     )
     typeI_bound = typeI_err + typeI_CI
 
-    import confirm.mini_imprint.bound.binomial as tiltbound
+    import confirm.imprint.bound.binomial as tiltbound
 
     n_arm_samples = model.n_arm_samples
     theta0 = g.theta_tiles[idx]

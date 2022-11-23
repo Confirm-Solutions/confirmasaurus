@@ -10,8 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.spatial
 import scipy.special
-import confirm.mini_imprint.grid as berrylibgrid
-import confirm.mini_imprint.binomial as binomial
+import confirm.imprint.grid as berrylibgrid
+import confirm.imprint.binomial as binomial
 
 # grid_info, sim_info, bound_info = np.load("output_berry3d_hi3.npy", allow_pickle=True)
 # grid_info, sim_info, bound_info = np.load("../../output_berry3d_0_1000.npy", allow_pickle=True)
@@ -57,7 +57,7 @@ tree = scipy.spatial.KDTree(theta_tiles)
 
 ```python
 import jax
-import confirm.mini_imprint.bound.binomial as tiltbound
+import confirm.imprint.bound.binomial as tiltbound
 
 fwd_solver = tiltbound.TileForwardQCPSolver(n=n_arm_samples)
 
@@ -126,7 +126,7 @@ typeI_range, theta_range
 ```
 
 ```python
-from confirm.mini_imprint.grid import hypercube_vertices
+from confirm.imprint.grid import hypercube_vertices
 
 reduced_tile_idx = np.arange(10)
 theta0 = theta_tiles[reduced_tile_idx]

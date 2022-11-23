@@ -3,8 +3,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from confirm.mini_imprint import db
-from confirm.mini_imprint import grid
+from confirm.imprint import db
+from confirm.imprint import grid
 
 
 def example_grid(x1, x2):

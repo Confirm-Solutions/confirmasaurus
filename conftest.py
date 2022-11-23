@@ -3,10 +3,10 @@ from pathlib import Path
 import pytest
 from jax.config import config
 
-from confirm.mini_imprint.testing import Pickler  # noqa
-from confirm.mini_imprint.testing import pytest_addoption as ip_addoption  # noqa
-from confirm.mini_imprint.testing import snapshot  # noqa
-from confirm.mini_imprint.testing import TextSerializer  # noqa
+from confirm.imprint.testing import Pickler  # noqa
+from confirm.imprint.testing import pytest_addoption as ip_addoption  # noqa
+from confirm.imprint.testing import snapshot  # noqa
+from confirm.imprint.testing import TextSerializer  # noqa
 
 config.update("jax_enable_x64", True)
 

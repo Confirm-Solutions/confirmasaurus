@@ -12,7 +12,7 @@ import jax
 # Run on CPU because a concurrent process is probably running on GPU.
 jax.config.update("jax_platform_name", "cpu")
 
-import confirm.mini_imprint.lewis_drivers as lts
+import confirm.imprint.lewis_drivers as lts
 from confirm.lewislib import lewis
 
 import adastate
@@ -77,7 +77,7 @@ Blamsort[0]
 ```
 
 ```python
-import confirm.mini_imprint.lewis_drivers as ld
+import confirm.imprint.lewis_drivers as ld
 
 for i in [0, 1, 10, 100, 200, 300, 500, 750, 1000, 5000, 10000, 100000]:
     B_lamss_idx = Blamsort[i, :]

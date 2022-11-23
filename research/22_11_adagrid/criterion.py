@@ -1,6 +1,6 @@
 import numpy as np
 
-import confirm.mini_imprint.lewis_drivers as ld
+import confirm.imprint.lewis_drivers as ld
 
 
 class Criterion:

@@ -25,8 +25,8 @@ import scipy
 from functools import partial
 import matplotlib.pyplot as plt
 import pyimprint.grid as pygrid
-import confirm.mini_imprint.grid as grid
-from confirm.mini_imprint.bound import binomial as binomial
+import confirm.imprint.grid as grid
+from confirm.imprint.bound import binomial as binomial
 ```
 
 ## Validation Step

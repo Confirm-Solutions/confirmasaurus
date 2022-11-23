@@ -9,7 +9,7 @@ import pandas as pd
 import scipy.stats
 import matplotlib.pyplot as plt
 
-import confirm.mini_imprint as ip
+import confirm.imprint as ip
 from confirm.models.ztest import ZTest1D
 ```
 
