@@ -7,11 +7,11 @@ import pytest
 import scipy.stats
 from scipy.special import logit
 
-import confirm.berrylib.dirty_bayes as dirty_bayes
-import confirm.berrylib.fast_inla as fast_inla
-import confirm.berrylib.quadrature as quadrature
-import confirm.berrylib.util as util
-import confirm.mini_imprint.binomial as binomial
+from confirm.berrylib import binomial
+from confirm.berrylib import dirty_bayes
+from confirm.berrylib import fast_inla
+from confirm.berrylib import quadrature
+from confirm.berrylib import util
 
 
 def logistic(x):

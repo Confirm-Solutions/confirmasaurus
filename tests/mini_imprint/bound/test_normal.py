@@ -1,6 +1,6 @@
 import numpy as np
 
-import confirm.mini_imprint.bound.normal as normal
+import confirm.bound.normal as normal
 
 
 def fwd_qcp_derivative(q, scale, v, f0):

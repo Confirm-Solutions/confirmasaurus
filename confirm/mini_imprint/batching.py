@@ -1,8 +1,6 @@
 import jax.numpy as jnp
 import numpy as np
 
-# TODO: allow batch to decide internally what batch size to use??
-
 
 def _pad_arg(a, axis, n_pad: int, module):
     """
@@ -186,21 +184,23 @@ def batch(f, batch_size: int, in_axes, out_axes=None):
         module = jnp if is_jax else np
 
         def entry(i, j):
-            if j == len(outs) - 1 and n_pad > 0:
-                axis = internal_out_axes[i]
-                N = outs[-1][i].shape[axis]
-                slc = [slice(None)] * outs[-1][i].ndim
-                slc[axis] = slice(0, N - n_pad)
-                res = outs[-1][i][tuple(slc)]
-            else:
-                res = outs[j][i]
+            arr = outs[j][i]
 
             # if we're concatenating on an axis that doesn't exist, we need to
             # create that axis.
+            if j == len(outs) - 1 and n_pad > 0:
+                axis = internal_out_axes[i]
+                slc = [slice(None)] * arr.ndim
+                # N = outs[-1][i].shape[axis]
+                # slc[axis] = slice(0, N - n_pad)
+                slc[axis] = slice(0, batch_size - n_pad)
+                arr = arr[tuple(slc)]
+
             axis = internal_out_axes[i]
-            while axis >= res.ndim:
-                res = res[..., None]
-            return res
+            while axis >= arr.ndim:
+                arr = arr[..., None]
+
+            return arr
 
         if len(outs) == 1:
             return_vals = [entry(i, 0) for i in range(len(outs[0]))]
