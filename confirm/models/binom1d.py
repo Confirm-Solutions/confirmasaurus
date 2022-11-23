@@ -14,18 +14,16 @@ def _sim(samples, theta, null_truth):
 
 
 class Binom1D:
-    def __init__(self, seed, max_K, *, n_arm_samples):
+    def __init__(self, seed, max_K, *, n):
         self.family = "binomial"
-        self.family_params = {"n": n_arm_samples}
+        self.family_params = {"n": n}
         self.dtype = jnp.float32
-        self.n_arm_samples = n_arm_samples
 
         # sample normals and then compute the CDF to transform into the
         # interval [0, 1]
         key = jax.random.PRNGKey(seed)
-        self.samples = jax.random.uniform(
-            key, shape=(max_K, self.n_arm_samples), dtype=self.dtype
-        )
+        self.samples = jax.random.uniform(key, shape=(max_K, n), dtype=self.dtype)
+        print(self.samples.shape)
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
         return _sim(self.samples[begin_sim:end_sim], theta, null_truth)
