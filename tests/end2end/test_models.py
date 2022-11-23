@@ -50,5 +50,5 @@ def test_fisher_exact_jax_vs_scipy():
     null_truth = np.ones((5, 1), dtype=bool)
     np.testing.assert_allclose(
         fisher._sim_scipy(model.samples[0:10], theta, null_truth),
-        model._sim_jax(model.samples[0:10], theta, null_truth),
+        model.sim_batch(0, 10, theta, null_truth),
     )

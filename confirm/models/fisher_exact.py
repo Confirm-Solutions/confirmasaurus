@@ -4,6 +4,7 @@ import numpy as np
 import scipy
 
 
+# We reimplement the hypergeometric PDF and CDF in JAX for performance.
 def hypergeom_logpmf(k, M, n, N):
     # Copied from scipy.stats.hypergeom
     tot, good = M, n
@@ -58,6 +59,19 @@ def _sim_scipy(samples, theta, null_truth, f=None):
     return stats
 
 
+@jax.jit
+def _sim_jax(samples, theta, null_truth):
+    n = samples.shape[1]
+    p = jax.scipy.special.expit(theta)
+    successes = jnp.sum(samples[None, :] < p[:, None, None], axis=2)
+    cdfvv = jax.vmap(
+        jax.vmap(hypergeom_cdf, in_axes=(0, None, 0, None)),
+        in_axes=(0, None, 0, None),
+    )
+    cdf = cdfvv(successes[..., 0], 2 * n, successes.sum(axis=-1), n)
+    return cdf
+
+
 class FisherExact:
     def __init__(self, seed, max_K, *, n):
         self.family = "binomial"
@@ -66,21 +80,8 @@ class FisherExact:
             jax.random.PRNGKey(seed), shape=(max_K, n, 2), dtype=jnp.float32
         )
 
-    @staticmethod
-    @jax.jit
-    def _sim_jax(samples, theta, null_truth):
-        n = samples.shape[1]
-        p = jax.scipy.special.expit(theta)
-        successes = jnp.sum(samples[None, :] < p[:, None, None], axis=2)
-        cdfvv = jax.vmap(
-            jax.vmap(hypergeom_cdf, in_axes=(0, None, 0, None)),
-            in_axes=(0, None, 0, None),
-        )
-        cdf = cdfvv(successes[..., 0], 2 * n, successes.sum(axis=-1), n)
-        return cdf
-
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
-        return self._sim_jax(self.samples[begin_sim:end_sim], theta, null_truth)
+        return _sim_jax(self.samples[begin_sim:end_sim], theta, null_truth)
 
 
 class BoschlooExact(FisherExact):
