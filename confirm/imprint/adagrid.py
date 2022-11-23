@@ -51,6 +51,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+from . import batching
 from . import driver
 from . import grid
 from .db import DuckDB
@@ -72,7 +73,9 @@ class AdagridDriver:
     For the basic `validate` and `tune` drivers, see `driver.py`.
     """
 
-    def __init__(self, model, *, init_K, n_K_double, nB, bootstrap_seed):
+    def __init__(
+        self, model, *, init_K, n_K_double, nB, bootstrap_seed, tile_batch_size
+    ):
         self.model = model
         self.forward_boundv, self.backward_boundv = driver.get_bound(
             model.family, model.family_params if hasattr(model, "family_params") else {}
@@ -105,17 +108,33 @@ class AdagridDriver:
             for K in self.Ks
         }
 
-    def _bootstrap_tune(self, K_df, alpha):
+        self.tile_batch_size = tile_batch_size
+
+    def _batched_bootstrap_tune(self, K, theta, vertices, null_truth, alpha):
+        # NOTE: sort of a todo. having the simulations loop as the outer batch
+        # is faster than the other way around. But, we need all simulations in
+        # order to tune. So, the likely fastest solution is to have multiple
+        # layers of batching. This is not currently implemented.
+        stats = self.model.sim_batch(0, K, theta, null_truth)
+        sorted_stats = jnp.sort(stats, axis=-1)
+        alpha0 = self.backward_boundv(alpha, theta, vertices)
+        return self.tunevv(sorted_stats, self.bootstrap_idxs[K], alpha0), alpha0
+
+    def _bootstrap_tune(self, K_df, alpha, tile_batch_size=None):
+        if tile_batch_size is None:
+            tile_batch_size = self.tile_batch_size
+
         K = K_df["K"].iloc[0]
         assert all(K_df["K"] == K)
         K_g = grid.Grid(K_df)
 
         theta, vertices = K_g.get_theta_and_vertices()
-        alpha0 = self.backward_boundv(alpha, theta, vertices)
-        # TODO: batching
-        stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-        sorted_stats = jnp.sort(stats, axis=-1)
-        bootstrap_lams = self.tunevv(sorted_stats, self.bootstrap_idxs[K], alpha0)
+        bootstrap_lams, alpha0 = batching.batch(
+            self._batched_bootstrap_tune,
+            tile_batch_size,
+            in_axes=(None, 0, 0, 0, None),
+        )(K, theta, vertices, K_g.get_null_truth(), alpha)
+
         cols = ["lams"]
         for i in range(self.nB):
             cols.append(f"B_lams{i}")
@@ -129,9 +148,9 @@ class AdagridDriver:
         lams_df.insert(0, "alpha0", alpha0)
         return lams_df
 
-    def bootstrap_tune(self, df, alpha):
+    def bootstrap_tune(self, df, alpha, tile_batch_size=None):
         return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._bootstrap_tune(K_df, alpha)
+            lambda K_df: self._bootstrap_tune(K_df, alpha, tile_batch_size)
         )
 
     def _many_rej(self, K_df, lams_arr):
@@ -143,6 +162,8 @@ class AdagridDriver:
         return tie_sum
 
     def many_rej(self, df, lams_arr):
+        # NOTE: no batching implemented here. Currently, this function is only
+        # called with a single tile so it's not necessary.
         return df.groupby("K", group_keys=False).apply(
             lambda K_df: self._many_rej(K_df, lams_arr)
         )
@@ -190,7 +211,7 @@ class Adagrid:
             # database will be initialized with the correct set of columns.
             g_tuned = self._process_tiles(g, 0)
             self.db.init_tiles(g_tuned.df)
-            self.db.init_null_hypos(self.null_hypos)
+            # self.db.init_null_hypos(self.null_hypos)
 
     def _process_tiles(self, g, i):
         # This method actually runs the tuning and bootstrapping.
@@ -323,7 +344,9 @@ class Adagrid:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
         twb_worst_tile["K"] = self.ada_driver.max_K
-        twb_worst_tile_lams = self.ada_driver.bootstrap_tune(twb_worst_tile, self.alpha)
+        twb_worst_tile_lams = self.ada_driver.bootstrap_tune(
+            twb_worst_tile, self.alpha, tile_batch_size=1
+        )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = work["twb_mean_lams"] > twb_worst_tile_mean_lams
 
@@ -373,6 +396,12 @@ class Adagrid:
             start_processing = time.time()
             g_tuned_new = self._process_tiles(g_new, i)
             self.db.write(g_tuned_new.df)
+            report.update(
+                dict(
+                    n_processed=g_tuned_new.n_tiles,
+                    K_distribution=g_tuned_new.df["K"].value_counts().to_dict(),
+                )
+            )
 
         ########################################
         # Step 8: Finish up!
@@ -412,16 +441,17 @@ def ada_tune(
     g=None,
     db=None,
     model_seed=0,
-    bootstrap_seed=0,
+    alpha=0.025,
     init_K=2**13,
     n_K_double=4,
+    bootstrap_seed=0,
     nB=50,
+    tile_batch_size=64,
     grid_target=0.001,
     bias_target=0.001,
     std_target=0.002,
-    iter_size=2**10,
-    alpha=0.025,
     tuning_min_idx=40,
+    iter_size=2**10,
     n_iter=100,
     callback=print_report,
     model_kwargs=None,
@@ -433,11 +463,13 @@ def ada_tune(
         modeltype: The model class to use.
         g: The initial grid.
         model_seed: The random seed for the model. Defaults to 0.
-        bootstrap_seed: The random seed for bootstrapping. Defaults to 0.
+        alpha: The target type I error control level. Defaults to 0.025.
         init_K: Initial K for the first tiles. Defaults to 2**13.
         n_K_double: The number of doublings of K. The maximum K will be
                     `init_K * 2 ** (n_K_double + 1)`. Defaults to 4.
+        bootstrap_seed: The random seed for bootstrapping. Defaults to 0.
         nB: The number of bootstrap samples. Defaults to 50.
+        tile_batch_size: The number of tiles to simulate in a single batch.
         grid_target: Part of the stopping criterion: the target slack from CSE.
                      Defaults to 0.001.
         bias_target: Part of the stopping criterion: the target bias as
@@ -446,7 +478,6 @@ def ada_tune(
                     deviation of the type I error as calculated by the
                     bootstrap. Defaults to 0.002.
         iter_size: The number of tiles to process per iteration. Defaults to 2**10.
-        alpha: The target type I error control level. Defaults to 0.025.
         tuning_min_idx: The minimum tuning selection index. We enforce that:
                         `alpha0 >= (tuning_min_idx + 1) / (K + 1)`
                         A larger value will reduce the variance of lambda* but
@@ -480,6 +511,7 @@ def ada_tune(
         n_K_double=n_K_double,
         nB=nB,
         bootstrap_seed=bootstrap_seed,
+        tile_batch_size=tile_batch_size,
     )
 
     ada = Adagrid(

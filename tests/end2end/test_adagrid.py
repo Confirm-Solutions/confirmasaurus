@@ -9,7 +9,7 @@ from confirm.models.ztest import ZTest1D
 
 
 @pytest.mark.slow
-@mock.patch("time.time", mock.MagicMock(return_value=100))
+@mock.patch("confirm.imprint.grid.uuid_timer", mock.MagicMock(return_value=100))
 def test_adagrid(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     iter, reports, ada = ip.ada_tune(ZTest1D, g=g, nB=5)

@@ -129,14 +129,41 @@ iter, reports, ada = ip.ada_tune(
     std_target=0.0001,
     iter_size=2**11,
     n_K_double=6,
+    n_iter=1000,
 )
 ```
 
 ```python
 g_ada = ip.Grid(ada.db.get_all()).active()
+K = 2**14
 df = g_ada.df
 lamss = df["lams"].min()
 rej_df = ip.validate(fisher.FisherExact, g_ada, lamss, K=K, model_kwargs=dict(n=n))
+```
+
+```python
+tiles = [g_ada.df[f"B_lams{i}"].idxmin() for i in range(50)]
+g_critical = g_ada.df.loc[tiles]
+```
+
+```python
+lamss = df["lams"].min()
+lamss
+```
+
+```python
+rej_df = ip.validate(
+    fisher.FisherExact,
+    ip.Grid(g_critical),
+    lamss,
+    K=2**20,
+    model_kwargs=dict(n=n),
+    tile_batch_size=5,
+)
+```
+
+```python
+rej_df
 ```
 
 ```python
@@ -235,7 +262,7 @@ def compare_tables(n, lam, lamss):
     )
 
 
-compare_tables(n, lam, lamss)
+compare_tables(n, alpha, lamss)
 ```
 
 ```python

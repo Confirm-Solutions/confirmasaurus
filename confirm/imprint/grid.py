@@ -639,6 +639,10 @@ def get_edges(theta, radii):
     return edges
 
 
+def uuid_timer():
+    return time.time()
+
+
 def gen_short_uuids(n, host_id=None, t=None):
     """
     Short UUIDs are a custom identifier created for imprint that should allow
@@ -694,7 +698,7 @@ def _gen_short_uuids(n, host_id, t):
     assert host_id < 2**host_bits
 
     if t is None:
-        t = np.uint64(int(time.time()))
+        t = np.uint64(int(uuid_timer()))
     if _gen_short_uuids.largest_t is not None and t <= _gen_short_uuids.largest_t:
         t = np.uint64(_gen_short_uuids.largest_t + 1)
     _gen_short_uuids.largest_t = t
