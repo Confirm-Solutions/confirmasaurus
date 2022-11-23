@@ -148,7 +148,7 @@ class AdagridDriver:
         )
 
 
-class _Adagrid:
+class Adagrid:
     def __init__(
         self,
         ada_driver,
@@ -190,6 +190,7 @@ class _Adagrid:
             # database will be initialized with the correct set of columns.
             g_tuned = self._process_tiles(g, 0)
             self.db.init_tiles(g_tuned.df)
+            self.db.init_null_hypos(self.null_hypos)
 
     def _process_tiles(self, g, i):
         # This method actually runs the tuning and bootstrapping.
@@ -481,7 +482,7 @@ def ada_tune(
         bootstrap_seed=bootstrap_seed,
     )
 
-    ada = _Adagrid(
+    ada = Adagrid(
         ada_driver,
         g=g,
         db=db,
@@ -503,5 +504,6 @@ def ada_tune(
             reports.append(report)
             if done:
                 break
-    finally:
+    except KeyboardInterrupt:
         return ada_iter, reports, ada
+    return ada_iter, reports, ada

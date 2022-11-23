@@ -1,5 +1,7 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
+import scipy
 
 
 def hypergeom_logpmf(k, M, n, N):
@@ -33,23 +35,40 @@ def hypergeom_cdf(k, M, n, N):
     return jnp.exp(hypergeom_logcdf(k, M, n, N))
 
 
-class FisherExact:
-    def __init__(self, seed, max_K, *, n_arm_samples):
-        self.family = "binomial"
-        self.family_params = {"n": n_arm_samples}
-        self.dtype = jnp.float32
-        self.n_arm_samples = n_arm_samples
+def scipy_fisher_exact(tbl):
+    return scipy.stats.fisher_exact(tbl, alternative="less")[1]
 
-        # sample normals and then compute the CDF to transform into the
-        # interval [0, 1]
-        key = jax.random.PRNGKey(seed)
+
+def _sim_scipy(samples, theta, null_truth, f=None):
+    if f is None:
+        f = scipy_fisher_exact
+
+    p = scipy.special.expit(theta)
+    successes = np.sum(samples[None, :] < p[:, None, None], axis=2)
+    tbl2by2 = np.concatenate(
+        (successes[:, :, None, :], samples.shape[1] - successes[:, :, None, :]),
+        axis=2,
+    )
+    stats = np.array(
+        [
+            [f(tbl2by2[i, j]) for j in range(tbl2by2.shape[1])]
+            for i in range(tbl2by2.shape[0])
+        ]
+    )
+    return stats
+
+
+class FisherExact:
+    def __init__(self, seed, max_K, *, n):
+        self.family = "binomial"
+        self.family_params = {"n": n}
         self.samples = jax.random.uniform(
-            key, shape=(max_K, self.n_arm_samples, 2), dtype=self.dtype
+            jax.random.PRNGKey(seed), shape=(max_K, n, 2), dtype=jnp.float32
         )
 
     @staticmethod
     @jax.jit
-    def _sim(samples, theta, null_truth):
+    def _sim_jax(samples, theta, null_truth):
         n = samples.shape[1]
         p = jax.scipy.special.expit(theta)
         successes = jnp.sum(samples[None, :] < p[:, None, None], axis=2)
@@ -57,8 +76,26 @@ class FisherExact:
             jax.vmap(hypergeom_cdf, in_axes=(0, None, 0, None)),
             in_axes=(0, None, 0, None),
         )
-        cdf = cdfvv(successes[..., 1], 2 * n, successes.sum(axis=-1), n)
-        return 1 - cdf
+        cdf = cdfvv(successes[..., 0], 2 * n, successes.sum(axis=-1), n)
+        return cdf
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
-        return self._sim(self.samples[begin_sim:end_sim], theta, null_truth)
+        return self._sim_jax(self.samples[begin_sim:end_sim], theta, null_truth)
+
+
+class BoschlooExact(FisherExact):
+    # NOTE: This is super slow!
+    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
+        def f(tbl):
+            return scipy.stats.boschloo_exact(tbl, alternative="less").pvalue
+
+        return _sim_scipy(self.samples[begin_sim:end_sim], theta, null_truth, f=f)
+
+
+class BarnardExact(FisherExact):
+    # NOTE: This is super slow!
+    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
+        def f(tbl):
+            return scipy.stats.barnard_exact(tbl, alternative="less").pvalue
+
+        return _sim_scipy(self.samples[begin_sim:end_sim], theta, null_truth, f=f)

@@ -1,4 +1,3 @@
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
@@ -44,25 +43,12 @@ def test_jax_hypergeom():
     )
 
 
-def test_fisher_exact():
-    model = fisher.FisherExact(0, 10, n_arm_samples=10)
+def test_fisher_exact_jax_vs_scipy():
+    model = fisher.FisherExact(0, 10, n=10)
     np.random.seed(0)
     theta = np.random.rand(5, 2)
     null_truth = np.ones((5, 1), dtype=bool)
-    samples = model.samples
-    p = jax.scipy.special.expit(theta)
-    nsucc = jnp.sum(samples[None] < p[:, None, None], axis=2)
-    tbl2by2 = np.concatenate(
-        (nsucc[:, :, None, :], samples.shape[1] - nsucc[:, :, None, :]), axis=2
+    np.testing.assert_allclose(
+        fisher._sim_scipy(model.samples[0:10], theta, null_truth),
+        model._sim_jax(model.samples[0:10], theta, null_truth),
     )
-
-    stats = np.array(
-        [
-            [
-                1 - scipy.stats.fisher_exact(tbl2by2[i, j], alternative="greater")[1]
-                for j in range(tbl2by2.shape[1])
-            ]
-            for i in range(tbl2by2.shape[0])
-        ]
-    )
-    np.testing.assert_allclose(stats, model.sim_batch(0, 10, theta, null_truth))
