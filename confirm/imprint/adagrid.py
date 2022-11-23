@@ -51,9 +51,9 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from . import db
 from . import driver
 from . import grid
+from .db import DuckDB
 
 
 class AdagridDriver:
@@ -152,9 +152,9 @@ class _Adagrid:
     def __init__(
         self,
         ada_driver,
-        g,
         *,
-        db_type,
+        g=None,
+        db=None,
         grid_target,
         bias_target,
         std_target,
@@ -170,13 +170,26 @@ class _Adagrid:
         self.std_target = std_target
         self.iter_size = iter_size
 
-        self.null_hypos = g.null_hypos
-        g.df["K"] = self.ada_driver.init_K
+        if db is None:
+            if g is None:
+                raise ValueError(
+                    "Must provide either an initial grid or an existing"
+                    " database! Set either g or db."
+                )
+            self.db = DuckDB.connect()
+        else:
+            self.db = db
 
-        # We process the tiles before adding them to the database so that the
-        # database will be initialized with the correct set of columns.
-        g_tuned = self._process_tiles(g, 0)
-        self.tiledb = db_type.create(g_tuned.df)
+        if g is not None:
+            self.null_hypos = g.null_hypos
+            # Copy the input grid so that the caller is not surprised by any changes.
+            g = copy.deepcopy(g)
+            g.df["K"] = self.ada_driver.init_K
+
+            # We process the tiles before adding them to the database so that the
+            # database will be initialized with the correct set of columns.
+            g_tuned = self._process_tiles(g, 0)
+            self.db.init_tiles(g_tuned.df)
 
     def _process_tiles(self, g, i):
         # This method actually runs the tuning and bootstrapping.
@@ -224,12 +237,12 @@ class _Adagrid:
         ########################################
         # Step 1: Calculate bias and standard deviation of TIE
         ########################################
-        worst_tile = self.tiledb.worst_tile("lams")
+        worst_tile = self.db.worst_tile("lams")
         lamss = worst_tile["lams"].iloc[0]
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
-        B_lamss = self.tiledb.bootstrap_lamss()
+        B_lamss = self.db.bootstrap_lamss()
         worst_tile_tie_sum = self.ada_driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0][0]
@@ -247,7 +260,7 @@ class _Adagrid:
         # checking for convergence because part of the convergence criterion is
         # whether there are any impossible tiles .
         ########################################
-        work = self.tiledb.next(self.iter_size, "orderer")
+        work = self.db.next(self.iter_size, "orderer")
 
         ########################################
         # Step 3: Convergence criterion! In terms of:
@@ -304,7 +317,7 @@ class _Adagrid:
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we prefer to refine it.
         start_refine_deepen = time.time()
-        twb_worst_tile = self.tiledb.worst_tile("twb_mean_lams")
+        twb_worst_tile = self.db.worst_tile("twb_mean_lams")
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
@@ -358,14 +371,14 @@ class _Adagrid:
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
             start_processing = time.time()
             g_tuned_new = self._process_tiles(g_new, i)
-            self.tiledb.write(g_tuned_new.df)
+            self.db.write(g_tuned_new.df)
 
         ########################################
         # Step 8: Finish up!
         ########################################
         # We need to report back to the TileDB that we're done with this batch
         # of tiles and whether any of the tiles are still active.
-        self.tiledb.finish(work)
+        self.db.finish(work)
         if not nothing_to_do:
             report["runtime_processing"] = time.time() - start_processing
         else:
@@ -394,8 +407,9 @@ def print_report(_iter, report, _ada):
 
 def ada_tune(
     modeltype,
-    g,
     *,
+    g=None,
+    db=None,
     model_seed=0,
     bootstrap_seed=0,
     init_K=2**13,
@@ -407,8 +421,7 @@ def ada_tune(
     iter_size=2**10,
     alpha=0.025,
     tuning_min_idx=40,
-    max_iter=100,
-    db_type=db.DuckDBTiles,
+    n_iter=100,
     callback=print_report,
     model_kwargs=None,
 ):
@@ -438,8 +451,8 @@ def ada_tune(
                         A larger value will reduce the variance of lambda* but
                         will require more computational effort because K and/or
                         alpha0 will need to be larger. Defaults to 40.
-        max_iter: The maximum number of adagrid iterations to run.
-                  Defaults to 100.
+        n_iter: The number of adagrid iterations to run.
+                Defaults to 100.
         db_type: The database backend to use. Defaults to db.DuckDBTiles.
         callback: A function accepting three arguments (ada_iter, report, ada)
                   that can perform some reporting or printing at each iteration.
@@ -452,11 +465,6 @@ def ada_tune(
         reports: A list of the report dicts from each iteration.
         ada: The Adagrid object after the final iteration.
     """
-
-    # Copy the input grid so that the caller is not surprised by any changes.
-    g = copy.deepcopy(g)
-    g.df["K"] = init_K
-
     # Why initialize the model here rather than relying on the user to pass an
     # already constructed model object?
     # 1. We can pass the seed here.
@@ -475,8 +483,8 @@ def ada_tune(
 
     ada = _Adagrid(
         ada_driver,
-        g,
-        db_type=db_type,
+        g=g,
+        db=db,
         grid_target=grid_target,
         bias_target=bias_target,
         std_target=std_target,
@@ -488,7 +496,7 @@ def ada_tune(
     try:
         reports = []
         # We start at iteration 1 because the initial grid is iteration 0.
-        for ada_iter in range(1, max_iter):
+        for ada_iter in range(1, n_iter):
             done, report = ada.step(ada_iter)
             if callback is not None:
                 callback(ada_iter, report, ada)

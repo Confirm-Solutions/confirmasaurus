@@ -20,8 +20,10 @@ def assert_frame_equal_special(pd_df, db_df):
 
 def prepped_dbs():
     g = example_grid(-1, 1)
-    pd_tiles = db.PandasTiles.create(g.df)
-    db_tiles = db.DuckDBTiles.create(g.df)
+    pd_tiles = db.PandasDB()
+    pd_tiles.init_tiles(g.df)
+    db_tiles = db.DuckDB.connect()
+    db_tiles.init_tiles(g.df)
     return g, pd_tiles, db_tiles
 
 
@@ -59,10 +61,11 @@ def test_load():
     g = example_grid(-1, 1)
     p = Path("test.db")
     p.unlink(missing_ok=True)
-    db_tiles = db.DuckDBTiles.create(g.df, path=str(p))
+    db_tiles = db.DuckDB.connect(path=str(p))
+    db_tiles.init_tiles(g.df)
     db_tiles.close()
 
-    db_tiles2 = db.DuckDBTiles.load(str(p))
+    db_tiles2 = db.DuckDB.connect(path=str(p))
     assert_frame_equal_special(g.df, db_tiles2.get_all())
 
 
@@ -104,8 +107,10 @@ def test_worst_tile():
     g = example_grid(-1, 1)
     g.df["lams"] = np.random.rand(g.df.shape[0])
     g.df.loc[g.df["lams"].idxmin(), "active"] = False
-    pd_tiles = db.PandasTiles.create(g.df)
-    db_tiles = db.DuckDBTiles.create(g.df)
+    pd_tiles = db.PandasDB()
+    pd_tiles.init_tiles(g.df)
+    db_tiles = db.DuckDB.connect()
+    db_tiles.init_tiles(g.df)
     np.testing.assert_allclose(pd_tiles.worst_tile("lams").iloc[0]["theta0"], -0.1)
     assert_frame_equal_special(pd_tiles.worst_tile("lams"), db_tiles.worst_tile("lams"))
 
@@ -118,7 +123,9 @@ def test_bootstrap_lamss():
     cols = ["lams"] + [f"B_lams{i}" for i in range(nB)]
     g = g.add_cols(pd.DataFrame(data, index=g.df.index, columns=cols))
 
-    pd_tiles = db.PandasTiles.create(g.df)
-    db_tiles = db.DuckDBTiles.create(g.df)
+    pd_tiles = db.PandasDB()
+    pd_tiles.init_tiles(g.df)
+    db_tiles = db.DuckDB.connect()
+    db_tiles.init_tiles(g.df)
 
     np.testing.assert_allclose(pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss())

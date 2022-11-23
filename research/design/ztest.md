@@ -37,7 +37,7 @@ std
 ```
 
 ```python
-err = np.abs(tie_est - true_err).values
+err = np.abs(rej_df["tie_est"] - true_err).values
 err
 ```
 
@@ -64,13 +64,13 @@ plt.show()
 
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-n_iter, reports, ada = ip.ada_tune(ZTest1D, g, nB=5)
+n_iter, reports, ada = ip.ada_tune(ZTest1D, g=g, nB=5)
 ```
 
 ```python
 import scipy.stats
 
-g = ip.Grid(ada.tiledb.get_all())
+g = ip.Grid(ada.db.get_all())
 ga = g.active()
 lamss = ga.df["lams"].min()
 true_err = 1 - scipy.stats.norm.cdf(-lamss)
