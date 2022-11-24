@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from dataclasses import field
+from typing import Dict
 from typing import List
 
 import duckdb
@@ -16,6 +18,19 @@ class PandasDB:
     """
 
     df: pd.DataFrame = None
+    _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
+
+    def load(self, table_name):
+        return self._tables[table_name]
+
+    def store(self, table_name, df):
+        self._tables[table_name] = df
+
+    def dimension(self):
+        return max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
+
+    def columns(self):
+        return self.df.columns
 
     def get_all(self):
         return self.df
@@ -56,9 +71,23 @@ class DuckDB:
 
     con: duckdb.DuckDBPyConnection
     _columns: List[str] = None
+    _d: int = None
 
     def __init__(self, con):
         self.con = con
+
+    def load(self, table_name):
+        return self.con.execute(f"select * from {table_name}").df()
+
+    def store(self, table_name, df):
+        self.con.execute(f"create table {table_name} as select * from df")
+
+    def dimension(self):
+        if self._d is None:
+            self._d = (
+                max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
+            )
+        return self._d
 
     def columns(self):
         if self._columns is None:

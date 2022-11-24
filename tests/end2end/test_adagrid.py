@@ -45,12 +45,28 @@ def test_adagrid_clickhouse(snapshot):
     db.client.command(f"drop database {db.job_id}")
 
 
-# def test_adagrid_checkpointing():
-#     g = ip.cartesian_grid(
-#           theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-#     db = ip.db.DuckDB.connect()
-#     ada_intermediate = ip.ada_tune(ZTest1D, g=g, db=db, nB=3, init_K=4, n_iter=2)
-#     ada_final = ip.ada_tune(ZTest1D, db=db, nB=3, init_K=4, n_iter=1)
+def test_adagrid_checkpointing():
+    g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
+    db = ip.db.DuckDB.connect()
+    iter_two1, reports_two1, ada_two1 = ip.ada_tune(
+        ZTest1D, g=g, db=db, nB=3, init_K=4, n_iter=2
+    )
+    iter_two2, reports_two2, ada_two2 = ip.ada_tune(
+        ZTest1D, db=db, nB=3, init_K=4, n_iter=1
+    )
+    reports_two2[0]["i"] = 2
+
+    iter, reports, ada = ip.ada_tune(ZTest1D, g=g, nB=3, init_K=4, n_iter=3)
+    assert iter_two1 + iter_two2 == iter
+    drop_cols = [c for c in reports[0].keys() if c.startswith("runtime")]
+    pd.testing.assert_frame_equal(
+        pd.DataFrame(reports_two1 + reports_two2).drop(drop_cols, axis=1),
+        pd.DataFrame(reports).drop(drop_cols, axis=1),
+    )
+    pd.testing.assert_frame_equal(
+        ada_two2.db.get_all().drop(["birthday", "id", "parent_id"], axis=1),
+        ada.db.get_all().drop(["birthday", "id", "parent_id"], axis=1),
+    )
 
 
 def main():

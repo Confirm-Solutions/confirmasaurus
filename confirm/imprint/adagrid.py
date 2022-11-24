@@ -202,7 +202,15 @@ class AdaCalibration:
         else:
             self.db = db
 
-        if g is not None:
+        if g is None:
+            d = self.db.dimension()
+            null_hypos_df = self.db.load("null_hypos")
+            self.null_hypos = []
+            for i in range(null_hypos_df.shape[0]):
+                n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
+                c = null_hypos_df["c"].iloc[i]
+                self.null_hypos.append(grid.HyperPlane(n, c))
+        else:
             self.null_hypos = g.null_hypos
             # Copy the input grid so that the caller is not surprised by any changes.
             g = copy.deepcopy(g)
@@ -212,7 +220,16 @@ class AdaCalibration:
             # database will be initialized with the correct set of columns.
             g_tuned = self._process_tiles(g, 0)
             self.db.init_tiles(g_tuned.df)
-            # self.db.init_null_hypos(self.null_hypos)
+            d = self.db.dimension()
+
+            n_hypos = len(self.null_hypos)
+            cols = {
+                f"n{i}": [self.null_hypos[j].n[i] for j in range(n_hypos)]
+                for i in range(d)
+            }
+            cols["c"] = [self.null_hypos[j].c for j in range(n_hypos)]
+            null_hypos_df = pd.DataFrame(cols)
+            self.db.store("null_hypos", null_hypos_df)
 
     def _process_tiles(self, g, i):
         # This method actually runs the calibration and bootstrapping.
@@ -449,7 +466,7 @@ def ada_tune(
     n_K_double=4,
     bootstrap_seed=0,
     nB=50,
-    tile_batch_size=64,
+    tile_batch_size=None,
     grid_target=0.001,
     bias_target=0.001,
     std_target=0.002,
@@ -473,6 +490,7 @@ def ada_tune(
         bootstrap_seed: The random seed for bootstrapping. Defaults to 0.
         nB: The number of bootstrap samples. Defaults to 50.
         tile_batch_size: The number of tiles to simulate in a single batch.
+            Defaults to 64 on GPU and 4 on CPU.
         grid_target: Part of the stopping criterion: the target slack from CSE.
                      Defaults to 0.001.
         bias_target: Part of the stopping criterion: the target bias as
@@ -500,6 +518,10 @@ def ada_tune(
         reports: A list of the report dicts from each iteration.
         ada: The Adagrid object after the final iteration.
     """
+    tile_batch_size = tile_batch_size or (
+        64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
+    )
+
     # Why initialize the model here rather than relying on the user to pass an
     # already constructed model object?
     # 1. We can pass the seed here.
@@ -529,20 +551,20 @@ def ada_tune(
         calibration_min_idx=calibration_min_idx,
     )
 
-    try:
-        reports = []
-        # We start at iteration 1 because the initial grid is iteration 0.
-        for ada_iter in range(1, n_iter):
+    reports = []
+    for ada_iter in range(n_iter):
+        try:
             done, report = ada.step(ada_iter)
             if callback is not None:
                 callback(ada_iter, report, ada)
             reports.append(report)
             if done:
                 break
-    except KeyboardInterrupt:
-        return ada_iter, reports, ada
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt")
+            return ada_iter, reports, ada
     # TODO: return db instead of ada?
-    return ada_iter, reports, ada
+    return ada_iter + 1, reports, ada
 
 
 def _validation_process_tiles(driver, g, lam, delta, i, transformation):
