@@ -8,10 +8,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+import confirm.imprint.batching as batching
 import confirm.outlaw.berry as berry
 import confirm.outlaw.inla as inla
 import confirm.outlaw.quad as quad
-from confirm.lewislib import batch
 from confirm.lewislib.table import LinearInterpTable
 from confirm.lewislib.table import LookupTable
 
@@ -388,7 +388,7 @@ class Lewis45:
             grid = self._make_grid(self.n_configs_pd, n_points)
 
         def _process_batch(i, f, batch_size):
-            f_batched = batch.batch_all(
+            f_batched = batching.batch_all(
                 f,
                 batch_size,
                 in_axes=(0,),
@@ -450,7 +450,7 @@ class Lewis45:
             )
 
         def _process_batch(i, f, batch_size):
-            f_batched = batch.batch_all(
+            f_batched = batching.batch_all(
                 f,
                 batch_size,
                 in_axes=(0,),
@@ -530,7 +530,7 @@ class Lewis45:
             )
 
         def _process_batch(i, f, batch_size):
-            f_batched = batch.batch_all(
+            f_batched = batching.batch_all(
                 f,
                 batch_size,
                 in_axes=(0,),

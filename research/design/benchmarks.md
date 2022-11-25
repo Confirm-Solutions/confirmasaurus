@@ -49,7 +49,7 @@ import jax.numpy as jnp
 import pandas as pd
 
 from confirm.lewislib import batch
-import confirm.mini_imprint.lewis_drivers as ld
+import confirm.imprint.lewis_drivers as ld
 from confirm.lewislib import lewis
 ```
 

@@ -11,5 +11,5 @@
   "python.analysis.extraPaths": [
     "./outlaw"
   ],
-  "cmake.configureOnOpen": false,
+  "cmake.configureOnOpen": false
 }

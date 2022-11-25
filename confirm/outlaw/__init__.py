@@ -13,6 +13,7 @@ with warnings.catch_warnings():
 # TODO: there should be a better way to do this that allows the user to specify
 # whether they want to support 64 bit or not. Enabling 64 bit seems to make a
 # number of operations substantially slower!
+# TODO: this is bad! but i'm not sure what to do about it.
 from jax.config import config
 
 config.update("jax_enable_x64", True)

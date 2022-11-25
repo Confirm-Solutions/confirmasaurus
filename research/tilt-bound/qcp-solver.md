@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
 
-import confirm.mini_imprint.bound.binomial as binomial
+import confirm.imprint.bound.binomial as binomial
 from pyimprint.grid import make_cartesian_grid_range
 ```
 

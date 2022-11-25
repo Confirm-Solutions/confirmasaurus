@@ -9,10 +9,10 @@
 import jax
 import os
 import numpy as np
-from confirm.mini_imprint import grid
+from confirm.imprint import grid
 from confirm.lewislib import grid as lewgrid
 from confirm.lewislib import lewis
-from confirm.mini_imprint import binomial
+from confirm.imprint import binomial
 ```
 
 ```python
