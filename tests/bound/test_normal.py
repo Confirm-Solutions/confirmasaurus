@@ -31,6 +31,15 @@ def test_fwd_qcp_solver():
     np.testing.assert_almost_equal(q_opt_deriv, 0.0)
 
 
+def test_fwd_qcp_solver_inf():
+    scale = 2.0
+    v = 0
+    f0 = 0.025
+    fwd_solver = normal.ForwardQCPSolver(scale)
+    q_opt = fwd_solver.solve(v, f0)
+    np.testing.assert_almost_equal(q_opt, np.inf)
+
+
 def test_bwd_qcp_solver():
     scale = 2.0
     v = -0.321
