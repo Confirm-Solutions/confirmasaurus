@@ -51,7 +51,7 @@ jobs:
 
       - name: Update environment
         run: |
-          poetry env use ${{ matrix.python-version }} && poetry install
+          poetry env use ${{ matrix.python-version }} && poetry install --only=test
           
       - name: Get changed files
         id: changed-files
