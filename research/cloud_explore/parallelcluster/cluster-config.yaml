@@ -1,0 +1,27 @@
+Region: us-east-1
+Image:
+  Os: alinux2
+HeadNode:
+  InstanceType: t2.micro
+  Networking:
+    SubnetId: subnet-0983eff7514e2beba
+  Ssh:
+    KeyName: aws-key-pair
+  Iam:
+    S3Access:
+      - BucketName: imprint-dump
+        EnableWriteAccess: true
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+  - Name: queue1
+    CapacityType: SPOT
+    ComputeResources:
+    - Name: t2medium
+      Instances:
+      - InstanceType: t2.medium
+      MinCount: 0
+      MaxCount: 4
+    Networking:
+      SubnetIds:
+      - subnet-0983eff7514e2beba

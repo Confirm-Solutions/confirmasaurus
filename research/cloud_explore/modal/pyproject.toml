@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "confirm"
+version = "0.1.0"
+description = ""
+authors = ["Confirm Solutions <research@confirmsol.org>"]
+
+[tool.poetry.dependencies]
+python = "~3.10"
+jax = "^0.3.24"
+jaxlib = "^0.3.24"
+
+[[tool.poetry.source]]
+name = "jax"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+default = false
+secondary = false
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
