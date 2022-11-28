@@ -6,9 +6,11 @@ img = modal.Image.debian_slim().poetry_install_from_file("pyproject.toml")
 
 @stub.function(image=img)
 def f(n):
-    import pkg_resources
+    import jax
 
-    return pkg_resources.get_distribution("poetry").version
+    seed = jax.random.PRNGKey(0)
+    arr = jax.random.choice(seed, n, shape=(n, n))
+    return arr.sum()
 
 
 if __name__ == "__main__":

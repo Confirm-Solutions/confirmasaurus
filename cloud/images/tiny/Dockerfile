@@ -24,5 +24,5 @@ RUN mamba env update -n base -f /tmp/conda-tmp/environment.yml \
 COPY pyproject.toml poetry.lock ./confirm /confirmasaurus/
 RUN cd /confirmasaurus \
     && poetry config virtualenvs.create false \
-    && poetry install --without test
+    && poetry install --without=test,dev
 WORKDIR /confirmasaurus
