@@ -1,0 +1,10 @@
+[tool.poetry]
+name = "confirm-jobrunner"
+version = "0.1.0"
+description = ""
+authors = ["Confirm Solutions <research@confirmsol.org>"]
+
+[tool.poetry.dependencies]
+python = "~3.10"
+cloudpickle = "~2.0"
+boto3 = "^1.26.17"

@@ -4,10 +4,11 @@ Tools for setting up nice Jupyter notebooks.
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from IPython import get_ipython
 
 
 def magic(text):
+    from IPython import get_ipython
+
     ipy = get_ipython()
     if ipy is not None:
         ipy.magic(text)
