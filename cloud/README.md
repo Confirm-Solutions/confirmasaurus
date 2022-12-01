@@ -4,6 +4,8 @@
 
 ## Our Docker images
 
+NOTE: The images that install JAX for cuda will not build inside Docker Desktop on an M1 Mac because cuda jaxlib requires x86.
+
 We have three docker images at the moment:
 
 - `smalldev` - this is a minimal docker image for developing our Python/C++/JAX/CUDA codebase. All our tests should pass and you should be able to 80% of development tasks.
