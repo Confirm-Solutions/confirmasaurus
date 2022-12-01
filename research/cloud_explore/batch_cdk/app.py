@@ -46,7 +46,7 @@ class BatchCdkStack(Stack):
                     ec2.InstanceType("m6a.large"),  # 2 vCPU, 8 GB RAM
                     ec2.InstanceType("m6a.8xlarge"),  # 32 vCPU, 128 GB RAM
                     ec2.InstanceType("p3.2xlarge"),  # 8 vCPU, 61 GB RAM, 1 V100
-                    ec2.InstanceType("p3.8xlarge"),  #
+                    ec2.InstanceType("p3.8xlarge"),  # 32 vCPU 244 GB RAM, 4 V100
                 ],
                 type=batch.ComputeResourceType.SPOT,
             ),

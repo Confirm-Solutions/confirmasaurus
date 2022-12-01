@@ -5,6 +5,4 @@ dependencies:
   - python=3.10
   - pip
   - pip:
-    - poetry>=1.2.2
-    - boto3>=1.26
-    - cloudpickle<2.2
+    - poetry==1.2.2
