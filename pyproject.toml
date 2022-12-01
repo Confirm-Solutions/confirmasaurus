@@ -12,6 +12,7 @@ python = "~3.10"
 numpy = "^1.23.4"
 scipy = "^1.9.3"
 sympy = "^1.11.1"
+matplotlib = "^3.6.2"
 pandas = "^1.5.1"
 jax = "0.3.24"
 numpyro = "^0.10.1"
@@ -19,7 +20,6 @@ jaxlib = [
     {version = "0.3.22", platform = "darwin", source="pypi"},
     {version = "0.3.24+cuda11.cudnn82", platform = "linux"}
 ]
-rich = "^12.6.0"
 duckdb = "^0.6.0"
 
 [tool.poetry.group.test.dependencies]
@@ -34,8 +34,8 @@ jupytext = "^1.14.1"
 reorder-python-imports = "^3.9.0"
 flake8 = "^5.0.4"
 black = {extras = ["jupyter"], version = "^22.10.0"}
-matplotlib = "^3.6.2"
 jupyter = "^1.0.0"
+rich = "^12.6.0"
 
 [[tool.poetry.source]]
 name = "jax"
