@@ -165,9 +165,8 @@ RUN mamba create -n sagemath -y sage \
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
 #
-# BUG: the install here does not work correctly when launched inside docker
-# from an M1 Mac because it's running Linux on an "aarch64" architecture and
-# the PyPI packages from JAX are not properly set up.
+# NOTE: For the install here to work correctly through, you will need:
+# `docker build --platform linux/amd64` because jaxlib isn't built for ARM.
 #
 # NOTE: installing g++ gcc binutils through conda results in conda activate
 # being slightly slow. this is weird and kind of a bummer.
@@ -175,7 +174,7 @@ RUN mamba create -n sagemath -y sage \
     && mamba env update -n base -f environment.yml \
     && mamba install -y radian \
     && poetry config virtualenvs.create false \
-    && poetry install \
+    && poetry install --with=test,dev,cloud\
     && cd / \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \

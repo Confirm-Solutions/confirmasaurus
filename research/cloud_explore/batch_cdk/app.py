@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
 import os
+import shutil
 
 import aws_cdk as cdk
 import keyring
@@ -9,6 +9,9 @@ from aws_cdk import aws_ecr_assets
 from aws_cdk import aws_ecs as ecs
 from aws_cdk import Stack
 from constructs import Construct
+
+shutil.copy2("../../../pyproject.toml", "./image")
+shutil.copy2("../../../poetry.lock", "./image")
 
 
 class BatchCdkStack(Stack):
@@ -20,7 +23,10 @@ class BatchCdkStack(Stack):
         )
 
         docker_image_asset = aws_ecr_assets.DockerImageAsset(
-            self, "ECRDockerImageAsset", directory="./image"
+            self,
+            "ECRDockerImageAsset",
+            directory="./image",
+            platform=aws_ecr_assets.Platform.LINUX_AMD64,
         )
         image = ecs.ContainerImage.from_docker_image_asset(docker_image_asset)
 

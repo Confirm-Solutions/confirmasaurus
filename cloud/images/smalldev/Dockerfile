@@ -70,7 +70,7 @@ COPY environment.yml pyproject.toml poetry.lock /tmp/conda-tmp/
 RUN cd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment.yml \
     && poetry config virtualenvs.create false \
-    && poetry install \
+    && poetry install --with=test,dev,cloud \
     && cd / \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \
