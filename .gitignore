@@ -23,11 +23,19 @@ Vagrantfile
 compile_commands.json
 
 # python stuff
-__pycache__
-*.pkl
+__pycache__/
+*.py[cod]
+*$py.class
+
+# notebook stuff
+.ipynb_checkpoints
+
+# profiler outputs
 *.lprof
 *.prof
-*.npy
+
+# python packaging outputs
+*.egg-info
 
 # c++ extensions built in place within the source tree.
 .rendered.*.cpp
@@ -36,17 +44,17 @@ __pycache__
 # bazel outputs
 *pid*.log
 
-# python packaging outputs
-*.egg-info
 
 # Codespaces
 oryx-build-commands.txt
 venv
 
-# Cloud and AWS stuff
+# Cloud and AWS stuff, CDK
 .terraform
 .terraform.*
 terraform.*
+.cdk.staging/
+cdk.out/
 
 # explicitly ignore a file.
 *.gitignore
@@ -55,8 +63,9 @@ terraform.*
 # (e.g. CI will want to use virtualenvs but locally we use conda)
 poetry.toml
 
-.ipynb_checkpoints
-
-# dataframe and database files
-*.db
+# various data
+*.pkl
+*.npy
 *.parquet
+*.db
+*.zip

@@ -150,7 +150,7 @@ tests-no-zope = ["cloudpickle", "coverage[toml] (>=5.0.2)", "hypothesis", "mypy 
 
 [[package]]
 name = "aws-cdk-asset-awscli-v1"
-version = "2.2.25"
+version = "2.2.24"
 description = "A library that contains the AWS CLI for use in Lambda Layers"
 category = "dev"
 optional = false
@@ -176,7 +176,7 @@ typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-asset-node-proxy-agent-v5"
-version = "2.0.31"
+version = "2.0.30"
 description = "@aws-cdk/asset-node-proxy-agent-v5"
 category = "dev"
 optional = false
@@ -283,14 +283,14 @@ dev = ["Sphinx (==4.3.2)", "black (==22.3.0)", "build (==0.8.0)", "flake8 (==4.0
 
 [[package]]
 name = "boto3"
-version = "1.26.22"
+version = "1.26.20"
 description = "The AWS SDK for Python"
 category = "main"
 optional = false
 python-versions = ">= 3.7"
 
 [package.dependencies]
-botocore = ">=1.29.22,<1.30.0"
+botocore = ">=1.29.20,<1.30.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.6.0,<0.7.0"
 
@@ -299,7 +299,7 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.29.22"
+version = "1.29.20"
 description = "Low-level, data-driven core of boto 3."
 category = "main"
 optional = false
@@ -431,7 +431,7 @@ test = ["flake8 (==3.7.8)", "hypothesis (==3.55.3)"]
 
 [[package]]
 name = "constructs"
-version = "10.1.177"
+version = "10.1.176"
 description = "A programming model for software-defined state"
 category = "dev"
 optional = false
@@ -1257,7 +1257,7 @@ python-versions = "*"
 
 [[package]]
 name = "modal-client"
-version = "0.41.417"
+version = "0.41.409"
 description = "Python client library for Modal"
 category = "dev"
 optional = false
@@ -2473,7 +2473,7 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "1.1"
 python-versions = "~3.10"
-content-hash = "efc59f43cfea16a5031d26f0fd29f4c7e535813afa25486574565b18684bf9c5"
+content-hash = "ab02e9bf3880ccf98d9d73daaafc2c5219d5b54f30da9f3ab720a3eeceabaae4"
 
 [metadata.files]
 absl-py = [
@@ -2629,16 +2629,16 @@ attrs = [
     {file = "attrs-22.1.0.tar.gz", hash = "sha256:29adc2665447e5191d0e7c568fde78b21f9672d344281d0c6e1ab085429b22b6"},
 ]
 aws-cdk-asset-awscli-v1 = [
-    {file = "aws-cdk.asset-awscli-v1-2.2.25.tar.gz", hash = "sha256:292b0a664d71302090fe29b4dcdca622d026ea76cbe0b8de4cad1b82403ff5b2"},
-    {file = "aws_cdk.asset_awscli_v1-2.2.25-py3-none-any.whl", hash = "sha256:617f3438a58c4ffc618a76c6a93b4d2a7aed71ba193705e873aa9214547d33a6"},
+    {file = "aws-cdk.asset-awscli-v1-2.2.24.tar.gz", hash = "sha256:5ad9722dbebe9a04bd94f644e4a791ffdcc63fb6416079ae50fb2eb278ee3273"},
+    {file = "aws_cdk.asset_awscli_v1-2.2.24-py3-none-any.whl", hash = "sha256:9c53354ab8db4a51f04068adcb39d6248c6d9ce01c54f90fed79de2a93176a18"},
 ]
 aws-cdk-asset-kubectl-v20 = [
     {file = "aws-cdk.asset-kubectl-v20-2.1.1.tar.gz", hash = "sha256:9834cdb150c5590aea4e5eba6de2a89b4c60617451181c524810c5a75154565c"},
     {file = "aws_cdk.asset_kubectl_v20-2.1.1-py3-none-any.whl", hash = "sha256:a2fad1a5a35a94a465efe60859f91e45dacc33261fb9bbf1cf9bbc6e2f70e9d6"},
 ]
 aws-cdk-asset-node-proxy-agent-v5 = [
-    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.31.tar.gz", hash = "sha256:c9724a9dd85f1a10016f78562ab20d0030eec5213782eedca67f8290e0875058"},
-    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.31-py3-none-any.whl", hash = "sha256:c370f6a04a34f7a8a6418922886fb9402d57ad4431354d3ce1c7b3acc5a498b7"},
+    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.30.tar.gz", hash = "sha256:6e6ec7594e2bca8344c20745a737d04d4832be9f53925bf2f44cba0af232a704"},
+    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.30-py3-none-any.whl", hash = "sha256:cb779709e15d99ce4c723752c24282b6d8dcf137b34c89bbe225ae57a007d1a1"},
 ]
 aws-cdk-aws-batch-alpha = [
     {file = "aws-cdk.aws-batch-alpha-2.53.0a0.tar.gz", hash = "sha256:6342c3c363dc5071a6c9157039a0d0886c7cc672c8d902741d1a16a57d6a5f07"},
@@ -2684,12 +2684,12 @@ bleach = [
     {file = "bleach-5.0.1.tar.gz", hash = "sha256:0d03255c47eb9bd2f26aa9bb7f2107732e7e8fe195ca2f64709fcf3b0a4a085c"},
 ]
 boto3 = [
-    {file = "boto3-1.26.22-py3-none-any.whl", hash = "sha256:a4cf7fe649b0202f2f2307eb982ca215edcf9c87b6e65f5b3405f66c289603f2"},
-    {file = "boto3-1.26.22.tar.gz", hash = "sha256:f16c3aef1432c5083a9e1c36ac08b70b9072e87205e970f8d7520b10b964858f"},
+    {file = "boto3-1.26.20-py3-none-any.whl", hash = "sha256:6b2e04ea415f375f607e6c633f7699e6a56bdc35c294116c5a6dc02da6aaa2ba"},
+    {file = "boto3-1.26.20.tar.gz", hash = "sha256:0d61243999adaddee22855ada1fdf7fe3d89cc95821e82f3b3a9dbe56c1589ba"},
 ]
 botocore = [
-    {file = "botocore-1.29.22-py3-none-any.whl", hash = "sha256:d3029e81f0112a74e5c83c6eebcdcf8d221e996f062d5e2b715963976ae4895f"},
-    {file = "botocore-1.29.22.tar.gz", hash = "sha256:ce637e3537388200775d80c5a3170df4810ddf7afbd7883db5673279b2584f68"},
+    {file = "botocore-1.29.20-py3-none-any.whl", hash = "sha256:7c26cb870d0cae26349df2926a7bf6277c1326db6d42c650807a519d50a83786"},
+    {file = "botocore-1.29.20.tar.gz", hash = "sha256:806dab6358b0b44d7b283f133aadd26846f31fab12c97d348a1849b3b5a36c74"},
 ]
 cattrs = [
     {file = "cattrs-22.2.0-py3-none-any.whl", hash = "sha256:bc12b1f0d000b9f9bee83335887d532a1d3e99a833d1bf0882151c97d3e68c21"},
@@ -2861,8 +2861,8 @@ commonmark = [
     {file = "commonmark-0.9.1.tar.gz", hash = "sha256:452f9dc859be7f06631ddcb328b6919c67984aca654e5fefb3914d54691aed60"},
 ]
 constructs = [
-    {file = "constructs-10.1.177-py3-none-any.whl", hash = "sha256:c7e40391aed81539a4f1e591c5f5a1078399131f28b77128181dfeae00112fac"},
-    {file = "constructs-10.1.177.tar.gz", hash = "sha256:d1e51cbc6b39476da9e6ac263728be3b605f0a822d5e43a6f0302b44e41c5e3e"},
+    {file = "constructs-10.1.176-py3-none-any.whl", hash = "sha256:7e2eb33da89ff1db9c9d28b3969499889310b38f1c1fdf696039a9d58e6a2e53"},
+    {file = "constructs-10.1.176.tar.gz", hash = "sha256:06d15fd83e8fddc7c9e266c5fe341d425390768b23ae46aaa96378661789156e"},
 ]
 contourpy = [
     {file = "contourpy-1.0.6-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:613c665529899b5d9fade7e5d1760111a0b011231277a0d36c49f0d3d6914bd6"},
@@ -3521,7 +3521,7 @@ mistune = [
     {file = "mistune-2.0.4.tar.gz", hash = "sha256:9ee0a66053e2267aba772c71e06891fa8f1af6d4b01d5e84e267b4570d4d9808"},
 ]
 modal-client = [
-    {file = "modal_client-0.41.417-py3-none-any.whl", hash = "sha256:6a78987571c6765674106858005bd2ab8a7ae764759265382abfce251d565ab7"},
+    {file = "modal_client-0.41.409-py3-none-any.whl", hash = "sha256:833031a4d76f1355f753d564a2dcf587962c548ebddc4b8675f4fefbdb65698f"},
 ]
 more-itertools = [
     {file = "more-itertools-9.0.0.tar.gz", hash = "sha256:5a6257e40878ef0520b1803990e3e22303a41b5714006c32a3fd8304b26ea1ab"},

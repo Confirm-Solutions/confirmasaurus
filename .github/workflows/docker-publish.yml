@@ -11,7 +11,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
-      - "environment*.yml"
+      - "environment.yml"
       - "pyproject.toml"
       - "poetry.lock"
       - "cloud/images/**"
@@ -21,7 +21,7 @@ on:
       - main
     tags: ["v*.*.*"]
     paths:
-      - "environment*.yml"
+      - "environment.yml"
       - "pyproject.toml"
       - "poetry.lock"
       - "cloud/images/**"
@@ -40,8 +40,6 @@ jobs:
       matrix:
         include:
           - NAME: smalldev
-          - NAME: clouddev
-          - NAME: tiny
     permissions:
       contents: read
       packages: write

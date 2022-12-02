@@ -9,7 +9,8 @@ poetry config virtualenvs.create false --local
 # installed our dependencies in the Dockerfile.
 poetry install || true
 
-# Install our package:
+# Install our package (if the above line failed, we still want to make sure we
+# install the confirm package itself!)
 poetry install --only-root
 
 # Set up pre-commit so it's fast the first time it gets used

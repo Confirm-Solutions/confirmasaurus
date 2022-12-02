@@ -426,13 +426,11 @@ class Adagrid:
 
 
 def print_report(_iter, report, _ada):
-    from rich import print as rprint
-
     ready = report.copy()
     for k in ready:
         if isinstance(ready[k], float) or isinstance(ready[k], jnp.DeviceArray):
             ready[k] = f"{ready[k]:.6f}"
-    rprint(ready)
+    print(ready)
 
 
 def ada_tune(

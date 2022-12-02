@@ -52,10 +52,9 @@
   // Use 'postCreateCommand' to run commands after the container is created.
   // CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
   "onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh",
-  // Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
   // We are connecting as root because it simplifies things and there is no
   // strong reason to have isolation in this context.
-  // "remoteUser": "vscode"
+  "remoteUser": "root",
 
   // Based on https://github.com/microsoft/vscode-dev-containers/blob/main/containers/codespaces-linux/.devcontainer/devcontainer.json
   // adding capabilities to the container so that we can do things like use
@@ -69,5 +68,8 @@
     "seccomp=unconfined",
     "--privileged",
     "--init"
-  ]
+  ],
+  "features": {
+    "docker-from-docker": "latest"
+  }
 }
