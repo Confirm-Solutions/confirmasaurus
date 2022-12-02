@@ -5,7 +5,7 @@ import numpy as np
 
 def f():
     np.random.seed(0)
-    A = np.random.rand(2000, 2000)
+    A = np.random.rand(20, 20)
     Ai = np.linalg.inv(A)
     return Ai.diagonal()[0]
 

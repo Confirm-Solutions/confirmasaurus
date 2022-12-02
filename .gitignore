@@ -68,3 +68,4 @@ poetry.toml
 *.npy
 *.parquet
 *.db
+*.zip

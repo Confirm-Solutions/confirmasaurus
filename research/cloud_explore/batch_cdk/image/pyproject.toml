@@ -34,6 +34,15 @@ pytest-xdist = {extras = ["psutil"], version = "^3.0.2"}
 [tool.poetry.group.dev]
 optional = true
 
+[tool.poetry.group.cloud]
+optional = true
+
+[tool.poetry.group.cloud.dependencies]
+clickhouse-connect = "^0.4.6"
+redis = "^4.3.5"
+pyarrow = "^10.0.1"
+cloudpickle = "~2.0"
+
 [tool.poetry.group.dev.dependencies]
 typer = "^0.6.1"
 line-profiler = "^3.5.1"
@@ -43,19 +52,10 @@ flake8 = "^5.0.4"
 black = {extras = ["jupyter"], version = "^22.10.0"}
 jupyter = "^1.0.0"
 rich = "^12.6.0"
-
-[tool.poetry.group.cloud]
-optional = true
-
-[tool.poetry.group.cloud.dependencies]
-clickhouse-connect = "^0.4.6"
 aws-cdk-lib = "^2.53.0"
 aws-cdk-aws-batch-alpha = "^2.53.0a0"
-redis = "^4.3.5"
 modal-client = "^0.41.396"
-pyarrow = "^10.0.1"
 keyring = "^23.11.0"
-cloudpickle = "~2.0"
 
 [[tool.poetry.source]]
 name = "jax"

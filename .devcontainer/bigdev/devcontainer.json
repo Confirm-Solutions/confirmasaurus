@@ -5,6 +5,7 @@
     "context": "../..",
     "dockerfile": "../../cloud/bigdev/Dockerfile"
   },
+  "remoteUser": "root",
   // Configure tool-specific properties.
   "customizations": {
     // Configure properties specific to VS Code.

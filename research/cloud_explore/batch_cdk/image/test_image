@@ -1,1 +1,2 @@
-docker run -v /Users/tbent/.aws:/root/.aws jobrunner
+#/bin/bash
+docker run --rm -v $HOME/.aws:/root/.aws jobrunner

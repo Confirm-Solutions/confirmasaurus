@@ -1257,7 +1257,7 @@ python-versions = "*"
 
 [[package]]
 name = "modal-client"
-version = "0.41.403"
+version = "0.41.409"
 description = "Python client library for Modal"
 category = "dev"
 optional = false
@@ -2473,7 +2473,7 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "1.1"
 python-versions = "~3.10"
-content-hash = "4e4015dd8fa059a7c4e2bb08000337c910959a68b73aa29468404fe367fcfb99"
+content-hash = "ab02e9bf3880ccf98d9d73daaafc2c5219d5b54f30da9f3ab720a3eeceabaae4"
 
 [metadata.files]
 absl-py = [
@@ -3521,7 +3521,7 @@ mistune = [
     {file = "mistune-2.0.4.tar.gz", hash = "sha256:9ee0a66053e2267aba772c71e06891fa8f1af6d4b01d5e84e267b4570d4d9808"},
 ]
 modal-client = [
-    {file = "modal_client-0.41.403-py3-none-any.whl", hash = "sha256:1c3934853197173bea2ff1f228077ff1cb5f3f18d6d7012da785f31bb671b9e8"},
+    {file = "modal_client-0.41.409-py3-none-any.whl", hash = "sha256:833031a4d76f1355f753d564a2dcf587962c548ebddc4b8675f4fefbdb65698f"},
 ]
 more-itertools = [
     {file = "more-itertools-9.0.0.tar.gz", hash = "sha256:5a6257e40878ef0520b1803990e3e22303a41b5714006c32a3fd8304b26ea1ab"},
