@@ -12,16 +12,7 @@ def f():
     import confirm.imprint as ip
     from confirm.models.ztest import ZTest1D
 
-    print(os.environ["LD_LIBRARY_PATH"])
-    print(os.environ["LD_LIBRARY_PATH"])
-    print(os.environ["LD_LIBRARY_PATH"])
-    print(os.listdir("/usr/local/cuda/compat"))
-    print(os.listdir("/usr/local/cuda/compat"))
-    print(os.listdir("/usr/local/cuda/compat"))
     os.system("nvidia-smi")
-    os.system("nvidia-smi")
-    os.system("nvidia-smi")
-
     start = time.time()
     print("Loaded confirm in {:.2f} seconds".format(time.time() - start))
     start = time.time()

@@ -79,12 +79,6 @@ con.execute(
 ## duckdb
 
 ```python
-import pandas as pd
-
-df = pd.read_parquet("dbtest.parquet")
-```
-
-```python
 chunk = df[:]
 chunk.shape
 ```
@@ -92,6 +86,7 @@ chunk.shape
 ```python
 import duckdb
 import pyarrow as pa
+import pandas as pd
 import pickle
 
 con = duckdb.connect()
