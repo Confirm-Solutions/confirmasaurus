@@ -21,7 +21,6 @@ jaxlib = [
     {version = "0.3.24+cuda11.cudnn82", platform = "linux"}
 ]
 duckdb = "^0.6.0"
-boto3 = "^1.26.20"
 
 [tool.poetry.group.test]
 optional = true
@@ -38,6 +37,7 @@ optional = true
 optional = true
 
 [tool.poetry.group.cloud.dependencies]
+boto3 = "^1.26.20"
 clickhouse-connect = "^0.4.6"
 redis = "^4.3.5"
 pyarrow = "^10.0.1"
