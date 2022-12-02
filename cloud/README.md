@@ -8,7 +8,7 @@ NOTE: The images that install JAX for cuda will not build inside Docker Desktop 
 
 We have three docker images at the moment:
 
-- `smalldev` - this is a minimal docker image for developing our Python/C++/JAX/CUDA codebase. All our tests should pass and you should be able to 80% of development tasks.
+- `smalldev` - this is a minimal docker image for developing our Python/C++/JAX/CUDA codebase. All our tests should pass and you should be able to 95% of development tasks.
 - `clouddev` - this is a very small image that has docker installed _inside_ the image. It also includes terraform and the AWS CLI. It's useful if you want to do some docker/cloud infrastructure work on a remote machine.
 - `bigdev` - this is a much larger docker image. The set up focuses on anything you could possibly want when using our repo.
   - Conda environment: a conda environment including all our standard tools.

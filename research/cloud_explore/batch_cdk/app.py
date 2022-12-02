@@ -121,7 +121,6 @@ class BatchCdkStack(Stack):
                     ec2.InstanceType("r6i.xlarge"),
                     ec2.InstanceType("r6i.2xlarge"),
                     ec2.InstanceType("r6i.4xlarge"),
-                    # GPU enabled P instances
                     ec2.InstanceType("p3.2xlarge"),
                     ec2.InstanceType("p3.8xlarge"),
                 ],

@@ -34,13 +34,13 @@ def f():
 
 
 def main():
-    awsbatch_tool.local_test(f)
-    # resp, bucket, filename = awsbatch_tool.remote_run(
-    #   f2, cpus=2, memory=2**12, gpu=True
-    # )
-    # print(resp)
-    # print(bucket)
-    # print(filename)
+    # awsbatch_tool.local_test(f)
+    resp, bucket, filename = awsbatch_tool.remote_run(
+        f, cpus=2, memory=2**12, gpu=True
+    )
+    print(resp)
+    print(bucket)
+    print(filename)
 
 
 if __name__ == "__main__":
