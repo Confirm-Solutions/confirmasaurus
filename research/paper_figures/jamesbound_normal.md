@@ -3,7 +3,7 @@
 
 ```python
 import confirm.outlaw.nb_util as nb_util
-import confirm.mini_imprint.bound.normal as jamesbound
+import confirm.bound.normal as jamesbound
 
 nb_util.setup_nb()
 import numpy as np
@@ -282,18 +282,20 @@ boundpoint = -0.25
 ystart = true_err(boundpoint)
 qlist = 2 ** np.linspace(9, 4, 6)
 vlist = np.linspace(0, 0.25, 2000)
-outputs = np.zeros(shape=(len(qlist), len(vlist)))
-for i in range(len(qlist)):
-    for j in range(len(vlist)):
-        outputs[i, j] = jamesbound.tilt_bound_fwd(qlist[i], 1, vlist[j], ystart)
-qlist
+outputs = jax.vmap(
+    jax.vmap(jamesbound.tilt_bound_fwd, in_axes=(None, None, 0, None)),
+    in_axes=(0, None, None, None),
+)(qlist, 1, vlist, ystart)
+qlist, outputs.shape
 ```
 
 ```python
 # What is the optimal q for each v in vlist?
 qsolve = jamesbound.ForwardQCPSolver(scale=1)
-optqs = qsolve.solve(vlist, true_err(boundpoint))
-optbound = jamesbound.tilt_bound_fwd(optqs, 1, vlist, ystart)
+fwd_solve_vmap = jax.vmap(qsolve.solve, in_axes=(0, None))
+fwd_bound_vmap = jax.vmap(jamesbound.tilt_bound_fwd, in_axes=(0, None, 0, None))
+optqs = fwd_solve_vmap(vlist, true_err(boundpoint))
+optbound = fwd_bound_vmap(optqs, 1, vlist, ystart)
 # We observe that the optimal q ranges from 250 down to 10. It can go much below this for smaller ranges of q, as well.
 ```
 
@@ -356,40 +358,42 @@ plt.savefig("figs/greens_up.pdf", bbox_inches="tight")
 
 ```python
 # Next, let's do the backward plot!
-vlist = np.linspace(0, 0.25, 25)
-x = np.linspace(-0.25, 0, 1000)
-z = ztest(delta=0.05, x=x, nsims=int(1e5))
-mu_dense10 = np.linspace(-0.25, 0, 100)
-pow_dense10 = true_err(mu_dense10)
-# Plotting the true function in red
-plt.plot(mu_dense10, pow_dense10, "r:", linewidth=2, label="True Type I Error")
-vadjust = -vlist
+alpha = 0.025
+theta0 = -0.25
+vlist = np.linspace(0, -theta0, 25)
+ts = theta0 + vlist
+
+# Plot baseline level alpha
+mu_dense10 = np.linspace(theta0, 0, 100)
+f0 = true_err(theta0)
+optimal_ties = 1 - jax.scipy.stats.norm.cdf(
+    jax.scipy.stats.norm.ppf(1 - alpha) + mu_dense10 - theta0
+)
+plt.plot(
+    mu_dense10,
+    optimal_ties,
+    "r:",
+    linewidth=2,
+    label="Optimal Type I Error at $\\theta_0=-0.25$",
+)
 
 # Now plotting the optimal
 qsolveback = jamesbound.BackwardQCPSolver(scale=1)
-optqsback = qsolve.solve(vlist, 0.025)
-optboundback = jamesbound.tilt_bound_bwd(optqsback, 1, vlist, 0.025)
-plt.plot(vadjust, optboundback, "k", linewidth=1, label="Optimized Bound")
+bwd_solve_vmap = jax.vmap(qsolveback.solve, in_axes=(0, None))
+bwd_bound_vmap = jax.vmap(jamesbound.tilt_bound_bwd, in_axes=(0, None, 0, None))
+optqsback = bwd_solve_vmap(vlist, 0.025)
+optboundback = bwd_bound_vmap(optqsback, 1, vlist, 0.025)
+plt.plot(ts, optboundback, "k", linewidth=1, label="Optimized Bound")
 
 # Plotting for 6 different choices of q, ranging from 2^4 to 2^9
 for i in range(len(qlist)):
-    output = jamesbound.tilt_bound_bwd(qlist[i], 1, vlist, 0.025)
+    output = bwd_bound_vmap(np.full(len(vlist), qlist[i]), 1, vlist, 0.025)
     filter = output < 0.03
-    plt.plot(vadjust[filter], output[filter], "g:", linewidth=1)
-plt.plot(
-    vadjust[filter],
-    output[filter],
-    "g",
-    linestyle=":",
-    linewidth=1,
-    label="Tilt-Bound(q)",
-)
+    plt.plot(ts[filter], output[filter], "g:", linewidth=1)
 
-leg = plt.legend(loc="upper left", fontsize=10)
+leg = plt.legend(fontsize=10)
 
-plt.scatter(0, true_err(0), color="k", marker="o", s=20)
-# plt.axvline(0, color='k', linestyle='--',linewidth = '.25')
-# plt.axhline(.025, color='k', linestyle='-.',linewidth = '.5')
+plt.scatter(theta0, f0, color="k", marker="o", s=20)
 plt.xlim([-0.253, 0.003])
 yticks = np.linspace(0, 0.025, 6)
 plt.yticks(
@@ -401,18 +405,27 @@ plt.yticks(
 plt.xlabel("$\\theta$")
 plt.ylabel("Type I Error ($\%$)")
 
-plt.text(-0.066, 0.0073, "512", fontsize=8)
-plt.text(-0.110, 0.0072, "256", fontsize=8)
-plt.text(-0.15, 0.0071, "128", fontsize=8)
-plt.text(-0.205, 0.006975, "64", fontsize=8)
-plt.text(-0.25, 0.00688, "32", fontsize=8)
-plt.text(-0.25, 0.0113, "q = 16", fontsize=8)
+plt.text(-0.01, 0.011, "512", fontsize=8)
+plt.text(-0.04, 0.0085, "256", fontsize=8)
+plt.text(-0.08, 0.0071, "128", fontsize=8)
+plt.text(-0.13, 0.006975, "64", fontsize=8)
+plt.text(-0.165, 0.00688, "32", fontsize=8)
+plt.text(-0.21, 0.00688, "q = 16", fontsize=8)
 
 plt.savefig("figs/greens_down.pdf", bbox_inches="tight")
 ```
 
-#Next Figure: Showing the critical value of lambda which gives a proper backsolve? Actually, nevermind, let's just drop that figure!!
-We'll say clearly that we require to tune for a target TIE of at most
+Now, we plot for a range of number of grid-points in $[-1, 0]$ the Type I Error of the overall procedure 
+with the optimal critical threshold. 
+
+```python
+def crit_thresh(t, alpha):
+    return scipy.stats.norm.ppf(1 - alpha) + t
+```
+
+```python
+crit_thresh(0, 0.025)
+```
 
 ```python
 optboundback[len(optboundback)]
