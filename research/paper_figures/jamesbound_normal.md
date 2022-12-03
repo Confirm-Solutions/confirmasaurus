@@ -393,7 +393,7 @@ for i in range(len(qlist)):
 
 leg = plt.legend(fontsize=10)
 
-plt.scatter(theta0, f0, color="k", marker="o", s=20)
+plt.scatter(theta0, alpha, color="k", marker="o", s=20)
 plt.xlim([-0.253, 0.003])
 yticks = np.linspace(0, 0.025, 6)
 plt.yticks(
