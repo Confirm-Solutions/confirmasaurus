@@ -63,16 +63,16 @@ def batch_yield(f, batch_size: int, in_axes):
                 "whose corresponding in_axes is not None."
             )
 
+        if len(args) != len(in_axes):
+            raise ValueError(
+                "The number of arguments must match the number of in_axes."
+            )
+
         dims_all_equal = np.sum(dims != dims[0]) == 0
         if not dims_all_equal:
             raise ValueError(
                 "All batched arguments must have the same dimension "
                 "along their corresopnding in_axes."
-            )
-
-        if len(args) != len(in_axes):
-            raise ValueError(
-                "The number of arguments must match the number of in_axes."
             )
 
         dim = dims[0]
