@@ -102,9 +102,9 @@ http_archive(
 
 http_archive(
     name = "com_google_tcmalloc",
-    sha256 = "2e5e6755e02b0275b1333199c2a128a57c0d48ec8838fdca9baccf3b0e939ad6",
-    strip_prefix = "tcmalloc-a3717bc4fcade63c642f9b991fbdd64299896762",
-    urls = ["https://github.com/google/tcmalloc/archive/a3717bc4fcade63c642f9b991fbdd64299896762.zip"],
+    sha256 = "900ff94e82ff62b4d8ce838c63e78f0921855e9963b1f37d6d97824cd5cafd10",
+    strip_prefix = "tcmalloc-d4ad7f61c19b0fbf5de8cabdf053bb2a384c4f98",
+    urls = ["https://github.com/google/tcmalloc/archive/d4ad7f61c19b0fbf5de8cabdf053bb2a384c4f98.zip"],
 )
 
 # ====================================
