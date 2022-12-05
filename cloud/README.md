@@ -185,3 +185,7 @@ TODO: I think this is one of the remaining important tasks here. See the [issue 
   unzip awscliv2.zip
   sudo ./aws/install -i /usr/local/aws-cli -b /usr/local/bin
   ```
+
+## AWS Contacts:
+
+- Taylor Dickey is our AWS representative. Mike should have her contact info if it's needed.

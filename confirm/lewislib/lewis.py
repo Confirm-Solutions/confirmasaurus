@@ -1086,8 +1086,7 @@ class Lewis45Model:
         )
         self.unifs_order = jnp.arange(0, self.unifs.shape[1])
 
-        sim_batch_size = 1024
-        grid_batch_size = 64
+        sim_batch_size = 2048
 
         def stat(theta, null_truth, unifs, unifs_order):
             p = jax.scipy.special.expit(theta)
@@ -1098,14 +1097,10 @@ class Lewis45Model:
 
         self.statv = jax.jit(jax.vmap(stat, in_axes=(0, 0, None, None)))
         self.batched_statv = batching.batch(
-            batching.batch(
-                self.statv,
-                sim_batch_size,
-                in_axes=(None, None, 0, None),
-                out_axes=(1,),
-            ),
-            grid_batch_size,
-            in_axes=(0, 0, None, None),
+            self.statv,
+            sim_batch_size,
+            in_axes=(None, None, 0, None),
+            out_axes=(1,),
         )
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
