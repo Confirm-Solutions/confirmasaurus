@@ -313,9 +313,10 @@ class Grid:
         _inherit(out.df, self.df, 2**self.d, inherit_cols)
         return out
 
-    def concat(self, other):
+    def concat(self, *others):
         return Grid(
-            pd.concat((self.df, other.df), axis=0, ignore_index=True), self.null_hypos
+            pd.concat((self.df, *[o.df for o in others]), axis=0, ignore_index=True),
+            self.null_hypos,
         )
 
 

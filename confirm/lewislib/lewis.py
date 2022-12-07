@@ -1080,6 +1080,8 @@ class Lewis45:
 class Lewis45Model:
     def __init__(self, seed, max_K, **kwargs):
         self.lewis45 = Lewis45(**kwargs)
+        self.family = "binomial"
+        self.family_params = {"n": int(self.lewis45.unifs_shape()[0])}
         key = jax.random.PRNGKey(seed)
         self.unifs = jax.random.uniform(
             key=key, shape=(max_K,) + self.lewis45.unifs_shape(), dtype=jnp.float32

@@ -169,7 +169,7 @@ class AdagridDriver:
         )
 
 
-class Adagrid:
+class AdaTuning:
     def __init__(
         self,
         ada_driver,
@@ -512,7 +512,7 @@ def ada_tune(
         tile_batch_size=tile_batch_size,
     )
 
-    ada = Adagrid(
+    ada = AdaTuning(
         ada_driver,
         g=g,
         db=db,
