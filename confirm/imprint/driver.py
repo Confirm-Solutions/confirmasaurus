@@ -109,8 +109,10 @@ class Driver:
         #     for each K: (_validate)
         #         for each batch of tiles: (_batched_validate)
         #             simulate
-        return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._validate(K_df, lam, delta)
+        return (
+            df.groupby("K", group_keys=False)
+            .apply(lambda K_df: self._validate(K_df, lam, delta))
+            .reset_index(drop=True)
         )
 
     def _batched_tune(self, K, theta, vertices, null_truth, alpha):
@@ -133,8 +135,10 @@ class Driver:
         return pd.DataFrame(bootstrap_lams, columns=["lams"])
 
     def tune(self, df, alpha):
-        return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._tune(K_df, alpha)
+        return (
+            df.groupby("K", group_keys=False)
+            .apply(lambda K_df: self._tune(K_df, alpha))
+            .reset_index(drop=True)
         )
 
 

@@ -1,5 +1,5 @@
 """
-Broadly speaking, the adaptive tuning algorithm refines and deepens tiles until
+Broadly speaking, the adaptive calibration algorithm refines and deepens tiles until
 the type I error, max(f_hat(lambda**)), is close to the type I error control
 level, alpha.
 
@@ -29,15 +29,15 @@ The great glossary of adagrid:
 - f_hat(lambda**): the type I error with lambda=lambda**
 - B: "bias bootstrap". The set of bootstrap resamples used for computing the
   bias in f_hat(lambda**)
-- lams aka "lambda*" "lambda star": The tuning threshold for a given tile.
+- lams aka "lambda*" "lambda star": The calibration threshold for a given tile.
 - twb_lams, B_lams: the lambda star from each bootstrap for this tile.
 - `twb_[min, mean, max]_lams`: The minimum lambda* for this tile across the twb
   bootstraps
-- lamss aka "lambda**": The minimum tuning threshold over the whole grid.
+- lamss aka "lambda**": The minimum calibration threshold over the whole grid.
 - alpha0: backward_cse(this_tile, alpha)
 - grid_cost: alpha - alpha0
 - impossible tiles are those for which K and alpha0 are not large enough to
-  satisfy the tuning_min_idx constraint.
+  satisfy the calibration_min_idx constraint.
 - orderer: the value by which we decide the next tiles to "process"
 - processing tiles: deciding to refine or deepen and then simulating for those
   new tiles that resulted from refining or deepening.
@@ -45,6 +45,7 @@ The great glossary of adagrid:
 """
 import copy
 import time
+from pprint import pprint
 
 import jax
 import jax.numpy as jnp
@@ -64,7 +65,7 @@ class AdagridDriver:
 
     This driver has two entrypoints:
     1. `bootstrap_tune(...)`: tunes (calculating lambda*) for every tile in a
-       grid. The tuning is performed for many bootstrap resamplings of the
+       grid. The calibration is performed for many bootstrap resamplings of the
        simulated test statistics. This bootstrap gives a picture of the
        distribution of lambda*.
     2. `many_rej(...)`: calculates the number of rejections for many different
@@ -169,7 +170,7 @@ class AdagridDriver:
         )
 
 
-class AdaTuning:
+class AdaCalibration:
     def __init__(
         self,
         ada_driver,
@@ -181,11 +182,11 @@ class AdaTuning:
         std_target,
         iter_size,
         alpha,
-        tuning_min_idx,
+        calibration_min_idx,
     ):
         self.ada_driver = ada_driver
         self.alpha = alpha
-        self.tuning_min_idx = tuning_min_idx
+        self.calibration_min_idx = calibration_min_idx
         self.bias_target = bias_target
         self.grid_target = grid_target
         self.std_target = std_target
@@ -214,7 +215,7 @@ class AdaTuning:
             # self.db.init_null_hypos(self.null_hypos)
 
     def _process_tiles(self, g, i):
-        # This method actually runs the tuning and bootstrapping.
+        # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
@@ -225,13 +226,13 @@ class AdaTuning:
         lams_df.insert(
             2,
             "impossible",
-            lams_df["alpha0"] < (self.tuning_min_idx + 1) / (g.df["K"] + 1),
+            lams_df["alpha0"] < (self.calibration_min_idx + 1) / (g.df["K"] + 1),
         )
 
         lams_df.insert(
             3,
             "orderer",
-            # Where tuning is impossible due to either small K or small alpha0,
+            # Where calibration is impossible due to either small K or small alpha0,
             # the orderer is set to -inf so that such tiles are guaranteed to
             # be processed.
             np.minimum(
@@ -367,30 +368,7 @@ class AdaTuning:
         n_deepen = work["deepen"].sum()
         nothing_to_do = n_refine == 0 and n_deepen == 0
         if not nothing_to_do:
-            g_deepen_in = grid.Grid(work.loc[work["deepen"]])
-            g_deepen = grid.init_grid(
-                g_deepen_in.get_theta(),
-                g_deepen_in.get_radii(),
-                g_deepen_in.df["id"],
-            )
-            # We just multiply K by 2 to deepen.
-            # TODO: it's possible to do better by multiplying by 4 or 8
-            # sometimes when a tile clearly needs *way* more sims. how to
-            # determine this?
-            g_deepen.df["K"] = g_deepen_in.df["K"] * 2
-
-            g_refine_in = grid.Grid(work.loc[work["refine"]])
-            inherit_cols = ["K"]
-            g_refine = g_refine_in.refine(inherit_cols)
-
-            ########################################
-            # Step 7: Simulate the new tiles and write to the DB.
-            ########################################
-            g_new = (
-                g_refine.concat(g_deepen)
-                .add_null_hypos(self.null_hypos, inherit_cols)
-                .prune()
-            )
+            g_new = refine_deepen(work, self.null_hypos)
 
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
             start_processing = time.time()
@@ -425,6 +403,31 @@ class AdaTuning:
         return False, report
 
 
+def refine_deepen(g, null_hypos):
+    g_deepen_in = grid.Grid(g.loc[g["deepen"]])
+    g_deepen = grid.init_grid(
+        g_deepen_in.get_theta(),
+        g_deepen_in.get_radii(),
+        g_deepen_in.df["id"],
+    )
+    # We just multiply K by 2 to deepen.
+    # TODO: it's possible to do better by multiplying by 4 or 8
+    # sometimes when a tile clearly needs *way* more sims. how to
+    # determine this?
+    g_deepen.df["K"] = g_deepen_in.df["K"] * 2
+
+    g_refine_in = grid.Grid(g.loc[g["refine"]])
+    inherit_cols = ["K"]
+    # TODO: it's possible to do better by refining by more than just a
+    # factor of 2.
+    g_refine = g_refine_in.refine(inherit_cols)
+
+    ########################################
+    # Step 7: Simulate the new tiles and write to the DB.
+    ########################################
+    return g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols).prune()
+
+
 def print_report(_iter, report, _ada):
     ready = report.copy()
     for k in ready:
@@ -448,14 +451,14 @@ def ada_tune(
     grid_target=0.001,
     bias_target=0.001,
     std_target=0.002,
-    tuning_min_idx=40,
+    calibration_min_idx=40,
     iter_size=2**10,
     n_iter=100,
     callback=print_report,
     model_kwargs=None,
 ):
     """
-    The main entrypoint for the adaptive tuning algorithm.
+    The main entrypoint for the adaptive calibration algorithm.
 
     Args:
         modeltype: The model class to use.
@@ -476,8 +479,8 @@ def ada_tune(
                     deviation of the type I error as calculated by the
                     bootstrap. Defaults to 0.002.
         iter_size: The number of tiles to process per iteration. Defaults to 2**10.
-        tuning_min_idx: The minimum tuning selection index. We enforce that:
-                        `alpha0 >= (tuning_min_idx + 1) / (K + 1)`
+        calibration_min_idx: The minimum calibration selection index. We enforce that:
+                        `alpha0 >= (calibration_min_idx + 1) / (K + 1)`
                         A larger value will reduce the variance of lambda* but
                         will require more computational effort because K and/or
                         alpha0 will need to be larger. Defaults to 40.
@@ -512,7 +515,7 @@ def ada_tune(
         tile_batch_size=tile_batch_size,
     )
 
-    ada = AdaTuning(
+    ada = AdaCalibration(
         ada_driver,
         g=g,
         db=db,
@@ -521,7 +524,7 @@ def ada_tune(
         std_target=std_target,
         iter_size=iter_size,
         alpha=alpha,
-        tuning_min_idx=tuning_min_idx,
+        calibration_min_idx=calibration_min_idx,
     )
 
     try:
@@ -536,4 +539,112 @@ def ada_tune(
                 break
     except KeyboardInterrupt:
         return ada_iter, reports, ada
+    # TODO: return db instead of ada?
     return ada_iter, reports, ada
+
+
+def validation_process_tiles(driver, g, lam, delta, i):
+    rej_df = driver.validate(g.df, lam, delta=delta)
+    rej_df["grid_cost"] = rej_df["tie_bound"] - rej_df["tie_cp_bound"]
+    rej_df["sim_cost"] = rej_df["tie_cp_bound"] - rej_df["tie_est"]
+    rej_df["total_cost"] = rej_df["grid_cost"] + rej_df["sim_cost"]
+
+    g_val = g.add_cols(rej_df)
+    g_val.df["birthday"] = i
+    return g_val
+
+
+def ada_validate(
+    modeltype,
+    *,
+    g,
+    lam,
+    delta=0.01,
+    model_seed=0,
+    init_K=2**13,
+    n_K_double=4,
+    tile_batch_size=64,
+    max_target=0.001,
+    global_target=0.002,
+    # grid_target=None, # might be a nice feature?
+    # sim_target=None, # might be a nice feature?
+    iter_size=2**10,
+    n_iter=1000,
+    model_kwargs=None,
+):
+    if model_kwargs is None:
+        model_kwargs = {}
+    model = modeltype(seed=model_seed, max_K=init_K * 2**n_K_double, **model_kwargs)
+    ada_driver = driver.Driver(model, tile_batch_size=tile_batch_size)
+
+    db = DuckDB.connect()
+
+    g = copy.deepcopy(g)
+    null_hypos = g.null_hypos
+    g.df["K"] = init_K
+    g_val = validation_process_tiles(ada_driver, g, lam, delta, 0)
+    db.init_tiles(g_val.df)
+
+    reports = []
+    ada_iter = 1
+    for ada_iter in range(1, n_iter):
+        start_convergence = time.time()
+        # step 1: grab a batch of the worst tiles.
+        # TODO: move this into the DB interface.
+        work = db.con.execute(
+            "select * from tiles"
+            f"  where  active=true"
+            f"         and (total_cost > {global_target}"
+            f"              or (total_cost > {max_target}"
+            f"                    and tie_bound > ("
+            "    select max(tie_est) from tiles where active=true"
+            "                                    )))"
+            f" limit {iter_size}"
+        ).df()
+
+        # step 2: check if there's anything left to do
+        done = work.shape[0] == 0
+
+        worst_tile = db.worst_tile("tie_bound")
+        report = dict(
+            i=ada_iter,
+            n_work=work.shape[0],
+            max_total_cost=work["total_cost"].max(),
+            max_grid_cost=work["grid_cost"].max(),
+            max_sim_cost=work["sim_cost"].max(),
+            worst_tile_est=worst_tile["tie_est"].iloc[0],
+            worst_tile_bound=worst_tile["tie_bound"].iloc[0],
+            worst_tile_cost=worst_tile["total_cost"].iloc[0],
+            runtime_convergence_check=time.time() - start_convergence,
+        )
+
+        if done:
+            pprint(report)
+            return True, report
+
+        # step 3: identify whether to refine or deepen
+        start_refine_deepen = time.time()
+        work["refine"] = work["grid_cost"] > work["sim_cost"]
+        work["deepen"] = ~work["refine"]
+        work["active"] = False
+
+        g_new = refine_deepen(work, null_hypos)
+        report["runtime_refine_deepen"] = time.time() - start_refine_deepen
+
+        start_processing = time.time()
+        g_val_new = validation_process_tiles(ada_driver, g_new, lam, delta, ada_iter)
+        db.write(g_val_new.df)
+        report["runtime_processing"] = time.time() - start_processing
+
+        db.finish(work)
+        report.update(
+            dict(
+                n_refine=work["refine"].sum(),
+                n_deepen=work["deepen"].sum(),
+                n_processed=g_val_new.n_tiles,
+                K_distribution=g_val_new.df["K"].value_counts().to_dict(),
+            )
+        )
+        pprint(report)
+        reports.append(report)
+    return ada_iter, reports, db

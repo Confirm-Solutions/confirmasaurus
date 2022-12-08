@@ -13,6 +13,13 @@ import confirm.imprint as ip
 from confirm.models.ztest import ZTest1D
 ```
 
+## Adaptive validation
+
+```python
+g = ip.cartesian_grid([-1], [1], n=[1], null_hypos=[ip.hypo("x < 0")])
+rej_df = ip.ada_validate(ZTest1D, g=g, lam=-1.96, n_iter=15)
+```
+
 ## Validation
 
 ```python
