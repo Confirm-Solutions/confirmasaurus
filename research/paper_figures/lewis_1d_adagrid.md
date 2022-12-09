@@ -35,6 +35,53 @@ params = {
 ```
 
 ```python
+g = ip.cartesian_grid([-1, -10], [1, -1], n=[10, 10]).add_null_hypos(
+    [ip.hypo("theta0 > theta1")]
+)
+```
+
+```python
+db = ip.db.DuckDB.connect("lewis1dslice.db")
+```
+
+```python
+def T(theta_in, radii_in, null_truth_in):
+    theta_out = np.empty((theta_in.shape[0], 4))
+    theta_out[:, 0] = theta_in[:, 0]
+    theta_out[:, 1] = theta_in[:, 0]
+    theta_out[:, 2] = theta_in[:, 0]
+    theta_out[:, 3] = theta_in[:, 1]
+    radii_out = np.empty((theta_in.shape[0], 4))
+    radii_out[:, 0] = radii_in[:, 0]
+    radii_out[:, 1] = radii_in[:, 0]
+    radii_out[:, 2] = radii_in[:, 0]
+    radii_out[:, 3] = radii_in[:, 1]
+    null_truth_out = np.empty((theta_in.shape[0], 3))
+    null_truth_out[:, 0] = null_truth_in[:, 0]
+    null_truth_out[:, 1] = null_truth_in[:, 0]
+    null_truth_out[:, 2] = null_truth_in[:, 0]
+    return theta_out, radii_out, null_truth_out
+
+
+ada_iter, reports, db = ip.ada_validate(
+    lewis.Lewis45Model,
+    g=g,
+    db=db,
+    lam=0.06253,
+    n_iter=100,
+    iter_size=2**13,
+    init_K=2**16,
+    n_K_double=3,
+    global_target=0.002,
+    max_target=0.002,
+    transformation=T,
+    model_kwargs=params,
+)
+```
+
+## old stuff
+
+```python
 import os
 import time
 import modal

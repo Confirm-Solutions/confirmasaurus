@@ -1106,6 +1106,7 @@ class Lewis45Model:
         )
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
+        assert null_truth.shape[1] == theta.shape[1] - 1
         return self.batched_statv(
             theta, null_truth, self.unifs[begin_sim:end_sim], self.unifs_order
         )

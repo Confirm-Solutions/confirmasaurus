@@ -543,8 +543,30 @@ def ada_tune(
     return ada_iter, reports, ada
 
 
-def validation_process_tiles(driver, g, lam, delta, i):
-    rej_df = driver.validate(g.df, lam, delta=delta)
+def _validation_process_tiles(driver, g, lam, delta, i, transformation):
+    print("processing ", g.n_tiles)
+    # TODO: this is ugly
+    # more generally, this idea of having a "computational" grid and an "input"
+    # grid might not be the ideal solution for our problems. i'm not sure!
+    # potential problem: null hypotheses need to take into account the transformations.
+    if transformation is None:
+        computational_df = g.df
+    else:
+        theta, radii, null_truth = transformation(
+            g.get_theta(), g.get_radii(), g.get_null_truth()
+        )
+        d = theta.shape[1]
+        indict = {}
+        indict["K"] = g.df["K"]
+        for i in range(d):
+            indict[f"theta{i}"] = theta[:, i]
+        for i in range(d):
+            indict[f"radii{i}"] = radii[:, i]
+        for j in range(null_truth.shape[1]):
+            indict[f"null_truth{j}"] = null_truth[:, j]
+        computational_df = pd.DataFrame(indict)
+
+    rej_df = driver.validate(computational_df, lam, delta=delta)
     rej_df["grid_cost"] = rej_df["tie_bound"] - rej_df["tie_cp_bound"]
     rej_df["sim_cost"] = rej_df["tie_cp_bound"] - rej_df["tie_est"]
     rej_df["total_cost"] = rej_df["grid_cost"] + rej_df["sim_cost"]
@@ -559,6 +581,8 @@ def ada_validate(
     *,
     g,
     lam,
+    db=None,
+    transformation=None,
     delta=0.01,
     model_seed=0,
     init_K=2**13,
@@ -574,16 +598,27 @@ def ada_validate(
 ):
     if model_kwargs is None:
         model_kwargs = {}
-    model = modeltype(seed=model_seed, max_K=init_K * 2**n_K_double, **model_kwargs)
+    max_K = init_K * 2**n_K_double
+    model = modeltype(seed=model_seed, max_K=max_K, **model_kwargs)
     ada_driver = driver.Driver(model, tile_batch_size=tile_batch_size)
 
-    db = DuckDB.connect()
+    if db is None:
+        if g is None:
+            raise ValueError(
+                "Must provide either an initial grid or an existing"
+                " database! Set either g or db."
+            )
+        db = DuckDB.connect()
 
-    g = copy.deepcopy(g)
-    null_hypos = g.null_hypos
-    g.df["K"] = init_K
-    g_val = validation_process_tiles(ada_driver, g, lam, delta, 0)
-    db.init_tiles(g_val.df)
+        # TODO: fix this, not right in the midterm for restarts
+        g = copy.deepcopy(g)
+        null_hypos = g.null_hypos
+        g.df["K"] = init_K
+        g_val = _validation_process_tiles(ada_driver, g, lam, delta, 0, transformation)
+        db.init_tiles(g_val.df)
+    else:
+        db = db
+        null_hypos = g.null_hypos
 
     reports = []
     ada_iter = 1
@@ -591,14 +626,17 @@ def ada_validate(
         start_convergence = time.time()
         # step 1: grab a batch of the worst tiles.
         # TODO: move this into the DB interface.
+        max_tie_est = (
+            db.con.execute("select max(tie_est) from tiles where active=true")
+            .df()
+            .iloc[0, 0]
+        )
         work = db.con.execute(
             "select * from tiles"
             f"  where  active=true"
             f"         and (total_cost > {global_target}"
             f"              or (total_cost > {max_target}"
-            f"                    and tie_bound > ("
-            "    select max(tie_est) from tiles where active=true"
-            "                                    )))"
+            f"                    and tie_bound > {max_tie_est}))"
             f" limit {iter_size}"
         ).df()
 
@@ -620,31 +658,65 @@ def ada_validate(
 
         if done:
             pprint(report)
-            return True, report
+            break
 
         # step 3: identify whether to refine or deepen
         start_refine_deepen = time.time()
-        work["refine"] = work["grid_cost"] > work["sim_cost"]
-        work["deepen"] = ~work["refine"]
-        work["active"] = False
+        deepen_cheaper = work["sim_cost"] > work["grid_cost"]
+        impossible = (work["K"] == max_K) & (
+            (work["sim_cost"] > global_target)
+            | ((work["sim_cost"] > max_target) & (work["tie_bound"] > max_tie_est))
+        )
+        work["deepen"] = deepen_cheaper & (work["K"] < max_K)
+        work["refine"] = ~work["deepen"]
+        work["refine"] &= ~impossible
+        work["active"] = ~(work["refine"] | work["deepen"])
 
-        g_new = refine_deepen(work, null_hypos)
-        report["runtime_refine_deepen"] = time.time() - start_refine_deepen
-
-        start_processing = time.time()
-        g_val_new = validation_process_tiles(ada_driver, g_new, lam, delta, ada_iter)
-        db.write(g_val_new.df)
-        report["runtime_processing"] = time.time() - start_processing
-
-        db.finish(work)
+        # step 4: refine, deepen --> validate!
+        n_refine = work["refine"].sum()
+        n_deepen = work["deepen"].sum()
         report.update(
             dict(
-                n_refine=work["refine"].sum(),
-                n_deepen=work["deepen"].sum(),
-                n_processed=g_val_new.n_tiles,
-                K_distribution=g_val_new.df["K"].value_counts().to_dict(),
+                n_refine=n_refine,
+                n_deepen=n_deepen,
+                n_impossible=impossible.sum(),
             )
         )
+        nothing_to_do = n_refine == 0 and n_deepen == 0
+        if not nothing_to_do:
+            g_new = refine_deepen(work, null_hypos)
+            report["runtime_refine_deepen"] = time.time() - start_refine_deepen
+
+            start_processing = time.time()
+            g_val_new = _validation_process_tiles(
+                ada_driver, g_new, lam, delta, ada_iter, transformation
+            )
+            db.write(g_val_new.df)
+            report.update(
+                dict(
+                    n_processed=g_val_new.n_tiles,
+                    K_distribution=g_val_new.df["K"].value_counts().to_dict(),
+                )
+            )
+
+        db.finish(work)
+        if not nothing_to_do:
+            report["runtime_processing"] = time.time() - start_processing
+        else:
+            report["runtime_refine_deepen"] = time.time() - start_refine_deepen
+
         pprint(report)
         reports.append(report)
     return ada_iter, reports, db
+
+
+def verify_adagrid(df):
+    inactive_ids = df.loc[~df["active"], "id"]
+    assert inactive_ids.unique().shape == inactive_ids.shape
+
+    parents = df["parent_id"].unique()
+    parents_that_dont_exist = np.setdiff1d(parents, inactive_ids)
+    inactive_tiles_with_no_children = np.setdiff1d(inactive_ids, parents)
+    assert parents_that_dont_exist.shape[0] == 1
+    assert parents_that_dont_exist[0] == 0
+    assert inactive_tiles_with_no_children.shape[0] == 0
