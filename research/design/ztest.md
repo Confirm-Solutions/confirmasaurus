@@ -13,6 +13,47 @@ import confirm.imprint as ip
 from confirm.models.ztest import ZTest1D
 ```
 
+## Adaptive validation
+
+```python
+lam = -1.96
+g = ip.cartesian_grid([-1], [1], n=[1], null_hypos=[ip.hypo("x < 0")])
+
+
+def T(theta, radii):
+    return theta / 2, radii
+
+
+ada_iter, reports, db = ip.ada_validate(
+    ZTest1D,
+    g=g,
+    lam=lam,
+    n_iter=30,
+    n_K_double=7,
+    global_target=0.0005,
+    transformation=T,
+)
+```
+
+```python
+ga.df.groupby("K")["id"].count()
+```
+
+```python
+g = ip.Grid(db.get_all())
+ga = g.active()
+true_err = 1 - scipy.stats.norm.cdf(-ga.get_theta()[:, 0] - lam)
+
+plt.plot(ga.df["theta0"] / 2, ga.df["tie_est"], "ko")
+plt.plot(ga.df["theta0"] / 2, ga.df["tie_bound"], "bo")
+plt.plot(ga.df["theta0"], true_err, "ro", markersize=2)
+plt.show()
+plt.plot(ga.df["theta0"], ga.df["K"], "ko", markersize=2)
+plt.show()
+plt.plot(ga.df["theta0"], ga.df["radii0"], "ko", markersize=2)
+plt.show()
+```
+
 ## Validation
 
 ```python

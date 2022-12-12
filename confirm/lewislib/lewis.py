@@ -1075,3 +1075,38 @@ class Lewis45:
         rej = test_stat < self.rejection_threshold
         false_rej = rej * null_truth[best_arm - 1]
         return false_rej, score
+
+
+class Lewis45Model:
+    def __init__(self, seed, max_K, **kwargs):
+        self.lewis45 = Lewis45(**kwargs)
+        self.family = "binomial"
+        self.family_params = {"n": int(self.lewis45.unifs_shape()[0])}
+        key = jax.random.PRNGKey(seed)
+        self.unifs = jax.random.uniform(
+            key=key, shape=(max_K,) + self.lewis45.unifs_shape(), dtype=jnp.float32
+        )
+        self.unifs_order = jnp.arange(0, self.unifs.shape[1])
+
+        sim_batch_size = 2048
+
+        def stat(theta, null_truth, unifs, unifs_order):
+            p = jax.scipy.special.expit(theta)
+            simulatev = jax.vmap(self.lewis45.simulate, in_axes=(None, 0, None))
+            test_stats, best_arms, _ = simulatev(p, unifs, unifs_order)
+            false_test_stats = jnp.where(null_truth[best_arms - 1], test_stats, 100.0)
+            return false_test_stats
+
+        self.statv = jax.jit(jax.vmap(stat, in_axes=(0, 0, None, None)))
+        self.batched_statv = batching.batch(
+            self.statv,
+            sim_batch_size,
+            in_axes=(None, None, 0, None),
+            out_axes=(1,),
+        )
+
+    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
+        assert null_truth.shape[1] == theta.shape[1] - 1
+        return self.batched_statv(
+            theta, null_truth, self.unifs[begin_sim:end_sim], self.unifs_order
+        )
