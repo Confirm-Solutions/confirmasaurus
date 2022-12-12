@@ -2,6 +2,8 @@
 import clickhouse_connect
 import os
 import keyring
+import pandas as pd
+import time
 
 host = keyring.get_password("clickhouse-confirm-host", os.environ["USER"])
 password = keyring.get_password("clickhouse-confirm-password", os.environ["USER"])
@@ -14,6 +16,62 @@ client = clickhouse_connect.get_client(
 # client = clickhouse_connect.get_client(host='127.0.0.1', port=8123)
 ```
 
+## Benchmark
+
+```python
+df = pd.read_parquet('dbtestsmall.parquet')
+df['id'] = df.index
+```
+
+```python
+client.command('drop table tiles0')
+client.command('drop table tiles_reject')
+```
+
+```python
+for i in range(1):
+    start = time.time()
+    query = (
+        f"create table tiles{i} ("
+        + ",".join([f"{c} Float32" for c in df.columns])
+        + ") engine = MergeTree() order by id"
+    )
+    client.command(query)
+    client.insert_df(f"tiles{i}", df[:100000])
+    print('insert', time.time() - start)
+    start = time.time()
+    sel_df = client.query_df(f"select * from tiles{i} order by orig_lam limit 10000")
+    print('select', time.time() - start)
+    print(sel_df.shape)
+```
+
+```python
+query = (
+    f"create table tiles_reject ("
+    + ",".join([f"{c} Float32" for c in df.columns])
+    + ") engine = MergeTree() order by id"
+)
+client.command(query)
+```
+
+```python
+client.insert_df(f"tiles_reject", df[:80000])
+```
+
+```python
+%%time
+client.query_df(f"""
+select * from tiles0
+    where id not in (
+        select id from tiles_reject
+    ) 
+    order by orig_lam
+    limit 10000
+""")
+```
+
+## Explore
+
 ```python
 client.command("CREATE TABLE test_table (key UInt16, value String) ENGINE Memory")
 data = [[100, "value1"], [200, "value2"]]
@@ -25,6 +83,19 @@ print(client.query("SELECT * FROM test_table").result_set)
 import pandas as pd
 
 df = pd.read_parquet("./dbtest.parquet")
+```
+
+```python
+import sqlalchemy as sa
+engine = sa.create_engine(f'clickhouse://default:{password}@{host}:8443/default?ssl=True')
+```
+
+```python
+type(client)
+```
+
+```python
+df[:1000].to_sql('test', engine, if_exists='replace', index=False)
 ```
 
 ```python
@@ -42,6 +113,10 @@ query
 
 ```python
 client.command(query)
+```
+
+```python
+client.
 ```
 
 ```python

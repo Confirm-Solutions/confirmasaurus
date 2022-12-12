@@ -9,14 +9,14 @@ def summarize_validate(g, rej_df, plot_dims=(0, 1)):
     plt.scatter(g.df[f"theta{d1}"], g.df[f"theta{d2}"], c=rej_df["tie_bound"])
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
-    plt.colorbar(label="$\hat{f}$")
+    plt.colorbar(label=r"$\hat{f}$")
 
     plt.subplot(2, 2, 2)
     plt.title("TIE at simulation points")
     plt.scatter(g.df[f"theta{d1}"], g.df[f"theta{d2}"], c=rej_df["tie_est"])
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
-    plt.colorbar(label="$\hat{f}$")
+    plt.colorbar(label=r"$\hat{f}$")
 
     plt.subplot(2, 2, 3)
     plt.title("CSE cost")
@@ -27,7 +27,7 @@ def summarize_validate(g, rej_df, plot_dims=(0, 1)):
     )
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
-    plt.colorbar(label="$\hat{f}$")
+    plt.colorbar(label=r"$\hat{f}$")
 
     plt.subplot(2, 2, 4)
     plt.title("Clopper-Pearson cost")
@@ -38,4 +38,4 @@ def summarize_validate(g, rej_df, plot_dims=(0, 1)):
     )
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
-    plt.colorbar(label="$\hat{f}$")
+    plt.colorbar(label=r"$\hat{f}$")

@@ -373,6 +373,8 @@ class AdaCalibration:
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
             start_processing = time.time()
             g_tuned_new = self._process_tiles(g_new, i)
+            report["runtime_processing"] = time.time() - start_processing
+            start_cleanup = time.time()
             self.db.write(g_tuned_new.df)
             report.update(
                 dict(
@@ -387,10 +389,10 @@ class AdaCalibration:
         # We need to report back to the TileDB that we're done with this batch
         # of tiles and whether any of the tiles are still active.
         self.db.finish(work)
-        if not nothing_to_do:
-            report["runtime_processing"] = time.time() - start_processing
+        if nothing_to_do:
+            report["runtime_cleanup"] = time.time() - start_refine_deepen
         else:
-            report["runtime_refine_deepen"] = time.time() - start_refine_deepen
+            report["runtime_cleanup"] = time.time() - start_cleanup
 
         report.update(
             dict(
@@ -433,7 +435,7 @@ def print_report(_iter, report, _ada):
     for k in ready:
         if isinstance(ready[k], float) or isinstance(ready[k], jnp.DeviceArray):
             ready[k] = f"{ready[k]:.6f}"
-    print(ready)
+    pprint(ready)
 
 
 def ada_tune(
@@ -596,6 +598,10 @@ def ada_validate(
     n_iter=1000,
     model_kwargs=None,
 ):
+    # TODO: output how many tiles are left according to the criterion?
+    # TODO: order refinement and deepening by total_cost.
+    # TODO: clean up...
+    # TODO: move the query inside the database backend.
     if model_kwargs is None:
         model_kwargs = {}
     max_K = init_K * 2**n_K_double

@@ -80,7 +80,7 @@ class DuckDB:
             "select * from tiles where eligible=true"
             f" order by {order_col} asc limit {n}"
         ).df()
-        t.execute("update tiles set eligible=false where id in" " (select id from out)")
+        t.execute("update tiles set eligible=false where id in (select id from out)")
         t.commit()
         return out
 
