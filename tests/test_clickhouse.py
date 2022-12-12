@@ -4,9 +4,10 @@ from test_duckdb import DBTester
 
 @pytest.mark.slow
 class TestClickhouse(DBTester):
-    from confirm.cloud.clickhouse import Clickhouse
+    def setup_class(cls):
+        from confirm.cloud.clickhouse import Clickhouse
 
-    dbtype = Clickhouse
+        cls.dbtype = Clickhouse
 
     def test_connect(self):
         self.dbtype.connect()
