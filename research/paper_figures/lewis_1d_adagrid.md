@@ -72,11 +72,58 @@ ada_iter, reports, db = ip.ada_validate(
     iter_size=2**13,
     init_K=2**16,
     n_K_double=3,
-    global_target=0.002,
-    max_target=0.002,
+    global_target=0.003,
+    max_target=0.003,
     transformation=T,
     model_kwargs=params,
 )
+```
+
+```python
+ga = ip.Grid(db.get_all()).active()
+```
+
+```python
+tc = np.linspace(-1, 1, 99)
+t3 = np.linspace(-10, -1, 100)
+TT = np.stack(np.meshgrid(tc, t3, indexing="ij"), axis=-1)
+TT.shape
+```
+
+```python
+import scipy.interpolate
+
+interp_bound = scipy.interpolate.griddata(
+    ga.get_theta(), ga.df["tie_bound"], TT.reshape(-1, 2)
+)
+```
+
+```python
+interp_est = scipy.interpolate.griddata(
+    ga.get_theta(), ga.df["tie_est"], TT.reshape(-1, 2)
+)
+```
+
+```python
+plt.plot(
+    t3[1:-1],
+    100 * interp_est.reshape(99, 100)[1:-1, 1:-1].max(axis=0),
+    "k-",
+    label="Type I Error",
+)
+plt.plot(
+    t3[1:-1],
+    100 * interp_bound.reshape(99, 100)[1:-1, 1:-1].max(axis=0),
+    "r-",
+    label="Tilt-Bound",
+)
+plt.legend()
+plt.ylim([0, 3.5])
+plt.xlabel(r"$\theta_{3}$")
+plt.ylabel(r"Type I Error \%")
+plt.title(r"$\max_{\theta_c}(f(\theta_c, \theta_c, \theta_c, \theta_3))$")
+plt.savefig("lewis_1d_orthogonal.pdf", bbox_inches="tight")
+plt.show()
 ```
 
 ## old stuff
