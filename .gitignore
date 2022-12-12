@@ -70,3 +70,6 @@ poetry.toml
 *.db
 *.db.wal
 *.zip
+
+# anything else
+*.gitignore*

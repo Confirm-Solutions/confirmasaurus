@@ -144,24 +144,29 @@ class Clickhouse:
             "int64": "Int64",
             "bool": "Boolean",
             "string": "String",
+            "bytes640": "FixedString(80)",
         }
         cols = [f"{c} {types[dt.name]}" for c, dt in zip(df.columns, df.dtypes)]
+        id_type = types[df["id"].dtype.name]
+
+        orderby = "orderer" if "orderer" in df.columns else "id"
+
         self.client.command(
             f"""
             create table tiles ({",".join(cols)})
-                engine = MergeTree() order by id
+                engine = MergeTree() order by {orderby}
         """
         )
         self.client.command(
-            """
-            create table tiles_inactive (id UInt64)
+            f"""
+            create table tiles_inactive (id {id_type})
                 engine = MergeTree() order by id
             """
         )
         self.client.command(
-            """
+            f"""
             create table work
-                (id UInt64, time Float64, worker_id UInt32)
+                (id {id_type}, time Float64, worker_id UInt32)
                 engine = MergeTree() order by (worker_id, id)
             """
         )
