@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import confirm.cloud.clickhouse as ch
 import confirm.imprint as ip
 from confirm.models.ztest import ZTest1D
 
@@ -35,6 +34,8 @@ def test_adagrid(snapshot):
 @pytest.mark.slow
 @mock.patch("confirm.imprint.grid.uuid_timer", mock.MagicMock(return_value=100))
 def test_adagrid_clickhouse(snapshot):
+    import confirm.cloud.clickhouse as ch
+
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
 
     db = ch.Clickhouse.connect()
@@ -53,6 +54,8 @@ def test_adagrid_clickhouse(snapshot):
 
 
 def main():
+    import confirm.cloud.clickhouse as ch
+
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     db = ch.Clickhouse.connect()
     # db = ch.Clickhouse.connect(

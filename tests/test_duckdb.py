@@ -132,7 +132,7 @@ class DBTester:
 class TestDuckDB(DBTester):
     dbtype = db.DuckDB
 
-    def test_duckdb_load():
+    def test_duckdb_load(self):
         g = example_grid(-1, 1)
         p = Path("test.db")
         p.unlink(missing_ok=True)
