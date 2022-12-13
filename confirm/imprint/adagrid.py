@@ -59,7 +59,7 @@ import pandas as pd
 from . import batching
 from . import driver
 from . import grid
-from .db import DuckDB
+from .db import DuckDBTiles
 
 
 class AdaCalibrationDriver:
@@ -593,7 +593,7 @@ def ada_calibrate(
         raise ValueError("Must provide either an initial grid or a database!")
 
     if db is None:
-        db = DuckDB.connect()
+        db = DuckDBTiles.connect()
 
     ########################################
     # Store config
@@ -736,7 +736,7 @@ def ada_validate(
                 "Must provide either an initial grid or an existing"
                 " database! Set either g or db."
             )
-        db = DuckDB.connect()
+        db = DuckDBTiles.connect()
 
         # TODO: fix this, not right in the midterm for restarts
         g = copy.deepcopy(g)

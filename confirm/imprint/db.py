@@ -6,13 +6,9 @@ from typing import List
 import duckdb
 import pandas as pd
 
-# NOTE: currently the caching and adagrid tile db interfaces are combined into
-# a single class. this violates single responsibility principle, but it's
-# simpler. I don't think we should split them up until there are problems.
-
 
 @dataclass
-class PandasDB:
+class PandasTiles:
     """
     A tile database built on top of Pandas DataFrames.
 
@@ -25,18 +21,6 @@ class PandasDB:
     worker_id: int = 0
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
-    ########################################
-    # Caching interface
-    ########################################
-    def load(self, table_name):
-        return self._tables[table_name]
-
-    def store(self, table_name, df):
-        self._tables[table_name] = df
-
-    ########################################
-    # Adagrid tile database interface
-    ########################################
     def dimension(self):
         return max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
 
@@ -71,7 +55,7 @@ class PandasDB:
 
 
 @dataclass
-class DuckDB:
+class DuckDBTiles:
     """
     A tile database built on top of DuckDB. This should be very fast and
     robust and is the default database for confirm.
@@ -90,25 +74,6 @@ class DuckDB:
     def __init__(self, con):
         self.con = con
 
-    ########################################
-    # Caching interface
-    ########################################
-    def load(self, table_name):
-        return self.con.execute(f"select * from {table_name}").df()
-
-    def store(self, table_name, df):
-        if table_name not in self._table_list():
-            self.con.execute(f"create table {table_name} as select * from df")
-        else:
-            self.con.execute(f"insert into {table_name} select * from df")
-
-    def _table_list(self):
-        result = self.con.execute("show tables").df()
-        return result["name"].values
-
-    ########################################
-    # Adagrid tile database interface
-    ########################################
     def dimension(self):
         if self._d is None:
             self._d = (
@@ -184,4 +149,4 @@ class DuckDB:
         Returns:
             The tile database.
         """
-        return DuckDB(duckdb.connect(path))
+        return DuckDBTiles(duckdb.connect(path))

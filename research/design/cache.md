@@ -1,5 +1,49 @@
 ```python
 from confirm.outlaw.nb_util import setup_nb
+setup_nb()
+```
+
+```python
+from confirm.models.binom1d import Binom1D
+from confirm.imprint.cache import DuckDBCache
+c = DuckDBCache.connect()
+```
+
+```python
+%%time
+m = Binom1D(0, 100000, n=1000, cache=c)
+```
+
+```python
+%%time
+m = Binom1D(0, 100000, n=1000, cache=c)
+```
+
+```python
+c.get(c._get_all_keys().iloc[0,0])
+```
+
+```python
+import numpy as np
+A = np.random.uniform(0, 1, size=(3000, 3000))
+```
+
+```python
+A
+```
+
+```python
+from confirm.imprint.cache import DuckDBCache
+c = DuckDBCache.connect()
+c.set('abc', pd.DataFrame(dict(a=[1,2,3], b=[4,5,6])), shortname='cool')
+```
+
+```python
+c.con.execute('select * from cache_tables').df()
+```
+
+```python
+from confirm.outlaw.nb_util import setup_nb
 
 setup_nb()
 
@@ -9,6 +53,11 @@ import numpy as np
 import pandas as pd
 
 import confirm.imprint as ip
+```
+
+```python
+import json
+json.dumps((0, {'a': (1,2)}))
 ```
 
 ```python
@@ -27,11 +76,14 @@ def _sim(samples, theta, null_truth):
     )
 
 
-def unifs(seed, *, shape, dtype):
-    return jax.random.uniform(jax.random.PRNGKey(seed), shape=shape, dtype=dtype)
 
 
 class Binom1D:
+
+    @staticmethod
+    def unifs(seed, *, shape, dtype):
+        return jax.random.uniform(jax.random.PRNGKey(seed), shape=shape, dtype=dtype)
+
     def __init__(self, cache, seed, max_K, *, n):
         self.family = "binomial"
         self.family_params = {"n": n}
@@ -45,7 +97,7 @@ class Binom1D:
         #     self.samples = jax.random.uniform(key, shape=(max_K, n), dtype=self.dtype)
         #     cache.update({cache_key: self.samples})
         #
-        self.samples = cache(unifs)(seed, shape=(max_K, n), dtype=self.dtype)
+        self.samples = cache(Binom1D.unifs)(seed, shape=(max_K, n), dtype=self.dtype)
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
         return _sim(self.samples[begin_sim:end_sim], theta, null_truth)
@@ -56,9 +108,13 @@ class Cache:
     def __init__(self):
         self._cache = {}
 
-    def __call__(self, func, safety=2, serialize=False):
+    def __call__(self, func):
         def wrapper(*args, **kwargs):
-            key = (func, args, tuple(kwargs.items()))
+            key = json.dumps(dict(
+                f=func.__module__ + '.' + func.__qualname__,
+                args=args, 
+                kwargs={str(k):str(v) for k,v in kwargs.items()}
+            ))
             if key in self._cache:
                 return self._cache[key]
             else:
@@ -67,6 +123,21 @@ class Cache:
                 return result
 
         return wrapper
+```
+
+```python
+import confirm.models.binom1d
+c = Cache()
+confirm.models.binom1d.Binom1D(c, 0, 100, n=100)
+```
+
+```python
+from pprint import pprint
+json.loads(list(c._cache.keys())[0])
+```
+
+```python
+list(c._cache.keys())[0]
 ```
 
 ```python
@@ -102,10 +173,6 @@ cache = Cache()
 ```python
 %%time
 unifs(0, shape=(10, 10), dtype=jnp.float32)
-```
-
-```python
-t.results().write_results(coverdir=".")
 ```
 
 ```python
