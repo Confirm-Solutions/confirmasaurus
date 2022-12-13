@@ -6,7 +6,33 @@ from typing import List
 
 import clickhouse_connect
 import keyring
+import pottery
 import pyarrow
+import redis
+
+type_map = {
+    "uint32": "UInt32",
+    "uint64": "UInt64",
+    "float32": "Float32",
+    "float64": "Float64",
+    "int32": "Int32",
+    "int64": "Int64",
+    "bool": "Boolean",
+    "string": "String",
+    "object": "String",
+}
+
+
+def get_create_table_cols(df):
+    return [f"{c} {type_map[dt.name]}" for c, dt in zip(df.columns, df.dtypes)]
+
+
+def _table_list(client):
+    result = client.query_df("show tables")
+    if result.shape[0] == 0:
+        return []
+    else:
+        return result["name"].values
 
 
 @dataclass
@@ -38,18 +64,50 @@ class Clickhouse:
     criterion decided it was not worth refining or deepening.
     """
 
-    client: clickhouse_connect.driver.httpclient.HttpClient
+    ch_client: clickhouse_connect.driver.httpclient.HttpClient
+    redis_con: redis.Redis
+    host: str
     job_id: str
     worker_id: int
     _columns: List[str] = None
+    _d: int = None
 
     def _query_df(self, query):
-        return self.client.query_arrow(query).to_pandas()
+        return self.ch_client.query_arrow(query).to_pandas()
 
     def _insert_df(self, table, df):
-        self.client.insert_arrow(
+        self.ch_client.insert_arrow(
             table, pyarrow.Table.from_pandas(df, preserve_index=False)
         )
+
+    ########################################
+    # Caching interface
+    ########################################
+    def load(self, table_name):
+        return self._query_df(f"select * from {table_name}")
+
+    def store(self, table_name, df):
+        if table_name not in _table_list(self.ch_client):
+            if "id" not in df.columns:
+                df["id"] = df.index
+            cols = get_create_table_cols(df)
+            self.ch_client.command(
+                f"""
+                create table {table_name} ({",".join(cols)})
+                    engine = MergeTree() order by id
+            """
+            )
+        self._insert_df(table_name, df)
+
+    ########################################
+    # Adagrid tile database interface
+    ########################################
+    def dimension(self):
+        if self._d is None:
+            self._d = (
+                max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
+            )
+        return self._d
 
     def columns(self):
         if self._columns is None:
@@ -81,35 +139,41 @@ class Clickhouse:
         )
 
     def next(self, n, order_col):
-        out = self._query_df(
-            f"""
-            select * from tiles where
-                eligible=true
-                and id not in (select id from work)
-            order by {order_col} asc limit {n}
-        """
+        lock = pottery.Redlock(
+            key=f"{self.host}/{self.job_id}/lock", masters={self.redis_con}
         )
-        T = time.time()
-        out["time"] = T
-        out["worker_id"] = self.worker_id
-        self._insert_df("work", out[["id", "time", "worker_id"]])
-
-        conflicts = self._query_df(
-            f"""
-            with mine as (
-                select id, time from work where
-                    worker_id={self.worker_id}
-                    and time={T}
+        with lock:
+            out = self._query_df(
+                f"""
+                select * from tiles where
+                    eligible=true
+                    and id not in (select id from work)
+                order by {order_col} asc limit {n}
+            """
             )
-            select worker_id, time from work
-                join mine on (
-                    work.id=mine.id
-                    and work.worker_id != {self.worker_id}
-                )
-                where work.time <= mine.time
-        """
-        )
-        assert conflicts.shape[0] == 0
+            T = time.time()
+            out["time"] = T
+            out["worker_id"] = self.worker_id
+            self._insert_df("work", out[["id", "time", "worker_id"]])
+
+        # No need to check for conflicts because we are using a lock but if we
+        # were to check for conflicts, it would look something like this
+        # conflicts = self._query_df(
+        #     f"""
+        #     with mine as (
+        #         select id, time from work where
+        #             worker_id={self.worker_id}
+        #             and time={T}
+        #     )
+        #     select worker_id, time from work
+        #         join mine on (
+        #             work.id=mine.id
+        #             and work.worker_id != {self.worker_id}
+        #         )
+        #         where work.time <= mine.time
+        # """
+        # )
+        # assert conflicts.shape[0] == 0
         return out
 
     def finish(self, which):
@@ -121,7 +185,7 @@ class Clickhouse:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        lamss = self.client.query(
+        lamss = self.ch_client.query(
             f"""
             select {cols} from tiles where
                 active=true
@@ -132,38 +196,26 @@ class Clickhouse:
         return lamss
 
     def close(self):
-        self.client.close()
+        self.ch_client.close()
 
     def init_tiles(self, df):
-        types = {
-            "uint32": "UInt32",
-            "uint64": "UInt64",
-            "float32": "Float32",
-            "float64": "Float64",
-            "int32": "Int32",
-            "int64": "Int64",
-            "bool": "Boolean",
-            "string": "String",
-            "bytes640": "FixedString(80)",
-        }
-        cols = [f"{c} {types[dt.name]}" for c, dt in zip(df.columns, df.dtypes)]
-        id_type = types[df["id"].dtype.name]
-
+        cols = get_create_table_cols(df)
         orderby = "orderer" if "orderer" in df.columns else "id"
-
-        self.client.command(
+        self.ch_client.command(
             f"""
             create table tiles ({",".join(cols)})
                 engine = MergeTree() order by {orderby}
         """
         )
-        self.client.command(
+
+        id_type = type_map[df["id"].dtype.name]
+        self.ch_client.command(
             f"""
             create table tiles_inactive (id {id_type})
                 engine = MergeTree() order by id
             """
         )
-        self.client.command(
+        self.ch_client.command(
             f"""
             create table work
                 (id {id_type}, time Float64, worker_id UInt32)
@@ -174,20 +226,59 @@ class Clickhouse:
 
     def connect(
         job_id: int = None,
-        worker_id: int = 0,
         host=None,
         port=None,
         username=None,
         password=None,
+        redis_host=None,
+        redis_port=None,
+        redis_password=None,
     ):
         if job_id is None:
-            client = get_client(host, port, username, password)
+            client = clickhouse_connect.get_client(
+                **get_ch_config(host, port, username, password)
+            )
             job_id = find_unique_job_id(client)
-        client = get_client(host, port, username, password, job_id)
-        return Clickhouse(client, job_id, worker_id)
+        connection_details = get_ch_config(host, port, username, password, job_id)
+        host = connection_details["host"]
+        client = clickhouse_connect.get_client(**connection_details)
+        redis_con = redis.Redis(
+            **get_redis_config(redis_host, redis_port, redis_password)
+        )
+        worker_id = next(
+            pottery.NextId(
+                key=f"{host}/{job_id}/worker_id",
+                masters={redis_con},
+            )
+        )
+        print(f"Connected to job {job_id} as worker {worker_id}")
+        return Clickhouse(client, redis_con, host, job_id, worker_id)
 
 
-def get_client(host=None, port=None, username=None, password=None, database=None):
+def get_redis_config(host=None, port=None, password=None):
+    if host is None:
+        if "REDIS_HOST" in os.environ:
+            host = os.environ["REDIS_HOST"]
+        else:
+            host = keyring.get_password(
+                "upstash-confirm-coordinator-host", os.environ["USER"]
+            )
+    if port is None:
+        if "REDIS_PORT" in os.environ:
+            port = os.environ["REDIS_PORT"]
+        else:
+            port = 37085
+    if password is None:
+        if "REDIS_PASSWORD" in os.environ:
+            password = os.environ["REDIS_PASSWORD"]
+        else:
+            password = keyring.get_password(
+                "upstash-confirm-coordinator-password", os.environ["USER"]
+            )
+    return dict(host=host, port=port, password=password)
+
+
+def get_ch_config(host=None, port=None, username=None, password=None, database=None):
     if host is None:
         if "CLICKHOUSE_HOST" in os.environ:
             host = os.environ["CLICKHOUSE_HOST"]
@@ -209,7 +300,8 @@ def get_client(host=None, port=None, username=None, password=None, database=None
             password = keyring.get_password(
                 "clickhouse-confirm-test-password", os.environ["USER"]
             )
-    return clickhouse_connect.get_client(
+    print(f"Connecting to {host}:{port}/{database} as {username}.")
+    return dict(
         host=host, port=port, username=username, password=password, database=database
     )
 
@@ -248,4 +340,6 @@ def clear_dbs(client):
     print("Are you sure? [yN]")
     if input() == "y":
         for db in to_drop:
-            client.command(f"drop database {db}")
+            cmd = f"drop database {db}"
+            print(cmd)
+            client.command(cmd)

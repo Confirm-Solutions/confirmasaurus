@@ -39,6 +39,7 @@ clickhouse-connect = "^0.4.6"
 redis = "^4.3.5"
 pyarrow = "^10.0.1"
 cloudpickle = "~2.0"
+pottery = "^3.0.0"
 
 [tool.poetry.group.dev.dependencies]
 typer = "^0.6.1"

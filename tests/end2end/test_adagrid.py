@@ -8,7 +8,7 @@ import confirm.imprint as ip
 from confirm.models.ztest import ZTest1D
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @mock.patch("confirm.imprint.grid.uuid_timer", mock.MagicMock(return_value=100))
 def test_adagrid(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
@@ -31,7 +31,7 @@ def test_adagrid(snapshot):
     )
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @mock.patch("confirm.imprint.grid.uuid_timer", mock.MagicMock(return_value=100))
 def test_adagrid_clickhouse(snapshot):
     import confirm.cloud.clickhouse as ch
@@ -42,9 +42,9 @@ def test_adagrid_clickhouse(snapshot):
     iter, reports, db = ip.ada_calibrate(ZTest1D, g=g, db=db, nB=5, tile_batch_size=1)
     lamss = reports[-1]["lamss"]
     np.testing.assert_allclose(lamss, snapshot(lamss))
-    db.client.command(f"drop database {db.job_id}")
 
 
+@pytest.mark.slow
 def test_adagrid_checkpointing():
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     db = ip.db.DuckDB.connect()

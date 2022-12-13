@@ -673,10 +673,6 @@ def ada_calibrate(
 
 def _validation_process_tiles(driver, g, lam, delta, i, transformation):
     print("processing ", g.n_tiles)
-    # TODO: this is ugly
-    # more generally, this idea of having a "computational" grid and an "input"
-    # grid might not be the ideal solution for our problems. i'm not sure!
-    # potential problem: null hypotheses need to take into account the transformations.
     if transformation is None:
         computational_df = g.df
     else:
