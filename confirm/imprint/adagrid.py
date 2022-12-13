@@ -211,7 +211,9 @@ class AdaCalibrationDriver:
             ),
         )
         g_calibrated = g.add_cols(lams_df)
-        g_calibrated.df["birthday"] = i
+        g_calibrated.df["worker_id"] = self.db.worker_id
+        g_calibrated.df["birthiter"] = i
+        g_calibrated.df["birthtime"] = time.time()
         return g_calibrated
 
     def step(self, i):
@@ -671,7 +673,7 @@ def ada_calibrate(
     return ada_iter + 1, reports, db
 
 
-def _validation_process_tiles(driver, g, lam, delta, i, transformation):
+def _validation_process_tiles(db, driver, g, lam, delta, i, transformation):
     print("processing ", g.n_tiles)
     if transformation is None:
         computational_df = g.df
@@ -696,7 +698,9 @@ def _validation_process_tiles(driver, g, lam, delta, i, transformation):
     rej_df["total_cost"] = rej_df["grid_cost"] + rej_df["sim_cost"]
 
     g_val = g.add_cols(rej_df)
-    g_val.df["birthday"] = i
+    g_val.df["worker_id"] = db.worker_id
+    g_val.df["birthiter"] = i
+    g_val.df["birthtime"] = time.time()
     return g_val
 
 
@@ -742,7 +746,9 @@ def ada_validate(
         g = copy.deepcopy(g)
         null_hypos = g.null_hypos
         g.df["K"] = init_K
-        g_val = _validation_process_tiles(ada_driver, g, lam, delta, 0, transformation)
+        g_val = _validation_process_tiles(
+            db, ada_driver, g, lam, delta, 0, transformation
+        )
         db.init_tiles(g_val.df)
     else:
         db = db
@@ -817,7 +823,7 @@ def ada_validate(
 
             start_processing = time.time()
             g_val_new = _validation_process_tiles(
-                ada_driver, g_new, lam, delta, ada_iter, transformation
+                db, ada_driver, g_new, lam, delta, ada_iter, transformation
             )
             db.write(g_val_new.df)
             report.update(
