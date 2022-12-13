@@ -57,7 +57,7 @@ class Driver:
             model.family, model.family_params if hasattr(model, "family_params") else {}
         )
 
-        self.tunev = jax.jit(
+        self.calibratev = jax.jit(
             jax.vmap(
                 calc_tuning_threshold,
                 in_axes=(0, None, 0),
@@ -115,29 +115,29 @@ class Driver:
             .reset_index(drop=True)
         )
 
-    def _batched_tune(self, K, theta, vertices, null_truth, alpha):
+    def _batched_calibrate(self, K, theta, vertices, null_truth, alpha):
         stats = self.model.sim_batch(0, K, theta, null_truth)
         sorted_stats = jnp.sort(stats, axis=-1)
         alpha0 = self.backward_boundv(alpha, theta, vertices)
-        bootstrap_lams = self.tunev(sorted_stats, np.arange(K), alpha0)
+        bootstrap_lams = self.calibratev(sorted_stats, np.arange(K), alpha0)
         return bootstrap_lams
 
-    def _tune(self, K_df, alpha):
+    def _calibrate(self, K_df, alpha):
         K = K_df["K"].iloc[0]
         K_g = grid.Grid(K_df)
 
         theta, vertices = K_g.get_theta_and_vertices()
         bootstrap_lams = batching.batch(
-            self._batched_tune,
+            self._batched_calibrate,
             self.tile_batch_size,
             in_axes=(None, 0, 0, 0, None),
         )(K, theta, vertices, K_g.get_null_truth(), alpha)
         return pd.DataFrame(bootstrap_lams, columns=["lams"])
 
-    def tune(self, df, alpha):
+    def calibrate(self, df, alpha):
         return (
             df.groupby("K", group_keys=False)
-            .apply(lambda K_df: self._tune(K_df, alpha))
+            .apply(lambda K_df: self._calibrate(K_df, alpha))
             .reset_index(drop=True)
         )
 
@@ -202,7 +202,7 @@ def validate(
     return rej_df
 
 
-def tune(
+def calibrate(
     modeltype,
     g,
     *,
@@ -213,7 +213,7 @@ def tune(
     model_kwargs=None
 ):
     """
-    Tune the critical threshold for a given level of Type I Error control.
+    calibrate the critical threshold for a given level of Type I Error control.
 
     Args:
         modeltype: The model class.
@@ -231,5 +231,5 @@ def tune(
         _description_
     """
     driver, g = _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size)
-    tune_df = driver.tune(g.df, alpha)
-    return tune_df
+    calibrate_df = driver.calibrate(g.df, alpha)
+    return calibrate_df

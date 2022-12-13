@@ -119,7 +119,7 @@ alpha = 0.05
 g = ip.cartesian_grid(
     [-1, -1], [1, 1], n=[4, 4], null_hypos=[ip.hypo("theta1 < theta0")]
 )
-iter, reports, ada = ip.ada_tune(
+iter, reports, ada = ip.ada_calibrate(
     fisher.FisherExact,
     g=g,
     alpha=alpha,

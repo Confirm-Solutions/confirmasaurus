@@ -36,5 +36,5 @@ plt.show()
 ```
 
 ```python
-iter, reports, ada = ip.ada_tune(Binom1D, g=g, model_kwargs=dict(n_arm_samples=10))
+iter, reports, ada = ip.ada_calibrate(Binom1D, g=g, model_kwargs=dict(n_arm_samples=10))
 ```

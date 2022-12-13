@@ -128,6 +128,21 @@ class DBTester:
             pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()
         )
 
+    def test_cache_create(self):
+        db = self.dbtype.connect()
+        cdf = pd.DataFrame(dict(a=[1, 2, 3], b=[4, 5, 6]))
+        db.store("test_table", cdf)
+        pd.testing.assert_frame_equal(db.load("test_table"), cdf)
+
+    def test_cache_insert(self):
+        db = self.dbtype.connect()
+        cdf = pd.DataFrame(dict(a=[1, 2, 3], b=[4, 5, 6]))
+        db.store("test_table", cdf)
+        db.store("test_table", cdf)
+        pd.testing.assert_frame_equal(
+            db.load("test_table"), pd.concat((cdf, cdf)).reset_index(drop=True)
+        )
+
 
 class TestDuckDB(DBTester):
     dbtype = db.DuckDB

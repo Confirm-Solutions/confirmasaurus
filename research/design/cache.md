@@ -92,7 +92,7 @@ def hash_confirm_code():
 ```python
 import glob
 
-glob.glob("confirm/*.py")
+glob.glob("../../confirm/**/*.py")
 ```
 
 ```python

@@ -44,7 +44,11 @@ The great glossary of adagrid:
 - worst tile: the tile for which lams is smallest. `lams[worst_tile] == lamss`
 """
 import copy
+import json
+import subprocess
 import time
+from dataclasses import dataclass
+from dataclasses import field
 from pprint import pprint
 
 import jax
@@ -58,49 +62,53 @@ from . import grid
 from .db import DuckDB
 
 
-class AdagridDriver:
+class AdaCalibrationDriver:
     """
     Driver classes are the layer of imprint that is directly responsible for
     asking the Model for simulations.
 
     This driver has two entrypoints:
-    1. `bootstrap_tune(...)`: tunes (calculating lambda*) for every tile in a
+    1. `bootstrap_calibrate(...)`: calibrates (calculating lambda*) for every tile in a
        grid. The calibration is performed for many bootstrap resamplings of the
        simulated test statistics. This bootstrap gives a picture of the
        distribution of lambda*.
     2. `many_rej(...)`: calculates the number of rejections for many different
        values values of lambda*.
 
-    For the basic `validate` and `tune` drivers, see `driver.py`.
+    For the basic `validate` and `calibrate` drivers, see `driver.py`.
     """
 
-    def __init__(
-        self, model, *, init_K, n_K_double, nB, bootstrap_seed, tile_batch_size
-    ):
+    def __init__(self, db, model, null_hypos, config):
+        self.db = db
         self.model = model
+        self.null_hypos = null_hypos
+        self.c = config
         self.forward_boundv, self.backward_boundv = driver.get_bound(
             model.family, model.family_params if hasattr(model, "family_params") else {}
         )
 
-        self.tunevv = jax.jit(
+        self.calibratevv = jax.jit(
             jax.vmap(
                 jax.vmap(driver.calc_tuning_threshold, in_axes=(None, 0, None)),
                 in_axes=(0, None, 0),
             )
         )
 
-        bootstrap_key = jax.random.PRNGKey(bootstrap_seed)
-        self.init_K = init_K
-        self.Ks = init_K * 2 ** np.arange(n_K_double + 1)
+        bootstrap_key = jax.random.PRNGKey(self.c.bootstrap_seed)
+        self.init_K = self.c.init_K
+        self.Ks = self.c.init_K * 2 ** np.arange(self.c.n_K_double + 1)
         self.max_K = self.Ks[-1]
-        self.nB = nB
+        self.nB = self.c.nB
         self.bootstrap_idxs = {
             K: jnp.concatenate(
                 (
                     jnp.arange(K)[None, :],
                     jnp.sort(
                         jax.random.choice(
-                            bootstrap_key, K, shape=(nB + nB, K), replace=True
+                            bootstrap_key,
+                            K,
+                            shape=(self.c.nB + self.c.nB, K),
+                            replace=True,
                         ),
                         axis=-1,
                     ),
@@ -109,19 +117,26 @@ class AdagridDriver:
             for K in self.Ks
         }
 
-        self.tile_batch_size = tile_batch_size
+        self.tile_batch_size = self.c.tile_batch_size
 
-    def _batched_bootstrap_tune(self, K, theta, vertices, null_truth, alpha):
+        self.alpha = self.c.alpha
+        self.calibration_min_idx = self.c.calibration_min_idx
+        self.bias_target = self.c.bias_target
+        self.grid_target = self.c.grid_target
+        self.std_target = self.c.std_target
+        self.iter_size = self.c.iter_size
+
+    def _batched_bootstrap_calibrate(self, K, theta, vertices, null_truth, alpha):
         # NOTE: sort of a todo. having the simulations loop as the outer batch
         # is faster than the other way around. But, we need all simulations in
-        # order to tune. So, the likely fastest solution is to have multiple
+        # order to calibrate. So, the likely fastest solution is to have multiple
         # layers of batching. This is not currently implemented.
         stats = self.model.sim_batch(0, K, theta, null_truth)
         sorted_stats = jnp.sort(stats, axis=-1)
         alpha0 = self.backward_boundv(alpha, theta, vertices)
-        return self.tunevv(sorted_stats, self.bootstrap_idxs[K], alpha0), alpha0
+        return self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0), alpha0
 
-    def _bootstrap_tune(self, K_df, alpha, tile_batch_size=None):
+    def _bootstrap_calibrate(self, K_df, alpha, tile_batch_size=None):
         if tile_batch_size is None:
             tile_batch_size = self.tile_batch_size
 
@@ -131,7 +146,7 @@ class AdagridDriver:
 
         theta, vertices = K_g.get_theta_and_vertices()
         bootstrap_lams, alpha0 = batching.batch(
-            self._batched_bootstrap_tune,
+            self._batched_bootstrap_calibrate,
             tile_batch_size,
             in_axes=(None, 0, 0, 0, None),
         )(K, theta, vertices, K_g.get_null_truth(), alpha)
@@ -149,9 +164,9 @@ class AdagridDriver:
         lams_df.insert(0, "alpha0", alpha0)
         return lams_df
 
-    def bootstrap_tune(self, df, alpha, tile_batch_size=None):
+    def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
         return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._bootstrap_tune(K_df, alpha, tile_batch_size)
+            lambda K_df: self._bootstrap_calibrate(K_df, alpha, tile_batch_size)
         )
 
     def _many_rej(self, K_df, lams_arr):
@@ -169,75 +184,13 @@ class AdagridDriver:
             lambda K_df: self._many_rej(K_df, lams_arr)
         )
 
-
-class AdaCalibration:
-    def __init__(
-        self,
-        ada_driver,
-        *,
-        g=None,
-        db=None,
-        grid_target,
-        bias_target,
-        std_target,
-        iter_size,
-        alpha,
-        calibration_min_idx,
-    ):
-        self.ada_driver = ada_driver
-        self.alpha = alpha
-        self.calibration_min_idx = calibration_min_idx
-        self.bias_target = bias_target
-        self.grid_target = grid_target
-        self.std_target = std_target
-        self.iter_size = iter_size
-
-        if db is None:
-            if g is None:
-                raise ValueError(
-                    "Must provide either an initial grid or an existing"
-                    " database! Set either g or db."
-                )
-            self.db = DuckDB.connect()
-        else:
-            self.db = db
-
-        if g is None:
-            d = self.db.dimension()
-            null_hypos_df = self.db.load("null_hypos")
-            self.null_hypos = []
-            for i in range(null_hypos_df.shape[0]):
-                n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
-                c = null_hypos_df["c"].iloc[i]
-                self.null_hypos.append(grid.HyperPlane(n, c))
-        else:
-            self.null_hypos = g.null_hypos
-            # Copy the input grid so that the caller is not surprised by any changes.
-            g = copy.deepcopy(g)
-            g.df["K"] = self.ada_driver.init_K
-
-            # We process the tiles before adding them to the database so that the
-            # database will be initialized with the correct set of columns.
-            g_tuned = self._process_tiles(g, 0)
-            self.db.init_tiles(g_tuned.df)
-            d = self.db.dimension()
-
-            n_hypos = len(self.null_hypos)
-            cols = {
-                f"n{i}": [self.null_hypos[j].n[i] for j in range(n_hypos)]
-                for i in range(d)
-            }
-            cols["c"] = [self.null_hypos[j].c for j in range(n_hypos)]
-            null_hypos_df = pd.DataFrame(cols)
-            self.db.store("null_hypos", null_hypos_df)
-
     def _process_tiles(self, g, i):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.ada_driver.bootstrap_tune(g.df, self.alpha)
+        lams_df = self.bootstrap_calibrate(g.df, self.alpha)
         # we use insert here to order columns nicely for reading raw data
         lams_df.insert(1, "grid_cost", self.alpha - lams_df["alpha0"])
         lams_df.insert(
@@ -257,9 +210,9 @@ class AdaCalibration:
                 np.where(lams_df["impossible"], -np.inf, np.inf),
             ),
         )
-        g_tuned = g.add_cols(lams_df)
-        g_tuned.df["birthday"] = i
-        return g_tuned
+        g_calibrated = g.add_cols(lams_df)
+        g_calibrated.df["birthday"] = i
+        return g_calibrated
 
     def step(self, i):
         """
@@ -283,7 +236,7 @@ class AdaCalibration:
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
         B_lamss = self.db.bootstrap_lamss()
-        worst_tile_tie_sum = self.ada_driver.many_rej(
+        worst_tile_tie_sum = self.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0][0]
         worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
@@ -361,8 +314,8 @@ class AdaCalibration:
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
-        twb_worst_tile["K"] = self.ada_driver.max_K
-        twb_worst_tile_lams = self.ada_driver.bootstrap_tune(
+        twb_worst_tile["K"] = self.max_K
+        twb_worst_tile_lams = self.bootstrap_calibrate(
             twb_worst_tile, self.alpha, tile_batch_size=1
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
@@ -372,7 +325,7 @@ class AdaCalibration:
         # Step 5: Decide whether to refine or deepen
         # THIS IS IT! This is where we decide whether to refine or deepen.
         ########################################
-        at_max_K = work["K"] == self.ada_driver.max_K
+        at_max_K = work["K"] == self.max_K
         work["refine"] = at_max_K
         work["refine"] |= (grid_cost > self.grid_target) & (~deepen_likely_to_work)
         work["deepen"] = ~work["refine"]
@@ -389,14 +342,14 @@ class AdaCalibration:
 
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
             start_processing = time.time()
-            g_tuned_new = self._process_tiles(g_new, i)
+            g_calibrated_new = self._process_tiles(g_new, i)
             report["runtime_processing"] = time.time() - start_processing
             start_cleanup = time.time()
-            self.db.write(g_tuned_new.df)
+            self.db.write(g_calibrated_new.df)
             report.update(
                 dict(
-                    n_processed=g_tuned_new.n_tiles,
-                    K_distribution=g_tuned_new.df["K"].value_counts().to_dict(),
+                    n_processed=g_calibrated_new.n_tiles,
+                    K_distribution=g_calibrated_new.df["K"].value_counts().to_dict(),
                 )
             )
 
@@ -455,12 +408,18 @@ def print_report(_iter, report, _ada):
     pprint(ready)
 
 
-def ada_tune(
-    modeltype,
-    *,
-    g=None,
-    db=None,
+def _get_git_revision_hash() -> str:
+    return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+
+
+def _get_git_diff() -> str:
+    return subprocess.check_output(["git", "diff", "HEAD"]).decode("ascii").strip()
+
+
+calibration_defaults = dict(
+    model_name="invalid",
     model_seed=0,
+    model_kwargs=None,
     alpha=0.025,
     init_K=2**13,
     n_K_double=4,
@@ -473,8 +432,116 @@ def ada_tune(
     calibration_min_idx=40,
     iter_size=2**10,
     n_iter=100,
-    callback=print_report,
+    worker_id=None,
+    git_hash=None,
+    git_diff=None,
+)
+
+
+@dataclass
+class CalibrationConfig:
+    modeltype: type
+    model_seed: int
+    model_kwargs: dict
+    alpha: float
+    init_K: int
+    n_K_double: int
+    bootstrap_seed: int
+    nB: int
+    tile_batch_size: int
+    grid_target: float
+    bias_target: float
+    std_target: float
+    calibration_min_idx: int
+    iter_size: int
+    n_iter: int
+    worker_id: int
+    git_hash: str = field(default_factory=_get_git_revision_hash)
+    git_diff: str = field(default_factory=_get_git_diff)
+    defaults: dict = None
+
+    def __post_init__(self):
+        self.tile_batch_size = self.tile_batch_size or (
+            64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
+        )
+        self.model_name = self.modeltype.__name__  # noqa
+        if self.model_kwargs is None:
+            self.model_kwargs = {}
+        # TODO: is json suitable for all models? are there models that are going to
+        # want to have large objects as parameters?
+        self.model_kwargs = json.dumps(self.model_kwargs)
+
+        continuation = True
+        if self.defaults is None:
+            self.defaults = calibration_defaults
+            continuation = False
+
+        for k in self.defaults:
+            if self.__dict__[k] is None:
+                self.__dict__[k] = self.defaults[k]
+
+        # If we're continuing a calibration, make sure that fixed parameters
+        # are the same across all workers.
+        if continuation:
+            for k in [
+                "model_seed",
+                "model_kwargs",
+                "alpha",
+                "init_K",
+                "n_K_double",
+                "bootstrap_seed",
+                "nB",
+                "model_name",
+            ]:
+                if self.__dict__[k] != self.defaults[k]:
+                    raise ValueError(
+                        f"Fixed parameter {k} has different values across workers."
+                    )
+
+        config_dict = {k: self.__dict__[k] for k in self.defaults}
+        self.config_df = pd.DataFrame([config_dict])
+
+
+def _load_null_hypos(db):
+    d = db.dimension()
+    null_hypos_df = db.load("null_hypos")
+    null_hypos = []
+    for i in range(null_hypos_df.shape[0]):
+        n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
+        c = null_hypos_df["c"].iloc[i]
+        null_hypos.append(grid.HyperPlane(n, c))
+    return null_hypos
+
+
+def _store_null_hypos(db, null_hypos):
+    d = db.dimension()
+    n_hypos = len(null_hypos)
+    cols = {f"n{i}": [null_hypos[j].n[i] for j in range(n_hypos)] for i in range(d)}
+    cols["c"] = [null_hypos[j].c for j in range(n_hypos)]
+    null_hypos_df = pd.DataFrame(cols)
+    db.store("null_hypos", null_hypos_df)
+
+
+def ada_calibrate(
+    modeltype,
+    *,
+    g=None,
+    db=None,
+    model_seed: int = None,
     model_kwargs=None,
+    alpha: float = None,
+    init_K: int = None,
+    n_K_double: int = None,
+    bootstrap_seed: int = None,
+    nB: int = None,
+    tile_batch_size: int = None,
+    grid_target: float = None,
+    bias_target: float = None,
+    std_target: float = None,
+    calibration_min_idx: int = None,
+    iter_size: int = None,
+    n_iter: int = None,
+    callback=print_report,
 ):
     """
     The main entrypoint for the adaptive calibration algorithm.
@@ -482,7 +549,10 @@ def ada_tune(
     Args:
         modeltype: The model class to use.
         g: The initial grid.
+        db: The database backend to use. Defaults to `db.DuckDB.connect()`.
         model_seed: The random seed for the model. Defaults to 0.
+        model_kwargs: Additional keyword arguments for constructing the Model
+                  object. Defaults to None.
         alpha: The target type I error control level. Defaults to 0.025.
         init_K: Initial K for the first tiles. Defaults to 2**13.
         n_K_double: The number of doublings of K. The maximum K will be
@@ -506,65 +576,99 @@ def ada_tune(
                         alpha0 will need to be larger. Defaults to 40.
         n_iter: The number of adagrid iterations to run.
                 Defaults to 100.
-        db_type: The database backend to use. Defaults to db.DuckDBTiles.
         callback: A function accepting three arguments (ada_iter, report, ada)
                   that can perform some reporting or printing at each iteration.
                   Defaults to print_report.
-        model_kwargs: Additional keyword arguments for constructing the Model
-                  object. Defaults to None.
 
     Returns:
         ada_iter: The final iteration number.
         reports: A list of the report dicts from each iteration.
         ada: The Adagrid object after the final iteration.
     """
-    tile_batch_size = tile_batch_size or (
-        64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
+
+    ########################################
+    # Setup the database, load
+    ########################################
+    if g is None and db is None:
+        raise ValueError("Must provide either an initial grid or a database!")
+
+    if db is None:
+        db = DuckDB.connect()
+
+    ########################################
+    # Store config
+    ########################################
+
+    defaults = None
+    if g is None:
+        defaults = db.load("config").iloc[0].to_dict()
+
+    c = CalibrationConfig(
+        modeltype,
+        model_seed,
+        model_kwargs,
+        alpha,
+        init_K,
+        n_K_double,
+        bootstrap_seed,
+        nB,
+        tile_batch_size,
+        grid_target,
+        bias_target,
+        std_target,
+        calibration_min_idx,
+        iter_size,
+        n_iter,
+        db.worker_id,
+        defaults=defaults,
     )
+    db.store("config", c.config_df)
+
+    ########################################
+    # Set up model, driver and grid
+    ########################################
 
     # Why initialize the model here rather than relying on the user to pass an
     # already constructed model object?
     # 1. We can pass the seed here.
     # 2. We can pass the correct max_K and avoid a class of errors.
-    if model_kwargs is None:
-        model_kwargs = {}
-    model = modeltype(seed=model_seed, max_K=init_K * 2**n_K_double, **model_kwargs)
-
-    ada_driver = AdagridDriver(
-        model,
-        init_K=init_K,
-        n_K_double=n_K_double,
-        nB=nB,
-        bootstrap_seed=bootstrap_seed,
-        tile_batch_size=tile_batch_size,
+    model = modeltype(
+        seed=c.model_seed,
+        max_K=c.init_K * 2**c.n_K_double,
+        **json.loads(c.model_kwargs),
     )
+    null_hypos = _load_null_hypos(db) if g is None else g.null_hypos
+    ada_driver = AdaCalibrationDriver(db, model, null_hypos, c)
 
-    ada = AdaCalibration(
-        ada_driver,
-        g=g,
-        db=db,
-        grid_target=grid_target,
-        bias_target=bias_target,
-        std_target=std_target,
-        iter_size=iter_size,
-        alpha=alpha,
-        calibration_min_idx=calibration_min_idx,
-    )
+    if g is not None:
+        # Copy the input grid so that the caller is not surprised by any changes.
+        g = copy.deepcopy(g)
+        g.df["K"] = c.init_K
+
+        # We process the tiles before adding them to the database so that the
+        # database will be initialized with the correct set of columns.
+        g_calibrated = ada_driver._process_tiles(g, 0)
+        db.init_tiles(g_calibrated.df)
+        _store_null_hypos(db, null_hypos)
+
+    ########################################
+    # Run adagrid!
+    ########################################
 
     reports = []
-    for ada_iter in range(n_iter):
+    for ada_iter in range(c.n_iter):
         try:
-            done, report = ada.step(ada_iter)
+            done, report = ada_driver.step(ada_iter)
             if callback is not None:
-                callback(ada_iter, report, ada)
+                callback(ada_iter, report, ada_driver)
             reports.append(report)
             if done:
                 break
         except KeyboardInterrupt:
             print("KeyboardInterrupt")
-            return ada_iter, reports, ada
-    # TODO: return db instead of ada?
-    return ada_iter + 1, reports, ada
+            return ada_iter, reports, db
+
+    return ada_iter + 1, reports, db
 
 
 def _validation_process_tiles(driver, g, lam, delta, i, transformation):

@@ -105,7 +105,7 @@ plt.show()
 
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-n_iter, reports, ada = ip.ada_tune(ZTest1D, g=g, nB=5)
+n_iter, reports, ada = ip.ada_calibrate(ZTest1D, g=g, nB=5)
 ```
 
 ```python

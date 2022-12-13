@@ -191,17 +191,24 @@ def get_client(host=None, port=None, username=None, password=None, database=None
     if host is None:
         if "CLICKHOUSE_HOST" in os.environ:
             host = os.environ["CLICKHOUSE_HOST"]
-        host = keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
+        else:
+            host = keyring.get_password(
+                "clickhouse-confirm-test-host", os.environ["USER"]
+            )
     if port is None:
-        port = 8443
+        if "CLICKHOUSE_PORT" in os.environ:
+            port = os.environ["CLICKHOUSE_PORT"]
+        else:
+            port = 8443
     if username is None:
         username = "default"
     if password is None:
         if "CLICKHOUSE_PASSWORD" in os.environ:
             password = os.environ["CLICKHOUSE_PASSWORD"]
-        password = keyring.get_password(
-            "clickhouse-confirm-test-password", os.environ["USER"]
-        )
+        else:
+            password = keyring.get_password(
+                "clickhouse-confirm-test-password", os.environ["USER"]
+            )
     return clickhouse_connect.get_client(
         host=host, port=port, username=username, password=password, database=database
     )
