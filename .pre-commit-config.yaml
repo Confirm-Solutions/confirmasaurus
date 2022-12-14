@@ -1,5 +1,10 @@
 fail_fast: false
 repos:
+  # We have black here twice because the first black block runs black on
+  # Jupyter notebooks. And we don't want to run black on notebooks in the
+  # research folder because 1) it's slow. 2) it can overwrite a notebook in
+  # current use causing the session to be lost. 3) there's no reason, those
+  # notebooks are exploration anyway.
   - repo: https://github.com/psf/black
     rev: 22.10.0
     hooks:

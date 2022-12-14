@@ -702,6 +702,7 @@ def _gen_short_uuids(n, host_id, t):
         t = np.uint64(int(uuid_timer()))
     if _gen_short_uuids.largest_t is not None and t <= _gen_short_uuids.largest_t:
         t = np.uint64(_gen_short_uuids.largest_t + 1)
+    print(t)
     _gen_short_uuids.largest_t = t
 
     return (

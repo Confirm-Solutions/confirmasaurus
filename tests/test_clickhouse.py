@@ -14,7 +14,7 @@ class TestClickhouse(DBTester):
         self.dbtype.connect()
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 class TestClickhouseStore(StoreTester):
     def connect(self):
         from confirm.cloud.clickhouse import Clickhouse

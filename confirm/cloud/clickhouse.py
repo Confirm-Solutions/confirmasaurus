@@ -55,8 +55,8 @@ class ClickhouseStore(Store):
             """
             create table if not exists store_tables
                 (key String, table_name String)
-                order by key"
-                            """
+                order by key
+            """
         )
 
     def get(self, key):
