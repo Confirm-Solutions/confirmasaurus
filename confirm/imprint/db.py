@@ -6,6 +6,9 @@ from typing import List
 import duckdb
 import pandas as pd
 
+from confirm.imprint.store import DuckDBStore
+from confirm.imprint.store import PandasStore
+
 
 @dataclass
 class PandasTiles:
@@ -20,6 +23,13 @@ class PandasTiles:
     df: pd.DataFrame = None
     worker_id: int = 0
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
+
+    @property
+    def store(self):
+        return PandasStore(self._tables)
+
+    def get_store(self):
+        return PandasStore(self._tables)
 
     def dimension(self):
         return max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
@@ -70,9 +80,10 @@ class DuckDBTiles:
     worker_id: int = 0
     _columns: List[str] = None
     _d: int = None
+    store: DuckDBStore = None
 
-    def __init__(self, con):
-        self.con = con
+    def __post_init__(self):
+        self.store = DuckDBStore(self.con)
 
     def dimension(self):
         if self._d is None:

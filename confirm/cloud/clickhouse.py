@@ -10,6 +10,9 @@ import pottery
 import pyarrow
 import redis
 
+from confirm.imprint.store import is_table_name
+from confirm.imprint.store import Store
+
 type_map = {
     "uint32": "UInt32",
     "uint64": "UInt64",
@@ -33,6 +36,84 @@ def _table_list(client):
         return []
     else:
         return result["name"].values
+
+
+def _query_df(client, query):
+    return client.query_arrow(query).to_pandas()
+
+
+def _insert_df(client, table, df):
+    client.insert_arrow(table, pyarrow.Table.from_pandas(df, preserve_index=False))
+
+
+@dataclass
+class ClickhouseStore(Store):
+    client: clickhouse_connect.driver.httpclient.HttpClient
+
+    def __post_init__(self):
+        self.client.command(
+            """
+            create table if not exists store_tables
+                (key String, table_name String)
+                order by key"
+                            """
+        )
+
+    def get(self, key):
+        exists, table_name = self._exists(key)
+        print(exists, table_name)
+        if exists:
+            return _query_df(self.client, f"select * from {table_name}")
+        else:
+            raise KeyError(f"Key {key} not found in store")
+
+    def set(self, key, df, nickname=None):
+        exists, table_name = self._exists(key)
+        if exists:
+            self.client.command(f"drop table {table_name}")
+        else:
+            table_id = uuid.uuid4().hex
+            if is_table_name(key):
+                table_name = key
+            else:
+                table_name = (
+                    f"_store_{nickname}_{table_id}"
+                    if nickname is not None
+                    else f"_store_{table_id}"
+                )
+            self.client.command(
+                "insert into store_tables values (%s, %s)", (key, table_name)
+            )
+        cols = get_create_table_cols(df)
+        # if "id" not in df.columns:
+        #     df["id"] = df.index
+        self.client.command(
+            f"""
+            create table {table_name} ({",".join(cols)})
+                engine = MergeTree() order by tuple()
+        """
+        )
+        _insert_df(self.client, table_name, df)
+
+    def set_or_append(self, key, df):
+        exists, table_name = self._exists(key)
+        if exists:
+            print("exists", table_name, df)
+            _insert_df(self.client, table_name, df)
+        else:
+            self.set(key, df)
+
+    def _exists(self, key):
+        table_name = self.client.query(
+            "select table_name from store_tables where key = %s", (key,)
+        ).result_set
+        if len(table_name) == 0:
+            return False, None
+        else:
+            return True, table_name[0][0]
+
+    def exists(self, key):
+        return self._exists(key)[0]
 
 
 @dataclass
@@ -64,7 +145,7 @@ class Clickhouse:
     criterion decided it was not worth refining or deepening.
     """
 
-    ch_client: clickhouse_connect.driver.httpclient.HttpClient
+    client: clickhouse_connect.driver.httpclient.HttpClient
     redis_con: redis.Redis
     host: str
     job_id: str
@@ -72,36 +153,10 @@ class Clickhouse:
     _columns: List[str] = None
     _d: int = None
 
-    def _query_df(self, query):
-        return self.ch_client.query_arrow(query).to_pandas()
+    @property
+    def store(self):
+        return ClickhouseStore(self.client)
 
-    def _insert_df(self, table, df):
-        self.ch_client.insert_arrow(
-            table, pyarrow.Table.from_pandas(df, preserve_index=False)
-        )
-
-    ########################################
-    # Caching interface
-    ########################################
-    def load(self, table_name):
-        return self._query_df(f"select * from {table_name}")
-
-    def store(self, table_name, df):
-        if table_name not in _table_list(self.ch_client):
-            if "id" not in df.columns:
-                df["id"] = df.index
-            cols = get_create_table_cols(df)
-            self.ch_client.command(
-                f"""
-                create table {table_name} ({",".join(cols)})
-                    engine = MergeTree() order by id
-            """
-            )
-        self._insert_df(table_name, df)
-
-    ########################################
-    # Adagrid tile database interface
-    ########################################
     def dimension(self):
         if self._d is None:
             self._d = (
@@ -111,31 +166,35 @@ class Clickhouse:
 
     def columns(self):
         if self._columns is None:
-            self._columns = self._query_df("select * from tiles limit 1").columns
+            self._columns = _query_df(
+                self.client, "select * from tiles limit 1"
+            ).columns
         return self._columns
 
     def get_all(self):
         cols = ",".join([c for c in self.columns() if c not in ["active", "eligible"]])
-        return self._query_df(
+        return _query_df(
+            self.client,
             f"""
             select {cols},
                 and(active=true, (id not in (select id from tiles_inactive))) as active,
                 and(eligible=true, (id not in (select id from work))) as eligible
             from tiles
-        """
+        """,
         )
 
     def write(self, df):
-        self._insert_df("tiles", df)
+        _insert_df(self.client, "tiles", df)
 
     def worst_tile(self, order_col):
-        return self._query_df(
+        return _query_df(
+            self.client,
             f"""
             select * from tiles where
                 active=true
                 and id not in (select * from tiles_inactive)
             order by {order_col} limit 1
-        """
+        """,
         )
 
     def next(self, n, order_col):
@@ -143,22 +202,24 @@ class Clickhouse:
             key=f"{self.host}/{self.job_id}/lock", masters={self.redis_con}
         )
         with lock:
-            out = self._query_df(
+            out = _query_df(
+                self.client,
                 f"""
                 select * from tiles where
                     eligible=true
                     and id not in (select id from work)
                 order by {order_col} asc limit {n}
-            """
+            """,
             )
             T = time.time()
             out["time"] = T
             out["worker_id"] = self.worker_id
-            self._insert_df("work", out[["id", "time", "worker_id"]])
+            _insert_df(self.client, "work", out[["id", "time", "worker_id"]])
 
         # No need to check for conflicts because we are using a lock but if we
         # were to check for conflicts, it would look something like this
-        # conflicts = self._query_df(
+        # conflicts = _query_df(
+        # self.client,
         #     f"""
         #     with mine as (
         #         select id, time from work where
@@ -177,7 +238,7 @@ class Clickhouse:
         return out
 
     def finish(self, which):
-        self._insert_df("tiles_inactive", which.loc[~which["active"]][["id"]])
+        _insert_df(self.client, "tiles_inactive", which.loc[~which["active"]][["id"]])
 
     def bootstrap_lamss(self):
         # Get the number of bootstrap lambda* columns
@@ -185,7 +246,7 @@ class Clickhouse:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        lamss = self.ch_client.query(
+        lamss = self.client.query(
             f"""
             select {cols} from tiles where
                 active=true
@@ -196,12 +257,12 @@ class Clickhouse:
         return lamss
 
     def close(self):
-        self.ch_client.close()
+        self.client.close()
 
     def init_tiles(self, df):
         cols = get_create_table_cols(df)
         orderby = "orderer" if "orderer" in df.columns else "id"
-        self.ch_client.command(
+        self.client.command(
             f"""
             create table tiles ({",".join(cols)})
                 engine = MergeTree() order by {orderby}
@@ -209,13 +270,13 @@ class Clickhouse:
         )
 
         id_type = type_map[df["id"].dtype.name]
-        self.ch_client.command(
+        self.client.command(
             f"""
             create table tiles_inactive (id {id_type})
                 engine = MergeTree() order by id
             """
         )
-        self.ch_client.command(
+        self.client.command(
             f"""
             create table work
                 (id {id_type}, time Float64, worker_id UInt32)

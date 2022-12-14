@@ -3,13 +3,25 @@ import time
 import pandas as pd
 import pytest
 
-from confirm.imprint.cache import DuckDBCache
-from confirm.imprint.cache import PandasCache
+from confirm.imprint.store import DuckDBStore
+from confirm.imprint.store import is_table_name
+from confirm.imprint.store import PandasStore
 
 ex = pd.DataFrame(dict(a=[1, 2, 3], b=[4, 5, 6]))
+ex2 = ex.copy()
+ex2["a"] += 1
 
 
-class CacheTester:
+def test_is_table_name():
+    assert is_table_name("hello")
+    assert is_table_name("hello_world")
+    assert is_table_name("lol0")
+    assert not is_table_name("123_hello")
+    assert not is_table_name("_hello")
+    assert not is_table_name("hello!")
+
+
+class StoreTester:
     def test_exists_not_exists(self):
         assert not self.connect().exists("key")
 
@@ -30,9 +42,10 @@ class CacheTester:
     def test_append(self):
         c = self.connect()
         c.set("key", ex)
-        c.append("key", ex)
+        pd.testing.assert_frame_equal(c.get("key"), ex)
+        c.set_or_append("key", ex2)
         pd.testing.assert_frame_equal(
-            c.get("key"), pd.concat([ex, ex], axis=0).reset_index(drop=True)
+            c.get("key"), pd.concat([ex, ex2], axis=0).reset_index(drop=True)
         )
 
     def test_get_not_exists(self):
@@ -42,8 +55,8 @@ class CacheTester:
 
     def test_append_not_exists(self):
         c = self.connect()
-        with pytest.raises(KeyError):
-            c.append("key", ex)
+        c.set_or_append("key", ex)
+        pd.testing.assert_frame_equal(c.get("key"), ex)
 
     def test_cached_function(self):
         c = self.connect()
@@ -59,18 +72,23 @@ class CacheTester:
         assert r1.iloc[0, 0] != r3.iloc[0, 0]
 
 
-class TestPandasCache(CacheTester):
+class TestPandasStore(StoreTester):
     def connect(self):
-        return PandasCache()
+        return PandasStore()
 
 
-class TestDuckDBCache(CacheTester):
+class TestDuckDBStore(StoreTester):
     def connect(self):
-        return DuckDBCache.connect()
+        return DuckDBStore.connect()
 
     def test_set_nickname(self):
         c = self.connect()
-        c.set("key", ex, nickname="hi")
+        c.set("0key", ex, nickname="hi")
         pd.testing.assert_frame_equal(
-            c.con.execute("select * from _cache_hi_0").df(), ex
+            c.con.execute("select * from _store_hi_0").df(), ex
         )
+
+    def test_set_legal_table_name(self):
+        c = self.connect()
+        c.set("key", ex)
+        pd.testing.assert_frame_equal(c.con.execute("select * from key").df(), ex)

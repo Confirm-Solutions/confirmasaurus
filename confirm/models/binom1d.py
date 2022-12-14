@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 
 
@@ -15,19 +16,23 @@ def _sim(samples, theta, null_truth):
 
 
 def unifs(seed, *, shape, dtype):
-    return pd.DataFrame(
-        jax.random.uniform(jax.random.PRNGKey(seed), shape=shape, dtype=dtype).ravel()
-    )
+    samples = jax.random.uniform(
+        jax.random.PRNGKey(seed), shape=shape, dtype=dtype
+    ).ravel()
+    return pd.DataFrame(dict(data=[samples.tobytes()]))
 
 
 class Binom1D:
-    def __init__(self, seed, max_K, *, n, cache=lambda x: x):
+    def __init__(self, seed, max_K, *, n, store=lambda x: x):
         self.family = "binomial"
         self.family_params = {"n": n}
         self.dtype = jnp.float32
 
-        self.samples = cache(unifs)(seed, shape=(max_K, n), dtype=self.dtype)
-        self.samples = self.samples.values.reshape((max_K, n))
+        samples_bytes = store(unifs)(seed, shape=(max_K, n), dtype=self.dtype)
+        # NOTE: reshape before converting to jax because jax copies on reshape
+        self.samples = jnp.asarray(
+            np.frombuffer(samples_bytes["data"].iloc[0], self.dtype).reshape((max_K, n))
+        )
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
         return _sim(self.samples[begin_sim:end_sim], theta, null_truth)

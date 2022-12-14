@@ -4,6 +4,10 @@ setup_nb()
 ```
 
 ```python
+256000 * 350 * 4 * 8 / 1e9 / 9
+```
+
+```python
 from confirm.models.binom1d import Binom1D
 from confirm.imprint.cache import DuckDBCache
 c = DuckDBCache.connect()
@@ -11,12 +15,64 @@ c = DuckDBCache.connect()
 
 ```python
 %%time
-m = Binom1D(0, 100000, n=1000, cache=c)
+m = Binom1D(0, 256000, n=350 * 4, cache=c)
 ```
 
 ```python
 %%time
-m = Binom1D(0, 100000, n=1000, cache=c)
+m = Binom1D(0, 256000, n=350 * 4, cache=c)
+```
+
+```python
+import pandas as pd
+import numpy as np
+```
+
+```python
+%%time
+b = m.samples.tobytes()
+c.set("test2", pd.DataFrame(dict(data=[b])))
+```
+
+```python
+import jax.numpy as jnp
+```
+
+```python
+%%time
+arr = jnp.frombuffer(c.get('test2')['data'].iloc[0], dtype=np.float32).reshape((256000, 1400))
+```
+
+```python
+arr.shape
+```
+
+```python
+arr.reshape((256000, 350 * 4)).shape
+```
+
+```python
+import numpy as np
+```
+
+```python
+import sys
+import struct
+def fast_numpy_save(array):
+    size=len(array.shape)
+    return bytes(array.dtype.byteorder.replace('=','<' if sys.byteorder == 'little' else '>')+array.dtype.kind,'utf-8')+array.dtype.itemsize.to_bytes(1,byteorder='little')+struct.pack(f'<B{size}I',size,*array.shape)+array.tobytes()
+
+def fast_numpy_load(data):
+    dtype = str(data[:2],'utf-8')
+    dtype += str(data[2])
+    size = data[3]
+    shape = struct.unpack_from(f'<{size}I', data, 4)
+    return np.ndarray(shape, dtype=dtype, buffer=data[4+size*4:])
+```
+
+```python
+%%time
+m = Binom1D(0, 256000, n=350 * 4, cache=c)
 ```
 
 ```python

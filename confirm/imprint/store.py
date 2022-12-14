@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
@@ -7,7 +8,20 @@ import duckdb
 import pandas as pd
 
 
-class Cache:
+def is_table_name(s):
+    if not s:
+        return False
+
+    if not s[0].isalpha():
+        return False
+
+    if not re.match("^[a-zA-Z0-9_]+$", s):
+        return False
+
+    return True
+
+
+class Store:
     def __call__(self, func):
         def wrapper(*args, **kwargs):
             key = json.dumps(
@@ -28,9 +42,9 @@ class Cache:
 
 
 @dataclass
-class PandasCache(Cache):
+class PandasStore(Store):
     """
-    A very simple reference cache implementation that stores DataFrames in memory.
+    A very simple reference store implementation that stores DataFrames in memory.
     """
 
     _store: Dict[str, pd.DataFrame] = field(default_factory=dict)
@@ -41,58 +55,66 @@ class PandasCache(Cache):
     def set(self, key, data, nickname=None):
         self._store[key] = data
 
-    def append(self, key, data):
-        self._store[key] = pd.concat([self._store[key], data], axis=0).reset_index(
-            drop=True
-        )
+    def set_or_append(self, key, data):
+        if self.exists(key):
+            self._store[key] = pd.concat([self._store[key], data], axis=0).reset_index(
+                drop=True
+            )
+        else:
+            self.set(key, data)
 
     def exists(self, key):
         return key in self._store
 
 
 @dataclass
-class DuckDBCache(Cache):
+class DuckDBStore(Store):
     con: duckdb.DuckDBPyConnection
 
     def __post_init__(self):
         self.con.execute(
-            "create table if not exists cache_tables (key VARCHAR, table_name VARCHAR)"
+            "create table if not exists store_tables (key VARCHAR, table_name VARCHAR)"
         )
 
     def _get_all_keys(self):
-        return self.con.execute("select * from cache_tables").df()
+        return self.con.execute("select * from store_tables").df()
 
     def get(self, key):
         exists, table_name = self._exists(key)
         if exists:
             return self.con.execute(f"select * from {table_name}").df()
         else:
-            raise KeyError(f"Key {key} not found in cache")
+            raise KeyError(f"Key {key} not found in store")
 
     def set(self, key, df, nickname=None):
         exists, table_name = self._exists(key)
         if exists:
             self.con.execute(f"drop table {table_name}")
         else:
-            idx = self.con.execute("select count(*) from cache_tables").fetchall()[0][0]
-            table_name = (
-                f"_cache_{nickname}_{idx}" if nickname is not None else f"_cache_{idx}"
-            )
+            idx = self.con.execute("select count(*) from store_tables").fetchone()[0]
+            if is_table_name(key):
+                table_name = key
+            else:
+                table_name = (
+                    f"_store_{nickname}_{idx}"
+                    if nickname is not None
+                    else f"_store_{idx}"
+                )
             self.con.execute(
-                "insert into cache_tables values (?, ?)", (key, table_name)
+                "insert into store_tables values (?, ?)", (key, table_name)
             )
-        self.con.execute(f"create table {table_name} as select * from df ")
+        self.con.execute(f"create table {table_name} as select * from df")
 
-    def append(self, key, data):
+    def set_or_append(self, key, df):
         exists, table_name = self._exists(key)
         if exists:
-            self.con.execute(f"insert into {table_name} select * from data")
+            self.con.execute(f"insert into {table_name} select * from df")
         else:
-            raise KeyError(f"Key {key} not found in cache")
+            self.set(key, df)
 
     def _exists(self, key):
         table_name = self.con.execute(
-            "select table_name from cache_tables where key = ?", (key,)
+            "select table_name from store_tables where key = ?", (key,)
         ).fetchall()
         if len(table_name) == 0:
             return False, None
@@ -105,7 +127,7 @@ class DuckDBCache(Cache):
     @staticmethod
     def connect(path=":memory:"):
         """
-        Load a cache database from a file.
+        Load a store database from a file.
 
         Args:
             path: The filepath to the database.
@@ -113,4 +135,4 @@ class DuckDBCache(Cache):
         Returns:
             The database.
         """
-        return DuckDBCache(duckdb.connect(path))
+        return DuckDBStore(duckdb.connect(path))

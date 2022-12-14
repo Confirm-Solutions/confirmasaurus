@@ -45,10 +45,10 @@ The great glossary of adagrid:
 """
 import copy
 import json
+import platform
 import subprocess
 import time
 from dataclasses import dataclass
-from dataclasses import field
 from pprint import pprint
 
 import jax
@@ -410,12 +410,35 @@ def print_report(_iter, report, _ada):
     pprint(ready)
 
 
+def _run(cmd):
+    try:
+        return (
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
+            .decode("utf-8")
+            .strip()
+        )
+    except subprocess.CalledProcessError as exc:
+        return f"ERROR: {exc.returncode} {exc.output}"
+
+
 def _get_git_revision_hash() -> str:
-    return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
+    return _run(["git", "rev-parse", "HEAD"])
 
 
 def _get_git_diff() -> str:
-    return subprocess.check_output(["git", "diff", "HEAD"]).decode("ascii").strip()
+    return _run(["git", "diff", "HEAD"])
+
+
+def _get_nvidia_smi() -> str:
+    return _run(["nvidia-smi"])
+
+
+def _get_pip_freeze() -> str:
+    return _run(["pip", "freeze"])
+
+
+def _get_conda_list() -> str:
+    return _run(["conda", "list"])
 
 
 calibration_defaults = dict(
@@ -437,6 +460,7 @@ calibration_defaults = dict(
     worker_id=None,
     git_hash=None,
     git_diff=None,
+    nvidia_smi=None,
 )
 
 
@@ -458,11 +482,22 @@ class CalibrationConfig:
     iter_size: int
     n_iter: int
     worker_id: int
-    git_hash: str = field(default_factory=_get_git_revision_hash)
-    git_diff: str = field(default_factory=_get_git_diff)
+    git_hash: str = None
+    git_diff: str = None
+    nvidia_smi: str = None
+    pip_freeze: str = None
+    conda_list: str = None
+    platform: str = None
     defaults: dict = None
 
     def __post_init__(self):
+        self.git_hash = _get_git_revision_hash()
+        self.git_diff = _get_git_diff()
+        self.platform = platform.platform()
+        self.nvidia_smi = _get_nvidia_smi()
+        self.pip_freeze = _get_pip_freeze()
+        self.conda_list = _get_conda_list()
+
         self.tile_batch_size = self.tile_batch_size or (
             64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
         )
@@ -506,7 +541,7 @@ class CalibrationConfig:
 
 def _load_null_hypos(db):
     d = db.dimension()
-    null_hypos_df = db.load("null_hypos")
+    null_hypos_df = db.store.get("null_hypos")
     null_hypos = []
     for i in range(null_hypos_df.shape[0]):
         n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
@@ -521,7 +556,7 @@ def _store_null_hypos(db, null_hypos):
     cols = {f"n{i}": [null_hypos[j].n[i] for j in range(n_hypos)] for i in range(d)}
     cols["c"] = [null_hypos[j].c for j in range(n_hypos)]
     null_hypos_df = pd.DataFrame(cols)
-    db.store("null_hypos", null_hypos_df)
+    db.store.set("null_hypos", null_hypos_df)
 
 
 def ada_calibrate(
@@ -603,7 +638,7 @@ def ada_calibrate(
 
     defaults = None
     if g is None:
-        defaults = db.load("config").iloc[0].to_dict()
+        defaults = db.store.get("config").iloc[0].to_dict()
 
     c = CalibrationConfig(
         modeltype,
@@ -624,7 +659,7 @@ def ada_calibrate(
         db.worker_id,
         defaults=defaults,
     )
-    db.store("config", c.config_df)
+    db.store.set_or_append("config", c.config_df)
 
     ########################################
     # Set up model, driver and grid
