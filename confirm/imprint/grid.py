@@ -641,7 +641,6 @@ def get_edges(theta, radii):
 
 
 def uuid_timer():
-    print("yikes")
     return time.time()
 
 
@@ -678,7 +677,6 @@ def gen_short_uuids(n, host_id=None, t=None):
         An array with dtype uint64 of length n containing short uuids.
     """
     n_max = 2 ** _gen_short_uuids.config[0] - 1
-    print("gimme short uuids")
     if n <= n_max:
         return _gen_short_uuids(n, host_id, t)
 
@@ -704,7 +702,6 @@ def _gen_short_uuids(n, host_id, t):
         t = np.uint64(int(uuid_timer()))
     if _gen_short_uuids.largest_t is not None and t <= _gen_short_uuids.largest_t:
         t = np.uint64(_gen_short_uuids.largest_t + 1)
-    print(t)
     _gen_short_uuids.largest_t = t
 
     return (

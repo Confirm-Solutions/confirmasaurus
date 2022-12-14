@@ -67,7 +67,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
 
       - name: Pytest
-        run: poetry run pytest -n auto 
+        run: poetry run pytest -n auto -s
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack
