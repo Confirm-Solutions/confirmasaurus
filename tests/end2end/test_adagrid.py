@@ -12,6 +12,7 @@ from confirm.models.ztest import ZTest1D
 @mock.patch("confirm.imprint.grid.uuid_timer", mock.MagicMock(return_value=100))
 def test_adagrid(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
+    print(g.df["id"])
     iter, reports, db = ip.ada_calibrate(ZTest1D, g=g, nB=5, tile_batch_size=1)
     lamss = reports[-1]["lamss"]
     np.testing.assert_allclose(lamss, snapshot(lamss))

@@ -58,7 +58,7 @@ jobs:
         uses: tj-actions/changed-files@v34.5.3
         if: github.ref != 'refs/heads/main'
 
-      - name: Run all pre-commit checks on change files.
+      - name: Run all pre-commit checks on changed files.
         run: poetry run pre-commit run --color=always --files ${{ steps.changed-files.outputs.all_changed_files }}
         if: github.ref != 'refs/heads/main'
 
