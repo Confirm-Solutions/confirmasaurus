@@ -11,7 +11,7 @@ import numpy as np
 import confirm.outlaw.berry as berry
 import confirm.outlaw.inla as inla
 import confirm.outlaw.quad as quad
-import imprint.imprint.batching as batching
+import imprint.batching as batching
 from confirm.lewislib.table import LinearInterpTable
 from confirm.lewislib.table import LookupTable
 

@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 import confirm.imprint as ip
-from imprint.imprint.models.ztest import ZTest1D
+from imprint.models.ztest import ZTest1D
 
 
 @pytest.mark.slow

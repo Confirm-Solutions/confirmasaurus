@@ -1,6 +1,6 @@
 import numpy as np
 
-import confirm.bound.normal as normal
+import imprint.bound.normal as normal
 
 
 def fwd_qcp_derivative(q, scale, v, f0):
@@ -57,7 +57,6 @@ def test_tile_fwd_qcp_solver():
     fwd_solver = normal.TileForwardQCPSolver(scale)
     q_opt = fwd_solver.solve(vs, f0)
     q_opt_deriv = tile_fwd_qcp_derivative(q_opt, scale, vs, f0)
-    print(q_opt)
     np.testing.assert_almost_equal(q_opt_deriv, 0.0)
 
 

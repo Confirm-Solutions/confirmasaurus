@@ -56,10 +56,10 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from ...imprint.imprint import batching
-from ...imprint.imprint import driver
-from ...imprint.imprint import grid
 from .db import DuckDBTiles
+from imprint import batching
+from imprint import driver
+from imprint import grid
 
 
 class AdaCalibrationDriver:

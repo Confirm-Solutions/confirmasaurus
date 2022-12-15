@@ -42,7 +42,7 @@ To get a fully functional development environment...
    mamba env create
    conda activate confirm
    # install the confirm package plus development tools
-   poetry install --with=dev,test,cloud
+   poetry install --with=dev,test,cloud,cloud_dev
    ```
 
 

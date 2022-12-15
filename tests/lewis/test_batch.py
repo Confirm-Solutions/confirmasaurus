@@ -2,8 +2,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from imprint.imprint.batching import batch
-from imprint.imprint.batching import batch_yield
+from imprint.batching import batch
+from imprint.batching import batch_yield
 
 
 def test_simple():

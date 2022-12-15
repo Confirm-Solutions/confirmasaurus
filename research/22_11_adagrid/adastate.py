@@ -11,7 +11,7 @@ import numpy as np
 import confirm.imprint.bound.binomial as ehbound
 import confirm.imprint.lewis_drivers as ld
 from confirm.lewislib import batch
-from imprint.imprint import grid
+from imprint import grid
 
 
 @dataclass
