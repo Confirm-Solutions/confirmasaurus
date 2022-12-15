@@ -20,7 +20,7 @@ def make_cartesian_gridpts(n_theta_1d, lower, upper):
 
 @dataclass
 class HyperPlane:
-    """A plane defined by:
+    r"""A plane defined by:
     x \cdot n + c = 0
     """
 
