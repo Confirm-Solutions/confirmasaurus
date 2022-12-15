@@ -1,12 +1,17 @@
 from dataclasses import dataclass
+from dataclasses import field
+from typing import Dict
 from typing import List
 
 import duckdb
 import pandas as pd
 
+from confirm.imprint.store import DuckDBStore
+from confirm.imprint.store import PandasStore
+
 
 @dataclass
-class PandasDB:
+class PandasTiles:
     """
     A tile database built on top of Pandas DataFrames.
 
@@ -16,6 +21,18 @@ class PandasDB:
     """
 
     df: pd.DataFrame = None
+    worker_id: int = 0
+    _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
+
+    @property
+    def store(self):
+        return PandasStore(self._tables)
+
+    def dimension(self):
+        return max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
+
+    def columns(self):
+        return self.df.columns
 
     def get_all(self):
         return self.df
@@ -45,7 +62,7 @@ class PandasDB:
 
 
 @dataclass
-class DuckDB:
+class DuckDBTiles:
     """
     A tile database built on top of DuckDB. This should be very fast and
     robust and is the default database for confirm.
@@ -55,10 +72,22 @@ class DuckDB:
     """
 
     con: duckdb.DuckDBPyConnection
+    # TODO: despite not supporting multiple workers, it would still be good to
+    # distinguish between separate runs with worker_id
+    worker_id: int = 0
     _columns: List[str] = None
+    _d: int = None
+    store: DuckDBStore = None
 
-    def __init__(self, con):
-        self.con = con
+    def __post_init__(self):
+        self.store = DuckDBStore(self.con)
+
+    def dimension(self):
+        if self._d is None:
+            self._d = (
+                max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
+            )
+        return self._d
 
     def columns(self):
         if self._columns is None:
@@ -128,4 +157,4 @@ class DuckDB:
         Returns:
             The tile database.
         """
-        return DuckDB(duckdb.connect(path))
+        return DuckDBTiles(duckdb.connect(path))

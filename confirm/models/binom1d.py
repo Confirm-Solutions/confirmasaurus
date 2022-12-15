@@ -1,5 +1,7 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pandas as pd
 
 
 @jax.jit
@@ -13,18 +15,23 @@ def _sim(samples, theta, null_truth):
     )
 
 
-class Binom1D:
-    def __init__(self, seed, max_K, *, n_arm_samples):
-        self.family = "binomial"
-        self.family_params = {"n": n_arm_samples}
-        self.dtype = jnp.float32
-        self.n_arm_samples = n_arm_samples
+def unifs(seed, *, shape, dtype):
+    samples = jax.random.uniform(
+        jax.random.PRNGKey(seed), shape=shape, dtype=dtype
+    ).ravel()
+    return pd.DataFrame(dict(data=[samples.tobytes()]))
 
-        # sample normals and then compute the CDF to transform into the
-        # interval [0, 1]
-        key = jax.random.PRNGKey(seed)
-        self.samples = jax.random.uniform(
-            key, shape=(max_K, self.n_arm_samples), dtype=self.dtype
+
+class Binom1D:
+    def __init__(self, seed, max_K, *, n, store=lambda x: x):
+        self.family = "binomial"
+        self.family_params = {"n": n}
+        self.dtype = jnp.float32
+
+        samples_bytes = store(unifs)(seed, shape=(max_K, n), dtype=self.dtype)
+        # NOTE: reshape before converting to jax because jax copies on reshape
+        self.samples = jnp.asarray(
+            np.frombuffer(samples_bytes["data"].iloc[0], self.dtype).reshape((max_K, n))
         )
 
     def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):

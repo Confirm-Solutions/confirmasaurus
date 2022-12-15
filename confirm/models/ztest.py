@@ -13,7 +13,7 @@ def _sim(samples, theta, null_truth):
 
 
 class ZTest1D:
-    def __init__(self, seed, max_K):
+    def __init__(self, seed, max_K, store=None):
         self.family = "normal"
         self.dtype = jnp.float32
 

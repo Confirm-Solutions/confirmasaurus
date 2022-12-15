@@ -107,6 +107,7 @@ def test_lots_of_short_uuids():
 
 def test_add_null_hypos(simple_grid):
     g_active = simple_grid.active()
+    assert len(g_active.null_hypos) == 2
     np.testing.assert_allclose(
         np.concatenate((g_active.get_theta(), g_active.get_radii()), axis=1),
         np.array(

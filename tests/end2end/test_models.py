@@ -24,8 +24,8 @@ def test_ztest(snapshot):
     n_stds = (tie_est - true_err) / tie_std
     assert np.all(np.abs(n_stds) < 1.2)
 
-    tune_df = ip.tune(ZTest1D, g)
-    pd.testing.assert_frame_equal(tune_df, snapshot(tune_df))
+    calibrate_df = ip.calibrate(ZTest1D, g)
+    pd.testing.assert_frame_equal(calibrate_df, snapshot(calibrate_df))
 
 
 def test_jax_hypergeom():

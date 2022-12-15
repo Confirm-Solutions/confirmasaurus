@@ -5,8 +5,8 @@ import keyring
 import pandas as pd
 import time
 
-host = keyring.get_password("clickhouse-confirm-host", os.environ["USER"])
-password = keyring.get_password("clickhouse-confirm-password", os.environ["USER"])
+host = keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
+password = keyring.get_password("clickhouse-confirm-test-password", os.environ["USER"])
 client = clickhouse_connect.get_client(
     host=host,
     port=8443,

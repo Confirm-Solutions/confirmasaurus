@@ -51,14 +51,14 @@ jobs:
 
       - name: Update environment
         run: |
-          poetry env use ${{ matrix.python-version }} && poetry install --with=test
+          poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud
           
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v34.5.3
         if: github.ref != 'refs/heads/main'
 
-      - name: Run all pre-commit checks on change files.
+      - name: Run all pre-commit checks on changed files.
         run: poetry run pre-commit run --color=always --files ${{ steps.changed-files.outputs.all_changed_files }}
         if: github.ref != 'refs/heads/main'
 
@@ -67,7 +67,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
 
       - name: Pytest
-        run: poetry run pytest -n auto 
+        run: poetry run pytest -n auto -s
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack

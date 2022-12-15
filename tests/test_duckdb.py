@@ -32,7 +32,7 @@ def assert_frame_equal_special(pd_df, db_df):
 class DBTester:
     def prepped_dbs(self):
         g = example_grid(-1, 1)
-        pd_tiles = db.PandasDB()
+        pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
         db_tiles = self.dbtype.connect()
         db_tiles.init_tiles(g.df)
@@ -102,7 +102,7 @@ class DBTester:
         g = example_grid(-1, 1)
         g.df["lams"] = np.random.rand(g.df.shape[0])
         g.df.loc[g.df["lams"].idxmin(), "active"] = False
-        pd_tiles = db.PandasDB()
+        pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
         db_tiles = self.dbtype.connect()
         db_tiles.init_tiles(g.df)
@@ -119,7 +119,7 @@ class DBTester:
         cols = ["lams"] + [f"B_lams{i}" for i in range(nB)]
         g = g.add_cols(pd.DataFrame(data, index=g.df.index, columns=cols))
 
-        pd_tiles = db.PandasDB()
+        pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
         db_tiles = self.dbtype.connect()
         db_tiles.init_tiles(g.df)
@@ -130,15 +130,15 @@ class DBTester:
 
 
 class TestDuckDB(DBTester):
-    dbtype = db.DuckDB
+    dbtype = db.DuckDBTiles
 
     def test_duckdb_load(self):
         g = example_grid(-1, 1)
         p = Path("test.db")
         p.unlink(missing_ok=True)
-        db_tiles = db.DuckDB.connect(path=str(p))
+        db_tiles = db.DuckDBTiles.connect(path=str(p))
         db_tiles.init_tiles(g.df)
         db_tiles.close()
 
-        db_tiles2 = db.DuckDB.connect(path=str(p))
+        db_tiles2 = db.DuckDBTiles.connect(path=str(p))
         assert_frame_equal_special(g.df, db_tiles2.get_all())
