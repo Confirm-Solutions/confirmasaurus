@@ -5,8 +5,20 @@ from dataclasses import dataclass
 from typing import List
 
 import clickhouse_connect
-import keyring
 import pottery
+
+try:
+    import keyring
+
+    assert keyring.get_keyring().priority
+except (ImportError, AssertionError):
+    # No suitable keyring is available, so mock the interface
+    # to simulate no pw.
+    # https://github.com/jeffwidman/bitbucket-issue-migration/commit/f4a2e18b1a8e54ee8e265bf71d0808c5a99f66f9
+    class keyring:
+        get_password = staticmethod(lambda system, username: None)
+
+
 import pyarrow
 import redis
 
