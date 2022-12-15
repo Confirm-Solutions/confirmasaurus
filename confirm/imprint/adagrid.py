@@ -466,6 +466,12 @@ calibration_defaults = dict(
 
 @dataclass
 class CalibrationConfig:
+    """
+    CalibrationConfig is a dataclass that holds all the configuration for a
+    calibration run. For each worker, the data here will be written to the
+    database so that we can keep track of what was run and how.
+    """
+
     modeltype: type
     model_seed: int
     model_kwargs: dict

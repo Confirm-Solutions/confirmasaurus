@@ -27,27 +27,37 @@ type_map = {
 
 
 def get_create_table_cols(df):
+    """
+    Map from Pandas dtypes to Clickhouse types.
+
+    Args:
+        df: The dataframe
+
+    Returns:
+        A list of strings of the form "column_name type"
+    """
     return [f"{c} {type_map[dt.name]}" for c, dt in zip(df.columns, df.dtypes)]
 
 
-def _table_list(client):
-    result = client.query_df("show tables")
-    if result.shape[0] == 0:
-        return []
-    else:
-        return result["name"].values
-
-
 def _query_df(client, query):
+    # Loading via Arrow and then converting to Pandas is faster than using
+    # query_df directly to load a pandas dataframe. I'm guessing that loading
+    # through arrow is a little less flexible or something, but for our
+    # purposes, this is great.
     return client.query_arrow(query).to_pandas()
 
 
 def _insert_df(client, table, df):
+    # Save as _query_df, inserting through arrow is faster!
     client.insert_arrow(table, pyarrow.Table.from_pandas(df, preserve_index=False))
 
 
 @dataclass
 class ClickhouseStore(Store):
+    """
+    A store using Clickhouse as the backend.
+    """
+
     client: clickhouse_connect.driver.httpclient.HttpClient
 
     def __post_init__(self):
@@ -120,7 +130,19 @@ class ClickhouseStore(Store):
 class Clickhouse:
     """
     A tile database built on top of Clickhouse. This should be very fast and
-    robust and is preferred for large runs.
+    robust and is preferred for large runs. Latency will be worse than with
+    DuckDB because a network request will be required for each query.
+
+    See the DuckDBTiles or PandasTiles implementations for details on the
+    Adagrid tile database interface.
+
+    Internally, this also uses a Redis server for distributed locks and for
+    robustly incrementing the worker_id. We don't use Clickhouse for these
+    tasks because Clickhouse does not have any strong consistency tools or
+    tools for locking a table.
+
+    The active and eligible tile columns are stored across two places in order
+    to construct an append-only table structure.
 
     active: True if the tile is a leaf in the tile tree. Specified in two ways
         - the "active" column in the tiles table
@@ -136,13 +158,18 @@ class Clickhouse:
 
     The reason for these dual sources of information is the desire to only
     rarely update rows that have already been written. Updating data is painful
-    in Clickhouse. It's currently unimplemented, but we could periodically
-    flush the tiles_ineligible and tiles_inactive tables to corresponding
-    columns in the tiles table. This would reduce the size of the subqueries
-    and probably improve performance for very large jobs.
+    in Clickhouse. We could periodically flush the tiles_ineligible and
+    tiles_inactive tables to corresponding columns in the tiles table. This
+    would reduce the size of the subqueries and probably improve performance
+    for very large jobs. But, this flushing would probably only need to happen
+    once every few hours.
 
     NOTE: A tile may be active but ineligible if it was selected for work but the
     criterion decided it was not worth refining or deepening.
+
+    NOTE: We could explore a Clickhouse projection or a Clickhouse materialized
+    view as alternative approaches to the dual sources of information for
+    active and eligible tiles.
     """
 
     client: clickhouse_connect.driver.httpclient.HttpClient
@@ -295,10 +322,57 @@ class Clickhouse:
         redis_port=None,
         redis_password=None,
     ):
+        """
+        Connect to a Clickhouse server and to our Redis server.
+
+        Each job_id corresponds to a Clickhouse database on the Clickhouse
+        cluster. If job_id is None, we will find
+
+        For Clickhouse, we will use the following environment variables:
+            CLICKHOUSE_HOST: The hostname for the Clickhouse server.
+            CLICKHOUSE_PORT: The Clickhouse server port.
+            CLICKHOUSE_USERNAME: The Clickhouse username.
+            CLICKHOUSE_PASSWORD: The Clickhouse username.
+
+        If the environment variables are not set, the defaults will be:
+            host: keyring entry "clickhouse-confirm-test-host"
+            port: 8443
+            username: "default"
+            password: keyring entry "clickhouse-confirm-test-password"
+
+        For Redis, we will use the following environment variables:
+            REDIS_HOST: The hostname for the Redis server.
+            REDIS_PORT: The Redis server port.
+            REDIS_PASSWORD: The Redis password.
+
+        If the environment variables are not set, the defaults will be:
+            host: keyring entry "upstash-confirm-coordinator-host"
+            port: 37085
+            password: keyring entry "upstash-confirm-coordinator-password"
+
+        Args:
+            job_id: The job_id. Defaults to None.
+            host: The hostname for the Clickhouse server. Defaults to None.
+            port: The Clickhouse server port. Defaults to None.
+            username: The Clickhouse username. Defaults to None.
+            password: The Clickhouse password. Defaults to None.
+            redis_host: The Redis hostname. Defaults to None.
+            redis_port: The Redis port. Defaults to None.
+            redis_password: The Redis password. Defaults to None.
+
+        Returns:
+            A Clickhouse tile database object.
+        """
         if job_id is None:
-            client = clickhouse_connect.get_client(
-                **get_ch_config(host, port, username, password)
+            config = get_ch_config(host, port, username, password)
+            test_host = keyring.get_password(
+                "clickhouse-confirm-test-host", os.environ["USER"]
             )
+            if not (test_host in config["host"] or "localhost" in config["host"]):
+                raise RuntimeError(
+                    "To run a production job, please choose an explicit unique job_id."
+                )
+            client = clickhouse_connect.get_client(**config)
             job_id = find_unique_job_id(client)
         connection_details = get_ch_config(host, port, username, password, job_id)
         host = connection_details["host"]
@@ -353,7 +427,10 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
         else:
             port = 8443
     if username is None:
-        username = "default"
+        if "CLICKHOUSE_USERNAME" in os.environ:
+            username = os.environ["CLICKHOUSE_USERNAME"]
+        else:
+            username = "default"
     if password is None:
         if "CLICKHOUSE_PASSWORD" in os.environ:
             password = os.environ["CLICKHOUSE_PASSWORD"]
@@ -388,6 +465,22 @@ def find_unique_job_id(client, attempts=3):
 
 
 def clear_dbs(client):
+    """
+    DANGER, WARNING, ACHTUNG, PELIGRO:
+        Don't run this function for our production Clickhouse server. That
+        would be bad. There's a built-in safeguard to prevent this, but it's
+        not foolproof.
+
+    Clear all databases (and database tables) from the Clickhouse server. This
+    should only work for our test database or for localhost.
+
+    Args:
+        client: _description_
+    """
+    test_host = keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
+    if not (test_host in client.url or "localhost" in client.url):
+        raise RuntimeError("This function is only for localhost or test databases.")
+
     to_drop = []
     for db in client.query_df("show databases")["name"]:
         if db not in ["default", "INFORMATION_SCHEMA", "information_schema", "system"]:

@@ -22,6 +22,15 @@ def is_table_name(s):
 
 
 class Store:
+    """
+    A Store is a key-value store that can save and retrieve dataframes in a
+    database. We use this for two purposes:
+    1. To cache the results of expensive computations.
+    2. To store the configuration of a job in the database.
+
+    Tile-related information is handled separately. For example, by DuckDBTiles.
+    """
+
     def __call__(self, func):
         def wrapper(*args, **kwargs):
             key = json.dumps(
@@ -87,6 +96,21 @@ class DuckDBStore(Store):
             raise KeyError(f"Key {key} not found in store")
 
     def set(self, key, df, nickname=None):
+        """
+        Set a key. If the key already exists, it will be overwritten.
+
+        If the key is a valid table name, the key will be stored in that table.
+        If the key is not a valid table name:
+        - and nickname is not None, a new table will be created with a name
+          of the form _store_{nickname}_{idx}.
+        - and nickname is None, a new table will be created with a name of the
+          form _store_{idx}.
+
+        Args:
+            key: The key
+            df: The
+            nickname: _description_. Defaults to None.
+        """
         exists, table_name = self._exists(key)
         if exists:
             self.con.execute(f"drop table {table_name}")

@@ -28,9 +28,6 @@ class PandasTiles:
     def store(self):
         return PandasStore(self._tables)
 
-    def get_store(self):
-        return PandasStore(self._tables)
-
     def dimension(self):
         return max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
 
