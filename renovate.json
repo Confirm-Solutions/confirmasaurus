@@ -1,5 +1,10 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "research/*"
+  ],
   "extends": [
     "config:base",
     "schedule:weekly",
