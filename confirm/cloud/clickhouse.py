@@ -380,7 +380,10 @@ class Clickhouse:
             test_host = keyring.get_password(
                 "clickhouse-confirm-test-host", os.environ["USER"]
             )
-            if not (test_host in config["host"] or "localhost" in config["host"]):
+            if not (
+                (test_host is not None and test_host in config["host"])
+                or "localhost" in config["host"]
+            ):
                 raise RuntimeError(
                     "To run a production job, please choose an explicit unique job_id."
                 )
@@ -490,7 +493,9 @@ def clear_dbs(client):
         client: _description_
     """
     test_host = keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
-    if not (test_host in client.url or "localhost" in client.url):
+    if not (
+        (test_host is not None and test_host in client.url) or "localhost" in client.url
+    ):
         raise RuntimeError("This function is only for localhost or test databases.")
 
     to_drop = []
