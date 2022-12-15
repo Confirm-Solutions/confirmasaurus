@@ -3,6 +3,10 @@ name = "confirm"
 version = "0.1.0"
 description = ""
 authors = ["Confirm Solutions <research@confirmsol.org>"]
+packages = [
+    { include = "confirm" },
+    { include = "imprint", from = "imprint" }
+]
 
 [tool.poetry.dependencies]
 python = "~3.10"
@@ -27,9 +31,6 @@ pytest = "^7.2.0"
 pre-commit = "^2.20.0"
 pytest-xdist = {extras = ["psutil"], version = "^3.0.2"}
 
-[tool.poetry.group.dev]
-optional = true
-
 [tool.poetry.group.cloud]
 optional = true
 
@@ -41,6 +42,9 @@ clickhouse-connect = "^0.4.6"
 redis = "^4.3.5"
 pottery = "^3.0.0"
 keyring = "^23.11.0"
+
+[tool.poetry.group.dev]
+optional = true
 
 [tool.poetry.group.dev.dependencies]
 typer = "^0.6.1"

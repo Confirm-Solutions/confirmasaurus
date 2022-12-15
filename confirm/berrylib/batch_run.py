@@ -13,7 +13,7 @@ from scipy.special import logit
 
 import confirm.berrylib.fast_inla as fast_inla
 import confirm.imprint.binomial as binomial
-import confirm.imprint.grid as grid
+import imprint.imprint.grid as grid
 
 
 def setup_logging():

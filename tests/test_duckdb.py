@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from confirm.imprint import db
-from confirm.imprint import grid
+from imprint.imprint import grid
 
 
 def example_grid(x1, x2):

@@ -649,19 +649,19 @@ def gen_short_uuids(n, host_id=None, t=None):
     Short UUIDs are a custom identifier created for imprint that should allow
     for concurrent creation of tiles without having overlapping indices.
 
-    - The lowest 20 bits are the index of the created tiles within this batch.
-      This allows for up to 2^20 = ~1 million tiles to be created in a single
-      batch. This is not a problematic constraint, because we can just call the
-      function again for more IDs.
-    - The next 14 bits are the index of the process. This is a pretty generous limit
-      on the number of processes since 2^14=16384.
-    - The highest 30 bits are the time in seconds of creation. This will not
-      loop for 34 years. When we start running jobs that take longer than 34
+    - The highest 28 bits are the time in seconds of creation. This will not
+      loop for 8.5 years. When we start running jobs that take longer than 8.5
       years to complete, please send a message to me in the afterlife.
         - The creation time is never re-used. If the creation time is going to
           be reused because less than one second has passed since the previous
           call to gen_short_uuids, then the creation time is incremented by
           one.
+    - The next 18 bits are the index of the process. This is a pretty generous limit
+      on the number of processes. 2^18=262144.
+    - The lowest 18 bits are the index of the created tiles within this batch.
+      This allows for up to 2^18 = 262144 tiles to be created in a single
+      batch. This is not a problematic constraint, because we can just
+      increment the time by one and then grab another batch of IDs.
 
     NOTE: This should be safe across processes but will not be safe across
     threads within a single Python process because multithreaded programs share
@@ -711,5 +711,5 @@ def _gen_short_uuids(n, host_id, t):
     )
 
 
-_gen_short_uuids.config = (20, 14)
+_gen_short_uuids.config = (18, 18)
 _gen_short_uuids.largest_t = None

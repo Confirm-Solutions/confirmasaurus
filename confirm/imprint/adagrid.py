@@ -56,9 +56,9 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
-from . import batching
-from . import driver
-from . import grid
+from ...imprint.imprint import batching
+from ...imprint.imprint import driver
+from ...imprint.imprint import grid
 from .db import DuckDBTiles
 
 

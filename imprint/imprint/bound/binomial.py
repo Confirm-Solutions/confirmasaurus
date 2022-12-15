@@ -91,7 +91,7 @@ class BaseTileQCPSolver:
 
 
 class TileForwardQCPSolver(BaseTileQCPSolver):
-    """
+    r"""
     Solves the following strictly quasi-convex optimization problem:
         minimize_q max_{v \in S} L_v(q)
         subject to q >= 1
@@ -141,7 +141,7 @@ class TileForwardQCPSolver(BaseTileQCPSolver):
 
 
 class TileBackwardQCPSolver(BaseTileQCPSolver):
-    """
+    r"""
     Solves the following strictly quasi-convex optimization problem:
         minimize_q max_{v \in S} L_v(q)
         subject to q >= 1

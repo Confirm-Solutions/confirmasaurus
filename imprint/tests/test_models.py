@@ -4,8 +4,8 @@ import pandas as pd
 import scipy.stats
 
 import confirm.imprint as ip
-import confirm.models.fisher_exact as fisher
-from confirm.models.ztest import ZTest1D
+import imprint.imprint.models.fisher_exact as fisher
+from imprint.imprint.models.ztest import ZTest1D
 
 
 def test_ztest(snapshot):

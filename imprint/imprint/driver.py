@@ -9,23 +9,16 @@ import scipy.stats
 from . import batching
 from . import grid
 
-# NOTE: See these GitHub issues/demo PRs for Model API discussion:
-# https://github.com/Confirm-Solutions/confirmasaurus/pull/92
-# https://github.com/Confirm-Solutions/confirmasaurus/pull/148
 
-
-# TODO: Need to clean up the interface from driver to the bounds.
-# TODO: Need to clean up the interface from driver to the bounds.
-# TODO: Need to clean up the interface from driver to the bounds.
 # TODO: Need to clean up the interface from driver to the bounds.
 # - should the bound classes have staticmethods or should they be objects with
 #   __init__?
 # - can we pass a single vertex array as a substitute for the many vertex case?
 def get_bound(family, family_params):
     if family == "normal":
-        from confirm.bound.normal import NormalBound as bound_type
+        from imprint.bound.normal import NormalBound as bound_type
     elif family == "binomial":
-        from confirm.bound.binomial import BinomialBound as bound_type
+        from imprint.bound.binomial import BinomialBound as bound_type
     else:
         raise Exception("unknown family")
 
