@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 
+
 # TODO: let's make this work for arbitrary slices?
 def summarize_validate(g, rej_df, plot_dims=(0, 1)):
     d1, d2 = plot_dims

@@ -14,6 +14,39 @@ from scipy.special import logit
 config.update("jax_enable_x64", True)
 
 
+class BayesianBasket:
+    def __init__(self, seed, K, *, n_arm_samples=35):
+        self.n_arm_samples = n_arm_samples
+        np.random.seed(seed)
+        self.samples = np.random.uniform(size=(K, n_arm_samples, 3))
+        self.fi = FastINLA(n_arms=3, critical_value=0.95)
+        self.family = "binomial"
+        self.family_params = {"n": n_arm_samples}
+
+    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
+        # 1. Calculate the binomial count data.
+        # The sufficient statistic for binomial is just the number of uniform draws
+        # above the threshold probability. But the `p_tiles` array has shape (n_tiles,
+        # n_arms). So, we add empty dimensions to broadcast and then sum across
+        # n_arm_samples to produce an output `y` array of shape: (n_tiles,
+        # sim_size, n_arms)
+
+        p = jax.scipy.special.expit(theta)
+        y = jnp.sum(self.samples[None, begin_sim:end_sim] < p[:, None, None], axis=2)
+
+        # 2. Determine if we rejected each simulated sample.
+        # rejection_fnc expects inputs of shape (n, n_arms) so we must flatten
+        # our 3D arrays. We reshape exceedance afterwards to bring it back to 3D
+        # (n_tiles, sim_size, n_arms)
+        y_flat = y.reshape((-1, 3))
+        n_flat = jnp.full_like(y_flat, self.n_arm_samples)
+        data = jnp.stack((y_flat, n_flat), axis=-1)
+        test_stat_per_arm = self.fi.test_inference(data).reshape(y.shape)
+        return jnp.min(
+            jnp.where(null_truth[:, None, :], test_stat_per_arm, jnp.inf), axis=-1
+        )
+
+
 @dataclass
 class QuadRule:
     pts: np.ndarray
@@ -183,10 +216,12 @@ class FastINLA:
         _, exceedance, _, _ = self.inference(data, method)
         return exceedance > self.critical_value
 
+    def test_inference(self, data, method="jax"):
+        _, exceedance, _, _ = self.inference(data, method)
+        return 1 - exceedance
+
     def inference(self, data, method="jax"):
-        fncs = dict(
-            numpy=self.numpy_inference, jax=self.jax_inference, cpp=self.cpp_inference
-        )
+        fncs = dict(numpy=self.numpy_inference, jax=self.jax_inference)
         return fncs[method](data)[:4]
 
     def numpy_inference(self, data, thresh_theta=None):
@@ -343,38 +378,6 @@ class FastINLA:
             self.thresh_theta,
         )
 
-        return sigma2_post, exceedances, theta_max, theta_sigma
-
-    def cpp_inference(self, data):
-        """
-        See the numpy implementation for comments explaining the steps. The
-        series of operations is almost identical in the C++ implementation.
-        """
-        import cppimport
-
-        ext = cppimport.imp("berrylib.fast_inla_ext")
-        sigma2_post = np.empty((data.shape[0], self.sigma2_n))
-        exceedances = np.empty((data.shape[0], self.n_arms))
-        theta_max = np.empty((data.shape[0], self.sigma2_n, self.n_arms))
-        theta_sigma = np.empty((data.shape[0], self.sigma2_n, self.n_arms))
-        ext.inla_inference(
-            sigma2_post,
-            exceedances,
-            theta_max,
-            theta_sigma,
-            data[..., 0],
-            data[..., 1],
-            self.sigma2_rule.pts,
-            self.sigma2_rule.wts,
-            self.log_prior,
-            self.neg_precQ,
-            self.cov,
-            self.logprecQdet,
-            self.mu_0,
-            self.logit_p1,
-            self.opt_tol,
-            self.thresh_theta,
-        )
         return sigma2_post, exceedances, theta_max, theta_sigma
 
 

@@ -34,7 +34,7 @@ img = modal.Image.from_dockerhub(
 )
 def f(n):
     start = time.time()
-    import confirm.imprint as ip
+    import confirm.adagrid as ip
     from imprint.models.ztest import ZTest1D
     import pandas as pd
     import os

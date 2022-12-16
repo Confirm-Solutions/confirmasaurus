@@ -1,4 +1,4 @@
-import confirm.imprint.checkpoint as checkpoint
+import confirm.adagrid.checkpoint as checkpoint
 
 
 def test_exponential_27():

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import confirm.imprint as ip
+import confirm.adagrid as ip
 from imprint.models.ztest import ZTest1D
 
 

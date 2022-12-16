@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from confirm.imprint import db
+from confirm.adagrid import db
 from imprint import grid
 
 

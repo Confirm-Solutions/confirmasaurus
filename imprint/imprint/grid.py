@@ -1,3 +1,4 @@
+import copy
 import time
 import warnings
 from dataclasses import dataclass
@@ -112,9 +113,6 @@ class Grid:
       these ids.
     - active: Whether the tile is active. A tile is active if it has not been
       split.
-    - eligible: A tile is eligible if it is active and has not been processed.
-      This is useful for coordinating multiple workers processing tiles from
-      the same grid.
     - parent_id: The id of the parent tile if the tile has been split. This is
       0 for tiles with no parent.
     - theta{i} and radii{i}: The center and half-width of the tile in the i-th
@@ -207,7 +205,6 @@ class Grid:
         # Any tile that has been split should be ignored going forward.
         # We're done with these tiles!
         self.df["active"].values[intersects] = False
-        self.df["eligible"].values[intersects] = False
 
         return self.concat(new_g)
 
@@ -227,7 +224,7 @@ class Grid:
         Returns:
             The grid with the null hypotheses added.
         """
-        g = Grid(self.df.copy(), self.null_hypos)
+        g = Grid(self.df.copy(), copy.deepcopy(self.null_hypos))
         for H in null_hypos:
             Hn = np.asarray(H.n)
             Hpad = HyperPlane(np.pad(Hn, (0, g.d - Hn.shape[0])), H.c)
@@ -345,9 +342,6 @@ def init_grid(theta, radii, parents=None):
 
     # Is this a terminal tile in the tree?
     indict["active"] = True
-
-    # Is this tile eligible for processing?
-    indict["eligible"] = True
 
     indict["parent_id"] = (
         parents.astype(np.uint64) if parents is not None else np.uint64(0)

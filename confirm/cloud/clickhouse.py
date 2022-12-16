@@ -22,8 +22,8 @@ except (ImportError, AssertionError):
 import pyarrow
 import redis
 
-from confirm.imprint.store import is_table_name
-from confirm.imprint.store import Store
+from confirm.adagrid.store import is_table_name
+from confirm.adagrid.store import Store
 
 type_map = {
     "uint32": "UInt32",

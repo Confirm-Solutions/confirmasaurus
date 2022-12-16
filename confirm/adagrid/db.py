@@ -6,8 +6,8 @@ from typing import List
 import duckdb
 import pandas as pd
 
-from confirm.imprint.store import DuckDBStore
-from confirm.imprint.store import PandasStore
+from confirm.adagrid.store import DuckDBStore
+from confirm.adagrid.store import PandasStore
 
 
 @dataclass

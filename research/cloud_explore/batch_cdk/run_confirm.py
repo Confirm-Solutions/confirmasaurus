@@ -9,7 +9,7 @@ import confirm
 
 @awsbatch_tool.include_package(confirm)
 def f():
-    import confirm.imprint as ip
+    import confirm.adagrid as ip
     from imprint.models.ztest import ZTest1D
 
     os.system("nvidia-smi")

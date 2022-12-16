@@ -70,32 +70,3 @@ def scale_text(factor=1.0):
     plt.rcParams["ytick.labelsize"] = 12 * factor
     plt.rcParams["legend.fontsize"] = 15 * factor
     plt.rcParams["figure.titlesize"] = 17 * factor
-
-
-def contourf_tbt(x, y, z, levels=None):
-    """
-    A helper function for having nice contourf plot defaults. The arguments are
-    what you would normally pass to contourf. If you are doing something more
-    complicated, instead of adding extra arguments to this function, just copy
-    the contents of this function and modify it.
-    Args:
-        x: x grid for contourf
-        y: y grid for contourf
-        z: z grid for contourf
-        levels: levels passed to contourf. Defaults to None.
-    Returns:
-        Tuple[contourf, colorbar]
-    """
-    cntf = plt.contourf(x, y, z, levels=levels, extend="both")
-    plt.contour(
-        x,
-        y,
-        z,
-        levels=levels,
-        colors="k",
-        linestyles="-",
-        linewidths=0.5,
-        extend="both",
-    )
-    cbar = plt.colorbar(cntf)
-    return cntf, cbar

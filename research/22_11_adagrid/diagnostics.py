@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.spatial
 
-import confirm.imprint.lewis_drivers as ld
+import confirm.adagrid.lewis_drivers as ld
 
 
 # def status_report(adap, sim_sizes, bootstrap_cvs, pointwise_target_alpha):
@@ -39,7 +39,7 @@ def lamstar_histogram(bootstrap_cvs, sim_sizes, xlim=None, weighted=False):
         label=[f"K={K}" for K in np.unique(sim_sizes)],
     )
     plt.legend(fontsize=8)
-    plt.xlabel("$\lambda^*$")
+    plt.xlabel(r"$\lambda^*$")
     plt.ylabel("number of tiles")
 
 
@@ -58,7 +58,7 @@ def eval_bound(model, g, sim_sizes, D, eval_pts):
     )
     typeI_sum = typeI_sum[inverse]
     typeI_err = typeI_sum / sim_sizes[idx]
-    import confirm.imprint.binomial as binomial
+    import confirm.adagrid.binomial as binomial
 
     delta = 0.01
     typeI_err, typeI_CI = binomial.zero_order_bound(
@@ -66,7 +66,7 @@ def eval_bound(model, g, sim_sizes, D, eval_pts):
     )
     typeI_bound = typeI_err + typeI_CI
 
-    import confirm.imprint.bound.binomial as tiltbound
+    import confirm.adagrid.bound.binomial as tiltbound
 
     n_arm_samples = model.n_arm_samples
     theta0 = g.theta_tiles[idx]
