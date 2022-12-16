@@ -48,6 +48,13 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v34.5.3
         if: github.ref != 'refs/heads/main'
+          
+      # The hooks will be installed automatically when pre-commit run is
+      # called. But it's nice to do it separately for more visibility in the
+      # GitHub interface into where a failure happens and how long each step
+      # takes.
+      - name: Install pre-commit hooks
+        run: pre-commit install --install-hooks
 
       - name: Run all pre-commit checks on changed files.
         run: pre-commit run --color=always --files ${{ steps.changed-files.outputs.all_changed_files }}
