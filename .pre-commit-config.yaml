@@ -28,6 +28,13 @@ repos:
     hooks:
       - id: jupytext
         args: [--from, ipynb, --to, "md"]
+  # Should run after jupytext so that secrets in ipynb files get properly scanned.
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks
+        entry: gitleaks protect --staged --redact --verbose --baseline-path tools/gitleaks-report.json
+        language: system
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.3.0
     hooks:

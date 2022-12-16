@@ -44,6 +44,10 @@ To get a fully functional development environment...
    # install the confirm package plus development tools
    poetry install --with=dev,test,cloud,cloud_dev
    ```
+   
+## Committing code
+
+In order to commit code and pass the pre-commit checks, you will need to install `gitleaks` with `brew install gitleaks`.
 
 
 ## Other useful notes:

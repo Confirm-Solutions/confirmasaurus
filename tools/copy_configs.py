@@ -10,6 +10,7 @@ def copy_simple():
     # shutil.copy2('environment.yml', 'imprint/environment.yml')
     #
     shutil.copy2(".gitignore", "imprint/.gitignore")
+    shutil.copy2(".gitleaks.toml", "imprint/.gitleaks.toml")
     shutil.copy2(".vscode/settings.json", "imprint/.vscode/settings.json")
     shutil.copy2(".pre-commit-config.yaml", "imprint/.pre-commit-config.yaml")
     shutil.copy2("setup.cfg", "imprint/setup.cfg")
