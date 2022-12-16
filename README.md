@@ -47,7 +47,7 @@ To get a fully functional development environment...
    
 ## Committing code
 
-In order to commit code and pass the pre-commit checks, you will need to install `gitleaks` with `brew install gitleaks`.
+In order to commit code and pass the pre-commit checks, you will need to install `go` and `gitleaks` with `brew install go gitleaks`.
 
 
 ## Other useful notes:

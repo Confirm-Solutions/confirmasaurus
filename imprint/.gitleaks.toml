@@ -16,5 +16,6 @@ useDefault = true
 
 [allowlist]
 paths = [
-    '''(.*?)(ipynb)$'''
+    '''(.*?)(ipynb)$''',
+    '''tools/gitleaks-report.json'''
 ]

@@ -11,7 +11,10 @@ def example_grid(x1, x2):
     N = 10
     theta, radii = grid._cartesian_gridpts([x1], [x2], [N])
     H = grid.HyperPlane(np.array([-1]), 0)
-    return grid.init_grid(theta, radii).add_null_hypos([H]).prune()
+    g = grid.init_grid(theta, radii).add_null_hypos([H]).prune()
+    # Typically this field would be set by the adagrid code.
+    g.df["eligible"] = True
+    return g
 
 
 def assert_frame_equal_special(pd_df, db_df):
@@ -80,8 +83,6 @@ class DBTester:
         assert_frame_equal_special(pd_work2, db_work2)
 
         assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
-
-        assert (~db_tiles.get_all()["eligible"]).all()
 
         db_work["active"] = False
         pd_work["active"] = False
