@@ -1,4 +1,0 @@
-*__pycache__/
-build/
-pyimprint/*.so
-pyimprint.egg-info/

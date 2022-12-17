@@ -1,34 +1,41 @@
 fail_fast: false
 repos:
-  - repo: https://github.com/pocc/pre-commit-hooks
-    rev: v1.3.5
-    hooks:
-      - id: clang-format
-        args: [-i]
-      # - id: clang-tidy
+  # We have black here twice because the first black block runs black on
+  # Jupyter notebooks. And we don't want to run black on notebooks in the
+  # research folder because 1) it's slow. 2) it can overwrite a notebook in
+  # current use causing the session to be lost. 3) there's no reason, those
+  # notebooks are exploration anyway.
   - repo: https://github.com/psf/black
-    rev: 22.3.0
+    rev: 22.10.0
+    hooks:
+      - id: black-jupyter
+        language_version: python3
+        exclude: research/
+  - repo: https://github.com/psf/black
+    rev: 22.10.0
     hooks:
       - id: black
-        language_version: python3
-  - repo: https://gitlab.com/pycqa/flake8
-    rev: 3.8.4
+  - repo: https://github.com/pycqa/flake8
+    rev: 5.0.4
     hooks:
       - id: flake8
   - repo: https://github.com/asottile/reorder_python_imports
-    rev: v3.8.1
+    rev: v3.9.0
     hooks:
       - id: reorder-python-imports
   - repo: https://github.com/mwouts/jupytext
-    rev: v1.13.8
+    rev: v1.14.1
     hooks:
-    - id: jupytext
-      args: [--from, ipynb, --to, "md"]
+      - id: jupytext
+        args: [--from, ipynb, --to, "md"]
+  # Should run after jupytext so that secrets in ipynb files get properly scanned.
+  - repo: https://github.com/zricethezav/gitleaks
+    rev: v8.15.2
+    hooks:
+      - id: gitleaks
+        args: [--baseline-path, tools/gitleaks-report.json]
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.0.1
+    rev: v4.3.0
     hooks:
       - id: debug-statements
-      - id: detect-aws-credentials
-        args: [--allow-missing-credentials]
-      - id: detect-private-key
       - id: forbid-new-submodules

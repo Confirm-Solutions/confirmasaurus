@@ -4,8 +4,8 @@ import React from 'react';
 import './App.css';
 import { FormControl, FormLabel, FormControlLabel, Radio, RadioGroup, Checkbox, Button, InputLabel, MenuItem, Select } from '@mui/material';
 
-const numLayers = 6;
-const layerNames = ["Monte Carlo Type I error estimates", "0th order upper bound", "Max gradient estimates", "1st order upper bound", "2nd order upper bound", "Total upper bound"]
+const numLayers = 4;
+const layerNames = ["Monte Carlo Type I error estimates", "Clopper-Pearson", "Tilt-Bound", "Total bound"]
 
 function App() {
   const [plotType, setPlotType] = React.useState<PlotType>("surface");

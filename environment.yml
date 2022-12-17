@@ -2,43 +2,7 @@ name: imprint
 channels:
   - conda-forge
 dependencies:
-# essentials
-  - python
-  - setuptools
-  - jupyterlab
-  - ipykernel
-  - numpy
-  - scipy
-  - matplotlib
-  - sympy
-  - pandas
-
-# C++ toolchain
-  - cxx-compiler 
-  - clang-tools
-  - bazel 
-
-# some more nice stuff for easy dev.
-  - pytest
-  - pre-commit
-  - black
-  - flake8
-  - isort
-  - jupytext
-  - cython
-  - line_profiler
+  - python=3.10
   - pip
-  - seaborn
-
-# numerical tools
-  - jax==0.3.7
-  - jaxlib==0.3.7
-  - numpyro
-
-# dependencies only available from pip.
-# - cppimport is only used for a few things in the research folder so we don't
-#   need to worry about it much. That code could be removed safely.
-# - pybind11[global] is only used by the same cppimport code. 
   - pip:
-    - "pybind11[global]"
-    - cppimport
+    - poetry==1.2.2
