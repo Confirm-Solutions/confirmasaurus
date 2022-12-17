@@ -3,9 +3,9 @@ import time
 import pandas as pd
 import pytest
 
-from confirm.imprint.store import DuckDBStore
-from confirm.imprint.store import is_table_name
-from confirm.imprint.store import PandasStore
+from confirm.adagrid.store import DuckDBStore
+from confirm.adagrid.store import is_table_name
+from confirm.adagrid.store import PandasStore
 
 ex = pd.DataFrame(dict(a=[1, 2, 3], b=[4, 5, 6]))
 ex2 = ex.copy()

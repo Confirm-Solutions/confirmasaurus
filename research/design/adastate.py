@@ -8,10 +8,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import confirm.imprint.bound.binomial as ehbound
-import confirm.imprint.lewis_drivers as ld
-from confirm.imprint import grid
+import confirm.adagrid.bound.binomial as ehbound
+import confirm.adagrid.lewis_drivers as ld
 from confirm.lewislib import batch
+from imprint import grid
 
 
 @dataclass

@@ -2,32 +2,7 @@ name: imprint
 channels:
   - conda-forge
 dependencies:
-# essentials
-  - python
-  - setuptools
-  - jupyterlab
-  - numpy
-  - scipy
-  - matplotlib
-
-# C++ toolchain
-  - cxx-compiler 
-  - clang-tools
-
-# some more nice stuff for easy dev.
-  - pytest
-  - pre-commit
-  - black
-  - flake8
-  - isort
-  - jupytext
+  - python=3.10
   - pip
-
-# dependencies only available from pip.
-# - conda-forge gpu jax support is fairly new and might be fragile,
-#   and I can't get it to consistently install correctly.
-#   https://github.com/conda-forge/jaxlib-feedstock/issues/34
-#   so we install jax from pypi instead
   - pip:
-    - -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-    - "jax[cuda]"
+    - poetry==1.2.2

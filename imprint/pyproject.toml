@@ -1,2 +1,79 @@
+[tool.poetry]
+name = "imprint"
+version = "0.2.0"
+description = ""
+authors = [
+    "Confirm Solutions <research@confirmsol.org>",
+]
+
+[[tool.poetry.source]]
+name = "jax"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+default = false
+secondary = false
+
+[tool.poetry.dependencies]
+python = "~3.10"
+numpy = "^1.23.4"
+scipy = "^1.9.3"
+sympy = "^1.11.1"
+matplotlib = "^3.6.2"
+pandas = "^1.5.1"
+jax = "0.3.24"
+numpyro = "^0.10.1"
+jaxlib = [
+    { version = "0.3.22", platform = "darwin", source = "pypi" },
+    { version = "0.3.24+cuda11.cudnn82", platform = "linux" },
+]
+duckdb = "^0.6.0"
+
+[tool.poetry.group.test]
+optional = true
+
+[tool.poetry.group.test.dependencies]
+pytest = "^7.2.0"
+pre-commit = "^2.20.0"
+
+[tool.poetry.group.test.dependencies.pytest-xdist]
+extras = [
+    "psutil",
+]
+version = "^3.0.2"
+
+[tool.poetry.group.dev]
+optional = true
+
+[tool.poetry.group.dev.dependencies]
+line-profiler = "^3.5.1"
+jupytext = "^1.14.1"
+reorder-python-imports = "^3.9.0"
+flake8 = "^5.0.4"
+typer = "^0.6.1"
+jupyter = "^1.0.0"
+rich = "^12.6.0"
+
+[tool.poetry.group.dev.dependencies.black]
+extras = [
+    "jupyter",
+]
+version = "^22.10.0"
+
 [tool.isort]
 profile = "black"
+
+[tool.pytest.ini_options]
+addopts = "-s --tb=short --strict-markers --doctest-modules"
+testpaths = [
+    "tests",
+    "imprint",
+]
+
+[tool.jupytext]
+notebook_metadata_filter = "-all"
+cell_metadata_filter = "-all"
+
+[build-system]
+requires = [
+    "poetry-core>=1.0.0",
+]
+build-backend = "poetry.core.masonry.api"

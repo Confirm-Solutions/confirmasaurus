@@ -2,7 +2,13 @@
 name = "confirm"
 version = "0.1.0"
 description = ""
-authors = ["Confirm Solutions <research@confirmsol.org>"]
+authors = [
+    "Confirm Solutions <research@confirmsol.org>",
+]
+packages = [
+    { include = "confirm" },
+    { include = "imprint", from = "imprint" },
+]
 
 [tool.poetry.dependencies]
 python = "~3.10"
@@ -14,8 +20,8 @@ pandas = "^1.5.1"
 jax = "0.3.24"
 numpyro = "^0.10.1"
 jaxlib = [
-    {version = "0.3.22", platform = "darwin", source="pypi"},
-    {version = "0.3.24+cuda11.cudnn82", platform = "linux"}
+    { version = "0.3.22", platform = "darwin", source = "pypi" },
+    { version = "0.3.24+cuda11.cudnn82", platform = "linux" },
 ]
 duckdb = "^0.6.0"
 
@@ -26,9 +32,6 @@ optional = true
 pytest = "^7.2.0"
 pre-commit = "^2.20.0"
 pytest-xdist = {extras = ["psutil"], version = "^3.0.2"}
-
-[tool.poetry.group.dev]
-optional = true
 
 [tool.poetry.group.cloud]
 optional = true
@@ -42,15 +45,23 @@ redis = "^4.3.5"
 pottery = "^3.0.0"
 keyring = "^23.11.0"
 
+[tool.poetry.group.dev]
+optional = true
+
 [tool.poetry.group.dev.dependencies]
-typer = "^0.6.1"
+black = {extras = ["jupyter"], version = "^22.10.0"}
 line-profiler = "^3.5.1"
 jupytext = "^1.14.1"
 reorder-python-imports = "^3.9.0"
 flake8 = "^5.0.4"
-black = {extras = ["jupyter"], version = "^22.10.0"}
+typer = "^0.6.1"
 jupyter = "^1.0.0"
 rich = "^12.6.0"
+
+[tool.poetry.group.cloud_dev]
+optional = true
+
+[tool.poetry.group.cloud_dev.dependencies]
 aws-cdk-lib = "^2.53.0"
 aws-cdk-aws-batch-alpha = "^2.53.0a0"
 modal-client = "^0.41.396"
@@ -61,17 +72,24 @@ url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
 default = false
 secondary = false
 
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
-
 [tool.isort]
 profile = "black"
 
 [tool.pytest.ini_options]
 addopts = "-s --tb=short --strict-markers --doctest-modules"
-testpaths = ["tests", "confirm/imprint", "confirm/outlaw"]
+testpaths = [
+    "tests",
+    "imprint/tests",
+    "imprint/imprint",
+    "confirm/outlaw",
+]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"
 cell_metadata_filter = "-all"
+
+[build-system]
+requires = [
+    "poetry-core>=1.0.0",
+]
+build-backend = "poetry.core.masonry.api"

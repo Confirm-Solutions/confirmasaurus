@@ -42,8 +42,12 @@ To get a fully functional development environment...
    mamba env create
    conda activate confirm
    # install the confirm package plus development tools
-   poetry install --with=dev,test,cloud
+   poetry install --with=dev,test,cloud,cloud_dev
    ```
+   
+## Committing code
+
+In order to commit code and pass the pre-commit checks, you will need to install `go` and `gitleaks` with `brew install go gitleaks`.
 
 
 ## Other useful notes:

@@ -117,28 +117,29 @@ The vertices for each tile are explicitly computed using `radii`.
 Assume that we have access to the Type I Error values at each of the `thetas`.
 
 ```python
-gr = pygrid.make_cartesian_grid_range(
-    size=100,
-    lower=-np.ones(2),
-    upper=np.ones(2),
-    grid_sim_size=0,  # dummy for now
-)
-thetas = gr.thetas().T
-subset = thetas[:, 0] >= thetas[:, 1]
-thetas = thetas[subset]
-radii = gr.radii().T
-radii = radii[subset]
+# TODO: fix
+# gr = pygrid.make_cartesian_grid_range(
+#     size=100,
+#     lower=-np.ones(2),
+#     upper=np.ones(2),
+#     grid_sim_size=0,  # dummy for now
+# )
+# thetas = gr.thetas().T
+# subset = thetas[:, 0] >= thetas[:, 1]
+# thetas = thetas[subset]
+# radii = gr.radii().T
+# radii = radii[subset]
 
-# dummy function to output TIE of a simple test.
-def simple_TIE(n, theta, alpha):
-    prob = scipy.special.expit(theta)
-    var = np.sum(n * prob * (1 - prob), axis=-1)
-    mean = n * (prob[:, 1] - prob[:, 0]) / np.sqrt(var)
-    z_crit = scipy.stats.norm.isf(alpha)
-    return scipy.stats.norm.sf(z_crit - mean)
+# # dummy function to output TIE of a simple test.
+# def simple_TIE(n, theta, alpha):
+#     prob = scipy.special.expit(theta)
+#     var = np.sum(n * prob * (1 - prob), axis=-1)
+#     mean = n * (prob[:, 1] - prob[:, 0]) / np.sqrt(var)
+#     z_crit = scipy.stats.norm.isf(alpha)
+#     return scipy.stats.norm.sf(z_crit - mean)
 
 
-f0s = simple_TIE(n, thetas, 0.025)
+# f0s = simple_TIE(n, thetas, 0.025)
 ```
 
 ```python

@@ -11,9 +11,9 @@ import numpy as np
 import typer
 from scipy.special import logit
 
+import confirm.adagrid.binomial as binomial
 import confirm.berrylib.fast_inla as fast_inla
-import confirm.imprint.binomial as binomial
-import confirm.imprint.grid as grid
+import imprint.grid as grid
 
 
 def setup_logging():

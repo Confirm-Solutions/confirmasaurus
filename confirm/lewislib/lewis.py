@@ -8,10 +8,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import confirm.imprint.batching as batching
 import confirm.outlaw.berry as berry
 import confirm.outlaw.inla as inla
 import confirm.outlaw.quad as quad
+import imprint.batching as batching
 from confirm.lewislib.table import LinearInterpTable
 from confirm.lewislib.table import LookupTable
 

@@ -1,26 +1,5 @@
 *.DS_Store
-build/
-/.vs
-.history/
-/imprint/CMakeSettings.json
-CMakeCache.txt
-CMakeFiles/
-imprintConfig.cmake
-imprintConfigVersion.cmake
-DartConfiguration.tcl
 .env
-
-/python/dist/
-.spyproject/
-
-# ignore rc because we are tracking generator now
-.bazelrc 
-bazel
-bazel-*
-.vagrant/
-Vagrantfile
-.idea/
-compile_commands.json
 
 # python stuff
 __pycache__/
@@ -41,24 +20,6 @@ __pycache__/
 .rendered.*.cpp
 *.so 
 
-# bazel outputs
-*pid*.log
-
-
-# Codespaces
-oryx-build-commands.txt
-venv
-
-# Cloud and AWS stuff, CDK
-.terraform
-.terraform.*
-terraform.*
-.cdk.staging/
-cdk.out/
-
-# explicitly ignore a file.
-*.gitignore
-
 # poetry.toml should not be committed because it will vary between machines
 # (e.g. CI will want to use virtualenvs but locally we use conda)
 poetry.toml
@@ -73,3 +34,15 @@ poetry.toml
 
 # anything else
 *.gitignore*
+!**/.gitignore
+
+# Codespaces
+oryx-build-commands.txt
+venv
+
+# Cloud and AWS stuff, CDK
+.terraform
+.terraform.*
+terraform.*
+.cdk.staging/
+cdk.out/

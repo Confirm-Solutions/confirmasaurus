@@ -30,10 +30,10 @@ git fetch imprint main
 git subtree pull --prefix imprint imprint main --squash
 ```
 
-Add to push a branch to the external repo.
+Add to push a branch to the external repo. 
 ```
 git remote add -f imprint git@github.com:Confirm-Solutions/imprint.git
-git subtree push --prefix=imprint imprint branchname
+git subtree push --squash --prefix=imprint imprint branchname
 ```
 
 (I put the remote add commands in there just to avoid errors. You only need to run the remote add once per git clone.)
@@ -47,3 +47,4 @@ The process will get a bit more complex in the future if there are external deve
 
 * https://gist.github.com/SKempin/b7857a6ff6bddb05717cc17a44091202
 * https://github.com/joelparkerhenderson/monorepo-vs-polyrepo
+* force subtree push: https://stackoverflow.com/questions/33172857/how-do-i-force-a-subtree-push-to-overwrite-remote-changes

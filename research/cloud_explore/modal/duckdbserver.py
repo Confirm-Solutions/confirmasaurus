@@ -16,7 +16,7 @@ def create_table(db_path, df):
 
     conn = duckdb.connect(db_path)
     conn.execute("create table tiles as select * from df")
-    conn.execute('drop table tiles')
+    conn.execute("drop table tiles")
     conn.execute("create table tiles as select * from df")
 
 
