@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import imprint as ip
-import basket
+import model
 
 # This is the binomial n parameter, the number of patients recruited to each arm of the trial.
 n_arm_samples = 35
@@ -38,13 +38,12 @@ g = ip.cartesian_grid(
     null_hypos=[ip.hypo(f"theta{i} < {logit(0.1)}") for i in range(3)],
 )
 validation_df = ip.validate(
-    basket.BayesianBasket,
+    model.BayesianBasket,
     g,
     0.05,
     K=2000,
     model_kwargs={"n_arm_samples": n_arm_samples},
 )
-
 ```
 
 ```python
@@ -73,7 +72,7 @@ cbar = plt.colorbar(cntf)
 cbar.set_label("Simulated fraction of Type I errors")
 plt.xlabel(r"$\theta_0$")
 plt.ylabel(r"$\theta_1$")
-plt.axis('square')
+plt.axis("square")
 
 plt.subplot(1, 2, 2)
 cntf = plt.tricontourf(
@@ -93,10 +92,9 @@ cbar = plt.colorbar(cntf)
 cbar.set_label("Bound on the fraction of Type I errors")
 plt.xlabel(r"$\theta_0$")
 plt.ylabel(r"$\theta_1$")
-plt.axis('square')
+plt.axis("square")
 
 plt.show()
-
 ```
 
 ## Part 1: Constructing a parameter grid
@@ -109,12 +107,10 @@ g_raw = ip.cartesian_grid(
     theta_min=[-3.5, -3.5, -3.5], theta_max=[1.0, 1.0, 1.0], n=[16, 16, 16]
 )
 type(g_raw)
-
 ```
 
 ```python
 g_raw.df.head()
-
 ```
 
 Next, we need to define the null hypothesis space. There are built-in tools in imprint for translating a symbolic statement to a bounding plane for a null hypothesis space.
@@ -124,7 +120,6 @@ Once we have defined these planes, we attach the null hypothesis to the grid cre
 
 ```python
 logit(0.1)
-
 ```
 
 ```python
@@ -134,12 +129,10 @@ null_hypos = [
     ip.hypo(f"theta2 < -2.1972"),
 ]
 g_unpruned = g_raw.add_null_hypos(null_hypos)
-
 ```
 
 ```python
 g_unpruned.df.head()
-
 ```
 
 Next, we can optionally prune our grid by calling `Grid.prune(g)`. Pruning will remove any tiles that are entirely in the alternative hypothesis space for all arms. Since our goal is to calculate type I error, we do not care about the alternative hypothesis space. For a false positive to occur, the truth must be negative!
@@ -147,12 +140,10 @@ Next, we can optionally prune our grid by calling `Grid.prune(g)`. Pruning will 
 
 ```python
 g = g_unpruned.prune()
-
 ```
 
 ```python
 g_unpruned.n_tiles, g.n_tiles
-
 ```
 
 ```python
@@ -162,7 +153,6 @@ g = ip.cartesian_grid(
     n=[16, 16, 16],
     null_hypos=[ip.hypo(f"theta{i} < {logit(0.1)}") for i in range(3)],
 )
-
 ```
 
 **At this point, you can skip to the next section if you're not interested in learning about the details of the grid object.**
@@ -173,13 +163,11 @@ Here, we'll grab a few of the important variables from the grid object and exami
 ```python
 theta_tiles = g.get_theta()
 theta_tiles.shape
-
 ```
 
 ```python
 unique_t2 = np.unique(theta_tiles[:, 2])
 unique_t2
-
 ```
 
 In the figure below, we plot $\theta_0$ and $\theta_1$ for a couple different values of $\theta_2$. You can see that the shape of the domain in $(\theta_0, \theta_1)$ changes depending on whether $\theta_2$ is in the null space for arm 2 or not. The solid white region without any tile centers in the right figure represents the region where the alternative hypothesis is true for all three arms. The solid black lines represent the boundaries of the arm 0 and the arm 1 null hypothesis boundary planes.
@@ -193,7 +181,7 @@ selection = theta_tiles[:, 2] == unique_t2[3]
 plt.plot(theta_tiles[selection, 0], theta_tiles[selection, 1], "k.")
 plt.hlines(logit(0.1), -4, 2)
 plt.vlines(logit(0.1), -4, 2)
-plt.axis('square')
+plt.axis("square")
 plt.xlim(np.min(theta_tiles[:, 0]) - 0.2, np.max(theta_tiles[:, 0]) + 0.2)
 plt.ylim(np.min(theta_tiles[:, 1]) - 0.2, np.max(theta_tiles[:, 1]) + 0.2)
 
@@ -203,11 +191,10 @@ selection = theta_tiles[:, 2] == unique_t2[10]
 plt.plot(theta_tiles[selection, 0], theta_tiles[selection, 1], "k.")
 plt.hlines(logit(0.1), -4, 2)
 plt.vlines(logit(0.1), -4, 2)
-plt.axis('square')
+plt.axis("square")
 plt.xlim(np.min(theta_tiles[:, 0]) - 0.2, np.max(theta_tiles[:, 0]) + 0.2)
 plt.ylim(np.min(theta_tiles[:, 1]) - 0.2, np.max(theta_tiles[:, 1]) + 0.2)
 plt.show()
-
 ```
 
 Let's explore another useful array produced for the grid. The `g.null_truth` array will contain whether the null hypothesis is true for each arm for each tile. Naturally, this has the same shape as `theta_tiles`.
@@ -215,7 +202,6 @@ Let's explore another useful array produced for the grid. The `g.null_truth` arr
 
 ```python
 g.get_null_truth().shape
-
 ```
 
 Since we've pruned the grid, the tiles are all in the null hypothesis space for at least one arm.
@@ -223,7 +209,6 @@ Since we've pruned the grid, the tiles are all in the null hypothesis space for 
 
 ```python
 np.all(np.any(g.get_null_truth(), axis=1))
-
 ```
 
 ## Part 2: Simulating to compute type I error rates and gradients
@@ -242,7 +227,6 @@ y = [[4, 5, 9]]
 n = [[35, 35, 35]]
 fi = basket.FastINLA(n_arms=3, critical_value=0.95)
 fi.rejection_inference(np.stack((y, n), axis=-1))
-
 ```
 
 ```python
@@ -281,35 +265,29 @@ class BayesianBasket:
         return jnp.min(
             jnp.where(null_truth[:, None, :], test_stat_per_arm, jnp.inf), axis=-1
         )
-
 ```
 
 ```python
 sims = BayesianBasket(0, 100).sim_batch(0, 100, theta_tiles, g.get_null_truth())
-
 ```
 
 ```python
 rejections = sims < 0.05
 n_rejections = np.sum(rejections, axis=1)
-
 ```
 
 ```python
 plt.figure(figsize=(5, 4), constrained_layout=True)
 select = theta_tiles[:, 2] == np.unique(theta_tiles[:, 2])[4]
 plt.scatter(
-    theta_tiles[select, 0],
-    theta_tiles[select, 1],
-    c=n_rejections[select],
-    s=50
+    theta_tiles[select, 0], theta_tiles[select, 1], c=n_rejections[select], s=50
 )
 cbar = plt.colorbar()
 cbar.set_label(r"Number of sims with p-value $<$ 0.05")
 plt.title(f"slice: $\\theta_2 \\approx$ {t2:.1f}")
 plt.xlabel(r"$\theta_0$")
 plt.ylabel(r"$\theta_1$")
-plt.axis('square')
+plt.axis("square")
 plt.show()
 ```
 
@@ -320,7 +298,6 @@ validation_df = ip.validate(BayesianBasket, g, 0.05, K=2000)
 
 ```python
 validation_df.head()
-
 ```
 
 Next, the meat of the type I error calculation will be done by `binomial_accumulator`. This is a JAX function that will just in time compile into a very fast compiled version when passed a function that implements the rejection inference. Then, we call the JIT function `accumulator` and pass it the necessary information:
@@ -362,7 +339,6 @@ for i, t2_idx in enumerate([4, 8]):
     plt.ylabel(r"$\theta_1$")
     cbar.set_label("Simulated fraction of Type I errors")
 plt.show()
-
 ```
 
 Note that the upper bound here is going to be quite loose because we have a very coarse grid. The looseness of the bound will be quadratic in cell size because of the second order term. In addition, there is a lot of error in our pointwise type I error estimate because the number of simulations is only 2000.
@@ -381,7 +357,7 @@ bound_components = np.array(
         validation_df["tie_est"],
         validation_df["tie_cp_bound"] - validation_df["tie_est"],
         validation_df["tie_bound"] - validation_df["tie_cp_bound"],
-        validation_df["tie_bound"]
+        validation_df["tie_bound"],
     ]
 ).T
 t2 = np.unique(theta_tiles[:, 2])[4]
@@ -389,7 +365,6 @@ selection = theta_tiles[:, 2] == t2
 
 np.savetxt("P_tutorial.csv", theta_tiles[selection, :].T, fmt="%s", delimiter=",")
 np.savetxt("B_tutorial.csv", bound_components[selection, :], fmt="%s", delimiter=",")
-
 ```
 
 <!-- #region -->
