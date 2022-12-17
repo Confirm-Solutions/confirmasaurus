@@ -40,8 +40,9 @@ In order to commit code and pass the pre-commit checks, you will need to install
 
 ## Getting started understanding imprint
 
-[Please check out the tutorial where we analyze a three arm basket trial here.](./tutorials/basket/basket.ipynb)
-
+[Tutorial: z-test](./tutorials/basket.ipynb)
+[Tutorial: Fisher exact](./tutorials/basket.ipynb)
+[Tutorial: Three arm Bayesian Basket trial](./tutorials/basket.ipynb)
 
 ## References
 
