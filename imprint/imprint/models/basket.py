@@ -1,17 +1,9 @@
 from dataclasses import dataclass
-from typing import Callable
 
-import jax
-import jax.numpy as jnp
 import numpy as np
 import scipy.linalg
 import scipy.stats
-from jax.config import config
 from scipy.special import logit
-
-# This line is critical for enabling 64-bit floats.
-
-config.update("jax_enable_x64", True)
 
 
 class BayesianBasket:
@@ -31,19 +23,19 @@ class BayesianBasket:
         # n_arm_samples to produce an output `y` array of shape: (n_tiles,
         # sim_size, n_arms)
 
-        p = jax.scipy.special.expit(theta)
-        y = jnp.sum(self.samples[None, begin_sim:end_sim] < p[:, None, None], axis=2)
+        p = scipy.special.expit(theta)
+        y = np.sum(self.samples[None, begin_sim:end_sim] < p[:, None, None], axis=2)
 
         # 2. Determine if we rejected each simulated sample.
         # rejection_fnc expects inputs of shape (n, n_arms) so we must flatten
         # our 3D arrays. We reshape exceedance afterwards to bring it back to 3D
         # (n_tiles, sim_size, n_arms)
         y_flat = y.reshape((-1, 3))
-        n_flat = jnp.full_like(y_flat, self.n_arm_samples)
-        data = jnp.stack((y_flat, n_flat), axis=-1)
+        n_flat = np.full_like(y_flat, self.n_arm_samples)
+        data = np.stack((y_flat, n_flat), axis=-1)
         test_stat_per_arm = self.fi.test_inference(data).reshape(y.shape)
-        return jnp.min(
-            jnp.where(null_truth[:, None, :], test_stat_per_arm, jnp.inf), axis=-1
+        return np.min(
+            np.where(null_truth[:, None, :], test_stat_per_arm, np.inf), axis=-1
         )
 
 
@@ -73,43 +65,9 @@ def log_gauss_rule(N, a, b):
     return QuadRule(pts, wts)
 
 
-def fast_invert(S_in, d):
-    S = np.tile(S_in, (d.shape[0], 1, 1, 1))
-    for k in range(d.shape[-1]):
-        outer = np.einsum("...i,...j->...ij", S[..., k, :], S[..., :, k])
-        offset = d[..., k] / (1 + d[..., k] * S[..., k, k])
-        S = S - (offset[..., None, None] * outer)
-    return S
-
-
-@jax.jit
-def jax_fast_invert(S, d):
-    """
-    Invert a matrix plus a diagonal by iteratively applying the Sherman-Morrison
-    formula. If we are computing Binv = (A + d)^-1,
-    then the arguments are:
-    - S: A^-1
-    - d: d
-    """
-    # NOTE: It's possible to improve performance by about 10% by doing an
-    # incomplete inversion here. In the last iteration through the loop, return
-    # both S and offset. Then, perform .dot(grad) with those components directly.
-    for k in range(d.shape[0]):
-        offset = d[k] / (1 + d[k] * S[k, k])
-        S = S - (offset * (S[k, None, :] * S[:, None, k]))
-    return S
-
-
-@dataclass
-class FastINLAModel:
-    log_joint: Callable
-    grad_hess: Callable
-
-
 class FastINLA:
     def __init__(
         self,
-        model: FastINLAModel = None,
         n_arms=4,
         mu_0=-1.34,
         mu_sig2=100.0,
@@ -141,90 +99,15 @@ class FastINLA:
         self.thresh_theta = np.full(self.n_arms, logit(0.1) - self.logit_p1)
         self.critical_value = critical_value
 
-        # For JAX impl:
-        self.sigma2_pts_jax = jnp.asarray(self.sigma2_rule.pts)
-        self.sigma2_wts_jax = jnp.asarray(self.sigma2_rule.wts)
-        self.cov_jax = jnp.asarray(self.cov)
-        self.neg_precQ_jax = jnp.asarray(self.neg_precQ)
-        self.logprecQdet_jax = jnp.asarray(self.logprecQdet)
-        self.log_prior_jax = jnp.asarray(self.log_prior)
-
-        self.jax_opt_vec = jax.jit(
-            jax.vmap(
-                jax.vmap(
-                    jax_opt,
-                    in_axes=(None, None, 0, 0, 0, None, None, None),
-                    out_axes=(0, 0),
-                ),
-                in_axes=(0, 0, None, None, None, None, None, None),
-                out_axes=(0, 0),
-            )
-        )
-
-        self.model: FastINLAModel = model
-        if model is None:
-
-            def log_joint(self, data, theta):
-                """
-                theta is expected to have shape (N, n_sigma2, n_arms)
-                """
-                y = data[..., 0]
-                n = data[..., 1]
-                theta_m0 = theta - self.mu_0
-                theta_adj = theta + self.logit_p1
-                exp_theta_adj = np.exp(theta_adj)
-                return (
-                    # NB: this has fairly low accuracy in float32
-                    0.5
-                    * np.einsum("...i,...ij,...j", theta_m0, self.neg_precQ, theta_m0)
-                    + self.logprecQdet
-                    + np.sum(
-                        theta_adj * y[:, None] - n[:, None] * np.log(exp_theta_adj + 1),
-                        axis=-1,
-                    )
-                    + self.log_prior
-                )
-
-            def grad_hess(self, data, theta, arms_opt):
-                # These formulas are
-                # straightforward derivatives from the Berry log joint density
-                # see the log_joint method below
-                y = data[..., 0]
-                n = data[..., 1]
-                na = np.arange(len(arms_opt))
-                theta_m0 = theta - self.mu_0
-                exp_theta_adj = np.exp(theta + self.logit_p1)
-                C = 1.0 / (exp_theta_adj + 1)
-                grad = (
-                    np.matmul(self.neg_precQ[None], theta_m0[:, :, :, None])[..., 0]
-                    + y[:, None]
-                    - (n[:, None] * exp_theta_adj) * C
-                )[..., arms_opt]
-
-                hess = np.tile(
-                    self.neg_precQ[None, ..., arms_opt, :][..., :, arms_opt],
-                    (y.shape[0], 1, 1, 1),
-                )
-                hess[..., na, na] -= (n[:, None] * exp_theta_adj * (C**2))[
-                    ..., arms_opt
-                ]
-                return grad, hess
-
-            self.model = FastINLAModel(log_joint, grad_hess)
-
-    def rejection_inference(self, data, method="jax"):
-        _, exceedance, _, _ = self.inference(data, method)
+    def rejection_inference(self, data):
+        _, exceedance, _, _ = self.inference(data)
         return exceedance > self.critical_value
 
-    def test_inference(self, data, method="jax"):
-        _, exceedance, _, _ = self.inference(data, method)
+    def test_inference(self, data):
+        _, exceedance, _, _ = self.inference(data)
         return 1 - exceedance
 
-    def inference(self, data, method="jax"):
-        fncs = dict(numpy=self.numpy_inference, jax=self.jax_inference)
-        return fncs[method](data)[:4]
-
-    def numpy_inference(self, data, thresh_theta=None):
+    def inference(self, data, thresh_theta=None):
         """
         Bayesian inference of a basket trial given data with n_arms.
 
@@ -246,7 +129,7 @@ class FastINLA:
         theta_max, hess_inv = self.optimize_mode(data)
 
         # Step 2) Calculate the joint distribution p(theta, y, sigma^2)
-        logjoint = self.model.log_joint(self, data, theta_max)
+        logjoint = self.log_joint(data, theta_max)
 
         # Step 3) Calculate p(sigma^2 | y) = (
         #   p(theta_max, y, sigma^2)
@@ -282,13 +165,7 @@ class FastINLA:
                 exc_sigma2 * sigma2_post * self.sigma2_rule.wts[None, :], axis=1
             )
             exceedances.append(exc)
-        return (
-            sigma2_post,
-            np.stack(exceedances, axis=-1),
-            theta_max,
-            theta_sigma,
-            hess_inv,
-        )
+        return (sigma2_post, np.stack(exceedances, axis=-1), theta_max, theta_sigma)
 
     def optimize_mode(self, data, fixed_arm_dim=None, fixed_arm_values=None):
         """
@@ -326,7 +203,7 @@ class FastINLA:
         for i in range(100):
 
             # Calculate the gradient and hessian.
-            grad, hess = self.model.grad_hess(self, data, theta_max, arms_opt)
+            grad, hess = self.grad_hess(data, theta_max, arms_opt)
             hess_inv = np.linalg.inv(hess)
 
             # Take the full Newton step. The negative sign comes here because we
@@ -346,114 +223,45 @@ class FastINLA:
 
         return theta_max, hess_inv
 
-    def jax_inference(self, data):
+    def log_joint(self, data, theta):
         """
-        See the numpy implementation for comments explaining the steps. The
-        series of operations is almost identical in the JAX implementation.
+        theta is expected to have shape (N, n_sigma2, n_arms)
         """
-        y = jnp.asarray(data[..., 0])
-        n = jnp.asarray(data[..., 1])
-        theta_max, hess_inv = self.jax_opt_vec(
-            y,
-            n,
-            self.cov_jax,
-            self.neg_precQ_jax,
-            self.sigma2_pts_jax,
-            self.logit_p1,
-            self.mu_0,
-            self.opt_tol,
+        y = data[..., 0]
+        n = data[..., 1]
+        theta_m0 = theta - self.mu_0
+        theta_adj = theta + self.logit_p1
+        exp_theta_adj = np.exp(theta_adj)
+        return (
+            # NB: this has fairly low accuracy in float32
+            0.5 * np.einsum("...i,...ij,...j", theta_m0, self.neg_precQ, theta_m0)
+            + self.logprecQdet
+            + np.sum(
+                theta_adj * y[:, None] - n[:, None] * np.log(exp_theta_adj + 1),
+                axis=-1,
+            )
+            + self.log_prior
         )
 
-        sigma2_post, exceedances, theta_sigma = jax_calc_posterior_and_exceedances(
-            theta_max,
-            y,
-            n,
-            self.log_prior_jax,
-            self.neg_precQ_jax,
-            self.logprecQdet_jax,
-            hess_inv,
-            self.sigma2_wts_jax,
-            self.logit_p1,
-            self.mu_0,
-            self.thresh_theta,
-        )
-
-        return sigma2_post, exceedances, theta_max, theta_sigma
-
-
-def jax_opt(y, n, cov, neg_precQ, sigma2, logit_p1, mu_0, tol):
-    def step(args):
-        theta_max, hess_inv, stop = args
-        theta_m0 = theta_max - mu_0
-        exp_theta_adj = jnp.exp(theta_max + logit_p1)
+    def grad_hess(self, data, theta, arms_opt):
+        # These formulas are
+        # straightforward derivatives from the Berry log joint density
+        # see the log_joint method below
+        y = data[..., 0]
+        n = data[..., 1]
+        na = np.arange(len(arms_opt))
+        theta_m0 = theta - self.mu_0
+        exp_theta_adj = np.exp(theta + self.logit_p1)
         C = 1.0 / (exp_theta_adj + 1)
-        nCeta = n * C * exp_theta_adj
+        grad = (
+            np.matmul(self.neg_precQ[None], theta_m0[:, :, :, None])[..., 0]
+            + y[:, None]
+            - (n[:, None] * exp_theta_adj) * C
+        )[..., arms_opt]
 
-        grad = neg_precQ.dot(theta_m0) + y - nCeta
-        diag = nCeta * C
-
-        hess_inv = jax_fast_invert(-cov, -diag)
-        step = -hess_inv.dot(grad)
-        go = jnp.sum(step**2) > tol**2
-        return theta_max + step, hess_inv, go
-
-    # NOTE: Warm starting was not helpful but I left this code here in case it's
-    # useful.
-    # When sigma2 is small, the MLE from summing all the trials is a good guess.
-    # When sigma2 is large, the individual arm MLE is a good starting guess.
-    # theta_max0 = jnp.where(
-    #     sigma2 < 1e-3,
-    #     jnp.repeat(jax.scipy.special.logit(y.sum()/n.sum()),self.n_arms) - logit_p1,
-    #     jax.scipy.special.logit((y + 1e-4) / n) - logit_p1
-    # )
-    n_arms = y.shape[0]
-    theta_max0 = jnp.zeros(n_arms)
-
-    out = jax.lax.while_loop(
-        lambda args: args[2], step, (theta_max0, jnp.zeros((n_arms, n_arms)), True)
-    )
-    theta_max, hess_inv, stop = out
-    return theta_max, hess_inv
-
-
-@jax.jit
-def jax_calc_posterior_and_exceedances(
-    theta_max,
-    y,
-    n,
-    log_prior,
-    neg_precQ,
-    logprecQdet,
-    hess_inv,
-    sigma2_wts,
-    logit_p1,
-    mu_0,
-    thresh_theta,
-):
-    theta_m0 = theta_max - mu_0
-    theta_adj = theta_max + logit_p1
-    exp_theta_adj = jnp.exp(theta_adj)
-    logjoint = (
-        0.5 * jnp.einsum("...i,...ij,...j", theta_m0, neg_precQ, theta_m0)
-        + logprecQdet
-        + jnp.sum(
-            theta_adj * y[:, None] - n[:, None] * jnp.log(exp_theta_adj + 1),
-            axis=-1,
+        hess = np.tile(
+            self.neg_precQ[None, ..., arms_opt, :][..., :, arms_opt],
+            (y.shape[0], 1, 1, 1),
         )
-        + log_prior
-    )
-
-    log_sigma2_post = logjoint + 0.5 * jnp.log(jnp.linalg.det(-hess_inv))
-    sigma2_post = jnp.exp(log_sigma2_post)
-    sigma2_post /= jnp.sum(sigma2_post * sigma2_wts, axis=1)[:, None]
-
-    theta_sigma = jnp.sqrt(jnp.diagonal(-hess_inv, axis1=2, axis2=3))
-    exc_sigma2 = 1.0 - jax.scipy.stats.norm.cdf(
-        thresh_theta,
-        theta_max,
-        theta_sigma,
-    )
-    exceedances = jnp.sum(
-        exc_sigma2 * sigma2_post[:, :, None] * sigma2_wts[None, :, None], axis=1
-    )
-    return sigma2_post, exceedances, theta_sigma
+        hess[..., na, na] -= (n[:, None] * exp_theta_adj * (C**2))[..., arms_opt]
+        return grad, hess
