@@ -9,6 +9,7 @@ def copy_simple():
     # had to change the env name for environment.yml so we shouldn't overwrite
     # shutil.copy2('environment.yml', 'imprint/environment.yml')
     #
+    shutil.copy2(".github/workflows/lint.yml", "imprint/.github/workflows/lint.yml")
     shutil.copy2(".gitignore", "imprint/.gitignore")
     shutil.copy2(".gitleaks.toml", "imprint/.gitleaks.toml")
     shutil.copy2(".vscode/settings.json", "imprint/.vscode/settings.json")
