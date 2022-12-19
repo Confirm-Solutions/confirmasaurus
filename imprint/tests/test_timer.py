@@ -7,13 +7,13 @@ from imprint.timer import Timer
 def test_timer_zero():
     t = Timer()
     start = int(time.time())
-    assert t() == start
-    assert t() == start + 1
-    assert t() == start + 2
+    assert t.unique() == start
+    assert t.unique() == start + 1
+    assert t.unique() == start + 2
 
 
 def test_timer_mock():
     t = new_mock_timer()
-    assert t() == 0
-    assert t() == 1
-    assert t() == 2
+    assert t.unique() == 0
+    assert t.unique() == 1
+    assert t.unique() == 2

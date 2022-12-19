@@ -5,8 +5,6 @@ from jax.config import config
 
 config.update("jax_enable_x64", True)
 
-pytest_plugins = ["imprint.testing"]
-
 
 def pytest_addoption(parser):
     parser.addoption(

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import IPython
 import matplotlib
+import pandas as pd
 
 
 def run_tutorial(filename):
@@ -15,6 +16,7 @@ def run_tutorial(filename):
     return ipy.user_ns, end - start
 
 
-def test_ztest(snapshot):
+def test_ztest_tutorial(snapshot):
     nb_namespace, _ = run_tutorial("ztest.ipynb")
-    snapshot(nb_namespace["rej_df"])
+    rej_df = nb_namespace["rej_df"]
+    pd.testing.assert_frame_equal(rej_df, snapshot(rej_df))

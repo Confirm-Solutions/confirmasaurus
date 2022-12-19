@@ -62,7 +62,7 @@ version = "^22.10.0"
 profile = "black"
 
 [tool.pytest.ini_options]
-addopts = "-s --tb=short --strict-markers --doctest-modules"
+addopts = "-p imprint.testing -s --tb=short --strict-markers --doctest-modules"
 testpaths = [
     "tests",
     "imprint",
