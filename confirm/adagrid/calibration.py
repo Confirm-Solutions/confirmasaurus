@@ -60,6 +60,7 @@ from .db import DuckDBTiles
 from imprint import batching
 from imprint import driver
 from imprint import grid
+from imprint.timer import timer
 
 
 class AdaCalibrationDriver:
@@ -213,7 +214,7 @@ class AdaCalibrationDriver:
         g_calibrated = g.add_cols(lams_df)
         g_calibrated.df["worker_id"] = self.db.worker_id
         g_calibrated.df["birthiter"] = i
-        g_calibrated.df["birthtime"] = time.time()
+        g_calibrated.df["birthtime"] = timer()
         g_calibrated.df["eligible"] = True
         return g_calibrated
 

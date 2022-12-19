@@ -74,7 +74,7 @@ class DuckDBTiles:
     con: duckdb.DuckDBPyConnection
     # TODO: despite not supporting multiple workers, it would still be good to
     # distinguish between separate runs with worker_id
-    worker_id: int = 0
+    worker_id: int
     _columns: List[str] = None
     _d: int = None
     store: DuckDBStore = None
@@ -157,4 +157,11 @@ class DuckDBTiles:
         Returns:
             The tile database.
         """
-        return DuckDBTiles(duckdb.connect(path))
+        con = duckdb.connect(path)
+        con.execute(
+            "create sequence if not exists worker_id start with 1 increment by 1"
+        )
+        worker_id = con.execute("select nextval('worker_id')").fetchone()[0] - 1
+        con.execute("create table if not exists workers (id int)")
+        con.execute(f"insert into workers values ({worker_id})")
+        return DuckDBTiles(con, worker_id)

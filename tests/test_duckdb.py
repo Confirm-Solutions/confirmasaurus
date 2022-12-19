@@ -129,6 +129,17 @@ class DBTester:
             pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()
         )
 
+    def test_reload_worker_id(self):
+        import os
+
+        os.remove("test.db")
+        db1 = self.dbtype.connect("test.db")
+        assert db1.worker_id == 0
+        db1.close()
+
+        db2 = self.dbtype.connect("test.db")
+        assert db2.worker_id == 1
+
 
 class TestDuckDB(DBTester):
     dbtype = db.DuckDBTiles
