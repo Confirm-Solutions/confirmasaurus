@@ -4,8 +4,9 @@
 ; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
 ;
 [subrepo]
-	remote = none
-	branch = master
+	remote = imprint-staging
+	branch = main
 	commit = 
 	method = merge
 	cmdver = 0.4.5
+	parent = bf9c843245f3728f31827b39b59e400909ae8bab
