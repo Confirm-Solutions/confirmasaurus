@@ -60,7 +60,7 @@ from .db import DuckDBTiles
 from imprint import batching
 from imprint import driver
 from imprint import grid
-from imprint.timer import timer
+from imprint.timer import simple_timer
 
 
 class AdaCalibrationDriver:
@@ -212,9 +212,9 @@ class AdaCalibrationDriver:
             ),
         )
         g_calibrated = g.add_cols(lams_df)
-        g_calibrated.df["worker_id"] = self.db.worker_id
+        g_calibrated.df["worker_id"] = self.c.worker_id
         g_calibrated.df["birthiter"] = i
-        g_calibrated.df["birthtime"] = timer()
+        g_calibrated.df["birthtime"] = simple_timer()
         g_calibrated.df["eligible"] = True
         return g_calibrated
 
@@ -257,7 +257,7 @@ class AdaCalibrationDriver:
         # checking for convergence because part of the convergence criterion is
         # whether there are any impossible tiles .
         ########################################
-        work = self.db.next(self.iter_size, "orderer")
+        work = self.db.next(self.iter_size, "orderer", self.c.worker_id)
 
         ########################################
         # Step 3: Convergence criterion! In terms of:
@@ -639,6 +639,7 @@ def ada_calibrate(
 
     if db is None:
         db = DuckDBTiles.connect()
+    worker_id = db.new_worker()
 
     ########################################
     # Store config
@@ -664,7 +665,7 @@ def ada_calibrate(
         calibration_min_idx,
         iter_size,
         n_iter,
-        db.worker_id,
+        worker_id,
         defaults=defaults,
     )
     db.store.set_or_append("config", c.config_df)

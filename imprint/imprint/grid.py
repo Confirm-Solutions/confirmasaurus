@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import sympy as sp
 
-from .timer import timer
+from .timer import unique_timer
 
 
 @dataclass(eq=False)
@@ -643,10 +643,11 @@ def gen_short_uuids(n, host_id=None, t=None):
     - The highest 28 bits are the time in seconds of creation. This will not
       loop for 8.5 years. When we start running jobs that take longer than 8.5
       years to complete, please send a message to me in the afterlife.
-        - The timer() function used for the time never returns the same time
-          twice so the creation time is never re-used. If the creation time is
-          going to be reused because less than one second has passed since the
-          previous call to gen_short_uuids, then the timer increments by one.
+        - The unique_timer() function used for the time never returns the same
+          time twice so the creation time is never re-used. If the creation
+          time is going to be reused because less than one second has passed
+          since the previous call to gen_short_uuids, then the timer increments
+          by one.
     - The next 18 bits are the index of the process. This is a pretty generous limit
       on the number of processes. 2^18=262144.
     - The lowest 18 bits are the index of the created tiles within this batch.
@@ -690,7 +691,7 @@ def _gen_short_uuids(n, host_id, t):
     assert host_id < 2**host_bits
 
     if t is None:
-        t = timer()
+        t = unique_timer()
 
     return (
         (t << np.uint64(n_bits + host_bits))

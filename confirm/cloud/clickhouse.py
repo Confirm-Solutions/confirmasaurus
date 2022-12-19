@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Dict
 from typing import List
 
 import clickhouse_connect
@@ -184,11 +185,11 @@ class Clickhouse:
     active and eligible tiles.
     """
 
+    connection_details: Dict[str, str]
     client: clickhouse_connect.driver.httpclient.HttpClient
     redis_con: redis.Redis
     host: str
     job_id: str
-    worker_id: int
     _columns: List[str] = None
     _d: int = None
 
@@ -236,7 +237,7 @@ class Clickhouse:
         """,
         )
 
-    def next(self, n, order_col):
+    def next(self, n, order_col, worker_id):
         lock = pottery.Redlock(
             key=f"{self.host}/{self.job_id}/lock", masters={self.redis_con}
         )
@@ -252,7 +253,7 @@ class Clickhouse:
             )
             T = time.time()
             out["time"] = T
-            out["worker_id"] = self.worker_id
+            out["worker_id"] = worker_id
             _insert_df(self.client, "work", out[["id", "time", "worker_id"]])
 
         # No need to check for conflicts because we are using a lock but if we
@@ -323,6 +324,18 @@ class Clickhouse:
             """
         )
         self.write(df)
+
+    def new_worker(self):
+        host = self.connection_details["host"]
+        return (
+            next(
+                pottery.NextId(
+                    key=f"{host}/{self.job_id}/worker_id",
+                    masters={self.redis_con},
+                )
+            )
+            - 1
+        )
 
     def connect(
         job_id: int = None,
@@ -395,14 +408,8 @@ class Clickhouse:
         redis_con = redis.Redis(
             **get_redis_config(redis_host, redis_port, redis_password)
         )
-        worker_id = next(
-            pottery.NextId(
-                key=f"{host}/{job_id}/worker_id",
-                masters={redis_con},
-            )
-        )
-        print(f"Connected to job {job_id} as worker {worker_id}")
-        return Clickhouse(client, redis_con, host, job_id, worker_id)
+        print(f"Connected to job {job_id}")
+        return Clickhouse(connection_details, client, redis_con, host, job_id)
 
 
 def get_redis_config(host=None, port=None, password=None):

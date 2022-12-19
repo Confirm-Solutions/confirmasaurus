@@ -16,8 +16,8 @@ or
 def test_something():
     ...
 
-NOTE: The reason we mock the _timer function instead of the timer function is
-because the timer function will have already been imported by calling modules
+NOTE: The reason we mock the _timer object instead of the timer functions is
+because the timer functions will have already been imported by calling modules
 by the time the mock is applied. This means that the mock would not be applied.
 """
 import time
@@ -29,25 +29,39 @@ class Timer:
     def __init__(self):
         self.last = None
 
-    def __call__(self):
-        t = np.uint64(int(time.time()))
+    def unique(self):
+        t = np.uint64(int(self.now()))
         if self.last is not None and t <= self.last:
-            t = self.last + 1
+            t = self.last + np.uint64(1)
         self.last = t
         return t
+
+    def now(self):
+        return time.time()
+
+
+class MockTimer:
+    def __init__(self):
+        self.i = 0
+
+    def unique(self):
+        self.i += 1
+        return np.uint64(self.i - 1)
+
+    def now(self):
+        return self.i
+
+
+def new_mock_timer():
+    return MockTimer()
 
 
 _timer = Timer()
 
 
-def new_mock_timer():
-    def mock_timer():
-        mock_timer.i += 1
-        return np.uint64(mock_timer.i - 1)
-
-    mock_timer.i = 0
-    return mock_timer
+def unique_timer():
+    return _timer.unique()
 
 
-def timer():
-    return _timer()
+def simple_timer():
+    return _timer.now()

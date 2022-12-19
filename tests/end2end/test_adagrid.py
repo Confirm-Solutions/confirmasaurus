@@ -9,7 +9,7 @@ import imprint as ip
 from imprint.models.ztest import ZTest1D
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @mock.patch("imprint.timer._timer", ip.timer.new_mock_timer())
 def test_adagrid(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
@@ -19,8 +19,21 @@ def test_adagrid(snapshot):
     assert iter == snapshot(iter)
 
     all_tiles_df = db.get_all()
+    time_cols = ["id", "parent_id", "birthtime"]
     pd.testing.assert_frame_equal(
-        all_tiles_df, snapshot(all_tiles_df), check_dtype=False, check_like=True
+        all_tiles_df.drop(time_cols, axis=1),
+        snapshot(all_tiles_df).drop(time_cols, axis=1),
+        check_dtype=False,
+        check_like=True,
+    )
+
+    # The second check is to make sure that the snapshot is deterministic. This
+    # helps separate failures due to timing and failures due to other tile
+    # quantities.
+    pd.testing.assert_frame_equal(
+        all_tiles_df,
+        snapshot(all_tiles_df),
+        check_dtype=False,
     )
 
     # Compare DuckDB against pandas
@@ -45,11 +58,11 @@ def test_adagrid_clickhouse(snapshot):
     np.testing.assert_allclose(lamss, snapshot(lamss))
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 def test_adagrid_checkpointing():
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
-            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
+            theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
         db = ada.db.DuckDBTiles.connect()
         iter_two1, reports_two1, db_two1 = ada.ada_calibrate(
@@ -61,7 +74,7 @@ def test_adagrid_checkpointing():
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
-            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
+            theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
         iter, reports, db_once = ada.ada_calibrate(
             ZTest1D, g=g, nB=3, init_K=4, n_iter=3

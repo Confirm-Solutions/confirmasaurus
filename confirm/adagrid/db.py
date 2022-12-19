@@ -21,7 +21,7 @@ class PandasTiles:
     """
 
     df: pd.DataFrame = None
-    worker_id: int = 0
+    _next_worker_id: int = 0
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
     @property
@@ -37,7 +37,7 @@ class PandasTiles:
     def get_all(self):
         return self.df
 
-    def next(self, n, order_col):
+    def next(self, n, order_col, worker_id):
         out = self.df.loc[self.df["eligible"]].nsmallest(n, order_col)
         self.df.loc[out.index, "eligible"] = False
         return out
@@ -60,6 +60,11 @@ class PandasTiles:
     def init_tiles(self, df):
         self.df = df.reset_index(drop=True)
 
+    def new_worker(self):
+        out = self._next_worker_id
+        self._next_worker_id += 1
+        return out
+
 
 @dataclass
 class DuckDBTiles:
@@ -72,9 +77,6 @@ class DuckDBTiles:
     """
 
     con: duckdb.DuckDBPyConnection
-    # TODO: despite not supporting multiple workers, it would still be good to
-    # distinguish between separate runs with worker_id
-    worker_id: int
     _columns: List[str] = None
     _d: int = None
     store: DuckDBStore = None
@@ -101,7 +103,7 @@ class DuckDBTiles:
         column_order = ",".join(self.columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
-    def next(self, n, order_col):
+    def next(self, n, order_col, worker_id):
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
         t = self.con.begin()
@@ -146,6 +148,15 @@ class DuckDBTiles:
     def init_tiles(self, df):
         self.con.execute("create table tiles as select * from df")
 
+    def new_worker(self):
+        self.con.execute(
+            "create sequence if not exists worker_id start with 1 increment by 1"
+        )
+        worker_id = self.con.execute("select nextval('worker_id')").fetchone()[0] - 1
+        self.con.execute("create table if not exists workers (id int)")
+        self.con.execute(f"insert into workers values ({worker_id})")
+        return worker_id
+
     @staticmethod
     def connect(path=":memory:"):
         """
@@ -157,11 +168,4 @@ class DuckDBTiles:
         Returns:
             The tile database.
         """
-        con = duckdb.connect(path)
-        con.execute(
-            "create sequence if not exists worker_id start with 1 increment by 1"
-        )
-        worker_id = con.execute("select nextval('worker_id')").fetchone()[0] - 1
-        con.execute("create table if not exists workers (id int)")
-        con.execute(f"insert into workers values ({worker_id})")
-        return DuckDBTiles(con, worker_id)
+        return DuckDBTiles(duckdb.connect(path))
