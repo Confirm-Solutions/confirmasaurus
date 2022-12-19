@@ -6,7 +6,7 @@
 [subrepo]
 	remote = imprint-staging
 	branch = main
-	commit = 
+	commit = b67e31fd6b06dc4e1abdcceb1a1c3948a6460fec
 	method = merge
 	cmdver = 0.4.5
 	parent = bf9c843245f3728f31827b39b59e400909ae8bab
