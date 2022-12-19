@@ -1,50 +1,48 @@
-# Version control stuff 7/9/22
+# Version control stuff
+
+Originally written 7/9/22 based on git subtree, completely revamped 12/19/22 based on git subrepo. Much cleaner!
 
 ## Dealing with our open source library is non-trivial.
 
-We're a small team and it'd be nice to just use a single repo for everything. But, we can't because we want to open source `imprint`. Unfortunately, there are no *good* tools for splitting repos apart but still treating them as a single repo. The tool we use to split the repo is `git subtree`. See here for a nice introduction:
-[An introduction to git subtree](https://www.atlassian.com/git/tutorials/git-subtree)
+We're a small team and it'd be nice to just use a single repo for everything. But, we can't because we want to open source `imprint`. Unfortunately, there are no *good* tools for splitting repos apart but still treating them as a single repo. The options are:
+1. `git submodule`
+2. `git subtree`
+3. [`git subrepo`](https://github.com/ingydotnet/git-subrepo)
 
-I followed the directions under "Adding the sub-project as a remote":
+I like [the discussion here by the `git subrepo` author on why `subrepo` is the best option](https://github.com/ingydotnet/git-subrepo/blob/master/Intro.pod).
+
+As far as I can tell, the design of `git subrepo` is pretty close to the optimal design for our situation. The only downside to the tool is that it's not perfectly maintained. I think that's going to be okay for us. 
+
+For the most part, while developing confirm we can act like the open source imprint repo does not exist. This is nice. 
+## Contributing changes to imprint
 
 ```
-git remote add -f imprint git@github.com:Confirm-Solutions/imprint.git
-git subtree add --prefix imprint imprint main --squash
-```
-The `--prefix=imprint` tells git what directory to treat as a subtree. The next `imprint` is the remote we use. 
-
-The first line only needs to be run once _per clone_. So all users should run this exactly once after cloning this repo. 
-The second line only needs to be run once _ever_. Since it has already been run before, you don't need to run it.
-
-Now, for the most part, we can act like the open source external repo does not exist. This is nice. The painful part comes when we want to send our internal changes back to the external repo.
-## Contributing subtree changes back upstream
-
-For the foreseeable future, I expect almost all changes to imprint to occur internal to Confirm. So, a subtree fits our use case nicely because we can sort of ignore that the external repo exists and just push new changes to the external open source repo occasionally.
-
-**Currently**, the process looks like:
-
-To update the internal confirmasaurus/imprint subdirectory from changes in the external repo:
-```
-git remote add -f imprint git@github.com:Confirm-Solutions/imprint.git
-git fetch imprint main
-git subtree pull --prefix imprint imprint main --squash
+git subrepo push imprint --squash --debug --verbose
 ```
 
-Add to push a branch to the external repo. 
+## Pulling changes from imprint
+
 ```
-git remote add -f imprint git@github.com:Confirm-Solutions/imprint.git
-git subtree push --squash --prefix=imprint imprint branchname
+git subrepo pull imprint --squash --debug --verbose
 ```
 
-(I put the remote add commands in there just to avoid errors. You only need to run the remote add once per git clone.)
+## (historical) What I did to set up subrepo
 
-The process will get a bit more complex in the future if there are external developers who are submitting PRs to imprint. To handle this, *at that point in time*, we should:
+`git subrepo` has rough edges and some bugs. This is acceptable because the
+`git subtree` and `git submodule` alternatives are so shitty. One of the
+greatest gifts an engineer could give the world would be to fix this basic
+infrastructure!
 
-1. look around for new tools that solve this nicely.
-2. try setting up some CI tools that automatically keep the repos in sync. I think this could be quite easy if we follow some simple branch name conventions.
+1. `git subrepo init imprint`
+2. Manually open the `imprint/.gitrepo` file and set:
+    - `remote = git@github.com:Confirm-Solutions/imprint.git`
+	- `branch = main`
+	- `commit = go-get-the-commit-id-from-imprint-repo`
+	- `parent = go-get-the-commit-id-from-confirm-repo`
+3. Manually implement this fix: https://github.com/ingydotnet/git-subrepo/pull/498/files
 
 ## Useful references
 
-* https://gist.github.com/SKempin/b7857a6ff6bddb05717cc17a44091202
-* https://github.com/joelparkerhenderson/monorepo-vs-polyrepo
-* force subtree push: https://stackoverflow.com/questions/33172857/how-do-i-force-a-subtree-push-to-overwrite-remote-changes
+- https://github.com/ingydotnet/git-subrepo/wiki/Basics
+- https://gist.github.com/SKempin/b7857a6ff6bddb05717cc17a44091202
+- https://github.com/joelparkerhenderson/monorepo-vs-polyrepos
