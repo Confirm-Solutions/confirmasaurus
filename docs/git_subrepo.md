@@ -17,7 +17,7 @@ For the most part, while developing confirm we can act like the open source impr
 ## Contributing changes to imprint
 
 ```
-git subrepo push imprint --squash --debug --verbose --message "Push from confirm to imprint"
+git subrepo push imprint --branch branchname --squash --debug --verbose --message "Subrepo push to imprint"
 ```
 
 ## Pulling changes from imprint

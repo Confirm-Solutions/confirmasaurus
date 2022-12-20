@@ -21,7 +21,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       
       - name: Install pre-commit
         run: pipx install pre-commit
@@ -58,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
       
       - name: Install poetry
         run: pipx install poetry
@@ -76,11 +76,19 @@ jobs:
       - name: Pytest
         run: poetry run pytest -n auto -s
   push_to_imprint:
+    # if: github.ref == 'refs/heads/main'
     needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: gh pr 
+      - run: |
+          gh pr \
+            --repo Confirm-Solutions/confirmasaurus \
+            create \
+            -B main \
+            -H tbt/auto-push-imprint \
+            -t "[BOT] Sync with upstream" \
+            -b "Bot created PR to automatically to push changes to imprint.
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack
