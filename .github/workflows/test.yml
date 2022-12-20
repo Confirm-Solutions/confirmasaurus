@@ -15,74 +15,80 @@ on:
       - "**.ipynb"
       - "**.md"
 jobs:
-  lint:
-    if: github.event.pull_request.draft == false
-    timeout-minutes: 15
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
+  # lint:
+  #   if: github.event.pull_request.draft == false
+  #   timeout-minutes: 15
+  #   name: Lint
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v3
       
-      - name: Install pre-commit
-        run: pipx install pre-commit
+  #     - name: Install pre-commit
+  #       run: pipx install pre-commit
 
-      - name: set PY
-        run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
+  #     - name: set PY
+  #       run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
           
-      - name: Cache pre-commit
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit|${{ env.PY }}|${{ hashFiles('.pre-commit-config.yaml') }}
-        id: precommitcache
+  #     - name: Cache pre-commit
+  #       uses: actions/cache@v3
+  #       with:
+  #         path: ~/.cache/pre-commit
+  #         key: pre-commit|${{ env.PY }}|${{ hashFiles('.pre-commit-config.yaml') }}
+  #       id: precommitcache
           
-      # The hooks will be installed automatically when pre-commit run is
-      # called. But it's nice to do it separately for more visibility in the
-      # GitHub interface into where a failure happens and how long each step
-      # takes.
-      - name: Install pre-commit hooks
-        run: pre-commit install --install-hooks
+  #     # The hooks will be installed automatically when pre-commit run is
+  #     # called. But it's nice to do it separately for more visibility in the
+  #     # GitHub interface into where a failure happens and how long each step
+  #     # takes.
+  #     - name: Install pre-commit hooks
+  #       run: pre-commit install --install-hooks
 
-      - name: Run all pre-commit checks on all files
-        run: pre-commit run --color=always -a
-        if: github.ref == 'refs/heads/main'
-  test:
-    if: github.event.pull_request.draft == false
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ["ubuntu-latest"]
-        python-version: ["3.10"]
-    name: Test (${{ matrix.python-version }}, ${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    steps:
+  #     - name: Run all pre-commit checks on all files
+  #       run: pre-commit run --color=always -a
+  #       if: github.ref == 'refs/heads/main'
+  # test:
+  #   if: github.event.pull_request.draft == false
+  #   timeout-minutes: 15
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       os: ["ubuntu-latest"]
+  #       python-version: ["3.10"]
+  #   name: Test (${{ matrix.python-version }}, ${{ matrix.os }})
+  #   runs-on: ${{ matrix.os }}
+  #   steps:
 
-      - uses: actions/checkout@v3
+  #     - uses: actions/checkout@v3
       
-      - name: Install poetry
-        run: pipx install poetry
+  #     - name: Install poetry
+  #       run: pipx install poetry
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'poetry'
+  #     - name: Set up Python ${{ matrix.python-version }}
+  #       uses: actions/setup-python@v4
+  #       with:
+  #         python-version: ${{ matrix.python-version }}
+  #         cache: 'poetry'
 
-      - name: Update environment
-        run: |
-          poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud
+  #     - name: Update environment
+  #       run: |
+  #         poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud
 
-      - name: Pytest
-        run: poetry run pytest -n auto -s
+  #     - name: Pytest
+  #       run: poetry run pytest -n auto -s
   push_to_imprint:
     # if: github.ref == 'refs/heads/main'
-    needs: [test, lint]
+    # needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Install subrepo
+        run: |
+          git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
+          echo 'source ~/git-subrepo/.rc' >> ~/.bashrc
       - name: Push to imprint "sync" branch
         run: |
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
           git subrepo push imprint \
             --branch sync \
             --squash \
