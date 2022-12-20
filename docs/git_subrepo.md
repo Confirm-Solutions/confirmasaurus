@@ -23,7 +23,7 @@ git subrepo push imprint --branch branchname --squash --debug --verbose --messag
 ## Pulling changes from imprint
 
 ```
-git subrepo pull imprint --squash --debug --verbose --message "Pull from imprint to confirm"
+git subrepo pull imprint --debug --verbose --message "Pull from imprint to confirm"
 ```
 
 ## (historical) What I did to set up subrepo
