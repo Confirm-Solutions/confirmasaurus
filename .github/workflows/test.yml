@@ -81,6 +81,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        # TODO: remove for main branch
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
       - name: Install subrepo
         run: |
           git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
