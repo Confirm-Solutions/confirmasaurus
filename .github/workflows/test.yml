@@ -96,6 +96,8 @@ jobs:
           # TODO: remove for main branch
           ref: ${{ steps.extract_branch.outputs.branch }}
       - name: Push to imprint "sync" branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
         run: |
           source ~/git-subrepo/.rc
           git branch
@@ -110,6 +112,8 @@ jobs:
             --remote https://github.com/Confirm-Solutions/imprint.git
           git push origin ${{ steps.extract_branch.outputs.branch }}
       - name: Create imprint PR
+        env:
+          GH_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
         run: |
           gh pr \
             --repo Confirm-Solutions/imprint \
@@ -118,8 +122,6 @@ jobs:
             -H sync \
             -t "[BOT] Sync with upstream" \
             -b "Bot created PR to automatically to push changes to imprint."
-        env:
-          GH_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
       - name: Commit report
         run: git push
 
