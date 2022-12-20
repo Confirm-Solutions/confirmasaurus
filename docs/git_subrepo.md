@@ -14,6 +14,13 @@ I like [the discussion here by the `git subrepo` author on why `subrepo` is the 
 As far as I can tell, the design of `git subrepo` is pretty close to the optimal design for our situation. The only downside to the tool is that it's not perfectly maintained. I think that's going to be okay for us. 
 
 For the most part, while developing confirm we can act like the open source imprint repo does not exist. This is nice. 
+
+## Automated pushes from confirm to imprint
+
+See [the actions workflow here](../.github/workflows/test.yml). It pushes
+changes to the imprint branch `sync` and then automatically creates a PR to
+merge those changes.
+
 ## Contributing changes to imprint
 
 ```

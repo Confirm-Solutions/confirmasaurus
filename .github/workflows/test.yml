@@ -80,15 +80,27 @@ jobs:
     needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: |
+      - uses: actions/checkout@v3
+      - name: Push to imprint "sync" branch
+        run: |
+          git subrepo push imprint \
+            --branch sync \
+            --squash \
+            --debug \
+            --verbose \
+            --force \
+            --remote https://github.com/Confirm-Solutions/imprint.git
+      - name: Create imprint PR
+        run: |
           gh pr \
-            --repo Confirm-Solutions/confirmasaurus \
+            --repo Confirm-Solutions/imprint \
             create \
             -B main \
-            -H tbt/auto-push-imprint \
+            -H sync \
             -t "[BOT] Sync with upstream" \
-            -b "Bot created PR to automatically to push changes to imprint.
+            -b "Bot created PR to automatically to push changes to imprint."
+      - name: Commit report
+        run: git push
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack
