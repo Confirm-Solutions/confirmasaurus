@@ -84,7 +84,7 @@ jobs:
       - name: Install subrepo
         run: |
           git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
-          echo 'source ~/git-subrepo/.rc' >> ~/.bashrc
+          source ~/git-subrepo/.rc
       - name: Push to imprint "sync" branch
         run: |
           git config --global user.email "research@confirmsol.org"
