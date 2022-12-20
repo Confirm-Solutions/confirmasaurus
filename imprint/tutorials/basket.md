@@ -275,6 +275,8 @@ import jax.numpy as jnp
 
 class BayesianBasket:
     def __init__(self, seed, K):
+        self.n_arm_samples = 35
+
         # The family field is used by imprint to determine how to compute the Tilt Bound.
         self.family = "binomial"
 
@@ -284,7 +286,6 @@ class BayesianBasket:
         # Everything below here is internal to the model and is not needed by
         # imprint.
         np.random.seed(seed)
-        self.n_arm_samples = 35
         self.samples = np.random.uniform(size=(K, self.n_arm_samples, 3))
         self.fi = FastINLA(n_arms=3)
 
