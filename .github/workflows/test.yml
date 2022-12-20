@@ -83,7 +83,7 @@ jobs:
         # TODO: remove for main branch
       - name: Extract branch name
         shell: bash
-        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF#refs/heads/})"
         id: extract_branch
 
       - uses: actions/checkout@v3
