@@ -19,6 +19,11 @@
   //   "dockerfile": "./smalldev/Dockerfile"
   // },
 
+  "features": {
+    "docker-from-docker": "latest",
+    "ghcr.io/devcontainers/features/go:1": {}
+  },
+  
   // Configure tool-specific properties.
   "customizations": {
     // Configure properties specific to VS Code.
@@ -68,8 +73,5 @@
     "seccomp=unconfined",
     "--privileged",
     "--init"
-  ],
-  "features": {
-    "docker-from-docker": "latest"
-  }
+  ]
 }
