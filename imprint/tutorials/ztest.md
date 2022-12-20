@@ -64,3 +64,7 @@ plt.legend(fontsize=11, bbox_to_anchor=(0.05, 0.94), loc="upper left")
 plt.xlabel("$z$")
 _ = plt.ylabel(r"Type I Error (\%)")
 ```
+
+```python
+
+```
