@@ -80,21 +80,21 @@ jobs:
     # needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
-      # TODO: remove for main branch, just for debugging on a PR
-      # https://stackoverflow.com/questions/58033366/how-to-get-the-current-branch-within-github-actions
+      # NOTE: This is technically unnecessary for running on the main branch.
+      # But when debugging, it's nice to run in a PR, so I've left it here.
       - name: Extract branch name
         shell: bash
         run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF#refs/heads/})"
         id: extract_branch
 
+      - name: Install subrepo
+        run: |
+          git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
           # TODO: remove for main branch
           ref: ${{ steps.extract_branch.outputs.branch }}
-      - name: Install subrepo
-        run: |
-          git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
@@ -108,6 +108,7 @@ jobs:
             --verbose \
             --force \
             --remote https://github.com/Confirm-Solutions/imprint.git
+          git push origin ${{ steps.extract_branch.outputs.branch }}
       - name: Create imprint PR
         run: |
           gh pr \
