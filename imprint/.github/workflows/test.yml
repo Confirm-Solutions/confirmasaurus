@@ -38,23 +38,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'poetry'
 
-      # Cache pre-commit files so it's fast!
-      # based on https://pre-commit.com/#github-actions-example 
-      - name: set PY
-        run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
-      - name: Cache pre-commit
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit|${{ env.PY }}|${{ hashFiles('.pre-commit-config.yaml') }}
-        id: precommitcache
-
       - name: Update environment
         run: |
           poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud
-
-      - name: Run all pre-commit checks on all files
-        run: poetry run pre-commit run --color=always -a
 
       - name: Pytest
         run: poetry run pytest -n auto -s
