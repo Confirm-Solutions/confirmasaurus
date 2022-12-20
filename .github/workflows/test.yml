@@ -80,16 +80,23 @@ jobs:
     # needs: [test, lint]
     runs-on: ubuntu-latest
     steps:
+        # TODO: remove for main branch
+      - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_branch
+
       - uses: actions/checkout@v3
         # TODO: remove for main branch
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.extract_branch.outputs.branch }}
       - name: Install subrepo
         run: |
           git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
+          git branch
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
           git subrepo push imprint \
