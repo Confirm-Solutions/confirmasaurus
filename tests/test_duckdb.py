@@ -71,14 +71,14 @@ class DBTester:
     def test_next_tiles(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
 
-        pd_work = pd_tiles.next(3, "theta0")
-        db_work = db_tiles.next(3, "theta0")
+        pd_work = pd_tiles.next(3, "theta0", 0)
+        db_work = db_tiles.next(3, "theta0", 0)
         assert_frame_equal_special(pd_work, db_work)
 
         assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
 
-        pd_work2 = pd_tiles.next(3, "theta0")
-        db_work2 = db_tiles.next(3, "theta0")
+        pd_work2 = pd_tiles.next(3, "theta0", 0)
+        db_work2 = db_tiles.next(3, "theta0", 0)
         assert pd_work2.shape[0] == 2
         assert_frame_equal_special(pd_work2, db_work2)
 
@@ -128,6 +128,12 @@ class DBTester:
         np.testing.assert_allclose(
             pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()
         )
+
+    def test_new_worker(self):
+        db = self.dbtype.connect()
+        assert db.new_worker() == 0
+        assert db.new_worker() == 1
+        assert db.new_worker() == 2
 
 
 class TestDuckDB(DBTester):

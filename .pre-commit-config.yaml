@@ -29,6 +29,8 @@ repos:
       - id: jupytext
         args: [--from, ipynb, --to, "md"]
   # Should run after jupytext so that secrets in ipynb files get properly scanned.
+  # To reset gitleaks-report.json: 
+  # gitleaks detect -v --redact --report-path tools/gitleaks-report.json 
   - repo: https://github.com/zricethezav/gitleaks
     rev: v8.15.2
     hooks:
