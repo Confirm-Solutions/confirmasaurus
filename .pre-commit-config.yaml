@@ -19,6 +19,7 @@ repos:
     rev: 5.0.4
     hooks:
       - id: flake8
+        exclude: research/archive
   - repo: https://github.com/asottile/reorder_python_imports
     rev: v3.9.0
     hooks:
@@ -28,6 +29,7 @@ repos:
     hooks:
       - id: jupytext
         args: [--from, ipynb, --to, "md"]
+        exclude: research/archive
   # Should run after jupytext so that secrets in ipynb files get properly scanned.
   # To reset gitleaks-report.json: 
   # gitleaks detect -v --redact --report-path tools/gitleaks-report.json 

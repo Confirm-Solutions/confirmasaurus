@@ -17,13 +17,13 @@ For the most part, while developing confirm we can act like the open source impr
 ## Contributing changes to imprint
 
 ```
-git subrepo push imprint --squash --debug --verbose
+git subrepo push imprint --squash --debug --verbose --message "Push from confirm to imprint"
 ```
 
 ## Pulling changes from imprint
 
 ```
-git subrepo pull imprint --squash --debug --verbose
+git subrepo pull imprint --squash --debug --verbose --message "Pull from imprint to confirm"
 ```
 
 ## (historical) What I did to set up subrepo
