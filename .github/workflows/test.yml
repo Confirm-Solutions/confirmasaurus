@@ -79,6 +79,7 @@ jobs:
     # if: github.ref == 'refs/heads/main'
     # needs: [test, lint]
     runs-on: ubuntu-latest
+    name: Synchronize with imprint
     steps:
       # NOTE: This is technically unnecessary for running on the main branch.
       # But when debugging, it's nice to run in a PR, so I've left it here.
@@ -96,21 +97,20 @@ jobs:
           # TODO: remove for main branch
           ref: ${{ steps.extract_branch.outputs.branch }}
       - name: Push to imprint "sync" branch
-        # env:
-        #   GITHUB_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
-        #     # https://github.com/Confirm-Solutions/imprint.git
+        env:
+          GITHUB_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
         run: |
           source ~/git-subrepo/.rc
-          git branch
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
+          git config --unset-all http.https://github.com/.extraheader
           git subrepo push imprint \
             --branch sync \
             --squash \
             --debug \
             --verbose \
             --force \
-            --remote git@github.com:Confirm-Solutions/imprint.git 
+            --remote https://github.com/Confirm-Solutions/imprint.git
           git push origin ${{ steps.extract_branch.outputs.branch }}
       - name: Create imprint PR
         env:
