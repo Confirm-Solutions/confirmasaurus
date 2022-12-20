@@ -24,7 +24,7 @@ merge those changes.
 ## Contributing changes to imprint
 
 ```
-git subrepo push imprint --branch branchname --squash --debug --verbose --message "Subrepo push to imprint"
+git subrepo push imprint --branch sync --squash --debug --verbose --message "Subrepo push to imprint"
 ```
 
 ## Pulling changes from imprint

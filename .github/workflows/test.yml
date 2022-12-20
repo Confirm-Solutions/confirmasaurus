@@ -117,6 +117,8 @@ jobs:
             -H sync \
             -t "[BOT] Sync with upstream" \
             -b "Bot created PR to automatically to push changes to imprint."
+        env:
+          GH_TOKEN: ${{ github.token }}
       - name: Commit report
         run: git push
 
