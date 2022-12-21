@@ -108,6 +108,8 @@ jobs:
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
           git subrepo push imprint \
             --branch sync \
             --squash \
