@@ -108,37 +108,35 @@ jobs:
           # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
 
-      # - uses: actions/checkout@v3
-      #   with:
-      #     repository: Confirm-Solutions/imprint
-      #     path: imprint-repo
-      #     fetch-depth: 0
-      #     ref: main
-      #     token: ${{ secrets.SUBREPO_BOT_TOKEN }}
+      - uses: actions/checkout@v3
+        with:
+          repository: Confirm-Solutions/imprint
+          path: imprint-repo
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
             
-      # # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
-      # - name: Rebase sync branch.
-      #   run: |
-      #     cd imprint-repo
-      #     git fetch origin sync
-      #     git checkout --detach main
-      #     git merge --squash sync
-      #     git commit --allow-empty --message "Rebase sync"
-      #     git branch -f sync HEAD
-      #     git checkout sync
-      #     git push -f origin sync
+      # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
+      - name: Rebase sync branch.
+        run: |
+          cd imprint-repo
+          # delete and recreate sync branch
+          git branch -D sync || true
+          git checkout -b sync
+          git commit --allow-empty --message "Create sync branch"
+          git push -f origin sync
 
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
+          git subrepo pull imprint --branch sync --debug --verbose --message "Pull from imprint to confirm"
           git subrepo push imprint \
             --branch sync \
             --squash \
             --debug \
             --verbose \
-            --force \
             --remote https://github.com/Confirm-Solutions/imprint.git
 
       - name: Create imprint PR
