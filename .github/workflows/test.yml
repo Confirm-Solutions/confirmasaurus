@@ -108,25 +108,25 @@ jobs:
           # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
 
-      - uses: actions/checkout@v3
-        with:
-          repository: Confirm-Solutions/imprint
-          path: imprint-repo
-          fetch-depth: 0
-          ref: main
-          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
+      # - uses: actions/checkout@v3
+      #   with:
+      #     repository: Confirm-Solutions/imprint
+      #     path: imprint-repo
+      #     fetch-depth: 0
+      #     ref: main
+      #     token: ${{ secrets.SUBREPO_BOT_TOKEN }}
             
-      # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
-      - name: Rebase sync branch.
-        run: |
-          cd imprint-repo
-          git fetch origin sync
-          git checkout --detach main
-          git merge --squash sync
-          git commit --allow-empty --message "Rebase sync"
-          git branch -f sync HEAD
-          git checkout sync
-          git push -f origin sync
+      # # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
+      # - name: Rebase sync branch.
+      #   run: |
+      #     cd imprint-repo
+      #     git fetch origin sync
+      #     git checkout --detach main
+      #     git merge --squash sync
+      #     git commit --allow-empty --message "Rebase sync"
+      #     git branch -f sync HEAD
+      #     git checkout sync
+      #     git push -f origin sync
 
       - name: Push to imprint "sync" branch
         run: |
