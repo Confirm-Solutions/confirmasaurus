@@ -17,9 +17,10 @@ For the most part, while developing confirm we can act like the open source impr
 
 ## Automated pushes from confirm to imprint
 
-See [the actions workflow here](../.github/workflows/test.yml). It pushes
-changes to the imprint branch `sync` and then automatically creates a PR to
-merge those changes.
+See [the actions workflow here](../.github/workflows/test.yml) for pushing to
+imprint and [here](../.github/workflows/pull-from-imprint.yml) for pulling from
+imprint and [here](../imprint/.github/workflows/test.yml) for triggering a pull
+from imprint.
 
 The flow from confirm to imprint looks like:
 1. (manual) Merge PR to main in confirm
@@ -28,7 +29,7 @@ The flow from confirm to imprint looks like:
 4. (automatic) from confirm repo, subrepo push confirm `main` to imprint `sync`
 5. (automatic) create a PR on the imprint repo
 6. (manual) improve/merge the PR on imprint
-7. (TODO, automatic) pull imprint `main` changes back into confirm `main`
+7. (partially automatic) pull imprint `main` changes back into confirm `main`. 
 
 Step 7 needs to be triggered when the imprint `sync` branch is merged into `main`. 
 The end of the discussion here would be useful for building this. 
