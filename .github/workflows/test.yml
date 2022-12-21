@@ -108,6 +108,11 @@ jobs:
           # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
 
+      - name: Store commit name
+        run: |
+          export CONFIRM_COMMIT_MSG=$(git show -s --format=%s)
+          echo "$CONFIRM_COMMIT_MSG"
+
       - uses: actions/checkout@v3
         with:
           repository: Confirm-Solutions/imprint
@@ -120,20 +125,20 @@ jobs:
         run: |
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
-
-      - name: Store commit name
-        run: |
-          export CONFIRM_COMMIT_MSG=$(git show -s --format=%s)
             
       # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
       - name: Rebase sync branch.
         run: |
           cd imprint-repo
           # delete and recreate sync branch
-          git branch -D sync || true
-          git checkout -b sync
+          # Any information on a sync branch is at risk of deletion!
+          git fetch origin sync
+          git checkout --detach main
+          git merge --squash sync
           git commit --allow-empty --message "Create sync branch"
+          git branch -f sync HEAD
           git push -f origin sync
+          cd ../
 
       - name: Push to imprint "sync" branch
         run: |
@@ -145,7 +150,7 @@ jobs:
             --squash \
             --debug \
             --verbose \
-            --message "$CONFIRM_COMMIT_MSG"
+            --message "$CONFIRM_COMMIT_MSG" \
             --remote https://github.com/Confirm-Solutions/imprint.git
         # WE DO NOT PUSH HERE! The two git subrepo commands will create
         # pull/push commits that we want to ignore. The goal is to keep the
