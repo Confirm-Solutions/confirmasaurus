@@ -135,9 +135,9 @@ jobs:
       - name: Rebase sync branch.
         run: |
           cd imprint-repo
-          git fetch origin sync
+          git fetch origin sync || true
           git checkout --detach main
-          git merge --squash origin/sync
+          git merge --squash origin/sync || true
           git commit --allow-empty --message "Create sync branch"
           git branch -f sync HEAD
           git push -f origin sync
