@@ -120,7 +120,7 @@ jobs:
             --debug \
             --verbose \
             --force \
-            --remote https://github.com/Confirm-Solutions/imprint.git
+            --remote imprint
       # --remote git@github.com:Confirm-Solutions/imprint.git
       - name: Create imprint PR
         env:
