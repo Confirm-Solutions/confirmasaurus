@@ -121,6 +121,9 @@ jobs:
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
 
+      - name: Store commit name
+        run: |
+          export CONFIRM_COMMIT_MSG=$(git show -s --format=%s)
             
       # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
       - name: Rebase sync branch.
@@ -136,12 +139,13 @@ jobs:
         run: |
           source ~/git-subrepo/.rc
           # The pull here will just grab the one empty commit from above.
-          git subrepo pull imprint --branch sync --debug --verbose --message "Pull from imprint to confirm"
+          git subrepo pull imprint --branch sync --debug --verbose 
           git subrepo push imprint \
             --branch sync \
             --squash \
             --debug \
             --verbose \
+            --message "$CONFIRM_COMMIT_MSG"
             --remote https://github.com/Confirm-Solutions/imprint.git
         # WE DO NOT PUSH HERE! The two git subrepo commands will create
         # pull/push commits that we want to ignore. The goal is to keep the
@@ -162,7 +166,7 @@ jobs:
             create \
             -B main \
             -H sync \
-            -t "$(git show HEAD~1 -s --format=%s)" \
+            -t "$CONFIRM_COMMIT_MSG" \
             -b "Bot-created PR exporting internal Confirm changes." || true
 
       # Not sure if this is needed.
