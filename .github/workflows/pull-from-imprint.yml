@@ -33,6 +33,7 @@ jobs:
           git subrepo pull imprint --branch main --debug --verbose 
           git whatchanged -1
           export N_FILES=$(git diff HEAD~1 --name-only | wc -l)
+          echo "N_FILES=$(git show -s --format=%s)" >> $GITHUB_ENV
           if [ "$N_FILES" -le "1" ]
           then
             git branch -f main HEAD
