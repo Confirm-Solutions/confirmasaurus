@@ -97,8 +97,8 @@ jobs:
           # TODO: remove for main branch
           ref: ${{ steps.extract_branch.outputs.branch }}
       - name: Push to imprint "sync" branch
-        env:
-          GITHUB_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
+        # env:
+        #   GITHUB_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
         run: |
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
