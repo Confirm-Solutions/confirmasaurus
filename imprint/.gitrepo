@@ -4,9 +4,9 @@
 ; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
 ;
 [subrepo]
-	remote = imprint
+	remote = imprint2
 	branch = sync
 	commit = 5ef86359a1e2f10fff9fc88baba896b59cc539ab
 	method = merge
 	cmdver = 0.4.5
-	parent = 56211228f7c4eb5b332b5968ac113fa9abdfd224
+	parent = 6f2bfcde9874b4b22a46f4e0cdbc228cb6b7fac3
