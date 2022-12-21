@@ -66,3 +66,4 @@ infrastructure!
 - https://github.com/ingydotnet/git-subrepo/wiki/Basics
 - https://gist.github.com/SKempin/b7857a6ff6bddb05717cc17a44091202
 - https://github.com/joelparkerhenderson/monorepo-vs-polyrepos
+- if you ever screw up... https://stackoverflow.com/questions/63496368/git-how-to-remove-all-files-from-the-git-history-that-are-not-currently-prese

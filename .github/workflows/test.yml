@@ -108,18 +108,56 @@ jobs:
           # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
 
+      - name: Store commit name
+        run: |
+          export CONFIRM_COMMIT_MSG=$(git show -s --format=%s)
+          echo "$CONFIRM_COMMIT_MSG"
+
+      - uses: actions/checkout@v3
+        with:
+          repository: Confirm-Solutions/imprint
+          path: imprint-repo
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
+        
+      - name: Setup bot git user
+        run: |
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
+            
+      # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
+      - name: Rebase sync branch.
+        run: |
+          cd imprint-repo
+          # delete and recreate sync branch
+          # Any information on a sync branch is at risk of deletion!
+          git fetch origin sync
+          git checkout --detach main
+          git merge --squash origin/sync
+          git commit --allow-empty --message "Create sync branch"
+          git branch -f sync HEAD
+          git push -f origin sync
+          cd ../
+
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
-          git config --global user.email "research@confirmsol.org"
-          git config --global user.name "SubrepoBot"
+          # The pull here will just grab the one empty commit from above.
+          git subrepo pull imprint --branch sync --debug --verbose 
           git subrepo push imprint \
             --branch sync \
             --squash \
             --debug \
             --verbose \
-            --force \
+            --message "$CONFIRM_COMMIT_MSG" \
             --remote https://github.com/Confirm-Solutions/imprint.git
+        # WE DO NOT PUSH HERE! The two git subrepo commands will create
+        # pull/push commits that we want to ignore. The goal is to keep the
+        # commit/parent entries in .gitrepo pointed to the main branch in
+        # imprint. If we were to push now, the "commit" entry in .gitrepo would
+        # be overwritten with a commit that will be destroyed when the imprint
+        # PR gets squash merged.
 
       - name: Create imprint PR
         env:
@@ -133,11 +171,8 @@ jobs:
             create \
             -B main \
             -H sync \
-            -t "$(git show HEAD~1 -s --format=%s)" \
-            -b "Bot created PR to automatically to push changes to imprint." || true
-
-      - name: Push results
-        run: git push
+            -t "$CONFIRM_COMMIT_MSG" \
+            -b "Bot-created PR exporting internal Confirm changes." || true
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack

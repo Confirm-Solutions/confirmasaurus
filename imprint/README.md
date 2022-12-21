@@ -2,6 +2,7 @@
 
 Imprint is a library to validate clinical trial designs.
 
+[![Gitter](https://img.shields.io/gitter/room/confirm_imprint/community)](https://gitter.im/confirm_imprint/community#)
 ![example workflow](https://github.com/Confirm-Solutions/imprint/actions/workflows/test.yml/badge.svg)
 
 ## Installing Imprint for development.
@@ -25,7 +26,6 @@ Imprint is a library to validate clinical trial designs.
    in [`pyproject.toml`](pyproject.toml).
 
    ```bash
-   cd confirm/env
    mamba update -y conda
    # create a development virtual environment with useful tools
    mamba env create

@@ -36,7 +36,6 @@ To get a fully functional development environment...
    in [`pyproject.toml`](pyproject.toml).
 
    ```bash
-   cd confirm/env
    mamba update -y conda
    # create a development virtual environment with useful tools
    mamba env create
