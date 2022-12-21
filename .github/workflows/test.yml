@@ -77,9 +77,12 @@ jobs:
         run: poetry run pytest -n auto -s
   push_to_imprint:
     # if: github.ref == 'refs/heads/main'
-    # needs: [test, lint]
+    needs: [test, lint]
     runs-on: ubuntu-latest
     name: Synchronize with imprint
+    # A couple actions that helped me to write this:
+    # https://github.com/NxtLvLSoftware/git-subtree-action
+    # https://github.com/paygoc6/action-pull-request-another-repo
     steps:
       # NOTE: This is technically unnecessary for running on the main branch.
       # But when debugging, it's nice to run in a PR, so I've left it here.
@@ -98,13 +101,13 @@ jobs:
           ref: ${{ steps.extract_branch.outputs.branch }}
           # Important!! We need to replace the default token in order to also
           # access the imprint github repo.
+          # https://github.com/actions/checkout/blob/b4626ce19ce1106186ddf9bb20e706842f11a7c3/adrs/0153-checkout-v2.md#persist-credentials
+          # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
 
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
-          git config --global user.email "research@confirmsol.org"
-          git config --global user.name "SubrepoBot"
           git subrepo push imprint \
             --branch sync \
             --squash \
@@ -116,15 +119,17 @@ jobs:
       - name: Create imprint PR
         env:
           GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
+        # || true added to the end below because the PR might already exist.
+        # the downside to this is that some other failure won't bubble up and
+        # show itself
         run: |
-          gh pr --repo Confirm-Solutions/imprint close sync || true
           gh pr \
             --repo Confirm-Solutions/imprint \
             create \
             -B main \
             -H sync \
-            -t "[BOT] Sync with upstream" \
-            -b "Bot created PR to automatically to push changes to imprint."
+            -t "${{ github.event.head_commit.message }}" \
+            -b "Bot created PR to automatically to push changes to imprint." || true
 
       - name: Push results
         run: git push

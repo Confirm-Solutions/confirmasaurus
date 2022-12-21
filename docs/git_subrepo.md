@@ -21,6 +21,19 @@ See [the actions workflow here](../.github/workflows/test.yml). It pushes
 changes to the imprint branch `sync` and then automatically creates a PR to
 merge those changes.
 
+The flow from confirm to imprint looks like:
+1. (manual) Merge PR to main in confirm
+2. (automatic) subrepo push to imprint
+3. (automatic) PR created on imprint
+4. (automatic) automatically push the .gitrepo file to confirm
+5. (manual) improve/merge the PR on imprint
+
+I'd like to have a similar reverse flow from imprint to confirm but it's not
+implemented yet. It would probably need to be implemented as an actions
+workflow on the imprint repo triggering a workflow in the confirmasaurus repo.
+The end of the discussion here would be useful for building this. 
+https://github.com/orgs/community/discussions/26323
+
 ## Contributing changes to imprint
 
 ```
