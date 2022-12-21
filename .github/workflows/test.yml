@@ -101,6 +101,8 @@ jobs:
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
+          echo "${{ secrets.SUBREPO_BOT_TOKEN }}"
+          echo "https://x-access-token:${{ secrets.SUBREPO_BOT_TOKEN }}@github.com/Confirm-Solutions/imprint.git"
           git remote add imprint https://x-access-token:${{ secrets.SUBREPO_BOT_TOKEN }}@github.com/Confirm-Solutions/imprint.git
           git subrepo push imprint \
             --branch sync \
