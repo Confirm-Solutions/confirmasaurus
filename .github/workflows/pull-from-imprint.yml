@@ -31,7 +31,15 @@ jobs:
           # The pull here will just grab the one empty commit from above.
           git checkout -b sync
           git subrepo pull imprint --branch main --debug --verbose 
-          git push -f origin sync
+          git whatchanged -1
+          export N_FILES=$(git diff HEAD~1 --name-only | wc -l)
+          if [ $N_FILES -le 1 ]
+          then
+            git branch -f main HEAD
+            git push origin main
+          else
+            git push -f origin sync
+          fi
 
       - name: Create confirmasaurus PR
         env:
@@ -40,11 +48,14 @@ jobs:
         # the downside to this is that some other failure won't bubble up and
         # show itself
         run: |
-          gh pr \
-            --repo Confirm-Solutions/confirmasaurus \
-            create \
-            -B main \
-            -H sync \
-            -t "Sync with imprint changes" \
-            -b "Bot-created PR exporting internal Confirm changes." || true
+          if [ $N_FILES -le 1 ]
+          then
+            gh pr \
+              --repo Confirm-Solutions/confirmasaurus \
+              create \
+              -B main \
+              -H sync \
+              -t "Sync with imprint changes" \
+              -b "Bot-created PR exporting internal Confirm changes." || true
+          fi
     
