@@ -131,6 +131,7 @@ jobs:
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
+          # The pull here will just grab the one empty commit from above.
           git subrepo pull imprint --branch sync --debug --verbose --message "Pull from imprint to confirm"
           git subrepo push imprint \
             --branch sync \
@@ -138,6 +139,12 @@ jobs:
             --debug \
             --verbose \
             --remote https://github.com/Confirm-Solutions/imprint.git
+        # WE DO NOT PUSH HERE! The two git subrepo commands will create
+        # pull/push commits that we want to ignore. The goal is to keep the
+        # commit/parent entries in .gitrepo pointed to the main branch in
+        # imprint. If we were to push now, the "commit" entry in .gitrepo would
+        # be overwritten with a commit that will be destroyed when the imprint
+        # PR gets squash merged.
 
       - name: Create imprint PR
         env:
