@@ -148,6 +148,16 @@ jobs:
           source ~/git-subrepo/.rc
           # The pull here will just grab the one empty commit from above.
           git subrepo pull imprint --branch sync --debug --verbose 
+          # This might solve merge failures. Replace theirs with ours??
+          # git subrepo pull bar || {
+          #     cd .git/tmp/subrepo/bar
+          #     git checkout --theirs Bar2
+          #     git add Bar2
+          #     git commit --file ../../../../.git/worktrees/bar/MERGE_MSG
+          #     cd ../../../..
+          #     git subrepo commit bar
+          #     git subrepo clean bar
+          # }
           git subrepo push imprint \
             --branch sync \
             --squash \
