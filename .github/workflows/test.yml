@@ -95,6 +95,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ steps.extract_branch.outputs.branch }}
+          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
       # - name: Setup SSH agent
       #   env:
       #     SSH_AUTH_SOCK: /tmp/ssh_agent.sock
@@ -113,14 +114,16 @@ jobs:
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
-          git remote add imprint https://tbenthompson:${{ secrets.SUBREPO_BOT_TOKEN }}@github.com/Confirm-Solutions/imprint.git
           git subrepo push imprint \
             --branch sync \
             --squash \
             --debug \
             --verbose \
             --force \
-            --remote imprint
+            --remote https://github.com/Confirm-Solutions/imprint.git
+
+      # --remote imprint
+      # git remote add imprint https://tbenthompson:${{ secrets.SUBREPO_BOT_TOKEN }}@github.com/Confirm-Solutions/imprint.git
       # --remote git@github.com:Confirm-Solutions/imprint.git
       - name: Create imprint PR
         env:
