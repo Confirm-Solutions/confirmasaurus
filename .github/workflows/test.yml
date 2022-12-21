@@ -97,23 +97,22 @@ jobs:
           # TODO: remove for main branch
           ref: ${{ steps.extract_branch.outputs.branch }}
       - name: Push to imprint "sync" branch
-        # env:
-        #   GITHUB_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
         run: |
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
+          git remote add imprint git remote set-url origin https://x-access-token:${{ secrets.SUBREPO_BOT_TOKEN }}@github.com/Confirm-Solutions/imprint.git
           git subrepo push imprint \
             --branch sync \
             --squash \
             --debug \
             --verbose \
             --force \
-            --remote https://github.com/Confirm-Solutions/imprint.git
+            --remote imprint
           git push origin ${{ steps.extract_branch.outputs.branch }}
       - name: Create imprint PR
         env:
-          GH_TOKEN: ${{ secrets.SUBREPO_BOT_PRTOKEN }}
+          GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
         run: |
           gh pr \
             --repo Confirm-Solutions/imprint \
