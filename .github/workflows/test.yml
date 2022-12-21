@@ -130,7 +130,7 @@ jobs:
             create \
             -B main \
             -H sync \
-            -t "$(git show -s --format=%s)" \
+            -t "$(git show HEAD~1 -s --format=%s)" \
             -b "Bot created PR to automatically to push changes to imprint." || true
 
       - name: Push results
