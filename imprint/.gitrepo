@@ -6,7 +6,7 @@
 [subrepo]
 	remote = imprint2
 	branch = sync
-	commit = 
+	commit = 5ef86359a1e2f10fff9fc88baba896b59cc539ab
 	method = merge
 	cmdver = 0.4.5
-	parent = 
+	parent = 353e640437e1b5d2e19b558690aaa4917e5325af
