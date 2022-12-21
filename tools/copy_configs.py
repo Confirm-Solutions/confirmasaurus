@@ -41,6 +41,8 @@ def transfer_pyproject():
     with open("imprint/pyproject.toml", "wb") as f:
         tomli_w.dump(imprint_pp, f)
 
+    subprocess.call("poetry lock", shell=True, cwd="imprint")
+
 
 def run_poetry_lock():
     subprocess.run(["poetry", "lock"], cwd="imprint")

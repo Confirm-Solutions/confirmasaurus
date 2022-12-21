@@ -125,6 +125,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
         run: |
+          gh pr --repo Confirm-Solutions/imprint close sync || true
           gh pr \
             --repo Confirm-Solutions/imprint \
             create \
