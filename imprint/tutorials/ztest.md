@@ -144,6 +144,6 @@ inputs:
 - validation: the decision rule threshold
 - calibration: the goal false positive rate
 
-output:
+hmmoutput:
 - validation: the upper bound on false positive rate 
 - calibration: the tuning parameter value which yield guaranteed goal false positive rate
