@@ -104,8 +104,9 @@ jobs:
           ssh-keyscan github.com >> ~/.ssh/known_hosts
  
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-          chmod 0600 .github/workflows/secrets/id_rsa
-          ssh-add .github/workflows/secrets/id_rsa
+          echo "${{ secrets.SUBREPO_IMPRINT_DEPLOY_KEY }}" >> ~/.ssh/sshkey
+          chmod 0600 ~/.ssh/sshkey
+          ssh-add ~/.ssh/sshkey
       - name: Push to imprint "sync" branch
         env:
           SSH_AUTH_SOCK: /tmp/ssh_agent.sock
