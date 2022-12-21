@@ -23,24 +23,28 @@ merge those changes.
 
 The flow from confirm to imprint looks like:
 1. (manual) Merge PR to main in confirm
-2. (automatic) subrepo push to imprint
-3. (automatic) PR created on imprint
-4. (automatic) automatically push the .gitrepo file to confirm
-5. (manual) improve/merge the PR on imprint
+2. (automatic) on the imprint repo, rebase the `sync` branch on top of `main`.
+3. (automatic) from confirm repo, subrepo pull the latest changes from the imprint `sync` into confirm `main` --> this is merging the latest changes so we can push
+4. (automatic) from confirm repo, subrepo push confirm `main` to imprint `sync`
+5. (automatic) create a PR on the imprint repo
+6. (manual) improve/merge the PR on imprint
+7. (TODO, automatic) pull imprint `main` changes back into confirm `main`
 
-I'd like to have a similar reverse flow from imprint to confirm but it's not
-implemented yet. It would probably need to be implemented as an actions
-workflow on the imprint repo triggering a workflow in the confirmasaurus repo.
+Step 7 needs to be triggered when the imprint `sync` branch is merged into `main`. 
 The end of the discussion here would be useful for building this. 
 https://github.com/orgs/community/discussions/26323
 
 ## Contributing changes to imprint
+
+This should not normally be necessary due to the automated push/pull workflow above.
 
 ```
 git subrepo push imprint --branch sync --squash --debug --verbose --message "Subrepo push to imprint"
 ```
 
 ## Pulling changes from imprint
+
+This should not normally be necessary due to the automated push/pull workflow above.
 
 ```
 git subrepo pull imprint --debug --verbose --message "Pull from imprint to confirm"
@@ -59,7 +63,7 @@ infrastructure!
 	- `branch = main`
 	- `commit = go-get-the-commit-id-from-imprint-repo`
 	- `parent = go-get-the-commit-id-from-confirm-repo`
-3. Manually implement this fix: https://github.com/ingydotnet/git-subrepo/pull/498/files
+3. Manually implement this fix (only necessary for getting set up): https://github.com/ingydotnet/git-subrepo/pull/498/files
 
 ## Useful references
 

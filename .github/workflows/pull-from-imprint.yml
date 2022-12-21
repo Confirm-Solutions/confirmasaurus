@@ -1,0 +1,50 @@
+name: Pull from imprint
+on: workflow_dispatch
+jobs:
+  pull_from_imprint:
+    runs-on: ubuntu-latest
+    name: Pull from imprint
+    steps:
+
+      - name: Install subrepo
+        run: |
+          git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: main
+          # Important!! We need to replace the default token in order to also
+          # access the imprint github repo.
+          # https://github.com/actions/checkout/blob/b4626ce19ce1106186ddf9bb20e706842f11a7c3/adrs/0153-checkout-v2.md#persist-credentials
+          # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
+          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
+
+      - name: Setup bot git user
+        run: |
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
+
+      - name: Pull from imprint
+        run: |
+          source ~/git-subrepo/.rc
+          # The pull here will just grab the one empty commit from above.
+          git checkout -b sync
+          git subrepo pull imprint --branch main --debug --verbose 
+          git push -f origin sync
+
+      - name: Create confirmasaurus PR
+        env:
+          GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
+        # || true added to the end below because the PR might already exist.
+        # the downside to this is that some other failure won't bubble up and
+        # show itself
+        run: |
+          gh pr \
+            --repo Confirm-Solutions/confirmasaurus \
+            create \
+            -B main \
+            -H sync \
+            -t "Sync with imprint changes" \
+            -b "Bot-created PR exporting internal Confirm changes." || true
+    

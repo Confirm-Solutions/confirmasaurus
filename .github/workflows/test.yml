@@ -76,6 +76,10 @@ jobs:
       - name: Pytest
         run: poetry run pytest -n auto -s
   push_to_imprint:
+    # See docs/git_subrepo.md for further details on this stuff.
+    # See docs/git_subrepo.md for further details on this stuff.
+    # See docs/git_subrepo.md for further details on this stuff.
+    # 
     # comment out the if statement when you need to debug this! then you don't
     # need to merge to main to trigger the workflow. also can be nice to
     # comments out the "needs"
@@ -130,8 +134,6 @@ jobs:
       - name: Rebase sync branch.
         run: |
           cd imprint-repo
-          # delete and recreate sync branch
-          # Any information on a sync branch is at risk of deletion!
           git fetch origin sync
           git checkout --detach main
           git merge --squash origin/sync
