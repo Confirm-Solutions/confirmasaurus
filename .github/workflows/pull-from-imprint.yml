@@ -33,7 +33,7 @@ jobs:
           git subrepo pull imprint --branch main --debug --verbose 
           git whatchanged -1
           export N_FILES=$(git diff HEAD~1 --name-only | wc -l)
-          if [ $N_FILES -le 1 ]
+          if [ "$N_FILES" -le "1" ]
           then
             git branch -f main HEAD
             git push origin main
@@ -48,7 +48,7 @@ jobs:
         # the downside to this is that some other failure won't bubble up and
         # show itself
         run: |
-          if [ $N_FILES -le 1 ]
+          if [ "$N_FILES" -le "1" ]
           then
             gh pr \
               --repo Confirm-Solutions/confirmasaurus \
