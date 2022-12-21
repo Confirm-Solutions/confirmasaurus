@@ -96,16 +96,23 @@ jobs:
           fetch-depth: 0
           # TODO: remove for main branch
           ref: ${{ steps.extract_branch.outputs.branch }}
+      - name: Setup SSH agent
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+ 
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          chmod 0600 .github/workflows/secrets/id_rsa
+          ssh-add .github/workflows/secrets/id_rsa
       - name: Push to imprint "sync" branch
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
         run: |
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
-
-          mkdir ~/.ssh
-          echo "${{ secrets.SUBREPO_IMPRINT_DEPLOY_KEY }}" >> ~/.ssh/subtree
-          chmod 0600 ~/.ssh/subtree
-
           git subrepo push imprint \
             --branch sync \
             --squash \
@@ -113,7 +120,6 @@ jobs:
             --verbose \
             --force \
             --remote git@github.com:Confirm-Solutions/imprint.git
-          git push origin ${{ steps.extract_branch.outputs.branch }}
       - name: Create imprint PR
         env:
           GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
@@ -125,7 +131,14 @@ jobs:
             -H sync \
             -t "[BOT] Sync with upstream" \
             -b "Bot created PR to automatically to push changes to imprint."
-      - name: Commit report
+      - name: Cleanup
+        if: always()
+        env:
+          SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+        run: |
+          ssh-add -D
+          rm -Rf *
+      - name: Commit results
         run: git push
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
