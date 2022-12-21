@@ -130,7 +130,7 @@ jobs:
             create \
             -B main \
             -H sync \
-            -t "${{ github.event.head_commit.message }}" \
+            -t "$(git show -s --format=%s)" \
             -b "Bot created PR to automatically to push changes to imprint." || true
 
       - name: Push results
