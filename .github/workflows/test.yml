@@ -116,7 +116,7 @@ jobs:
         run: |
           export CONFIRM_COMMIT_MSG=$(git show -s --format=%s)
           echo "$(git show -s --format=%s)"
-          echo "{CONFIRM_COMMIT_MSG}={$(git show -s --format=%s)}" >> $GITHUB_ENV
+          echo "CONFIRM_COMMIT_MSG=$(git show -s --format=%s)" >> $GITHUB_ENV
 
       - uses: actions/checkout@v3
         with:
