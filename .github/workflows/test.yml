@@ -174,10 +174,6 @@ jobs:
             -t "$CONFIRM_COMMIT_MSG" \
             -b "Bot-created PR exporting internal Confirm changes." || true
 
-      # Not sure if this is needed.
-      # - name: Push results
-      #   run: git push
-
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack
       #   if: failure() && github.event.repository.default_branch == github.event.workflow_run.head_branch
