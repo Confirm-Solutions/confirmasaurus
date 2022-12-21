@@ -115,6 +115,12 @@ jobs:
           fetch-depth: 0
           ref: main
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
+        
+      - name: Setup bot git user
+        run: |
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
+
             
       # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
       - name: Rebase sync branch.
@@ -129,8 +135,6 @@ jobs:
       - name: Push to imprint "sync" branch
         run: |
           source ~/git-subrepo/.rc
-          git config --global user.email "research@confirmsol.org"
-          git config --global user.name "SubrepoBot"
           # The pull here will just grab the one empty commit from above.
           git subrepo pull imprint --branch sync --debug --verbose --message "Pull from imprint to confirm"
           git subrepo push imprint \
