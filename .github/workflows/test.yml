@@ -15,6 +15,37 @@ on:
       - "**.ipynb"
       - "**.md"
 jobs:
+  lint:
+    if: github.event.pull_request.draft == false
+    timeout-minutes: 15
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install pre-commit
+        run: pipx install pre-commit
+
+      - name: set PY
+        run: echo "PY=$(python -VV | sha256sum | cut -d' ' -f1)" >> $GITHUB_ENV
+          
+      - name: Cache pre-commit
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit|${{ env.PY }}|${{ hashFiles('.pre-commit-config.yaml') }}
+        id: precommitcache
+          
+      # The hooks will be installed automatically when pre-commit run is
+      # called. But it's nice to do it separately for more visibility in the
+      # GitHub interface into where a failure happens and how long each step
+      # takes.
+      - name: Install pre-commit hooks
+        run: pre-commit install --install-hooks
+
+      - name: Run all pre-commit checks on all files
+        run: pre-commit run --color=always -a
+        if: github.ref == 'refs/heads/main'
   test:
     if: github.event.pull_request.draft == false
     timeout-minutes: 15
@@ -44,6 +75,69 @@ jobs:
 
       - name: Pytest
         run: poetry run pytest -n auto -s
+  push_to_imprint:
+    # comment out the if statement when you need to debug this! then you don't
+    # need to merge to main to trigger the workflow. also can be nice to
+    # comments out the "needs"
+    if: github.ref == 'refs/heads/main'
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    name: Synchronize with imprint
+    # A couple actions that helped me to write this:
+    # https://github.com/NxtLvLSoftware/git-subtree-action
+    # https://github.com/paygoc6/action-pull-request-another-repo
+    steps:
+      # NOTE: This is technically unnecessary for running on the main branch.
+      # But when debugging, it's nice to run in a PR, so I've left it here.
+      - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF#refs/heads/})"
+        id: extract_branch
+
+      - name: Install subrepo
+        run: |
+          git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.extract_branch.outputs.branch }}
+          # Important!! We need to replace the default token in order to also
+          # access the imprint github repo.
+          # https://github.com/actions/checkout/blob/b4626ce19ce1106186ddf9bb20e706842f11a7c3/adrs/0153-checkout-v2.md#persist-credentials
+          # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
+          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
+
+      - name: Push to imprint "sync" branch
+        run: |
+          source ~/git-subrepo/.rc
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
+          git subrepo push imprint \
+            --branch sync \
+            --squash \
+            --debug \
+            --verbose \
+            --force \
+            --remote https://github.com/Confirm-Solutions/imprint.git
+
+      - name: Create imprint PR
+        env:
+          GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
+        # || true added to the end below because the PR might already exist.
+        # the downside to this is that some other failure won't bubble up and
+        # show itself
+        run: |
+          gh pr \
+            --repo Confirm-Solutions/imprint \
+            create \
+            -B main \
+            -H sync \
+            -t "$(git show HEAD~1 -s --format=%s)" \
+            -b "Bot created PR to automatically to push changes to imprint." || true
+
+      - name: Push results
+        run: git push
 
       # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
       # - name: Report failures on Slack

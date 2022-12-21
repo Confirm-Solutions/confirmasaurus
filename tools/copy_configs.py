@@ -9,11 +9,9 @@ def copy_simple():
     # had to change the env name for environment.yml so we shouldn't overwrite
     # shutil.copy2('environment.yml', 'imprint/environment.yml')
     #
-    shutil.copy2(".github/workflows/lint.yml", "imprint/.github/workflows/lint.yml")
     shutil.copy2(".gitignore", "imprint/.gitignore")
     shutil.copy2(".gitleaks.toml", "imprint/.gitleaks.toml")
     shutil.copy2(".vscode/settings.json", "imprint/.vscode/settings.json")
-    shutil.copy2(".pre-commit-config.yaml", "imprint/.pre-commit-config.yaml")
     shutil.copy2("setup.cfg", "imprint/setup.cfg")
 
 
@@ -42,6 +40,8 @@ def transfer_pyproject():
 
     with open("imprint/pyproject.toml", "wb") as f:
         tomli_w.dump(imprint_pp, f)
+
+    subprocess.call("poetry lock", shell=True, cwd="imprint")
 
 
 def run_poetry_lock():

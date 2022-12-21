@@ -14,16 +14,36 @@ I like [the discussion here by the `git subrepo` author on why `subrepo` is the 
 As far as I can tell, the design of `git subrepo` is pretty close to the optimal design for our situation. The only downside to the tool is that it's not perfectly maintained. I think that's going to be okay for us. 
 
 For the most part, while developing confirm we can act like the open source imprint repo does not exist. This is nice. 
+
+## Automated pushes from confirm to imprint
+
+See [the actions workflow here](../.github/workflows/test.yml). It pushes
+changes to the imprint branch `sync` and then automatically creates a PR to
+merge those changes.
+
+The flow from confirm to imprint looks like:
+1. (manual) Merge PR to main in confirm
+2. (automatic) subrepo push to imprint
+3. (automatic) PR created on imprint
+4. (automatic) automatically push the .gitrepo file to confirm
+5. (manual) improve/merge the PR on imprint
+
+I'd like to have a similar reverse flow from imprint to confirm but it's not
+implemented yet. It would probably need to be implemented as an actions
+workflow on the imprint repo triggering a workflow in the confirmasaurus repo.
+The end of the discussion here would be useful for building this. 
+https://github.com/orgs/community/discussions/26323
+
 ## Contributing changes to imprint
 
 ```
-git subrepo push imprint --squash --debug --verbose --message "Push from confirm to imprint"
+git subrepo push imprint --branch sync --squash --debug --verbose --message "Subrepo push to imprint"
 ```
 
 ## Pulling changes from imprint
 
 ```
-git subrepo pull imprint --squash --debug --verbose --message "Pull from imprint to confirm"
+git subrepo pull imprint --debug --verbose --message "Pull from imprint to confirm"
 ```
 
 ## (historical) What I did to set up subrepo
