@@ -103,7 +103,6 @@ jobs:
           source ~/git-subrepo/.rc
           git config --global user.email "research@confirmsol.org"
           git config --global user.name "SubrepoBot"
-          git config --unset-all http.https://github.com/.extraheader
           git subrepo push imprint \
             --branch sync \
             --squash \
