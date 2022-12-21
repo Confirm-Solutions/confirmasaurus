@@ -134,7 +134,7 @@ jobs:
           # Any information on a sync branch is at risk of deletion!
           git fetch origin sync
           git checkout --detach main
-          git merge --squash sync
+          git merge --squash origin/sync
           git commit --allow-empty --message "Create sync branch"
           git branch -f sync HEAD
           git push -f origin sync
