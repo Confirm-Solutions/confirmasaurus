@@ -76,7 +76,10 @@ jobs:
       - name: Pytest
         run: poetry run pytest -n auto -s
   push_to_imprint:
-    # if: github.ref == 'refs/heads/main'
+    # comment out the if statement when you need to debug this! then you don't
+    # need to merge to main to trigger the workflow. also can be nice to
+    # comments out the "needs"
+    if: github.ref == 'refs/heads/main'
     needs: [test, lint]
     runs-on: ubuntu-latest
     name: Synchronize with imprint
