@@ -102,6 +102,11 @@ jobs:
         run: |
           git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
 
+      - name: Setup bot git user
+        run: |
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
+
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
@@ -117,86 +122,15 @@ jobs:
           export CONFIRM_COMMIT_MSG=$(git show -s --format=%s)
           echo "$(git show -s --format=%s)"
           echo "CONFIRM_COMMIT_MSG=$(git show -s --format=%s)" >> $GITHUB_ENV
-
-      - uses: actions/checkout@v3
-        with:
-          repository: Confirm-Solutions/imprint
-          path: imprint-repo
-          fetch-depth: 0
-          ref: main
-          token: ${{ secrets.SUBREPO_BOT_TOKEN }}
         
-      - name: Setup bot git user
-        run: |
-          git config --global user.email "research@confirmsol.org"
-          git config --global user.name "SubrepoBot"
-            
-      # https://stackoverflow.com/questions/42332906/squash-git-commits-non-interactively-with-git-rebase
-      - name: Rebase sync branch.
-        run: |
-          cd imprint-repo
-          git fetch origin sync || true
-          git checkout --detach main
-          git merge --squash origin/sync || true
-          git commit --allow-empty --message "Create sync branch"
-          git branch -f sync HEAD
-          git push -f origin sync
-          cd ../
-
-      - name: Push to imprint "sync" branch
+      - name: Push to imprint
         run: |
           source ~/git-subrepo/.rc
-          # The pull here will just grab the one empty commit from above.
-          git subrepo pull imprint --branch sync --debug --verbose 
-          # This might solve merge failures. Replace theirs with ours??
-          # git subrepo pull bar || {
-          #     cd .git/tmp/subrepo/bar
-          #     git checkout --theirs Bar2
-          #     git add Bar2
-          #     git commit --file ../../../../.git/worktrees/bar/MERGE_MSG
-          #     cd ../../../..
-          #     git subrepo commit bar
-          #     git subrepo clean bar
-          # }
           git subrepo push imprint \
-            --branch sync \
+            --branch main \
             --squash \
             --debug \
             --verbose \
             --message "$CONFIRM_COMMIT_MSG" \
             --remote https://github.com/Confirm-Solutions/imprint.git
-        # WE DO NOT PUSH HERE! The two git subrepo commands will create
-        # pull/push commits that we want to ignore. The goal is to keep the
-        # commit/parent entries in .gitrepo pointed to the main branch in
-        # imprint. If we were to push now, the "commit" entry in .gitrepo would
-        # be overwritten with a commit that will be destroyed when the imprint
-        # PR gets squash merged.
-
-      - name: Create imprint PR
-        env:
-          GH_TOKEN: ${{ secrets.SUBREPO_BOT_TOKEN }}
-        # || true added to the end below because the PR might already exist.
-        # the downside to this is that some other failure won't bubble up and
-        # show itself
-        run: |
-          gh pr \
-            --repo Confirm-Solutions/imprint \
-            create \
-            -B main \
-            -H sync \
-            -t "$CONFIRM_COMMIT_MSG" \
-            -b "Bot-created PR exporting internal Confirm changes." || true
-
-      # TODO: this doesn't currently work because only the imprint repo has the SLACK_BOT_TOKEN
-      # - name: Report failures on Slack
-      #   if: failure() && github.event.repository.default_branch == github.event.workflow_run.head_branch
-      #   id: slack
-      #   uses: slackapi/slack-github-action@v1.19.0
-      #   with:
-      #     # Slack channel id, channel name, or user id to post message.
-      #     # See also: https://api.slack.com/methods/chat.postMessage#channels
-      #     channel-id: C02TC2DAN74
-      #     # For posting a simple plain text message
-      #     slack-message: "*Build failure on default branch!* 😱\nhttps://github.com/${{github.repository}}/actions/runs/${{github.run_id}}"
-      #   env:
-      #     SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          git push 

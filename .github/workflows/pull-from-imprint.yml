@@ -10,6 +10,11 @@ jobs:
         run: |
           git clone https://github.com/ingydotnet/git-subrepo ~/git-subrepo
 
+      - name: Setup bot git user
+        run: |
+          git config --global user.email "research@confirmsol.org"
+          git config --global user.name "SubrepoBot"
+
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
@@ -20,27 +25,13 @@ jobs:
           # key phrase "If users want to authenticate to an additional private remote, they should provide the token input."
           token: ${{ secrets.SUBREPO_BOT_TOKEN }}
 
-      - name: Setup bot git user
-        run: |
-          git config --global user.email "research@confirmsol.org"
-          git config --global user.name "SubrepoBot"
-
       - name: Pull from imprint
         run: |
           source ~/git-subrepo/.rc
           # The pull here will just grab the one empty commit from above.
           git checkout -b sync
           git subrepo pull imprint --branch main --debug --verbose 
-          git whatchanged -1
-          export N_FILES=$(git diff HEAD~1 --name-only | wc -l)
-          echo "N_FILES=$(git show -s --format=%s)" >> $GITHUB_ENV
-          if [ "$N_FILES" -le "1" ]
-          then
-            git branch -f main HEAD
-            git push origin main
-          else
-            git push -f origin sync
-          fi
+          git push -f origin sync
 
       - name: Create confirmasaurus PR
         env:
@@ -49,14 +40,11 @@ jobs:
         # the downside to this is that some other failure won't bubble up and
         # show itself
         run: |
-          if [ "$N_FILES" -le "1" ]
-          then
-            gh pr \
-              --repo Confirm-Solutions/confirmasaurus \
-              create \
-              -B main \
-              -H sync \
-              -t "Sync with imprint changes" \
-              -b "Bot-created PR exporting internal Confirm changes." || true
-          fi
+          gh pr \
+            --repo Confirm-Solutions/confirmasaurus \
+            create \
+            -B main \
+            -H sync \
+            -t "Sync with imprint changes" \
+            -b "Bot-created PR exporting internal Confirm changes." || true
     
