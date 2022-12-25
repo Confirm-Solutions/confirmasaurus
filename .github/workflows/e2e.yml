@@ -1,0 +1,32 @@
+
+name: Test
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    # Runs at 02:57
+    - cron: '57 2 * * *'
+jobs:
+  test:
+    timeout-minutes: 60
+    name: End to end tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install poetry
+        run: pipx install poetry
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'poetry-e2e'
+
+      - name: Update environment
+        run: |
+          poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud,cloud_dev
+
+      - name: Run tests
+        run: python confirm/cloud/e2e_runner.py
