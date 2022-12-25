@@ -29,4 +29,4 @@ jobs:
           poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud,cloud_dev
 
       - name: Run tests
-        run: python confirm/cloud/e2e_runner.py
+        run: poetry run python confirm/cloud/e2e_runner.py

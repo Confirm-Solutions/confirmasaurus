@@ -1,4 +1,3 @@
-import os
 import sys
 
 import modal
@@ -12,9 +11,8 @@ img = modal_util.get_image(dependency_groups=["test", "cloud"])
 
 
 def run_tests():
-    print(os.getcwd())
     exitcode = pytest.main(["tests/test_duckdb.py"])
-    sys.exit(exitcode)
+    return exitcode.value
 
 
 @stub.function(
@@ -23,15 +21,16 @@ def run_tests():
     retries=0,
     mounts=(
         modal.create_package_mounts(["confirm", "imprint"])
-        + [modal.Mount(local_dir="tests", remote_dir="/root/tests")]
+        + [modal.Mount(local_dir="./tests", remote_dir="/root/tests")]
     ),
     timeout=60 * 60 * 1,
 )
 def run_cloud_tests():
-    run_tests()
+    return run_tests()
 
 
 if __name__ == "__main__":
     # run_tests()
     with stub.run():
-        run_cloud_tests.call()
+        exitcode = run_cloud_tests.call()
+    sys.exit(exitcode)
