@@ -48,6 +48,10 @@ However, without conda, we would:
 2. Lose access to the large repository of easy-to-install packages that are often not-at-all-easy-to-install with pip/poetry. (e.g. sage!) This is not important for production jobs but it's nice to have this access for development.
 3. Need to spend time updating various parts of our cloud setup, mainly the Dockerfiles. Updating Dockerfiles is painful because the iteration time is so slow.
 
+## How to update pyproject.toml package versions?
+
+[The poetry plugin "poetry up" helps here.](https://github.com/MousaZeidBaker/poetry-plugin-up)
+
 ## Notes
 
 - [JAX doesn't have a "normal" package registry and doesn't use PyPI](https://github.com/google/jax/issues/5410)
