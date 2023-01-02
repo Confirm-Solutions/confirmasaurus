@@ -41,7 +41,7 @@ optional = true
 [tool.poetry.group.cloud.dependencies]
 pyarrow = "^10.0.1"
 boto3 = "^1.26.20"
-cloudpickle = "~2.0"
+cloudpickle = "~2.2"
 clickhouse-connect = "^0.4.6"
 redis = "^4.3.5"
 pottery = "^3.0.0"
