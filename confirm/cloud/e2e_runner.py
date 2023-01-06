@@ -10,8 +10,10 @@ stub = modal.Stub("e2e_runner")
 img = modal_util.get_image(dependency_groups=["test", "cloud"])
 
 
-def run_tests():
-    exitcode = pytest.main(["tests/test_duckdb.py"])
+def run_tests(argv=None):
+    if argv is None:
+        argv = ["--runslow", "tests", "imprint/tests"]
+    exitcode = pytest.main(argv)
     return exitcode.value
 
 
@@ -21,16 +23,25 @@ def run_tests():
     retries=0,
     mounts=(
         modal.create_package_mounts(["confirm", "imprint"])
-        + [modal.Mount(local_dir="./tests", remote_dir="/root/tests")]
+        + [
+            modal.Mount(local_dir="./tests", remote_dir="/root/tests"),
+            modal.Mount(local_dir="./imprint/tests", remote_dir="/root/imprint/tests"),
+            modal.Mount(
+                local_dir="./imprint/tutorials", remote_dir="/root/imprint/tutorials"
+            ),
+            modal.Mount(local_dir="./", remote_dir="/root", recursive=False),
+        ]
     ),
     timeout=60 * 60 * 1,
+    secrets=[modal.Secret.from_name("confirm-secrets")],
 )
-def run_cloud_tests():
-    return run_tests()
+def run_cloud_tests(argv=None):
+    return run_tests(argv=argv)
 
 
 if __name__ == "__main__":
     # run_tests()
     with stub.run():
+        argv = None if len(sys.argv) == 1 else sys.argv
         exitcode = run_cloud_tests.call()
     sys.exit(exitcode)

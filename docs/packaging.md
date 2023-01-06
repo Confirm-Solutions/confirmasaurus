@@ -50,7 +50,9 @@ However, without conda, we would:
 
 ## How to update pyproject.toml package versions?
 
-[The poetry plugin "poetry up" helps here.](https://github.com/MousaZeidBaker/poetry-plugin-up)
+- [The poetry plugin "poetry up" helps here.](https://github.com/MousaZeidBaker/poetry-plugin-up)
+- `poetry up --with=test,cloud,dev,cloud_dev`
+- [Lots of discussion in this issue](https://github.com/python-poetry/poetry/issues/461)
 
 ## Notes
 
