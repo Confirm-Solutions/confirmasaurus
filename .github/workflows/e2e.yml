@@ -10,6 +10,7 @@ on:
 jobs:
   # We only run the end to end tests if there have been new commits in the last
   # 24 hours.
+  # https://stackoverflow.com/questions/63014786/how-to-schedule-a-github-actions-nightly-build-but-run-it-only-when-there-where
   check_date:
    runs-on: ubuntu-latest
    name: Check latest commit
@@ -24,7 +25,14 @@ jobs:
      - id: should_run
        continue-on-error: true
        name: Check latest commit is less than a day old.
-       run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
+       run: |
+          sha=$(git rev-list --after="24 hours" ${{ github.sha }})
+          if test -z $sha
+          then
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
 
   test:
     needs: check_date
