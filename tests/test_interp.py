@@ -24,6 +24,11 @@ def test_against_scipy_multi_value(dim):
         xi = np.random.uniform(size=(10, 2))
         result = jax.vmap(interpn, in_axes=(None, None, 0))(grid, values, xi)
         scipy_result = scipy.interpolate.interpn(
-            grid, values, xi, method="linear", bounds_error=False, fill_value=None
+            grid,
+            np.asarray(values).copy(),
+            xi,
+            method="linear",
+            bounds_error=False,
+            fill_value=None,
         )
         np.testing.assert_allclose(result, scipy_result)
