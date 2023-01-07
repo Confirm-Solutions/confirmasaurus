@@ -2,6 +2,8 @@
 name: E2E
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     # Runs at 02:57am every day.
     - cron: '57 2 * * *'

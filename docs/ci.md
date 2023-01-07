@@ -15,7 +15,7 @@ Our end to end tests are run nightly via the [.github/workflows/e2e.yml](../.git
 
 ## Clearing the Github Actions cache
 
-We cache lots of stuff. If you need to clear the cache, run this command. 
+We cache lots of stuff including our Python environments. If you need to clear the cache, run this command. 
 
 ```
 gh actions-cache list --limit 100 | tail -n +5 | awk '{print $1}' | tr '\n' '\0' | xargs -0 -n1 gh actions-cache delete --confirm
