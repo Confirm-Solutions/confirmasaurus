@@ -29,9 +29,9 @@ jobs:
           sha=$(git rev-list --after="24 hours" ${{ github.sha }})
           if test -z $sha
           then
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          else
             echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
           fi
 
   test:
