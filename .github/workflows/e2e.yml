@@ -2,11 +2,9 @@
 name: E2E
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
-    # Runs at 02:57am on Monday at Thursday
-    - cron: '57 2 * * 1,4'
+    # Runs at 02:57am every day.
+    - cron: '57 2 * * *'
 jobs:
   test:
     timeout-minutes: 60
@@ -39,4 +37,4 @@ jobs:
             --token-id ${{ secrets.MODAL_TOKEN_ID }} \
             --token-secret ${{ secrets.MODAL_TOKEN_SECRET }}
             # --env=confirm_solutions
-          poetry run python confirm/cloud/e2e_runner.py
+          poetry run python confirm/cloud/e2e_runner.py tests/test_fail.py

@@ -13,7 +13,9 @@ img = modal_util.get_image(dependency_groups=["test", "cloud"])
 def run_tests(argv=None):
     if argv is None:
         argv = ["--runslow", "tests", "imprint/tests"]
+    print(argv)
     exitcode = pytest.main(argv)
+    print(exitcode)
     return exitcode.value
 
 
@@ -42,6 +44,6 @@ def run_cloud_tests(argv=None):
 if __name__ == "__main__":
     # run_tests()
     with stub.run():
-        argv = None if len(sys.argv) == 1 else sys.argv
-        exitcode = run_cloud_tests.call()
+        argv = None if len(sys.argv) == 1 else sys.argv[1:]
+        exitcode = run_cloud_tests.call(argv)
     sys.exit(exitcode)
