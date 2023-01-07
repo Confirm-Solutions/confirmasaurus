@@ -1,6 +1,10 @@
-# Continuous Integration
+# Tests and Continuous Integration
 
 Related: [docs/packaging.md](./packaging.md)
+
+## Slow tests
+
+Use `@pytest.mark.slow` to indicate that a test is slow and should not be run by default. To run slow tests, add the `--runslow` flag to pytest. Slow tests will not be run by the fast CI on PRs but will be run by the nightly end to end tests.
 
 ## Nightly end to end tests
 

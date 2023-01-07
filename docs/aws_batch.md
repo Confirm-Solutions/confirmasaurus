@@ -4,8 +4,15 @@ What are we here to do?
 - Launching an AWS Batch cluster that will run approximately arbitrary functions.
 - Why not use AWS Lambda? Lambda doesn't run on GPUs!
 
-Useful documentation:
+The current set up:
+- Active already-deployed AWS Batch cluster. See [the AWS CDK code here](../cloud/batch_cdk)
+- Use the `confirm.cloud.awsbatch.remote_run` function to launch arbitrary
+  functions and closures on the cluster.
+- Use `confirm.cloud.awsbatch.include_package` to pass a package along with the
+  function.
+- See [an example here](../cloud/batch_cdk/run_confirm.py).
 
+Useful documentation:
 - a fully worked example for using AWS Batch. This code is mostly based off this example:
   https://github.com/aws-samples/aws-cdk-deep-learning-image-vector-embeddings-at-scale-using-aws-batch/blob/main/batch_job_cdk/stack.py
 - boto3 docs for AWS Batch:
@@ -13,8 +20,7 @@ Useful documentation:
 - AWS CDK docs for AWS Batch:
   https://docs.aws.amazon.com/cdk/api/v2/python/aws_cdk.aws_batch_alpha.html
 
-
-##Setting up AWS CDK:
+## Setting up AWS CDK:
 
 https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html
 

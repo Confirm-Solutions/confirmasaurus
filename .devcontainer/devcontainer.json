@@ -46,6 +46,9 @@
   // strong reason to have isolation in this context.
   // "remoteUser": "vscode"
 
+  "hostRequirements": {
+    "gpu": true
+  },
   // Based on https://github.com/microsoft/vscode-dev-containers/blob/main/containers/codespaces-linux/.devcontainer/devcontainer.json
   // adding capabilities to the container so that we can do things like use
   // the GPU!
@@ -53,7 +56,6 @@
     "source=codespaces-linux-var-lib-docker,target=/var/lib/docker,type=volume"
   ],
   "runArgs": [
-    "--gpus=all",
     "--env",
     "NVIDIA_DISABLE_REQUIRE=1",
     "--cap-add=SYS_PTRACE",

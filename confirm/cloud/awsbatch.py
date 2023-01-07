@@ -49,6 +49,13 @@ def _submit_job(bucket, filename, cpus, memory, gpu):
 
 
 def local_test(f, *args, **kwargs):
+    """
+    This is a mock of remote_run that runs that function locally instead of on
+    AWS Batch.
+
+    Args:
+        f: The function/closure to run.
+    """
     bucket, filename = _serialize_to_s3(f)
     home_dir = os.environ["HOME"]
     subprocess.call(
@@ -68,12 +75,39 @@ def local_test(f, *args, **kwargs):
 
 
 def remote_run(f, *, cpus, memory, gpu):
+    """
+    Run a function/closure on AWS Batch. The function will be serialized to a
+    file in an S3 bucket and then downloaded and run on the AWS Batch instance.
+
+    For more details on the acceptable values for cpus, memory, and gpu, see
+    https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/batch.html#Batch.Client.submit_job
+
+    Args:
+        f: _description_
+        cpus: The number of CPUs to request.
+        memory: The amount of memory to request in MiB.
+        gpu: Should we request a GPU?
+
+    Returns:
+        The response from the AWS Batch API, the bucket name, and the filename.
+    """
     bucket, filename = _serialize_to_s3(f)
     response = _submit_job(bucket, filename, cpus, memory, gpu)
     return response, bucket, filename
 
 
 def include_package(package):
+    """
+    A decorator that will include a package in a zip file that is wrapped up
+    into the closure that is passed to remote_run.
+
+    Args:
+        package: The package to include. This should be the package object not
+        a string.
+
+    Returns:
+        The wrapped function.
+    """
     package_name = package.__name__
     parent_dir = Path(package.__file__).parent
     with tempfile.TemporaryDirectory() as tmpdir:
