@@ -390,9 +390,7 @@ class Clickhouse:
         """
         if job_id is None:
             config = get_ch_config(host, port, username, password)
-            test_host = keyring.get_password(
-                "clickhouse-confirm-test-host", os.environ["USER"]
-            )
+            test_host = get_ch_test_host()
             if not (
                 (test_host is not None and test_host in config["host"])
                 or "localhost" in config["host"]
@@ -440,9 +438,7 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
         if "CLICKHOUSE_HOST" in os.environ:
             host = os.environ["CLICKHOUSE_HOST"]
         else:
-            host = keyring.get_password(
-                "clickhouse-confirm-test-host", os.environ["USER"]
-            )
+            host = get_ch_test_host()
     if port is None:
         if "CLICKHOUSE_PORT" in os.environ:
             port = os.environ["CLICKHOUSE_PORT"]
@@ -464,6 +460,13 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
     return dict(
         host=host, port=port, username=username, password=password, database=database
     )
+
+
+def get_ch_test_host():
+    if "CLICKHOUSE_TEST_HOST" in os.environ:
+        return os.environ["CLICKHOUSE_TEST_HOST"]
+    else:
+        return keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
 
 
 def find_unique_job_id(client, attempts=3):
@@ -499,7 +502,7 @@ def clear_dbs(client):
     Args:
         client: _description_
     """
-    test_host = keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
+    test_host = get_ch_test_host()
     if not (
         (test_host is not None and test_host in client.url) or "localhost" in client.url
     ):

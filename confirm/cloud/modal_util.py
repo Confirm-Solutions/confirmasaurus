@@ -3,7 +3,7 @@ from pathlib import Path
 import modal
 
 
-def get_image():
+def get_image(dependency_groups=["cloud"]):
     poetry_dir = Path(__file__).resolve().parent.parent.parent
 
     context_files = {
@@ -17,7 +17,7 @@ def get_image():
         "COPY /.pyproject.toml /tmp/poetry/pyproject.toml",
         "RUN cd /tmp/poetry && \\ ",
         "  poetry config virtualenvs.create false && \\ ",
-        "  poetry install --with=cloud --no-root",
+        f"  poetry install --with={','.join(dependency_groups)} --no-root",
     ]
 
     return modal.Image.from_dockerhub(

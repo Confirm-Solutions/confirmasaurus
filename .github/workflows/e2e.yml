@@ -1,0 +1,69 @@
+
+name: E2E
+
+on:
+  schedule:
+    # Runs at 02:57am every day.
+    - cron: '57 2 * * *'
+jobs:
+  # We only run the end to end tests if there have been new commits in the last
+  # 24 hours.
+  # https://stackoverflow.com/questions/63014786/how-to-schedule-a-github-actions-nightly-build-but-run-it-only-when-there-where
+  check_date:
+   runs-on: ubuntu-latest
+   name: Check latest commit
+   outputs:
+     should_run: ${{ steps.should_run.outputs.should_run }}
+   steps:
+     - uses: actions/checkout@v3
+
+     - name: print latest_commit
+       run: echo ${{ github.sha }}
+ 
+     - id: should_run
+       continue-on-error: true
+       name: Check latest commit is less than a day old.
+       if: ${{ github.event_name == 'schedule' }}
+       run: |
+          sha=$(git rev-list --after="24 hours" ${{ github.sha }})
+          if test -z $sha
+          then
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
+  test:
+    needs: check_date
+    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ["ubuntu-latest"]
+        python-version: ["3.10"]
+    name: End to end tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install poetry
+        run: pipx install poetry
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'poetry'
+
+      - name: Update environment
+        run: |
+          poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud,cloud_dev
+
+      - name: Run tests
+        run: |
+          poetry run modal token set \
+            --token-id ${{ secrets.MODAL_TOKEN_ID }} \
+            --token-secret ${{ secrets.MODAL_TOKEN_SECRET }}
+            # --env=confirm_solutions
+          poetry run python confirm/cloud/e2e_runner.py
