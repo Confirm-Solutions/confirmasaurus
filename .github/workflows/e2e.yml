@@ -8,7 +8,27 @@ on:
     # Runs at 02:57am every day.
     - cron: '57 2 * * *'
 jobs:
+  # We only run the end to end tests if there have been new commits in the last
+  # 24 hours.
+  check_date:
+   runs-on: ubuntu-latest
+   name: Check latest commit
+   outputs:
+     should_run: ${{ steps.should_run.outputs.should_run }}
+   steps:
+     - uses: actions/checkout@v3
+
+     - name: print latest_commit
+       run: echo ${{ github.sha }}
+ 
+     - id: should_run
+       continue-on-error: true
+       name: Check latest commit is less than a day old.
+       run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
+
   test:
+    needs: check_date
+    if: ${{ needs.check_date.outputs.should_run != 'false' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -39,4 +59,4 @@ jobs:
             --token-id ${{ secrets.MODAL_TOKEN_ID }} \
             --token-secret ${{ secrets.MODAL_TOKEN_SECRET }}
             # --env=confirm_solutions
-          poetry run python confirm/cloud/e2e_runner.py tests/test_fail.py
+          poetry run python confirm/cloud/e2e_runner.py
