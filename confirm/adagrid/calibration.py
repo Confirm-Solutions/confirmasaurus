@@ -513,7 +513,7 @@ class CalibrationConfig:
         if self.model_kwargs is None:
             self.model_kwargs = {}
         # TODO: is json suitable for all models? are there models that are going to
-        # want to have large objects as parameters?
+        # want to have large non-jsonable objects as parameters?
         self.model_kwargs = json.dumps(self.model_kwargs)
 
         continuation = True
