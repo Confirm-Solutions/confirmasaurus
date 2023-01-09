@@ -67,3 +67,7 @@ jobs:
             --token-secret ${{ secrets.MODAL_TOKEN_SECRET }}
             # --env=confirm_solutions
           poetry run python confirm/cloud/e2e_runner.py
+        
+      - name: Clear Clickhouse Test DBs
+        run: |
+          poetry run python confirm/cloud/clear_clickhouse_test.py

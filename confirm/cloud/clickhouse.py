@@ -401,13 +401,19 @@ class Clickhouse:
             client = clickhouse_connect.get_client(**config)
             job_id = find_unique_job_id(client)
         connection_details = get_ch_config(host, port, username, password, job_id)
-        host = connection_details["host"]
         client = clickhouse_connect.get_client(**connection_details)
         redis_con = redis.Redis(
             **get_redis_config(redis_host, redis_port, redis_password)
         )
         print(f"Connected to job {job_id}")
-        return Clickhouse(connection_details, client, redis_con, host, job_id)
+        return Clickhouse(
+            connection_details, client, redis_con, connection_details["host"], job_id
+        )
+
+
+def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):
+    connection_details = get_ch_config(host, port, username, password, job_id)
+    return clickhouse_connect.get_client(**connection_details)
 
 
 def get_redis_config(host=None, port=None, password=None):
@@ -489,7 +495,7 @@ def find_unique_job_id(client, attempts=3):
     return job_id
 
 
-def clear_dbs(client):
+def clear_dbs(client, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -518,8 +524,11 @@ def clear_dbs(client):
 
     print("Dropping the following databases:")
     print(to_drop)
-    print("Are you sure? [yN]")
-    if input() == "y":
+    if not yes:
+        print("Are you sure? [yN]")
+        yes = input() == "y"
+
+    if yes:
         for db in to_drop:
             cmd = f"drop database {db}"
             print(cmd)

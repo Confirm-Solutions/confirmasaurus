@@ -27,3 +27,20 @@ def get_image(dependency_groups=["cloud"]):
             "apt-get install -y python-is-python3 python3-pip",
         ],
     ).dockerfile_commands(dockerfile_commands, context_files=context_files)
+
+
+def run_on_modal(f):
+    stub = modal.Stub("arbitrary_runner")
+
+    @stub.function(
+        image=get_image(dependency_groups=["test", "cloud"]),
+        retries=0,
+        mounts=(modal.create_package_mounts(["confirm", "imprint"])),
+        secrets=[modal.Secret.from_name("confirm-secrets")],
+        serialized=True,
+    )
+    def wrapper():
+        f()
+
+    with stub.run():
+        return wrapper.call()
