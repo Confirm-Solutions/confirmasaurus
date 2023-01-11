@@ -327,7 +327,7 @@ class Clickhouse:
 
     def new_worker(self):
         host = self.connection_details["host"]
-        return (
+        worker_id = (
             next(
                 pottery.NextId(
                     key=f"{host}/{self.job_id}/worker_id",
@@ -336,6 +336,7 @@ class Clickhouse:
             )
             - 1
         )
+        return worker_id
 
     def connect(
         job_id: int = None,
@@ -388,8 +389,8 @@ class Clickhouse:
         Returns:
             A Clickhouse tile database object.
         """
+        config = get_ch_config(host, port, username, password)
         if job_id is None:
-            config = get_ch_config(host, port, username, password)
             test_host = get_ch_test_host()
             if not (
                 (test_host is not None and test_host in config["host"])
@@ -400,6 +401,12 @@ class Clickhouse:
                 )
             client = clickhouse_connect.get_client(**config)
             job_id = find_unique_job_id(client)
+        else:
+            client = clickhouse_connect.get_client(**config)
+
+        # Create job_id database if it doesn't exist
+        client.command(f"create database if not exists {job_id}")
+
         connection_details = get_ch_config(host, port, username, password, job_id)
         client = clickhouse_connect.get_client(**connection_details)
         redis_con = redis.Redis(
@@ -491,11 +498,10 @@ def find_unique_job_id(client, attempts=3):
             raise Exception(
                 "Could not find a unique job id." " This should never happen"
             )
-    client.command(f"create database {job_id}")
     return job_id
 
 
-def clear_dbs(client, yes=False):
+def clear_dbs(client, names=None, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -506,7 +512,9 @@ def clear_dbs(client, yes=False):
     should only work for our test database or for localhost.
 
     Args:
-        client: _description_
+        client: Clickhouse client
+        names: default None, list of database names to drop. If None, drop all.
+        yes: bool, if True, don't ask for confirmation
     """
     test_host = get_ch_test_host()
     if not (
@@ -514,10 +522,19 @@ def clear_dbs(client, yes=False):
     ):
         raise RuntimeError("This function is only for localhost or test databases.")
 
-    to_drop = []
-    for db in client.query_df("show databases")["name"]:
-        if db not in ["default", "INFORMATION_SCHEMA", "information_schema", "system"]:
-            to_drop.append(db)
+    if names is None:
+        to_drop = []
+        for db in client.query_df("show databases")["name"]:
+            if db not in [
+                "default",
+                "INFORMATION_SCHEMA",
+                "information_schema",
+                "system",
+            ]:
+                to_drop.append(db)
+    else:
+        to_drop = names
+
     if len(to_drop) == 0:
         print("No databases to drop.")
         return

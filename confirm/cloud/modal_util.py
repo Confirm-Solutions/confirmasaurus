@@ -29,18 +29,24 @@ def get_image(dependency_groups=["cloud"]):
     ).dockerfile_commands(dockerfile_commands, context_files=context_files)
 
 
-def run_on_modal(f):
+def modalize(stub, **kwargs):
+    def decorator(f):
+        return stub.function(
+            raw_f=f,
+            image=get_image(dependency_groups=["test", "cloud"]),
+            retries=0,
+            mounts=(modal.create_package_mounts(["confirm", "imprint"])),
+            secret=modal.Secret.from_name("confirm-secrets"),
+            serialized=True,
+            name=f.__qualname__,
+            **kwargs,
+        )()
+
+    return decorator
+
+
+def run_on_modal(f, **kwargs):
     stub = modal.Stub("arbitrary_runner")
-
-    @stub.function(
-        image=get_image(dependency_groups=["test", "cloud"]),
-        retries=0,
-        mounts=(modal.create_package_mounts(["confirm", "imprint"])),
-        secrets=[modal.Secret.from_name("confirm-secrets")],
-        serialized=True,
-    )
-    def wrapper():
-        f()
-
+    wrapper = modalize(stub, **kwargs)(f)
     with stub.run():
         return wrapper.call()
