@@ -16,9 +16,30 @@ import numpy as np
 ```
 
 ```python
+%load_ext scalene
+```
+
+```python
+def f():
+    g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
+    db = ch.Clickhouse.connect()
+    iter, reports, ada = ada_calibrate(ZTest1D, g=g, db=db, nB=5, n_iter=1, iter_size=32, grid_target=0.0001, bias_target=0.0001)
+```
+
+```python
+import os
+import time
+import imprint as ip
+from imprint.models.ztest import ZTest1D
+from confirm.adagrid.calibration import ada_calibrate
+import confirm.cloud.clickhouse as ch
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
 db = ch.Clickhouse.connect()
-iter, reports, ada = ada_calibrate(ZTest1D, g=g, db=db, nB=5, n_iter=20, iter_size=32, grid_target=0.0001, bias_target=0.0001)
+iter, reports, ada = ada_calibrate(ZTest1D, g=g, db=db, nB=5, n_iter=1, iter_size=32, grid_target=0.0001, bias_target=0.0001)
 ```
 
 ```python

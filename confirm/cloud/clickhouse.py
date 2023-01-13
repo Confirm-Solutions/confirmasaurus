@@ -72,11 +72,12 @@ class ClickhouseStore(Store):
     """
 
     client: clickhouse_connect.driver.httpclient.HttpClient
+    job_id: str
 
     def __post_init__(self):
         self.client.command(
-            """
-            create table if not exists store_tables
+            f"""
+            create table if not exists {self.job_id}.store_tables
                 (key String, table_name String)
                 order by key
             """
@@ -86,14 +87,14 @@ class ClickhouseStore(Store):
         exists, table_name = self._exists(key)
         print(exists, table_name)
         if exists:
-            return _query_df(self.client, f"select * from {table_name}")
+            return _query_df(self.client, f"select * from {self.job_id}.{table_name}")
         else:
             raise KeyError(f"Key {key} not found in store")
 
     def set(self, key, df, nickname=None):
         exists, table_name = self._exists(key)
         if exists:
-            self.client.command(f"drop table {table_name}")
+            self.client.command(f"drop table {self.job_id}.{table_name}")
         else:
             table_id = uuid.uuid4().hex
             if is_table_name(key):
@@ -105,18 +106,19 @@ class ClickhouseStore(Store):
                     else f"_store_{table_id}"
                 )
             self.client.command(
-                "insert into store_tables values (%s, %s)", (key, table_name)
+                f"insert into {self.job_id}.store_tables values (%s, %s)",
+                (key, table_name),
             )
         cols = get_create_table_cols(df)
         # if "id" not in df.columns:
         #     df["id"] = df.index
         self.client.command(
             f"""
-            create table {table_name} ({",".join(cols)})
+            create table {self.job_id}.{table_name} ({",".join(cols)})
                 engine = MergeTree() order by tuple()
         """
         )
-        _insert_df(self.client, table_name, df)
+        _insert_df(self.client, self.job_id + "." + table_name, df)
 
     def set_or_append(self, key, df):
         exists, table_name = self._exists(key)
@@ -128,7 +130,7 @@ class ClickhouseStore(Store):
 
     def _exists(self, key):
         table_name = self.client.query(
-            "select table_name from store_tables where key = %s", (key,)
+            f"select table_name from {self.job_id}.store_tables where key = %s", (key,)
         ).result_set
         if len(table_name) == 0:
             return False, None
@@ -192,10 +194,16 @@ class Clickhouse:
     job_id: str
     _columns: List[str] = None
     _d: int = None
+    lock: pottery.Redlock = None
+
+    def __post_init__(self):
+        self.lock = pottery.Redlock(
+            key=f"{self.host}/{self.job_id}/next_lock", masters={self.redis_con}
+        )
 
     @property
     def store(self):
-        return ClickhouseStore(self.client)
+        return ClickhouseStore(self.client, self.job_id)
 
     def dimension(self):
         if self._d is None:
@@ -207,7 +215,7 @@ class Clickhouse:
     def columns(self):
         if self._columns is None:
             self._columns = _query_df(
-                self.client, "select * from tiles limit 1"
+                self.client, f"select * from {self.job_id}.tiles limit 1"
             ).columns
         return self._columns
 
@@ -217,68 +225,81 @@ class Clickhouse:
             self.client,
             f"""
             select {cols},
-                and(active=true, (id not in (select id from tiles_inactive))) as active,
-                and(eligible=true, (id not in (select id from work))) as eligible
+                and(active=true,
+                    (id not in (select id from {self.job_id}.tiles_inactive)))
+                    as active,
+                and(eligible=true,
+                    (id not in (select id from {self.job_id}.tiles_work)))
+                    as eligible
             from tiles
         """,
         )
 
-    def write(self, df):
-        _insert_df(self.client, "tiles", df)
+    def write(self, df, client=None):
+        if client is None:
+            client = self.client
+        _insert_df(client, "tiles", df)
 
     def worst_tile(self, order_col):
         return _query_df(
             self.client,
             f"""
-            select * from tiles where
+            select * from {self.job_id}.tiles where
                 active=true
-                and id not in (select * from tiles_inactive)
+                and id not in (select * from {self.job_id}.tiles_inactive)
             order by {order_col} limit 1
         """,
         )
 
-    def next(self, n, order_col, worker_id):
-        lock = pottery.Redlock(
-            key=f"{self.host}/{self.job_id}/lock", masters={self.redis_con}
-        )
-        with lock:
-            out = _query_df(
-                self.client,
-                f"""
-                select * from tiles where
-                    eligible=true
-                    and id not in (select id from work)
-                order by {order_col} asc limit {n}
-            """,
-            )
-            T = time.time()
-            out["time"] = T
-            out["worker_id"] = worker_id
-            _insert_df(self.client, "work", out[["id", "time", "worker_id"]])
+    def get_active_packet_id(self):
+        q = f"select max(packet_id) from {self.job_id}.tiles_packet"
+        return self.client.query(q).result_set[0][0]
 
-        # No need to check for conflicts because we are using a lock but if we
-        # were to check for conflicts, it would look something like this
-        # conflicts = _query_df(
-        # self.client,
-        #     f"""
-        #     with mine as (
-        #         select id, time from work where
-        #             worker_id={self.worker_id}
-        #             and time={T}
-        #     )
-        #     select worker_id, time from work
-        #         join mine on (
-        #             work.id=mine.id
-        #             and work.worker_id != {self.worker_id}
-        #         )
-        #         where work.time <= mine.time
-        # """
-        # )
-        # assert conflicts.shape[0] == 0
+    def n_tiles_left_in_packet(self, packet_id):
+        return self.client.query(
+            f"""
+        select count(*) from {self.job_id}.tiles_packet
+            where packet_id = {packet_id}
+                and id not in (select id from {self.job_id}.tiles_done)
+        """
+        ).result_set[0][0]
+
+    def new_packet(self, new_packet_id, n, order_col):
+        df = _query_df(
+            self.client,
+            f"""
+            select id from {self.job_id}.tiles where
+                and id not in (select id from {self.job_id}.tiles_done)
+            order by {order_col} asc limit {n}
+        """,
+        )
+        df["packet_id"] = new_packet_id
+        _insert_df(self.client, f"{self.job_id}.tiles_packet", df)
+
+    def next(self, packet_id, n, order_col, worker_id):
+        out = _query_df(
+            self.client,
+            f"""
+            select * from {self.job_id}.tiles where
+                id in (select id from {self.job_id}.tiles_packet
+                    where packet_id={packet_id})
+                and id not in (select id from {self.job_id}.tiles_work)
+            order by {order_col} asc limit {n}
+        """,
+        )
+        T = time.time()
+        out["time"] = T
+        out["worker_id"] = worker_id
+        out["packet_id"] = packet_id
+        _insert_df(
+            self.client,
+            f"{self.job_id}.tiles_work",
+            out[["packet_id", "id", "time", "worker_id"]],
+        )
         return out
 
     def finish(self, which):
-        _insert_df(self.client, "tiles_inactive", which.loc[~which["active"]][["id"]])
+        _insert_df(self.client, f"{self.job_id}.tiles_done", which[["id", "active"]])
 
     def bootstrap_lamss(self):
         # Get the number of bootstrap lambda* columns
@@ -288,7 +309,7 @@ class Clickhouse:
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
         lamss = self.client.query(
             f"""
-            select {cols} from tiles where
+            select {cols} from {self.job_id}.tiles where
                 active=true
                 and id not in (select id from tiles_inactive)
         """
@@ -300,29 +321,41 @@ class Clickhouse:
         self.client.close()
 
     def init_tiles(self, df):
+        # tables:
+        # - tiles: id, lots of other stuff...
+        # - packet: id
+        # - work: id
+        # - done: id, active
+        # - inactive: materialized view based on done
         cols = get_create_table_cols(df)
         orderby = "orderer" if "orderer" in df.columns else "id"
-        self.client.command(
-            f"""
-            create table tiles ({",".join(cols)})
-                engine = MergeTree() order by {orderby}
-        """
-        )
-
         id_type = type_map[df["id"].dtype.name]
-        self.client.command(
+        commands = [
             f"""
-            create table tiles_inactive (id {id_type})
+            create table {self.job_id}.tiles ({",".join(cols)})
+                engine = MergeTree() order by {orderby}
+            """,
+            f"""
+            create table {self.job_id}.tiles_packet (packet_id UInt32, id {id_type})
+                engine = MergeTree() order by (packet_id, id)
+            """,
+            f"""
+            create table {self.job_id}.tiles_work
+                (packet_id UInt32, id {id_type}, time Float64, worker_id UInt32)
+                engine = MergeTree() order by (packet_id, id)
+            """,
+            f"""
+            create table {self.job_id}.tiles_done (id {id_type}, active Bool)
                 engine = MergeTree() order by id
-            """
-        )
-        self.client.command(
+            """,
             f"""
-            create table work
-                (id {id_type}, time Float64, worker_id UInt32)
-                engine = MergeTree() order by (worker_id, id)
-            """
-        )
+            create materialized view {self.job_id}.tiles_inactive
+                engine = MergeTree() order by id
+                as select id from {self.job_id}.tiles_done where active=false
+            """,
+        ]
+        for c in commands:
+            self.client.command(c)
         self.write(df)
 
     def new_worker(self):
@@ -399,16 +432,14 @@ class Clickhouse:
                 raise RuntimeError(
                     "To run a production job, please choose an explicit unique job_id."
                 )
-            client = clickhouse_connect.get_client(**config)
-            job_id = find_unique_job_id(client)
-        else:
-            client = clickhouse_connect.get_client(**config)
+            job_id = uuid.uuid4().hex
 
         # Create job_id database if it doesn't exist
+        client = clickhouse_connect.get_client(**config)
         client.command(f"create database if not exists {job_id}")
 
         connection_details = get_ch_config(host, port, username, password, job_id)
-        client = clickhouse_connect.get_client(**connection_details)
+
         redis_con = redis.Redis(
             **get_redis_config(redis_host, redis_port, redis_password)
         )
@@ -469,7 +500,7 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
             password = keyring.get_password(
                 "clickhouse-confirm-test-password", os.environ["USER"]
             )
-    print(f"Connecting to {host}:{port}/{database} as {username}.")
+    # print(f"Connecting to {host}:{port}/{database} as {username}.")
     return dict(
         host=host, port=port, username=username, password=password, database=database
     )
@@ -480,25 +511,6 @@ def get_ch_test_host():
         return os.environ["CLICKHOUSE_TEST_HOST"]
     else:
         return keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
-
-
-def find_unique_job_id(client, attempts=3):
-    for i in range(attempts):
-        job_id = uuid.uuid4().hex
-        query = (
-            "select * from information_schema.schemata"
-            f"  where schema_name = '{job_id}'"
-        )
-        df = client.query_df(query)
-        if df.shape[0] == 0:
-            break
-
-        print("OMG WOW UUID COLLISION. GO TELL YOUR FRIENDS.")
-        if i == attempts - 1:
-            raise Exception(
-                "Could not find a unique job id." " This should never happen"
-            )
-    return job_id
 
 
 def clear_dbs(client, names=None, yes=False):

@@ -225,6 +225,58 @@ class AdaCalibrationDriver:
         g_calibrated = g.add_cols(lams_df)
         return g_calibrated
 
+    def convergence_criterion(self, any_impossible, report):
+        ########################################
+        # Step 2: Convergence criterion! In terms of:
+        # - bias
+        # - standard deviation
+        # - grid cost (i.e. alpha - alpha0)
+        #
+        # The bias and standard deviation are calculated using the bootstrap.
+        ########################################
+        if any_impossible:
+            return False
+
+        worst_tile = self.db.worst_tile("lams")
+        lamss = worst_tile["lams"].iloc[0]
+
+        # We determine the bias by comparing the Type I error at the worst
+        # tile for each lambda**_B:
+        B_lamss = self.db.bootstrap_lamss()
+        worst_tile_tie_sum = self.many_rej(
+            worst_tile, np.array([lamss] + list(B_lamss))
+        ).iloc[0][0]
+        worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
+
+        # Given these TIE values, we can compute bias, standard deviation and
+        # spread.
+        bias_tie = worst_tile_tie_est[0] - worst_tile_tie_est[1:].mean()
+        std_tie = worst_tile_tie_est.std()
+        spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
+        grid_cost = worst_tile["grid_cost"].iloc[0]
+
+        report.update(
+            dict(
+                bias_tie=bias_tie,
+                std_tie=std_tie,
+                spread_tie=spread_tie,
+                grid_cost=grid_cost,
+                lamss=lamss,
+            )
+        )
+        report["min(B_lamss)"] = min(B_lamss)
+        report["max(B_lamss)"] = max(B_lamss)
+        report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
+        report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
+
+        # The convergence criterion itself.
+        report["converged"] = (
+            (bias_tie < self.bias_target)
+            and (std_tie < self.std_target)
+            and (grid_cost < self.grid_target)
+        )
+        return report["converged"]
+
     def step(self, i):
         """
         One iteration of the adagrid algorithm.
@@ -237,7 +289,7 @@ class AdaCalibrationDriver:
             report: A dictionary of information about the iteration.
         """
 
-        start_convergence = time.time()
+        start_get_work = time.time()
         report = dict(i=i)
 
         ########################################
@@ -245,64 +297,34 @@ class AdaCalibrationDriver:
         # checking for convergence because part of the convergence criterion is
         # whether there are any impossible tiles.
         ########################################
-        work = self.db.next(self.iter_size, "orderer", self.c.worker_id)
+        with self.db.lock:
+            packet_id = self.db.get_active_packet_id()
+            work = self.db.next(packet_id, self.iter_size, "orderer", self.c.worker_id)
+            report["n_impossible"] = work["impossible"].sum()
+            report["runtime_get_work"] = time.time() - start_get_work
 
-        if work["impossible"].any():
-            done = False
-
-        else:
-            ########################################
-            # Step 2: Convergence criterion! In terms of:
-            # - bias
-            # - standard deviation
-            # - grid cost (i.e. alpha - alpha0)
-            #
-            # The bias and standard deviation are calculated using the bootstrap.
-            ########################################
-            worst_tile = self.db.worst_tile("lams")
-            lamss = worst_tile["lams"].iloc[0]
-
-            # We determine the bias by comparing the Type I error at the worst
-            # tile for each lambda**_B:
-            B_lamss = self.db.bootstrap_lamss()
-            worst_tile_tie_sum = self.many_rej(
-                worst_tile, np.array([lamss] + list(B_lamss))
-            ).iloc[0][0]
-            worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
-
-            # Given these TIE values, we can compute bias, standard deviation and
-            # spread.
-            bias_tie = worst_tile_tie_est[0] - worst_tile_tie_est[1:].mean()
-            std_tie = worst_tile_tie_est.std()
-            spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
-            grid_cost = worst_tile["grid_cost"].iloc[0]
-
-            # The convergence criterion itself.
-            done = (
-                (bias_tie < self.bias_target)
-                and (std_tie < self.std_target)
-                and (grid_cost < self.grid_target)
-                # if there are any impossible tiles left, we keep going!
-                and (~work["impossible"]).all()
-            )
-            report.update(
-                dict(
-                    bias_tie=bias_tie,
-                    std_tie=std_tie,
-                    spread_tie=spread_tie,
-                    grid_cost=grid_cost,
-                    lamss=lamss,
-                )
-            )
-            report["min(B_lamss)"] = min(B_lamss)
-            report["max(B_lamss)"] = max(B_lamss)
-            report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
-            report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
-
-        report["n_impossible"] = work["impossible"].sum()
-        report["runtime_convergence_check"] = time.time() - start_convergence
-        if done:
-            return True, report
+            if work.shape[0] == 0:
+                if self.db.n_tiles_left_in_packet(packet_id) == 0:
+                    start_convergence = time.time()
+                    done = self.convergence_criterion(work["impossible"].any(), report)
+                    report["runtime_convergence_check"] = (
+                        time.time() - start_convergence
+                    )
+                    if done:
+                        report["desc"] = "converged"
+                        # TODO: stop other workers? or just let them figure it out?
+                        return True, report
+                    start_new_packet = time.time()
+                    self.db.new_packet(packet_id + 1, self.packet_size, "orderer")
+                    report["runtime_new_packet"] = time.time() - start_new_packet
+                    report["desc"] = "new_packet"
+                    return False, report
+                else:
+                    # TODO: should this be configurable?
+                    time.sleep(5)
+                    report["desc"] = "waiting"
+                    return False, report
+        report["desc"] = "working"
 
         ########################################
         # Step 4: Is deepening likely to be enough?
@@ -452,7 +474,10 @@ def _get_nvidia_smi() -> str:
 
 
 def _get_pip_freeze() -> str:
-    return _run(["pip", "freeze"])
+    from pip._internal.operations import freeze
+
+    pkgs = freeze.freeze()
+    return "\n".join(list(pkgs))
 
 
 def _get_conda_list() -> str:
@@ -473,8 +498,10 @@ calibration_defaults = dict(
     bias_target=0.001,
     std_target=0.002,
     calibration_min_idx=40,
-    iter_size=2**10,
+    packet_size=2**12,
+    iter_size=2**9,
     n_iter=100,
+    prod=True,
     worker_id=None,
     git_hash=None,
     git_diff=None,
@@ -506,8 +533,10 @@ class CalibrationConfig:
     bias_target: float
     std_target: float
     calibration_min_idx: int
+    packet_size: int
     iter_size: int
     n_iter: int
+    prod: bool
     worker_id: int
     git_hash: str = None
     git_diff: str = None
@@ -522,8 +551,12 @@ class CalibrationConfig:
         self.git_diff = _get_git_diff()
         self.platform = platform.platform()
         self.nvidia_smi = _get_nvidia_smi()
-        self.pip_freeze = _get_pip_freeze()
-        self.conda_list = _get_conda_list()
+        if self.prod:
+            self.pip_freeze = _get_pip_freeze()
+            self.conda_list = _get_conda_list()
+        else:
+            self.pip_freeze = "skipped for non-prod run"
+            self.conda_list = "skipped for non-prod run"
 
         self.tile_batch_size = self.tile_batch_size or (
             64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
@@ -603,8 +636,10 @@ def ada_calibrate(
     bias_target: float = None,
     std_target: float = None,
     calibration_min_idx: int = None,
+    packet_size: int = None,
     iter_size: int = None,
     n_iter: int = None,
+    prod: bool = True,
     callback=print_report,
 ):
     """
@@ -632,6 +667,10 @@ def ada_calibrate(
         std_target: Part of the stopping criterion: the target standard
                     deviation of the type I error as calculated by the
                     bootstrap. Defaults to 0.002.
+        packet_size: The number of tiles in a "packet" produced by a single
+                     Adagrid tile selection step. This is different from
+                     iter_size because we select tiles once and then run many
+                     "iterations" in parallel to process those tiles.
         iter_size: The number of tiles to process per iteration. Defaults to 2**10.
         calibration_min_idx: The minimum calibration selection index. We enforce that:
                         `alpha0 >= (calibration_min_idx + 1) / (K + 1)`
@@ -640,6 +679,8 @@ def ada_calibrate(
                         alpha0 will need to be larger. Defaults to 40.
         n_iter: The number of adagrid iterations to run.
                 Defaults to 100.
+        prod: Is this a production run? If so, we will collection extra system
+              configuration info.
         callback: A function accepting three arguments (ada_iter, report, ada)
                   that can perform some reporting or printing at each iteration.
                   Defaults to print_report.
@@ -682,8 +723,10 @@ def ada_calibrate(
         bias_target,
         std_target,
         calibration_min_idx,
+        packet_size,
         iter_size,
         n_iter,
+        prod,
         worker_id,
         defaults=defaults,
     )
