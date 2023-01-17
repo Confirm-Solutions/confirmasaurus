@@ -38,7 +38,7 @@ optional = true
 optional = true
 
 [tool.poetry.group.cloud.dependencies]
-clickhouse-connect = "^0.4.6"
+clickhouse-connect = "^0.5.0"
 redis = "^4.3.5"
 pyarrow = "^10.0.1"
 cloudpickle = "~2.0"
