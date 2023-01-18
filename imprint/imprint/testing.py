@@ -135,10 +135,14 @@ class SnapshotAssertion:
         self.request = request
         self.default_serializer = default_serializer
         self.calls = 0
+        self.test_name = None
+
+    def set_test_name(self, test_name):
+        self.test_name = test_name
 
     def _get_filebase(self):
         test_folder = Path(self.request.fspath).parent
-        test_name = self.request.node.name
+        test_name = self.request.node.name if self.test_name is None else self.test_name
         return test_folder.joinpath("__snapshot__", test_name + f"_{self.calls}")
 
     def get(self, obj, serializer=None):

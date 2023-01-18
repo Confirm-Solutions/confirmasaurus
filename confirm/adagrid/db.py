@@ -1,3 +1,4 @@
+import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
@@ -23,6 +24,8 @@ class PandasTiles:
     df: pd.DataFrame = None
     _next_worker_id: int = 0
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    lock = contextlib.suppress()
+    use_packets = False
 
     @property
     def store(self):
@@ -37,7 +40,10 @@ class PandasTiles:
     def get_all(self):
         return self.df
 
-    def next(self, n, order_col, worker_id):
+    def write(self, df):
+        self.df = pd.concat((self.df, df), axis=0, ignore_index=True)
+
+    def next(self, packet_id, n, order_col, worker_id):
         out = self.df.loc[self.df["eligible"]].nsmallest(n, order_col)
         self.df.loc[out.index, "eligible"] = False
         return out
@@ -53,9 +59,6 @@ class PandasTiles:
     def worst_tile(self, order_col):
         active_tiles = self.df.loc[self.df["active"]]
         return active_tiles.loc[[active_tiles[order_col].idxmin()]]
-
-    def write(self, df):
-        self.df = pd.concat((self.df, df), axis=0, ignore_index=True)
 
     def init_tiles(self, df):
         self.df = df.reset_index(drop=True)
@@ -80,6 +83,8 @@ class DuckDBTiles:
     _columns: List[str] = None
     _d: int = None
     store: DuckDBStore = None
+    lock = contextlib.suppress()
+    use_packets = False
 
     def __post_init__(self):
         self.store = DuckDBStore(self.con)
@@ -103,7 +108,7 @@ class DuckDBTiles:
         column_order = ",".join(self.columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
-    def next(self, n, order_col, worker_id):
+    def next(self, _, n, order_col, worker_id, convergence_f):
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
         t = self.con.begin()
@@ -113,6 +118,7 @@ class DuckDBTiles:
         ).df()
         t.execute("update tiles set eligible=false where id in (select id from out)")
         t.commit()
+        convergence_f()
         return out
 
     def finish(self, which):

@@ -1,3 +1,12 @@
+"""
+Some notes I don't want to lose:
+
+Speeding up clickhouse stuff by using threading and specifying column_types:
+    https://clickhousedb.slack.com/archives/CU478UEQZ/p1673560678632889
+
+Fast min/max with clickhouse:
+    https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
+"""
 import os
 import time
 import uuid
@@ -25,6 +34,10 @@ import redis
 
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 type_map = {
     "uint32": "UInt32",
@@ -76,8 +89,8 @@ class ClickhouseStore(Store):
 
     def __post_init__(self):
         self.client.command(
-            f"""
-            create table if not exists {self.job_id}.store_tables
+            """
+            create table if not exists store_tables
                 (key String, table_name String)
                 order by key
             """
@@ -85,16 +98,16 @@ class ClickhouseStore(Store):
 
     def get(self, key):
         exists, table_name = self._exists(key)
-        print(exists, table_name)
+        logger.debug(f"get({key}) -> {exists} {table_name}")
         if exists:
-            return _query_df(self.client, f"select * from {self.job_id}.{table_name}")
+            return _query_df(self.client, f"select * from {table_name}")
         else:
             raise KeyError(f"Key {key} not found in store")
 
     def set(self, key, df, nickname=None):
         exists, table_name = self._exists(key)
         if exists:
-            self.client.command(f"drop table {self.job_id}.{table_name}")
+            self.client.command(f"drop table {table_name}")
         else:
             table_id = uuid.uuid4().hex
             if is_table_name(key):
@@ -106,15 +119,16 @@ class ClickhouseStore(Store):
                     else f"_store_{table_id}"
                 )
             self.client.command(
-                f"insert into {self.job_id}.store_tables values (%s, %s)",
+                "insert into store_tables values (%s, %s)",
                 (key, table_name),
             )
+        logger.debug(f"set({key}) -> {exists} {table_name}")
         cols = get_create_table_cols(df)
         # if "id" not in df.columns:
         #     df["id"] = df.index
         self.client.command(
             f"""
-            create table {self.job_id}.{table_name} ({",".join(cols)})
+            create table {table_name} ({",".join(cols)})
                 engine = MergeTree() order by tuple()
         """
         )
@@ -122,15 +136,15 @@ class ClickhouseStore(Store):
 
     def set_or_append(self, key, df):
         exists, table_name = self._exists(key)
+        logger.debug(f"set_or_append({key}) -> {exists} {table_name}")
         if exists:
-            print("exists", table_name, df)
             _insert_df(self.client, table_name, df)
         else:
             self.set(key, df)
 
     def _exists(self, key):
         table_name = self.client.query(
-            f"select table_name from {self.job_id}.store_tables where key = %s", (key,)
+            "select table_name from store_tables where key = %s", (key,)
         ).result_set
         if len(table_name) == 0:
             return False, None
@@ -138,7 +152,9 @@ class ClickhouseStore(Store):
             return True, table_name[0][0]
 
     def exists(self, key):
-        return self._exists(key)[0]
+        out = self._exists(key)[0]
+        logger.debug(f"exists({key}) = {out}")
+        return out
 
 
 @dataclass
@@ -146,7 +162,7 @@ class Clickhouse:
     """
     A tile database built on top of Clickhouse. This should be very fast and
     robust and is preferred for large runs. Latency will be worse than with
-    DuckDB because a network request will be required for each query.
+    DuckDB because network requests will be required for each query.
 
     See the DuckDBTiles or PandasTiles implementations for details on the
     Adagrid tile database interface.
@@ -161,15 +177,16 @@ class Clickhouse:
 
     active: True if the tile is a leaf in the tile tree. Specified in two ways
         - the "active" column in the tiles table
-        - the "tiles_inactive" table, which contains tiles that are inactive
+        - the "tiles_done" table, which contains a column indicating which
+          tiles are inactive.
         - a tile is only active is active=True and id not in tiles_inactive
 
     eligible: True if the tile is eligible to be selected for work. Specified in
          two ways
         - the "eligibile" column in the tiles table
-        - the "work" table, which contains tiles that are ineligible because
-          they either are being worked on or have been worked on
-        - a tile is only eligible if eligible=True and id not in tiles_ineligible
+        - the "tiles_work" table, which contains tiles that are ineligible
+          because they either are being worked on or have been worked on
+        - a tile is only eligible if eligible=True and id not in tiles_work
 
     The reason for these dual sources of information is the desire to only
     rarely update rows that have already been written. Updating data is painful
@@ -178,6 +195,11 @@ class Clickhouse:
     would reduce the size of the subqueries and probably improve performance
     for very large jobs. But, this flushing would probably only need to happen
     once every few hours.
+
+    Packets: A packet is a distributed unit of work. We check the convergence
+    criterion once an entire packet of work is done. This removes data race
+    conditions where one worker might finish work before or after another thus
+    affecting the convergence criterion and tile selection process.
 
     NOTE: A tile may be active but ineligible if it was selected for work but the
     criterion decided it was not worth refining or deepening.
@@ -195,6 +217,7 @@ class Clickhouse:
     _columns: List[str] = None
     _d: int = None
     lock: pottery.Redlock = None
+    use_packets = True
 
     def __post_init__(self):
         self.lock = pottery.Redlock(
@@ -215,7 +238,7 @@ class Clickhouse:
     def columns(self):
         if self._columns is None:
             self._columns = _query_df(
-                self.client, f"select * from {self.job_id}.tiles limit 1"
+                self.client, "select * from tiles limit 1"
             ).columns
         return self._columns
 
@@ -226,10 +249,10 @@ class Clickhouse:
             f"""
             select {cols},
                 and(active=true,
-                    (id not in (select id from {self.job_id}.tiles_inactive)))
+                    (id not in (select id from tiles_inactive)))
                     as active,
                 and(eligible=true,
-                    (id not in (select id from {self.job_id}.tiles_work)))
+                    (id not in (select id from tiles_work)))
                     as eligible
             from tiles
         """,
@@ -244,23 +267,23 @@ class Clickhouse:
         return _query_df(
             self.client,
             f"""
-            select * from {self.job_id}.tiles where
+            select * from tiles where
                 active=true
-                and id not in (select * from {self.job_id}.tiles_inactive)
+                and id not in (select * from tiles_inactive)
             order by {order_col} limit 1
         """,
         )
 
     def get_active_packet_id(self):
-        q = f"select max(packet_id) from {self.job_id}.tiles_packet"
+        q = "select max(packet_id) from tiles_packet"
         return self.client.query(q).result_set[0][0]
 
     def n_tiles_left_in_packet(self, packet_id):
         return self.client.query(
             f"""
-        select count(*) from {self.job_id}.tiles_packet
+        select count(*) from tiles_packet
             where packet_id = {packet_id}
-                and id not in (select id from {self.job_id}.tiles_done)
+                and id not in (select id from tiles_done)
         """
         ).result_set[0][0]
 
@@ -268,22 +291,22 @@ class Clickhouse:
         df = _query_df(
             self.client,
             f"""
-            select id from {self.job_id}.tiles where
-                and id not in (select id from {self.job_id}.tiles_done)
+            select id from tiles where
+                id not in (select id from tiles_done)
             order by {order_col} asc limit {n}
         """,
         )
         df["packet_id"] = new_packet_id
-        _insert_df(self.client, f"{self.job_id}.tiles_packet", df)
+        _insert_df(self.client, "tiles_packet", df)
 
     def next(self, packet_id, n, order_col, worker_id):
         out = _query_df(
             self.client,
             f"""
-            select * from {self.job_id}.tiles where
-                id in (select id from {self.job_id}.tiles_packet
+            select * from tiles where
+                id in (select id from tiles_packet
                     where packet_id={packet_id})
-                and id not in (select id from {self.job_id}.tiles_work)
+                and id not in (select id from tiles_work)
             order by {order_col} asc limit {n}
         """,
         )
@@ -293,13 +316,13 @@ class Clickhouse:
         out["packet_id"] = packet_id
         _insert_df(
             self.client,
-            f"{self.job_id}.tiles_work",
+            "tiles_work",
             out[["packet_id", "id", "time", "worker_id"]],
         )
         return out
 
     def finish(self, which):
-        _insert_df(self.client, f"{self.job_id}.tiles_done", which[["id", "active"]])
+        _insert_df(self.client, "tiles_done", which[["id", "active"]])
 
     def bootstrap_lamss(self):
         # Get the number of bootstrap lambda* columns
@@ -309,7 +332,7 @@ class Clickhouse:
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
         lamss = self.client.query(
             f"""
-            select {cols} from {self.job_id}.tiles where
+            select {cols} from tiles where
                 active=true
                 and id not in (select id from tiles_inactive)
         """
@@ -332,26 +355,26 @@ class Clickhouse:
         id_type = type_map[df["id"].dtype.name]
         commands = [
             f"""
-            create table {self.job_id}.tiles ({",".join(cols)})
+            create table tiles ({",".join(cols)})
                 engine = MergeTree() order by {orderby}
             """,
             f"""
-            create table {self.job_id}.tiles_packet (packet_id UInt32, id {id_type})
+            create table tiles_packet (packet_id UInt32, id {id_type})
                 engine = MergeTree() order by (packet_id, id)
             """,
             f"""
-            create table {self.job_id}.tiles_work
+            create table tiles_work
                 (packet_id UInt32, id {id_type}, time Float64, worker_id UInt32)
                 engine = MergeTree() order by (packet_id, id)
             """,
             f"""
-            create table {self.job_id}.tiles_done (id {id_type}, active Bool)
+            create table tiles_done (id {id_type}, active Bool)
                 engine = MergeTree() order by id
             """,
-            f"""
-            create materialized view {self.job_id}.tiles_inactive
+            """
+            create materialized view tiles_inactive
                 engine = MergeTree() order by id
-                as select id from {self.job_id}.tiles_done where active=false
+                as select id from tiles_done where active=false
             """,
         ]
         for c in commands:
@@ -439,11 +462,12 @@ class Clickhouse:
         client.command(f"create database if not exists {job_id}")
 
         connection_details = get_ch_config(host, port, username, password, job_id)
+        client = clickhouse_connect.get_client(**connection_details)
 
         redis_con = redis.Redis(
             **get_redis_config(redis_host, redis_port, redis_password)
         )
-        print(f"Connected to job {job_id}")
+        logger.info(f"Connected to job {job_id}")
         return Clickhouse(
             connection_details, client, redis_con, connection_details["host"], job_id
         )
@@ -500,7 +524,7 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
             password = keyring.get_password(
                 "clickhouse-confirm-test-password", os.environ["USER"]
             )
-    # print(f"Connecting to {host}:{port}/{database} as {username}.")
+    logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
         host=host, port=port, username=username, password=password, database=database
     )

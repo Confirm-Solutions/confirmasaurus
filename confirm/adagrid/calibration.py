@@ -303,28 +303,32 @@ class AdaCalibrationDriver:
             report["n_impossible"] = work["impossible"].sum()
             report["runtime_get_work"] = time.time() - start_get_work
 
-            if work.shape[0] == 0:
-                if self.db.n_tiles_left_in_packet(packet_id) == 0:
-                    start_convergence = time.time()
-                    done = self.convergence_criterion(work["impossible"].any(), report)
-                    report["runtime_convergence_check"] = (
-                        time.time() - start_convergence
-                    )
-                    if done:
-                        report["desc"] = "converged"
-                        # TODO: stop other workers? or just let them figure it out?
-                        return True, report
-                    start_new_packet = time.time()
-                    self.db.new_packet(packet_id + 1, self.packet_size, "orderer")
-                    report["runtime_new_packet"] = time.time() - start_new_packet
-                    report["desc"] = "new_packet"
+            if self.db.n_tiles_left_in_packet(packet_id) == 0:
+                start_convergence = time.time()
+                done = self.convergence_criterion(work["impossible"].any(), report)
+                report["runtime_convergence_check"] = time.time() - start_convergence
+                if done:
+                    report["desc"] = "converged"
+                    # TODO: stop other workers? or just let them figure it out?
+                    return True, report
+                start_new_packet = time.time()
+                self.db.new_packet(packet_id + 1, self.c.packet_size, "orderer")
+                report["runtime_new_packet"] = time.time() - start_new_packet
+                report["desc"] = "new_packet"
+                if work.shape[0] == 0:
                     return False, report
                 else:
-                    # TODO: should this be configurable?
-                    time.sleep(5)
-                    report["desc"] = "waiting"
-                    return False, report
-        report["desc"] = "working"
+                    # This is a path that should not occur in a distributed
+                    # setting. But, in a serial setting, we check convergence
+                    # at each iteration.
+                    report["desc"] = "working"
+            elif work.shape[0] == 0:
+                # TODO: should this sleep time be configurable?
+                time.sleep(5)
+                report["desc"] = "waiting"
+                return False, report
+            else:
+                report["desc"] = "working"
 
         ########################################
         # Step 4: Is deepening likely to be enough?

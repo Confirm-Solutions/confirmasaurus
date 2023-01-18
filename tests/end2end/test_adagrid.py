@@ -9,7 +9,7 @@ import imprint as ip
 from imprint.models.ztest import ZTest1D
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 @mock.patch("imprint.timer._timer", ip.timer.new_mock_timer())
 def test_adagrid(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
@@ -46,8 +46,9 @@ def test_adagrid(snapshot):
     )
 
 
-@pytest.mark.slow
+# @pytest.mark.slow
 def test_adagrid_clickhouse(snapshot):
+    snapshot.set_test_name("test_adagrid")
     import confirm.cloud.clickhouse as ch
 
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
