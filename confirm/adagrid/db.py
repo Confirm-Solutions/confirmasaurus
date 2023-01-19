@@ -1,4 +1,3 @@
-import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
@@ -7,8 +6,22 @@ from typing import List
 import duckdb
 import pandas as pd
 
+from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.store import DuckDBStore
 from confirm.adagrid.store import PandasStore
+
+
+def serial_next(db, convergence_f, packet_size, iter_size, order_col, worker_id):
+    work = db.get_work(iter_size, order_col, worker_id)
+
+    if convergence_f(work):
+        status = WorkerStatus.CONVERGED
+    elif work.shape[0] == 0:
+        status = WorkerStatus.FAILED
+    else:
+        status = WorkerStatus.INCOMPLETE
+
+    return status, work
 
 
 @dataclass
@@ -24,8 +37,8 @@ class PandasTiles:
     df: pd.DataFrame = None
     _next_worker_id: int = 0
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
-    lock = contextlib.suppress()
     use_packets = False
+    next = serial_next
 
     @property
     def store(self):
@@ -43,8 +56,8 @@ class PandasTiles:
     def write(self, df):
         self.df = pd.concat((self.df, df), axis=0, ignore_index=True)
 
-    def next(self, packet_id, n, order_col, worker_id):
-        out = self.df.loc[self.df["eligible"]].nsmallest(n, order_col)
+    def get_work(self, iter_size, order_col, _):
+        out = self.df.loc[self.df["eligible"]].nsmallest(iter_size, order_col)
         self.df.loc[out.index, "eligible"] = False
         return out
 
@@ -83,8 +96,8 @@ class DuckDBTiles:
     _columns: List[str] = None
     _d: int = None
     store: DuckDBStore = None
-    lock = contextlib.suppress()
     use_packets = False
+    next = serial_next
 
     def __post_init__(self):
         self.store = DuckDBStore(self.con)
@@ -108,7 +121,7 @@ class DuckDBTiles:
         column_order = ",".join(self.columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
-    def next(self, _, n, order_col, worker_id, convergence_f):
+    def get_work(self, n, order_col, _):
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
         t = self.con.begin()
@@ -118,7 +131,6 @@ class DuckDBTiles:
         ).df()
         t.execute("update tiles set eligible=false where id in (select id from out)")
         t.commit()
-        convergence_f()
         return out
 
     def finish(self, which):

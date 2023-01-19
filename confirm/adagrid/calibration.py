@@ -57,6 +57,7 @@ import numpy as np
 import pandas as pd
 
 from .db import DuckDBTiles
+from confirm.adagrid.convergence import WorkerStatus
 from imprint import batching
 from imprint import driver
 from imprint import grid
@@ -281,54 +282,46 @@ class AdaCalibrationDriver:
         """
         One iteration of the adagrid algorithm.
 
+        Parallelization:
+        There are four main portions of the adagrid algo:
+        - Convergence criterion --> serialize to avoid data races.
+        - Tile selection --> serialize to avoid data races.
+        - Deciding whether to refine or deepen --> parallelize.
+        - Simulation and CSE --> parallelize.
+        By using a distributed lock around the convergence/tile selection, we can have
+        equality between workers and not need to have a leader node.
+
         Args:
             i: The iteration number.
 
         Returns:
-            done: True if the algorithm has converged.
+            done: A value from the Enum Convergence:
+                 (INCOMPLETE, CONVERGED, FAILED).
             report: A dictionary of information about the iteration.
         """
 
         start_get_work = time.time()
-        report = dict(i=i)
+        report = dict(i=i, worker_id=self.c.worker_id)
 
         ########################################
         # Step 1: Get the next batch of tiles to process. We do this before
         # checking for convergence because part of the convergence criterion is
         # whether there are any impossible tiles.
         ########################################
-        with self.db.lock:
-            packet_id = self.db.get_active_packet_id()
-            work = self.db.next(packet_id, self.iter_size, "orderer", self.c.worker_id)
-            report["n_impossible"] = work["impossible"].sum()
-            report["runtime_get_work"] = time.time() - start_get_work
-
-            if self.db.n_tiles_left_in_packet(packet_id) == 0:
-                start_convergence = time.time()
-                done = self.convergence_criterion(work["impossible"].any(), report)
-                report["runtime_convergence_check"] = time.time() - start_convergence
-                if done:
-                    report["desc"] = "converged"
-                    # TODO: stop other workers? or just let them figure it out?
-                    return True, report
-                start_new_packet = time.time()
-                self.db.new_packet(packet_id + 1, self.c.packet_size, "orderer")
-                report["runtime_new_packet"] = time.time() - start_new_packet
-                report["desc"] = "new_packet"
-                if work.shape[0] == 0:
-                    return False, report
-                else:
-                    # This is a path that should not occur in a distributed
-                    # setting. But, in a serial setting, we check convergence
-                    # at each iteration.
-                    report["desc"] = "working"
-            elif work.shape[0] == 0:
-                # TODO: should this sleep time be configurable?
-                time.sleep(5)
-                report["desc"] = "waiting"
-                return False, report
-            else:
-                report["desc"] = "working"
+        status, work, next_report = self.db.next(
+            lambda work: self.convergence_criterion(work["impossible"].any(), report),
+            self.c.packet_size,
+            self.c.iter_size,
+            "orderer",
+            self.c.worker_id,
+        )
+        report.update(next_report)
+        report["status"] = status.name
+        report["runtime_get_work"] = time.time() - start_get_work
+        if status == WorkerStatus.CONVERGED or status == WorkerStatus.FAILED:
+            # TODO: stop other workers? or just let them figure it out?
+            return status, report
+        report["n_impossible"] = work["impossible"].sum()
 
         ########################################
         # Step 4: Is deepening likely to be enough?
@@ -417,7 +410,7 @@ class AdaCalibrationDriver:
             )
         )
 
-        return False, report
+        return WorkerStatus.INCOMPLETE, report
 
 
 def refine_deepen(g, null_hypos, max_K):
@@ -478,10 +471,7 @@ def _get_nvidia_smi() -> str:
 
 
 def _get_pip_freeze() -> str:
-    from pip._internal.operations import freeze
-
-    pkgs = freeze.freeze()
-    return "\n".join(list(pkgs))
+    return _run(["pip", "freeze"])
 
 
 def _get_conda_list() -> str:
@@ -767,14 +757,17 @@ def ada_calibrate(
     # Run adagrid!
     ########################################
 
+    if c.n_iter == 0:
+        return 0, [], db
+
     reports = []
     for ada_iter in range(c.n_iter):
         try:
-            done, report = ada_driver.step(ada_iter)
+            status, report = ada_driver.step(ada_iter)
             if callback is not None:
                 callback(ada_iter, report, ada_driver)
             reports.append(report)
-            if done:
+            if status == WorkerStatus.CONVERGED or status == WorkerStatus.FAILED:
                 break
         except KeyboardInterrupt:
             print("KeyboardInterrupt")

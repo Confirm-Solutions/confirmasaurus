@@ -34,6 +34,7 @@ import redis
 
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
+from confirm.adagrid.convergence import WorkerStatus
 
 import logging
 
@@ -157,6 +158,64 @@ class ClickhouseStore(Store):
         return out
 
 
+def distributed_next(db, convergence_f, packet_size, iter_size, order_col, worker_id):
+    """
+    This is a distributed version of the next function. It is used to
+    distribute the tile processing work.
+
+    This is the crux of the distributed version of the algorithm.
+    """
+    # If we loop 25 times, there's definitely a bug.
+    max_loops = 25
+    i = 0
+    status = WorkerStatus.INCOMPLETE
+    report = dict()
+    while i < max_loops:
+        report["distributed_next_loop"] = i
+        with db.lock:
+            packet_id = db.get_active_packet_id()
+            report["packet_id"] = packet_id
+            work = db.get_work(packet_id, iter_size, order_col, worker_id)
+            report["work_extraction_time"] = time.time()
+            # If there's work, return it!
+            if work.shape[0] > 0:
+                return status, work, report
+
+            # If there's no work, we check if the packet is complete.
+            if db.n_tiles_left_in_packet(packet_id) == 0:
+                # If the packet is complete, we check for convergence.
+                status = convergence_f(work)
+                if status:
+                    return WorkerStatus.CONVERGED, work, report
+
+                # If we haven't converged, we create a new packet.
+                new_packet_id = packet_id + 1
+                db.new_packet(new_packet_id, packet_size, order_col)
+
+                if db.n_tiles_left_in_packet(new_packet_id) == 0:
+                    # New packet is empty so we have finished but failed to converge.
+                    return WorkerStatus.FAILED, work, report
+                else:
+                    # Successful new packet. We should check for work again
+                    # immediately.
+                    status = WorkerStatus.NEW_PACKET
+                    wait = False
+            else:
+                # No work available, but the packet is incomplete. We should
+                # release the lock and wait for other workers to finish.
+                wait = True
+        if wait:
+            # TODO: the sleep time should be configurable.
+            time.sleep(1)
+        if i > 2:
+            logger.warning(
+                f"Worker {worker_id} has been waiting for work for"
+                f" {i} iterations. This probably indicates a bug."
+            )
+        i += 1
+    return WorkerStatus.STUCK, work, report
+
+
 @dataclass
 class Clickhouse:
     """
@@ -212,17 +271,23 @@ class Clickhouse:
     connection_details: Dict[str, str]
     client: clickhouse_connect.driver.httpclient.HttpClient
     redis_con: redis.Redis
-    host: str
     job_id: str
     _columns: List[str] = None
     _d: int = None
-    lock: pottery.Redlock = None
-    use_packets = True
+    next = distributed_next
 
     def __post_init__(self):
         self.lock = pottery.Redlock(
             key=f"{self.host}/{self.job_id}/next_lock", masters={self.redis_con}
         )
+        self._redis_packet_id = pottery.NextId(
+            key=f"{self.host}/{self.job_id}/worker_id",
+            masters={self.redis_con},
+        )
+
+    @property
+    def host(self):
+        return self.connection_details["host"]
 
     @property
     def store(self):
@@ -275,8 +340,7 @@ class Clickhouse:
         )
 
     def get_active_packet_id(self):
-        q = "select max(packet_id) from tiles_packet"
-        return self.client.query(q).result_set[0][0]
+        return self._redis_packet_id.__current_id()
 
     def n_tiles_left_in_packet(self, packet_id):
         return self.client.query(
@@ -299,7 +363,7 @@ class Clickhouse:
         df["packet_id"] = new_packet_id
         _insert_df(self.client, "tiles_packet", df)
 
-    def next(self, packet_id, n, order_col, worker_id):
+    def get_work(self, packet_id, n, order_col, worker_id):
         out = _query_df(
             self.client,
             f"""
@@ -382,11 +446,10 @@ class Clickhouse:
         self.write(df)
 
     def new_worker(self):
-        host = self.connection_details["host"]
         worker_id = (
             next(
                 pottery.NextId(
-                    key=f"{host}/{self.job_id}/worker_id",
+                    key=f"{self.host}/{self.job_id}/worker_id",
                     masters={self.redis_con},
                 )
             )
@@ -468,9 +531,7 @@ class Clickhouse:
             **get_redis_config(redis_host, redis_port, redis_password)
         )
         logger.info(f"Connected to job {job_id}")
-        return Clickhouse(
-            connection_details, client, redis_con, connection_details["host"], job_id
-        )
+        return Clickhouse(connection_details, client, redis_con, job_id)
 
 
 def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):

@@ -37,7 +37,6 @@ def modalize(stub, **kwargs):
             retries=0,
             mounts=(modal.create_package_mounts(["confirm", "imprint"])),
             secret=modal.Secret.from_name("confirm-secrets"),
-            serialized=True,
             name=f.__qualname__,
             **kwargs,
         )()

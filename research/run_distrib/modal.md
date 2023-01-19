@@ -22,64 +22,141 @@ iter, reports, db = ada.ada_calibrate(
     packet_size=32,
     iter_size=32,
     grid_target=0.0001,
-    bias_target=0.0001,
+    bias_target=0.0002,
 )
 ```
 
 ```python
-db = ch.Clickhouse.connect(job_id="distributed")
-iter, reports, db = ada.ada_calibrate(
+db_ch = ch.Clickhouse.connect()
+iter, reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
+    db=db_ch,
     nB=5,
     packet_size=32,
     iter_size=8,
     grid_target=0.0001,
-    bias_target=0.0001,
+    bias_target=0.0002,
 )
 ```
 
 ```python
-tiles = db.get_all()
-```
-
-```python
-ch.clear_dbs(db1.client, names=['distributed'], yes=True)
-```
-
-```python
-# from confirm.adagrid.calibration import AdaCalibrationDriver, CalibrationConfig
-# import json
-# gtemp = ip.Grid(db1.get_all())
-# null_hypos = [ip.hypo("x0 < 0")]
-# c= CalibrationConfig(ZTest1D, *[None] * 16, defaults=db1.store.get('config').iloc[0].to_dict())
-# model = ZTest1D(
-#     seed=c.model_seed,
-#     max_K=c.init_K * 2**c.n_K_double,
-#     **json.loads(c.model_kwargs),
-# )
-# driver = AdaCalibrationDriver(None, model, null_hypos, c)
-# driver.bootstrap_calibrate(gtemp.df, 0.025)
-# gtemp.df['K'].value_counts()
+ch.clear_dbs(ch.get_ch_client(), names=['distributed'], yes=True)
 ```
 
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-db = ch.Clickhouse.connect(job_id='distributed')
-_ = ada_calibrate(ZTest1D, db=db, g=g, n_iter=1, iter_size=8, grid_target=0.0001, bias_target=0.0001)
+db_dist = ch.Clickhouse.connect(job_id="distributed")
+iter, reports, _ = ada.ada_calibrate(
+    ZTest1D,
+    g=g,
+    db=db_dist,
+    nB=5,
+    n_iter=0,
+    packet_size=32,
+    iter_size=8,
+    grid_target=0.0001,
+    bias_target=0.0002,
+)
+db_w = ch.Clickhouse.connect(job_id="distributed")
+iter, reports, _ = ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)
+```
+
+## Run two threaded workers
+
+```python
+g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
+db_dist = ch.Clickhouse.connect(job_id="threaded")
+iter, reports, _ = ada.ada_calibrate(
+    ZTest1D,
+    g=g,
+    db=db_dist,
+    nB=5,
+    n_iter=0,
+    packet_size=32,
+    iter_size=8,
+    grid_target=0.0001,
+    bias_target=0.0002,
+)
 ```
 
 ```python
-job_id = db.job_id
-def worker(i):
-    db = ch.Clickhouse.connect(job_id=job_id)
-    return ada_calibrate(ZTest1D, db=db, n_iter=100)[:2]
-# iter_two2, reports_two2, ada_two2 = step(0)
+from concurrent.futures import ThreadPoolExecutor, wait
+def worker():
+    import confirm.adagrid as ada
+    import confirm.cloud.clickhouse as ch
+    from imprint.models.ztest import ZTest1D
+    db_w = ch.Clickhouse.connect(job_id='threaded')
+    return ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)[:2]
+
+with ThreadPoolExecutor(max_workers=2) as executor:
+    futures = [executor.submit(worker) for i in range(2)]
+    wait(futures)
+    outputs = [f.result() for f in futures]
+```
+
+## Run two distributed workers
+
+```python
+ch.clear_dbs(ch.get_ch_client(), names=['distributed'], yes=True)
+g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
+db_dist = ch.Clickhouse.connect(job_id="distributed")
+iter, reports, _ = ada.ada_calibrate(
+    ZTest1D,
+    g=g,
+    db=db_dist,
+    nB=5,
+    n_iter=0,
+    packet_size=32,
+    iter_size=8,
+    grid_target=0.0001,
+    bias_target=0.0002,
+)
+```
+
+```python
+
+import confirm.cloud.modal_util as modal_util
 import modal
 stub = modal.Stub("two_workers")
-wrapper = modal_util.modalize(stub)(worker)
+
+@stub.function(
+    image=modal_util.get_image(dependency_groups=["test", "cloud"]),
+    retries=0,
+    mounts=modal.create_package_mounts(["confirm", "imprint"]),
+    secret=modal.Secret.from_name("confirm-secrets")
+)
+def worker(i):
+    import confirm.adagrid as ada
+    import confirm.cloud.clickhouse as ch
+    from imprint.models.ztest import ZTest1D
+    db_w = ch.Clickhouse.connect(job_id='distributed')
+    return ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)[:2]
+
 with stub.run():
-    results = list(wrapper.map([1, 2]))
+    results = list(worker.map([1, 2]))
+```
+
+```python
+modal.__version__
+```
+
+```python
+duckdb.__path__
+```
+
+```python
+# With this import, error! Without the error, fine.
+# import duckdb
+import modal
+stub = modal.Stub("error")
+
+@stub.function()
+def worker(i):
+    return i + 1
+
+with stub.run():
+    print(worker.call(0))
 ```
 
 ```python
