@@ -194,7 +194,7 @@ class AdaCalibrationDriver:
         # called with a single tile so it's not necessary.
         return df.groupby("K", group_keys=False).apply(f)
 
-    def _process_tiles(self, g, i):
+    def _process_tiles(self, g, step_id, step_iter):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
@@ -203,8 +203,9 @@ class AdaCalibrationDriver:
         lams_df = self.bootstrap_calibrate(g.df, self.alpha)
 
         g.df["worker_id"] = self.c.worker_id
-        g.df["birthiter"] = i
-        g.df["birthtime"] = simple_timer()
+        g.df["step_id"] = step_id
+        g.df["step_iter"] = step_iter
+        g.df["creation_time"] = simple_timer()
         g.df["eligible"] = True
 
         # we use insert here to order columns nicely for reading raw data
@@ -391,7 +392,9 @@ class AdaCalibrationDriver:
 
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
             start_processing = time.time()
-            g_calibrated_new = self._process_tiles(g_new, i)
+            g_calibrated_new = self._process_tiles(
+                g_new, work["step_id"].iloc[0], work["step_iter"].iloc[0]
+            )
             report["runtime_processing"] = time.time() - start_processing
             start_cleanup = time.time()
             self.db.write(g_calibrated_new.df)
@@ -421,7 +424,7 @@ class AdaCalibrationDriver:
             )
         )
 
-        return WorkerStatus.WORKING, report
+        return WorkerStatus.WORK, report
 
 
 def refine_deepen(g, null_hypos, max_K, worker_id):
@@ -778,7 +781,7 @@ def ada_calibrate(
 
         # We process the tiles before adding them to the database so that the
         # database will be initialized with the correct set of columns.
-        g_calibrated = ada_driver._process_tiles(g, 0)
+        g_calibrated = ada_driver._process_tiles(g, -1, 0)
         db.init_tiles(g_calibrated.df)
         _store_null_hypos(db, null_hypos)
 

@@ -5,7 +5,7 @@ class WorkerStatus(Enum):
     CONVERGED = 0
     FAILED = 1
     REACHED_N_STEPS = 2
-    WORKING = 3
+    WORK = 3
     NEW_STEP = 4
     STUCK = 5
 

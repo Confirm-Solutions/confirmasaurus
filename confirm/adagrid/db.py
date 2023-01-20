@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
@@ -12,20 +13,24 @@ from confirm.adagrid.store import PandasStore
 
 
 def serial_next(db, convergence_f, n_steps, _, packet_size, order_col, worker_id):
-    step_id_df = db.store.get("step_id")
-    if step_id_df["step_id"].iloc[0] >= n_steps - 1:
+    step_id = db.store.get("step_id")["step_id"].iloc[0]
+    if step_id >= n_steps - 1:
         return WorkerStatus.REACHED_N_STEPS, None, dict()
 
-    step_id_df["step_id"] += 1
+    step_id += 1
     work = db.get_work(packet_size, order_col, worker_id)
-    step_id_df = db.store.set("step_id", step_id_df)
+    work["query_time"] = time.time()
+    work["worker_id"] = worker_id
+    work["step_id"] = step_id
+    work["step_iter"] = step_id
+    db.store.set("step_id", pd.DataFrame({"step_id": [step_id]}))
 
     if convergence_f():
         status = WorkerStatus.CONVERGED
     elif work.shape[0] == 0:
         status = WorkerStatus.FAILED
     else:
-        status = WorkerStatus.WORKING
+        status = WorkerStatus.WORK
 
     return status, work, dict()
 

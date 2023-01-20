@@ -36,9 +36,6 @@ class Timer:
     def unique(self):
         now = self.now()
         t = np.uint64(int(now))
-        logger.debug(
-            f"unique_timer() = {t}, now = {now}, last = {self.last}, self = {id(self)}"
-        )
         if t <= self.last:
             t = self.last + np.uint64(1)
         self.last = t

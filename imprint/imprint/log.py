@@ -1,6 +1,8 @@
 import contextvars
 import logging
 
+# ContextVar stores context-local state. It is similar to thread-local state,
+# but works for both asyncio coroutines and threads.
 worker_id = contextvars.ContextVar("worker_id", default=None)
 
 

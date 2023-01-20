@@ -169,7 +169,7 @@ def distributed_next(
     # If we loop 25 times, there's definitely a bug.
     max_loops = 25
     i = 0
-    status = WorkerStatus.WORKING
+    status = WorkerStatus.WORK
     report = dict()
     while i < max_loops:
         report["distributed_next_loop"] = i
@@ -183,9 +183,11 @@ def distributed_next(
             # yet created a step.
             if step_iter < step_n_iter:
                 logger.debug(f"get_work(step_id={step_id}, step_iter={step_iter})")
-                work = db.get_work(
-                    step_id, step_iter, packet_size, order_col, worker_id
-                )
+                work = db.get_work(step_id, step_iter, packet_size, order_col)
+                work["query_time"] = time.time()
+                work["worker_id"] = worker_id
+                work["step_id"] = step_id
+                work["step_iter"] = step_iter
                 report["work_extraction_time"] = time.time()
                 logger.debug(f"get_work(...) returned {work.shape[0]} tiles")
 
@@ -193,19 +195,25 @@ def distributed_next(
                 if work.shape[0] > 0:
                     db._set_step_info((step_id, step_iter + 1, step_n_iter))
                     return status, work, report
-
-            # If there's no work, we check if the step is complete.
-            if n_tiles_left_in_step(db, step_id) == 0:
+                else:
+                    # If step_iter < step_n_iter but there's no work, then The
+                    # INSERT into tiles_step that specifies the step is
+                    # probably incomplete. We should wait a very short time and
+                    # try again.
+                    wait = 0.1
+            # If there are no iterations left in the step, we check if the step
+            # is complete.
+            elif n_tiles_left_in_step(db, step_id) == 0:
                 # If a packet has just been completed, we check for convergence.
                 status = convergence_f()
                 if status:
                     return WorkerStatus.CONVERGED, None, report
 
-                # If we haven't converged, we create a new packet.
                 if step_id >= n_steps - 1:
                     # We've finished all the steps, so we're done.
                     return WorkerStatus.REACHED_N_STEPS, None, report
 
+                # If we haven't converged, we create a new packet.
                 new_step_id = new_step(db, step_id, step_size, packet_size, order_col)
 
                 if new_step_id == "empty":
@@ -215,14 +223,16 @@ def distributed_next(
                     # Successful new packet. We should check for work again
                     # immediately.
                     status = WorkerStatus.NEW_STEP
-                    wait = False
+                    wait = 0
             else:
-                # No work available, but the packet is incomplete. We should
-                # release the lock and wait for other workers to finish.
-                wait = True
-        if wait:
-            # TODO: the sleep time should be configurable.
-            time.sleep(1)
+                # No work available, but the packet is incomplete. This is
+                # because other workers have claimed all the work but have not
+                # finished yet.
+                # In this situation, we should release the lock and wait for
+                # other workers to finish.
+                wait = 1
+        if wait > 0:
+            time.sleep(wait)
         if i > 2:
             logger.warning(
                 f"Worker {worker_id} has been waiting for work for"
@@ -405,7 +415,7 @@ class Clickhouse:
         """,
         )
 
-    def get_work(self, step_id, step_iter, n, order_col, worker_id):
+    def get_work(self, step_id, step_iter, n, order_col):
         out = _query_df(
             self.client,
             f"""
@@ -418,16 +428,11 @@ class Clickhouse:
         """,
         )
         out.rename(columns={"t.id": "id"}, inplace=True)
-        T = time.time()
-        out["time"] = T
-        out["worker_id"] = worker_id
-        out["step_id"] = step_id
-        out["step_iter"] = step_iter
         return out
 
     def finish(self, which):
         write_subset = which[
-            ["step_id", "step_iter", "id", "active", "time", "worker_id"]
+            ["step_id", "step_iter", "id", "active", "query_time", "worker_id"]
         ]
         logger.debug(f"finish: {write_subset.head()}")
         _insert_df(self.client, "tiles_done", write_subset)
@@ -476,7 +481,7 @@ class Clickhouse:
                     step_iter UInt32,
                     id {id_type},
                     active Bool,
-                    time Float64,
+                    query_time Float64,
                     worker_id UInt32)
                 engine = MergeTree() order by (step_id, step_iter, id)
             """,

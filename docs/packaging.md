@@ -53,9 +53,10 @@ However, without conda, we would:
 - `poetry self update` --> update `poetry` itself.
 - `poetry lock` --> update `poetry.lock` based on `pyproject.toml`
 - `poetry update` --> update package versions according to `pyproject.toml`
-- `poetry up --with=test,cloud,dev,cloud_dev` --> this will update the package versions in `pyproject.toml`
-- [The poetry plugin "poetry up" helps here.](https://github.com/MousaZeidBaker/poetry-plugin-up)
-- [Lots of discussion in this issue](https://github.com/python-poetry/poetry/issues/461)
+- Updating the packages in `pyproject.toml` is not supported by Poetry itself, but through a plugin.
+  - `poetry up --with=test,cloud,dev,cloud_dev` --> this will update the package versions in `pyproject.toml`
+  - [The poetry plugin "poetry up"](https://github.com/MousaZeidBaker/poetry-plugin-up)
+  - [Lots of discussion in this issue](https://github.com/python-poetry/poetry/issues/461)
 
 ## Notes
 
