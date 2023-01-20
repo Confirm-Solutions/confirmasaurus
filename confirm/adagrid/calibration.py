@@ -49,19 +49,22 @@ import platform
 import subprocess
 import time
 from dataclasses import dataclass
-from pprint import pprint
+from pprint import pformat
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+import imprint.log
 from .db import DuckDBTiles
 from confirm.adagrid.convergence import WorkerStatus
 from imprint import batching
 from imprint import driver
 from imprint import grid
 from imprint.timer import simple_timer
+
+logger = imprint.log.getLogger(__name__)
 
 
 class AdaCalibrationDriver:
@@ -126,7 +129,7 @@ class AdaCalibrationDriver:
         self.bias_target = self.c.bias_target
         self.grid_target = self.c.grid_target
         self.std_target = self.c.std_target
-        self.iter_size = self.c.iter_size
+        self.packet_size = self.c.packet_size
 
     def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
         def _batched(K, theta, vertices, null_truth):
@@ -147,7 +150,7 @@ class AdaCalibrationDriver:
 
             K = K_df["K"].iloc[0]
             assert all(K_df["K"] == K)
-            K_g = grid.Grid(K_df)
+            K_g = grid.Grid(K_df, self.c.worker_id)
 
             theta, vertices = K_g.get_theta_and_vertices()
             bootstrap_lams, alpha0 = batching.batch(
@@ -181,7 +184,7 @@ class AdaCalibrationDriver:
     def many_rej(self, df, lams_arr):
         def f(K_df):
             K = K_df["K"].iloc[0]
-            K_g = grid.Grid(K_df)
+            K_g = grid.Grid(K_df, self.c.worker_id)
             theta = K_g.get_theta()
             stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
             tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
@@ -226,7 +229,7 @@ class AdaCalibrationDriver:
         g_calibrated = g.add_cols(lams_df)
         return g_calibrated
 
-    def convergence_criterion(self, any_impossible, report):
+    def convergence_criterion(self, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -235,6 +238,7 @@ class AdaCalibrationDriver:
         #
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
+        any_impossible = self.db.worst_tile("impossible")["impossible"].iloc[0]
         if any_impossible:
             return False
 
@@ -309,18 +313,25 @@ class AdaCalibrationDriver:
         # whether there are any impossible tiles.
         ########################################
         status, work, next_report = self.db.next(
-            lambda work: self.convergence_criterion(work["impossible"].any(), report),
+            lambda: self.convergence_criterion(report),
+            self.c.n_steps,
+            self.c.step_size,
             self.c.packet_size,
-            self.c.iter_size,
             "orderer",
             self.c.worker_id,
         )
         report.update(next_report)
         report["status"] = status.name
         report["runtime_get_work"] = time.time() - start_get_work
-        if status == WorkerStatus.CONVERGED or status == WorkerStatus.FAILED:
-            # TODO: stop other workers? or just let them figure it out?
+        if status.done():
+            # We just stop this worker. The other workers will continue to run
+            # but will stop once they reached the convergence criterion check.
+            # It might be faster to stop all the workers immediately, but that
+            # would be more engineering effort.
             return status, report
+        if work is None:
+            return status, report
+
         report["n_impossible"] = work["impossible"].sum()
 
         ########################################
@@ -376,7 +387,7 @@ class AdaCalibrationDriver:
         n_deepen = work["deepen"].sum()
         nothing_to_do = n_refine == 0 and n_deepen == 0
         if not nothing_to_do:
-            g_new = refine_deepen(work, self.null_hypos, self.max_K)
+            g_new = refine_deepen(work, self.null_hypos, self.max_K, self.c.worker_id)
 
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
             start_processing = time.time()
@@ -410,15 +421,16 @@ class AdaCalibrationDriver:
             )
         )
 
-        return WorkerStatus.INCOMPLETE, report
+        return WorkerStatus.WORKING, report
 
 
-def refine_deepen(g, null_hypos, max_K):
-    g_deepen_in = grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)])
+def refine_deepen(g, null_hypos, max_K, worker_id):
+    g_deepen_in = grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)], worker_id)
     g_deepen = grid.init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
-        g_deepen_in.df["id"],
+        worker_id=worker_id,
+        parents=g_deepen_in.df["id"],
     )
 
     # We just multiply K by 2 to deepen.
@@ -427,7 +439,7 @@ def refine_deepen(g, null_hypos, max_K):
     # determine this?
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
 
-    g_refine_in = grid.Grid(g.loc[g["refine"]])
+    g_refine_in = grid.Grid(g.loc[g["refine"]], worker_id)
     inherit_cols = ["K"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.
@@ -442,9 +454,13 @@ def refine_deepen(g, null_hypos, max_K):
 def print_report(_iter, report, _ada):
     ready = report.copy()
     for k in ready:
-        if isinstance(ready[k], float) or isinstance(ready[k], jnp.DeviceArray):
+        if (
+            isinstance(ready[k], float)
+            or isinstance(ready[k], np.floating)
+            or isinstance(ready[k], jnp.DeviceArray)
+        ):
             ready[k] = f"{ready[k]:.6f}"
-    pprint(ready)
+    logger.debug(pformat(ready))
 
 
 def _run(cmd):
@@ -492,9 +508,10 @@ calibration_defaults = dict(
     bias_target=0.001,
     std_target=0.002,
     calibration_min_idx=40,
-    packet_size=2**12,
-    iter_size=2**9,
+    n_steps=100,
+    step_size=2**10,
     n_iter=100,
+    packet_size=None,
     prod=True,
     worker_id=None,
     git_hash=None,
@@ -527,9 +544,10 @@ class CalibrationConfig:
     bias_target: float
     std_target: float
     calibration_min_idx: int
-    packet_size: int
-    iter_size: int
+    n_steps: int
+    step_size: int
     n_iter: int
+    packet_size: int
     prod: bool
     worker_id: int
     git_hash: str = None
@@ -541,6 +559,9 @@ class CalibrationConfig:
     defaults: dict = None
 
     def __post_init__(self):
+        if self.packet_size is None:
+            self.packet_size = self.step_size
+
         self.git_hash = _get_git_revision_hash()
         self.git_diff = _get_git_diff()
         self.platform = platform.platform()
@@ -628,11 +649,12 @@ def ada_calibrate(
     tile_batch_size: int = None,
     grid_target: float = None,
     bias_target: float = None,
+    n_steps: int = None,
+    step_size: int = None,
+    n_iter: int = None,
+    packet_size: int = None,
     std_target: float = None,
     calibration_min_idx: int = None,
-    packet_size: int = None,
-    iter_size: int = None,
-    n_iter: int = None,
     prod: bool = True,
     callback=print_report,
 ):
@@ -661,20 +683,25 @@ def ada_calibrate(
         std_target: Part of the stopping criterion: the target standard
                     deviation of the type I error as calculated by the
                     bootstrap. Defaults to 0.002.
-        packet_size: The number of tiles in a "packet" produced by a single
-                     Adagrid tile selection step. This is different from
-                     iter_size because we select tiles once and then run many
-                     "iterations" in parallel to process those tiles.
-        iter_size: The number of tiles to process per iteration. Defaults to 2**10.
+        n_steps: The number of Adagrid steps to run. Defaults to 100.
+        step_size: The number of tiles in an Adagrid step produced by a single
+                   Adagrid tile selection step. This is different from
+                   packet_size because we select tiles once and then run many
+                   simulation "iterations" in parallel to process those
+                   tiles. Defaults to 2**10.
+        n_iter: The number of packets to simulate. Defaults to None which
+                places no limit. Limiting the number of packets is useful for
+                stopping a worker after a specified amount of work.
+        packet_size: The number of tiles to process per iteration. Defaults to
+                     None. If None, we use the same value as step_size.
         calibration_min_idx: The minimum calibration selection index. We enforce that:
                         `alpha0 >= (calibration_min_idx + 1) / (K + 1)`
                         A larger value will reduce the variance of lambda* but
                         will require more computational effort because K and/or
                         alpha0 will need to be larger. Defaults to 40.
-        n_iter: The number of adagrid iterations to run.
-                Defaults to 100.
         prod: Is this a production run? If so, we will collection extra system
-              configuration info.
+              configuration info. Setting this to False will make startup time
+              a bit faster. Defaults to True.
         callback: A function accepting three arguments (ada_iter, report, ada)
                   that can perform some reporting or printing at each iteration.
                   Defaults to print_report.
@@ -694,6 +721,7 @@ def ada_calibrate(
     if db is None:
         db = DuckDBTiles.connect()
     worker_id = db.new_worker()
+    imprint.log.worker_id.set(worker_id)
 
     ########################################
     # Store config
@@ -717,9 +745,10 @@ def ada_calibrate(
         bias_target,
         std_target,
         calibration_min_idx,
-        packet_size,
-        iter_size,
+        n_steps,
+        step_size,
         n_iter,
+        packet_size,
         prod,
         worker_id,
         defaults=defaults,
@@ -756,7 +785,6 @@ def ada_calibrate(
     ########################################
     # Run adagrid!
     ########################################
-
     if c.n_iter == 0:
         return 0, [], db
 
@@ -767,7 +795,7 @@ def ada_calibrate(
             if callback is not None:
                 callback(ada_iter, report, ada_driver)
             reports.append(report)
-            if status == WorkerStatus.CONVERGED or status == WorkerStatus.FAILED:
+            if status.done():
                 break
         except KeyboardInterrupt:
             print("KeyboardInterrupt")

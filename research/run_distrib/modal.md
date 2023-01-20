@@ -19,10 +19,10 @@ iter, reports, db = ada.ada_calibrate(
     g=g,
     nB=5,
     tile_batch_size=1,
+    step_size=32,
     packet_size=32,
-    iter_size=32,
-    grid_target=0.0001,
-    bias_target=0.0002,
+    grid_target=0.00015,
+    bias_target=0.00015,
 )
 ```
 
@@ -33,32 +33,28 @@ iter, reports, _ = ada.ada_calibrate(
     g=g,
     db=db_ch,
     nB=5,
-    packet_size=32,
-    iter_size=8,
-    grid_target=0.0001,
-    bias_target=0.0002,
+    step_size=32,
+    packet_size=8,
+    grid_target=0.00015,
+    bias_target=0.00015,
 )
-```
-
-```python
-ch.clear_dbs(ch.get_ch_client(), names=['distributed'], yes=True)
 ```
 
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-db_dist = ch.Clickhouse.connect(job_id="distributed")
+db_dist = ch.Clickhouse.connect()
 iter, reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
     db=db_dist,
-    nB=5,
     n_iter=0,
-    packet_size=32,
-    iter_size=8,
-    grid_target=0.0001,
-    bias_target=0.0002,
+    nB=5,
+    step_size=32,
+    packet_size=8,
+    grid_target=0.0003,
+    bias_target=0.0003,
 )
-db_w = ch.Clickhouse.connect(job_id="distributed")
+db_w = ch.Clickhouse.connect(job_id=db_dist.job_id)
 iter, reports, _ = ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)
 ```
 
@@ -73,10 +69,10 @@ iter, reports, _ = ada.ada_calibrate(
     db=db_dist,
     nB=5,
     n_iter=0,
-    packet_size=32,
-    iter_size=8,
-    grid_target=0.0001,
-    bias_target=0.0002,
+    step_size=32,
+    packet_size=8,
+    grid_target=0.0003,
+    bias_target=0.0003,
 )
 ```
 
@@ -98,19 +94,18 @@ with ThreadPoolExecutor(max_workers=2) as executor:
 ## Run two distributed workers
 
 ```python
-ch.clear_dbs(ch.get_ch_client(), names=['distributed'], yes=True)
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-db_dist = ch.Clickhouse.connect(job_id="distributed")
+db_dist = ch.Clickhouse.connect()
 iter, reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
     db=db_dist,
     nB=5,
     n_iter=0,
-    packet_size=32,
-    iter_size=8,
-    grid_target=0.0001,
-    bias_target=0.0002,
+    step_size=32,
+    packet_size=8,
+    grid_target=0.0003,
+    bias_target=0.0003,
 )
 ```
 
@@ -130,52 +125,9 @@ def worker(i):
     import confirm.adagrid as ada
     import confirm.cloud.clickhouse as ch
     from imprint.models.ztest import ZTest1D
-    db_w = ch.Clickhouse.connect(job_id='distributed')
+    db_w = ch.Clickhouse.connect(job_id='74b1caa58c6d4e31bef2252015710597')
     return ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)[:2]
 
 with stub.run():
     results = list(worker.map([1, 2]))
-```
-
-```python
-modal.__version__
-```
-
-```python
-duckdb.__path__
-```
-
-```python
-# With this import, error! Without the error, fine.
-# import duckdb
-import modal
-stub = modal.Stub("error")
-
-@stub.function()
-def worker(i):
-    return i + 1
-
-with stub.run():
-    print(worker.call(0))
-```
-
-```python
-db.worst_tile('lams')
-```
-
-```python
-df2 = db.get_all()
-plt.plot(np.sort(df2['theta0']))
-plt.show()
-plt.plot(df2['theta0'], df2['lams'], 'o')
-plt.show()
-```
-
-```python
-plt.plot(np.sort(db1.get_all()['theta0']))
-plt.show()
-```
-
-```python
-
 ```

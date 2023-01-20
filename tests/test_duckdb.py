@@ -11,7 +11,7 @@ def example_grid(x1, x2):
     N = 10
     theta, radii = grid._cartesian_gridpts([x1], [x2], [N])
     H = grid.HyperPlane(np.array([-1]), 0)
-    g = grid.init_grid(theta, radii).add_null_hypos([H]).prune()
+    g = grid.init_grid(theta, radii, 1).add_null_hypos([H]).prune()
     # Typically this field would be set by the adagrid code.
     g.df["eligible"] = True
     return g
@@ -131,9 +131,9 @@ class DBTester:
 
     def test_new_worker(self):
         db = self.dbtype.connect()
-        assert db.new_worker() == 0
-        assert db.new_worker() == 1
         assert db.new_worker() == 2
+        assert db.new_worker() == 3
+        assert db.new_worker() == 4
 
 
 class TestDuckDB(DBTester):

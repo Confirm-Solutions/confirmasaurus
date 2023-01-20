@@ -11,17 +11,23 @@ from confirm.adagrid.store import DuckDBStore
 from confirm.adagrid.store import PandasStore
 
 
-def serial_next(db, convergence_f, packet_size, iter_size, order_col, worker_id):
-    work = db.get_work(iter_size, order_col, worker_id)
+def serial_next(db, convergence_f, n_steps, _, packet_size, order_col, worker_id):
+    step_id_df = db.store.get("step_id")
+    if step_id_df["step_id"].iloc[0] >= n_steps - 1:
+        return WorkerStatus.REACHED_N_STEPS, None, dict()
 
-    if convergence_f(work):
+    step_id_df["step_id"] += 1
+    work = db.get_work(packet_size, order_col, worker_id)
+    step_id_df = db.store.set("step_id", step_id_df)
+
+    if convergence_f():
         status = WorkerStatus.CONVERGED
     elif work.shape[0] == 0:
         status = WorkerStatus.FAILED
     else:
-        status = WorkerStatus.INCOMPLETE
+        status = WorkerStatus.WORKING
 
-    return status, work
+    return status, work, dict()
 
 
 @dataclass
@@ -35,9 +41,8 @@ class PandasTiles:
     """
 
     df: pd.DataFrame = None
-    _next_worker_id: int = 0
+    _next_worker_id: int = 2
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
-    use_packets = False
     next = serial_next
 
     @property
@@ -56,8 +61,8 @@ class PandasTiles:
     def write(self, df):
         self.df = pd.concat((self.df, df), axis=0, ignore_index=True)
 
-    def get_work(self, iter_size, order_col, _):
-        out = self.df.loc[self.df["eligible"]].nsmallest(iter_size, order_col)
+    def get_work(self, packet_size, order_col, _):
+        out = self.df.loc[self.df["eligible"]].nsmallest(packet_size, order_col)
         self.df.loc[out.index, "eligible"] = False
         return out
 
@@ -96,11 +101,12 @@ class DuckDBTiles:
     _columns: List[str] = None
     _d: int = None
     store: DuckDBStore = None
-    use_packets = False
     next = serial_next
 
     def __post_init__(self):
         self.store = DuckDBStore(self.con)
+        if not self.store.exists("step_id"):
+            self.store.set("step_id", pd.DataFrame(dict(step_id=[-1])))
 
     def dimension(self):
         if self._d is None:
@@ -170,7 +176,7 @@ class DuckDBTiles:
         self.con.execute(
             "create sequence if not exists worker_id start with 1 increment by 1"
         )
-        worker_id = self.con.execute("select nextval('worker_id')").fetchone()[0] - 1
+        worker_id = self.con.execute("select nextval('worker_id')").fetchone()[0] + 1
         self.con.execute("create table if not exists workers (id int)")
         self.con.execute(f"insert into workers values ({worker_id})")
         return worker_id

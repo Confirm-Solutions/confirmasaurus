@@ -9,8 +9,8 @@ for (keyring_name, env_name) in [
     ("clickhouse-confirm-test-host", "CLICKHOUSE_HOST"),
     ("clickhouse-confirm-test-host", "CLICKHOUSE_TEST_HOST"),
     ("clickhouse-confirm-test-password", "CLICKHOUSE_PASSWORD"),
-    ("upstash-confirm-coordinator-host", "REDIS_HOST"),
-    ("upstash-confirm-coordinator-password", "REDIS_PASSWORD"),
+    ("upstash-confirm-coord-test-host", "REDIS_HOST"),
+    ("upstash-confirm-coord-test-password", "REDIS_PASSWORD"),
 ]:
     secrets[env_name] = keyring.get_password(keyring_name, os.environ["USER"])
 
