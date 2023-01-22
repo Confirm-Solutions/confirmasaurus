@@ -30,6 +30,7 @@ except (ImportError, AssertionError):
 
 import pyarrow
 import redis
+import pandas as pd
 
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
@@ -285,17 +286,23 @@ class Clickhouse:
         logger.debug("get step info: %s", out)
         return out
 
-    def set_step_info(self, *, step_id, step_iter, n_iter, n_tiles):
+    def set_step_info(self, *, step_id: int, step_iter: int, n_iter: int, n_tiles: int):
         step_info = (step_id, step_iter, n_iter, n_tiles)
         logger.debug("set step info: %s", step_info)
         self.redis_con.set(f"{self.job_id}:step_info", str(step_info))
 
-    def n_processed_tiles(self, step_id):
+    def n_processed_tiles(self, step_id: int) -> int:
         # This checks the number of tiles for which both:
         # - there are results
         # - the parent tile is done
         # This is a good way to check if a step is done because it ensures that
         # all relevant inserts are done.
+        #
+        if not self._results_table_exists:
+            self._results_table_exists = does_table_exist(self.client, "results")
+            if not self._results_table_exists:
+                return -1
+
         R = self.client.query(
             f"""
             select count(*) from tiles
@@ -307,11 +314,11 @@ class Clickhouse:
         )
         return R.result_set[0][0]
 
-    def insert_tiles(self, df):
+    def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")
         _insert_df(self.client, "tiles", df)
 
-    def insert_results(self, df):
+    def insert_results(self, df: pd.DataFrame):
         self._create_results_table(df)
         logger.debug(f"writing {df.shape[0]} results")
         _insert_df(self.client, "results", df)
@@ -425,7 +432,6 @@ class Clickhouse:
             """,
         ]
         for c in commands:
-            print(c)
             self.client.command(c)
         self.client.command("insert into done values (0, 0, 0, 0, 0, 0, 0, 0)")
         self.insert_tiles(tiles_df)
@@ -508,6 +514,18 @@ class Clickhouse:
         redis_con = get_redis_client(redis_host, redis_port, redis_password)
         logger.info(f"Connected to job {job_id}")
         return Clickhouse(connection_details, client, redis_con, job_id)
+
+
+def does_table_exist(client, table_name: str) -> bool:
+    return (
+        client.query_df(
+            f"""
+        select * from information_schema.schemata
+            where schema_name = '{table_name}'
+        """
+        ).shape[0]
+        > 0
+    )
 
 
 def get_redis_client(host=None, port=None, password=None):

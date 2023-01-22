@@ -411,7 +411,7 @@ class AdaCalibrationDriver:
             f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
         )
         tiles["finisher_id"] = self.c.worker_id
-        tiles["query_time"] = time.time()
+        tiles["query_time"] = simple_timer()
         if tiles.shape[0] == 0:
             return "empty"
 
@@ -500,7 +500,7 @@ class AdaCalibrationDriver:
         df["step_id"] = new_step_id
         df["step_iter"], n_packets = step_iter_assignments(df, self.c.packet_size)
         df["creator_id"] = self.c.worker_id
-        df["creation_time"] = time.time()
+        df["creation_time"] = simple_timer()
 
         n_tiles = df.shape[0]
         logger.debug(
@@ -674,8 +674,6 @@ class CalibrationConfig:
     defaults: dict = None
 
     def __post_init__(self):
-        if self.packet_size is None:
-            self.packet_size = self.step_size
 
         self.git_hash = _get_git_revision_hash()
         self.git_diff = _get_git_diff()
@@ -706,6 +704,9 @@ class CalibrationConfig:
         for k in self.defaults:
             if self.__dict__[k] is None:
                 self.__dict__[k] = self.defaults[k]
+
+        if self.packet_size is None:
+            self.packet_size = self.step_size
 
         # If we're continuing a calibration, make sure that fixed parameters
         # are the same across all workers.
@@ -893,7 +894,7 @@ def ada_calibrate(
         df["step_id"] = 0
         df["step_iter"], n_packets = step_iter_assignments(df, c.packet_size)
         df["creator_id"] = worker_id
-        df["creation_time"] = time.time()
+        df["creation_time"] = simple_timer()
 
         db.init_tiles(df)
         _store_null_hypos(db, null_hypos)

@@ -96,7 +96,7 @@ class TextSerializer:
         if isinstance(obj, pd.DataFrame):
             # in all our dataframes, the index is meaningless, so we do not
             # save it here.
-            obj.to_csv(filebase + ".csv", index=False)
+            obj.to_csv(filebase + ".csv")
         elif isinstance(obj, np.ndarray) or isinstance(obj, jax.numpy.DeviceArray):
             np.savetxt(filebase + ".txt", obj)
         elif np.isscalar(obj):
@@ -110,7 +110,7 @@ class TextSerializer:
     @staticmethod
     def deserialize(filebase, obj):
         if isinstance(obj, pd.DataFrame):
-            return pd.read_csv(path_and_check(filebase, "csv"))
+            return pd.read_csv(path_and_check(filebase, "csv"), index_col=0)
         elif isinstance(obj, np.ndarray) or isinstance(obj, jax.numpy.DeviceArray):
             return np.loadtxt(path_and_check(filebase, "txt"))
         elif np.isscalar(obj):

@@ -6,6 +6,7 @@ from typing import List
 from typing import Tuple
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 import imprint.log
@@ -32,6 +33,7 @@ class PandasTiles:
     _next_worker_id: int = 2
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
     step_info = None
+    lock = contextlib.suppress()
 
     @property
     def store(self) -> Store:
@@ -63,7 +65,8 @@ class PandasTiles:
         self.step_info = (step_id, step_iter, n_iter, n_tiles)
 
     def n_processed_tiles(self, step_id: int) -> int:
-        self.tiles_df.loc[self.tiles_df["step_id"] == step_id]
+        ids = self.tiles_df.loc[self.tiles_df["step_id"] == step_id, "id"]
+        return np.in1d(self.results_df["id"], ids).sum()
 
     def insert_tiles(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")

@@ -1,3 +1,4 @@
+# TODO: this is all sorts of fucked up, should it be moved to confirm/__init__.py?
 # JAX spits out a bunch of ugly warnings on import. Ignore them.
 # https://github.com/google/flatbuffers/issues/6957
 # DeprecationWarning: the imp module is deprecated in favour of importlib; see

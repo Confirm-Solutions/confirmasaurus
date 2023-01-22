@@ -1,34 +1,14 @@
 ```python
-db = ch.Clickhouse.connect(job_id = '544d8afac72e4633809a162a480ed998')
-```
-
-```python
-T = db.get_all()
-```
-
-```python
-T.loc[T['id'] == 4373889141130919936]
-```
-
-```python
-from imprint.grid import _gen_short_uuids
-_gen_short_uuids(n=2, worker_id=3, t=1674261200)
-```
-
-```python
 import confirm.cloud.clickhouse as ch
 
-Adb = ch.Clickhouse.connect(job_id = '1cf6481207e54adc842def1c2bb22dc7')
-Bdb = ch.Clickhouse.connect(job_id = '544d8afac72e4633809a162a480ed998')
+# Bdb = ch.Clickhouse.connect(job_id = '544d8afac72e4633809a162a480ed998')
+Adb = ch.Clickhouse.connect(job_id="41ef6dbb374d4bb9a62a0ea8d98b5c9a")
+Bdb = ch.Clickhouse.connect(job_id="0da447c75edf4ef7b2cc905c6c004952")
 ```
 
 ```python
-_gen_short_uuids(n=2, worker_id=3, t=1674261200)
-```
-
-```python
-At = Adb.get_all()
-Bt = Bdb.get_all()
+At = Adb.get_results()
+Bt = Bdb.get_results()
 ```
 
 ```python
@@ -38,11 +18,20 @@ At.shape, Bt.shape
 ```python
 import pandas as pd
 
-drop_cols = ["id", "parent_id", "step_iter", "worker_id"]
-pd.testing.assert_frame_equal(
-    At.drop(drop_cols, axis=1).sort_values(['step_id', 'theta0']).reset_index(drop=True), 
-    Bt.drop(drop_cols, axis=1).sort_values(['step_id', 'theta0']).reset_index(drop=True)
-)
+drop_cols = ["id", "parent_id", "step_iter", "creator_id", "processor_id", "creation_time", "processing_time"]
+
+AAA = At.drop(drop_cols, axis=1).sort_values(['step_id', 'theta0']).reset_index(drop=True)
+BBB = Bt.drop(drop_cols, axis=1).sort_values(['step_id', 'theta0']).reset_index(drop=True)
+pd.testing.assert_frame_equal(AAA, BBB, check_dtype=False)
+```
+
+```python
+AAA['twb_max_lams'] - BBB['twb_max_lams']
+```
+
+```python
+pd.set_option('display.max_columns', None)
+display(AAA.head(2)), display(BBB.head(2))
 ```
 
 ```python
