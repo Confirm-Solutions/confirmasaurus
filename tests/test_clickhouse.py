@@ -1,5 +1,5 @@
 import pytest
-from test_duckdb import DBTester
+from test_db import DBTester
 from test_store import StoreTester
 
 import confirm.cloud.clickhouse as ch
@@ -34,5 +34,5 @@ def test_clear_dbs_only_test():
             self.url = "fakeprod"
 
     with pytest.raises(RuntimeError) as excinfo:
-        ch.clear_dbs(FakeClient())
+        ch.clear_dbs(FakeClient(), None)
     assert "localhost" in str(excinfo.value) and "test" in str(excinfo.value)

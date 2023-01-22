@@ -1,6 +1,8 @@
 import contextvars
 import logging
 
+import pandas as pd
+
 # ContextVar stores context-local state. It is similar to thread-local state,
 # but works for both asyncio coroutines and threads.
 worker_id = contextvars.ContextVar("worker_id", default=None)
@@ -8,7 +10,8 @@ worker_id = contextvars.ContextVar("worker_id", default=None)
 
 class Adapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
-        return f"[worker_id={worker_id.get()}] {msg}", kwargs
+        with pd.option_context("display.max_columns", None):
+            return f"[worker_id={worker_id.get()}] \n{msg}", kwargs
 
 
 def getLogger(name):

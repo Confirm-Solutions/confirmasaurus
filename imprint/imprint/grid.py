@@ -345,7 +345,7 @@ def _inherit(child_df, parent_df, repeat, inherit_cols):
 def init_grid(theta, radii, worker_id, parents=None):
     d = theta.shape[1]
     indict = dict()
-    indict["id"] = gen_short_uuids(len(theta), worker_id=worker_id)
+    indict["id"] = gen_short_uuids(theta.shape[0], worker_id=worker_id)
 
     # Is this a terminal tile in the tree?
     indict["active"] = True
@@ -695,10 +695,6 @@ def _gen_short_uuids(n, worker_id, t):
     if t is None:
         t = unique_timer()
 
-    logger.debug(
-        f"_gen_short_uuids(n_bits={n_bits}, worker_bits={worker_bits}):"
-        f" n={n}, worker_id={worker_id}, t={t}"
-    )
     max_t = np.uint64(2 ** (64 - n_bits - worker_bits))
     looped_t = np.uint64(t) % max_t
 
@@ -707,7 +703,10 @@ def _gen_short_uuids(n, worker_id, t):
         + (np.uint64(worker_id) << np.uint64(n_bits))
         + np.arange(n, dtype=np.uint64)
     )
-    logger.debug(out)
+    logger.debug(
+        f"_gen_short_uuids(n={n}, worker_id={worker_id}, t={t}, n_bits={n_bits},"
+        f" worker_bits={worker_bits}) = [{str(out[:3])[1:-1]}, ...]:"
+    )
     return out
 
 

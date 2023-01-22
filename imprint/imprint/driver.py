@@ -75,13 +75,13 @@ class Driver:
 
         def f(K_df):
             K = K_df["K"].iloc[0]
-            K_g = grid.Grid(K_df)
+            K_g = grid.Grid(K_df, None)
             theta = K_g.get_theta()
 
             tie_sum = batching.batch(
                 _batched,
                 self.tile_batch_size,
-                in_axes=(0, 0, None),
+                in_axes=(None, 0, 0),
             )(K, theta, K_g.get_null_truth())
 
             tie_cp_bound = clopper_pearson(tie_sum, K, delta)
@@ -114,13 +114,13 @@ class Driver:
 
         def f(K_df):
             K = K_df["K"].iloc[0]
-            K_g = grid.Grid(K_df)
+            K_g = grid.Grid(K_df, None)
 
             theta, vertices = K_g.get_theta_and_vertices()
             bootstrap_lams = batching.batch(
                 _batched,
                 self.tile_batch_size,
-                in_axes=(0, 0, 0, None),
+                in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
             return pd.DataFrame(bootstrap_lams, columns=["lams"])
 

@@ -8,7 +8,6 @@ Fast min/max with clickhouse:
     https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
 """
 import os
-import time
 import uuid
 from ast import literal_eval
 from dataclasses import dataclass
@@ -16,7 +15,6 @@ from typing import Dict
 from typing import List
 
 import clickhouse_connect
-import numpy as np
 
 try:
     import keyring
@@ -35,13 +33,13 @@ import redis
 
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
-from confirm.adagrid.convergence import WorkerStatus
 
 import imprint.log
 
 logger = imprint.log.getLogger(__name__)
 
 type_map = {
+    "uint8": "UInt8",
     "uint32": "UInt32",
     "uint64": "UInt64",
     "float32": "Float32",
@@ -157,139 +155,6 @@ class ClickhouseStore(Store):
         return out
 
 
-def distributed_next(
-    db, convergence_f, n_steps, step_size, packet_size, order_col, worker_id
-):
-    """
-    This is a distributed version of the next function. It is used to
-    distribute the tile processing work.
-
-    This is the crux of the distributed version of the algorithm.
-    """
-    # If we loop 25 times, there's definitely a bug.
-    max_loops = 25
-    i = 0
-    status = WorkerStatus.WORK
-    report = dict()
-    while i < max_loops:
-        report["distributed_next_loop"] = i
-        with db.lock:
-            step_id, step_iter, step_n_iter = db._get_step_info()
-            report["step_id"] = step_id
-            report["step_iter"] = step_iter
-            report["step_n_iter"] = step_n_iter
-
-            # step_id = None means that we're starting a new job and haven't
-            # yet created a step.
-            if step_iter < step_n_iter:
-                logger.debug(f"get_work(step_id={step_id}, step_iter={step_iter})")
-                work = db.get_work(step_id, step_iter, packet_size, order_col)
-                work["query_time"] = time.time()
-                work["worker_id"] = worker_id
-                work["step_id"] = step_id
-                work["step_iter"] = step_iter
-                report["work_extraction_time"] = time.time()
-                logger.debug(f"get_work(...) returned {work.shape[0]} tiles")
-
-                # If there's work, return it!
-                if work.shape[0] > 0:
-                    db._set_step_info((step_id, step_iter + 1, step_n_iter))
-                    return status, work, report
-                else:
-                    # If step_iter < step_n_iter but there's no work, then The
-                    # INSERT into tiles_step that specifies the step is
-                    # probably incomplete. We should wait a very short time and
-                    # try again.
-                    wait = 0.1
-            # If there are no iterations left in the step, we check if the step
-            # is complete.
-            elif n_tiles_left_in_step(db, step_id) == 0:
-                # If a packet has just been completed, we check for convergence.
-                status = convergence_f()
-                if status:
-                    return WorkerStatus.CONVERGED, None, report
-
-                if step_id >= n_steps - 1:
-                    # We've finished all the steps, so we're done.
-                    return WorkerStatus.REACHED_N_STEPS, None, report
-
-                # If we haven't converged, we create a new packet.
-                new_step_id = new_step(db, step_id, step_size, packet_size, order_col)
-
-                if new_step_id == "empty":
-                    # New packet is empty so we have finished but failed to converge.
-                    return WorkerStatus.FAILED, None, report
-                else:
-                    # Successful new packet. We should check for work again
-                    # immediately.
-                    status = WorkerStatus.NEW_STEP
-                    wait = 0
-            else:
-                # No work available, but the packet is incomplete. This is
-                # because other workers have claimed all the work but have not
-                # finished yet.
-                # In this situation, we should release the lock and wait for
-                # other workers to finish.
-                wait = 1
-        if wait > 0:
-            time.sleep(wait)
-        if i > 2:
-            logger.warning(
-                f"Worker {worker_id} has been waiting for work for"
-                f" {i} iterations. This might indicate a bug."
-            )
-        i += 1
-    return WorkerStatus.STUCK, None, report
-
-
-def n_tiles_left_in_step(db, step_id):
-    return db.client.query(
-        f"""
-        select count(*) from tiles_step
-            where step_id = {step_id}
-                and id not in (
-                    select id from tiles_done where step_id = {step_id}
-                )
-        """
-    ).result_set[0][0]
-
-
-def new_step(db, old_step_id, step_size, packet_size, order_col):
-    new_step_id = old_step_id + 1
-    df = _query_df(
-        db.client,
-        f"""
-        select id from tiles where
-            id not in (select id from tiles_done)
-        order by {order_col} asc limit {step_size}
-    """,
-    )
-    if df.shape[0] == 0:
-        return "empty"
-
-    df["step_id"] = new_step_id
-
-    n_tiles = df.shape[0]
-    n_packets = int(np.ceil(n_tiles / packet_size))
-    splits = np.array_split(np.arange(n_tiles), n_packets)
-    assignment = np.empty(n_tiles, dtype=np.int32)
-    for i in range(n_packets):
-        assignment[splits[i]] = i
-    rng = np.random.default_rng()
-    rng.shuffle(assignment)
-
-    df["step_iter"] = assignment
-    logger.debug(
-        f"new step {(new_step_id, 0, n_packets)} "
-        f"n_tiles={n_tiles} packet_size={packet_size}"
-    )
-    logger.debug(f"new step df.head(): {df.head()}")
-    _insert_df(db.client, "tiles_step", df)
-
-    db._set_step_info((new_step_id, 0, n_packets))
-    return new_step_id
-
-
 @dataclass
 class Clickhouse:
     """
@@ -310,9 +175,9 @@ class Clickhouse:
 
     active: True if the tile is a leaf in the tile tree. Specified in two ways
         - the "active" column in the tiles table
-        - the "tiles_done" table, which contains a column indicating which
+        - the "done" table, which contains a column indicating which
           tiles are inactive.
-        - a tile is only active is active=True and id not in tiles_inactive
+        - a tile is only active is active=True and id not in inactive
 
     eligible: True if the tile is eligible to be selected for work. Specified in
          two ways
@@ -324,7 +189,7 @@ class Clickhouse:
     The reason for these dual sources of information is the desire to only
     rarely update rows that have already been written. Updating data is painful
     in Clickhouse. We could periodically flush the tiles_ineligible and
-    tiles_inactive tables to corresponding columns in the tiles table. This
+    inactive tables to corresponding columns in the tiles table. This
     would reduce the size of the subqueries and probably improve performance
     for very large jobs. But, this flushing would probably only need to happen
     once every few hours.
@@ -346,24 +211,16 @@ class Clickhouse:
     client: clickhouse_connect.driver.httpclient.HttpClient
     redis_con: redis.Redis
     job_id: str
-    _columns: List[str] = None
+    _tiles_columns: List[str] = None
+    _results_columns: List[str] = None
     _d: int = None
-    next = distributed_next
+    _results_table_exists: bool = False
 
     def __post_init__(self):
         self.lock = redis.lock.Lock(self.redis_con, f"{self.job_id}:next_lock")
 
-    def _get_step_info(self):
-        out = literal_eval(self.redis_con.get(f"{self.job_id}:step_info").decode())
-        logger.debug("get step info: %s", out)
-        return out
-
-    def _set_step_info(self, step_info):
-        logger.debug("set step info: %s", step_info)
-        self.redis_con.set(f"{self.job_id}:step_info", str(step_info))
-
     @property
-    def host(self):
+    def _host(self):
         return self.connection_details["host"]
 
     @property
@@ -372,129 +229,207 @@ class Clickhouse:
 
     def dimension(self):
         if self._d is None:
-            self._d = (
-                max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
-            )
+            cols = self.tiles_columns()
+            self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
         return self._d
 
-    def columns(self):
-        if self._columns is None:
-            self._columns = _query_df(
+    def tiles_columns(self):
+        if self._tiles_columns is None:
+            self._tiles_columns = _query_df(
                 self.client, "select * from tiles limit 1"
             ).columns
-        return self._columns
+        return self._tiles_columns
 
-    def get_all(self):
-        cols = ",".join([c for c in self.columns() if c not in ["active", "eligible"]])
+    def results_columns(self):
+        if self._results_columns is None:
+            self._results_columns = _query_df(
+                self.client, "select * from results limit 1"
+            ).columns
+        return self._results_columns
+
+    def get_tiles(self):
+        cols = ",".join(
+            [c for c in self.tiles_columns() if c not in ["active", "eligible"]]
+        )
         return _query_df(
             self.client,
             f"""
             select {cols},
                 and(active=true,
-                    (id not in (select id from tiles_inactive)))
-                    as active,
-                and(eligible=true,
-                    (id not in (select id from tiles_done)))
-                    as eligible
+                    (id not in (select id from inactive)))
+                    as active
             from tiles
         """,
         )
 
-    def write(self, df):
-        logger.debug(f"writing {df.shape[0]} new tiles")
+    def get_results(self):
+        cols = ",".join(
+            [c for c in self.results_columns() if c not in ["active", "eligible"]]
+        )
+        return _query_df(
+            self.client,
+            f"""
+            select {cols},
+                and(active=true,
+                    (id not in (select id from inactive)))
+                    as active,
+                and(eligible=true,
+                    (id not in (select id from done)))
+                    as eligible
+            from results
+        """,
+        )
+
+    def get_step_info(self):
+        out = literal_eval(self.redis_con.get(f"{self.job_id}:step_info").decode())
+        logger.debug("get step info: %s", out)
+        return out
+
+    def set_step_info(self, *, step_id, step_iter, n_iter, n_tiles):
+        step_info = (step_id, step_iter, n_iter, n_tiles)
+        logger.debug("set step info: %s", step_info)
+        self.redis_con.set(f"{self.job_id}:step_info", str(step_info))
+
+    def n_processed_tiles(self, step_id):
+        # This checks the number of tiles for which both:
+        # - there are results
+        # - the parent tile is done
+        # This is a good way to check if a step is done because it ensures that
+        # all relevant inserts are done.
+        R = self.client.query(
+            f"""
+            select count(*) from tiles
+                where
+                    step_id = {step_id}
+                    and id in (select id from results)
+                    and parent_id in (select id from done)
+            """
+        )
+        return R.result_set[0][0]
+
+    def insert_tiles(self, df):
+        logger.debug(f"writing {df.shape[0]} tiles")
         _insert_df(self.client, "tiles", df)
+
+    def insert_results(self, df):
+        self._create_results_table(df)
+        logger.debug(f"writing {df.shape[0]} results")
+        _insert_df(self.client, "results", df)
 
     def worst_tile(self, order_col):
         return _query_df(
             self.client,
             f"""
-            select * from tiles where
-                active=true
-                and id not in (select * from tiles_inactive)
+            select * from results r
+                where
+                    active=true
+                    and id not in (select id from inactive)
             order by {order_col} limit 1
         """,
         )
 
-    def get_work(self, step_id, step_iter, n, order_col):
-        out = _query_df(
+    def get_work(self, step_id, step_iter):
+        return _query_df(
             self.client,
             f"""
-            select t.* from tiles_step tp
-                left join tiles t on t.id = tp.id
-            where
-                step_id = {step_id}
-                and step_iter = {step_iter}
-            order by t.{order_col} asc limit {n}
+            select * from tiles
+                where
+                    step_id = {step_id}
+                    and step_iter = {step_iter}
+            """,
+        )
+
+    def select_tiles(self, n, order_col):
+        return _query_df(
+            self.client,
+            f"""
+            select * from results
+                where
+                    eligible=true
+                    and id not in (select id from done)
+            order by {order_col} asc limit {n}
         """,
         )
-        out.rename(columns={"t.id": "id"}, inplace=True)
-        return out
 
     def finish(self, which):
-        write_subset = which[
-            ["step_id", "step_iter", "id", "active", "query_time", "worker_id"]
-        ]
-        logger.debug(f"finish: {write_subset.head()}")
-        _insert_df(self.client, "tiles_done", write_subset)
+        logger.debug(f"finish: {which.head()}")
+        _insert_df(self.client, "done", which)
 
     def bootstrap_lamss(self):
         # Get the number of bootstrap lambda* columns
-        nB = max([int(c[6:]) for c in self.columns() if c.startswith("B_lams")]) + 1
+        nB = (
+            max([int(c[6:]) for c in self.results_columns() if c.startswith("B_lams")])
+            + 1
+        )
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
         lamss = self.client.query(
             f"""
-            select {cols} from tiles where
+            select {cols} from results where
                 active=true
-                and id not in (select id from tiles_inactive)
+                and id not in (select id from inactive)
         """
         ).result_set[0]
 
         return lamss
 
+    def _create_results_table(self, results_df):
+        if self._results_table_exists:
+            return
+        self._results_table_exists = True
+        results_cols = get_create_table_cols(results_df)
+        cmd = f"""
+        create table if not exists results ({",".join(results_cols)})
+            engine = MergeTree() order by orderer
+        """
+        self.client.command(cmd)
+        self.insert_results(results_df)
+
     def close(self):
         self.client.close()
+        self.redis_con.close()
 
-    def init_tiles(self, df):
+    def init_tiles(self, tiles_df):
         # tables:
         # - tiles: id, lots of other stuff...
         # - packet: id
         # - work: id
         # - done: id, active
         # - inactive: materialized view based on done
-        cols = get_create_table_cols(df)
-        orderby = "orderer" if "orderer" in df.columns else "id"
-        id_type = type_map[df["id"].dtype.name]
+        tiles_cols = get_create_table_cols(tiles_df)
+
+        id_type = type_map[tiles_df["id"].dtype.name]
         commands = [
             f"""
-            create table tiles ({",".join(cols)})
-                engine = MergeTree() order by {orderby}
-            """,
-            f"""
-            create table tiles_step (step_id UInt32, step_iter UInt32, id {id_type})
+            create table tiles ({",".join(tiles_cols)})
                 engine = MergeTree() order by (step_id, step_iter, id)
             """,
+            # TODO: could leave this uncreated until we need it
             f"""
-            create table tiles_done (
+            create table done (
+                    id {id_type},
                     step_id UInt32,
                     step_iter UInt32,
-                    id {id_type},
                     active Bool,
                     query_time Float64,
-                    worker_id UInt32)
-                engine = MergeTree() order by (step_id, step_iter, id)
+                    finisher_id UInt32,
+                    refine Bool,
+                    deepen Bool)
+                engine = MergeTree() order by id
             """,
             """
-            create materialized view tiles_inactive
+            create materialized view inactive
                 engine = MergeTree() order by id
-                as select id from tiles_done where active=false
+                as select id from done where active=false
             """,
         ]
         for c in commands:
+            print(c)
             self.client.command(c)
-        self.write(df)
-        self._set_step_info((-1, 0, 0))
+        self.client.command("insert into done values (0, 0, 0, 0, 0, 0, 0, 0)")
+        self.insert_tiles(tiles_df)
+        self.set_step_info(step_id=-1, step_iter=0, n_iter=0, n_tiles=0)
 
     def new_worker(self):
         with self.lock:
