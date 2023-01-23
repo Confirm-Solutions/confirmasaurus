@@ -25,7 +25,8 @@ class BatchCdkStack(Stack):
 
         kms_policy_document = get_kms_policy_documents()
         
-        _ = kms.Key(self, 'SOPS_key',
+        _ = kms.Key(self, 
+            id='SOPS_key',
             description='Key for SOPS',
             enabled=True,
             enable_key_rotation=False,
