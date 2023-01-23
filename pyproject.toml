@@ -42,7 +42,7 @@ optional = true
 pyarrow = "^10.0.1"
 boto3 = "^1.26.53"
 cloudpickle = "~2.0.0"
-clickhouse-connect = "^0.4.8"
+clickhouse-connect = "^0.5.0"
 redis = "^4.4.2"
 keyring = "^23.13.1"
 
