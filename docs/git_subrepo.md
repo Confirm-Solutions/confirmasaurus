@@ -27,9 +27,8 @@ The flow from confirm to imprint looks like:
 2. (automatic) on the imprint repo, rebase the `sync` branch on top of `main`.
 3. (automatic) from confirm repo, subrepo pull the latest changes from the imprint `sync` into confirm `main` --> this is merging the latest changes so we can push
 4. (automatic) from confirm repo, subrepo push confirm `main` to imprint `sync`
-5. (automatic) create a PR on the imprint repo
-6. (manual) improve/merge the PR on imprint
-7. (partially automatic) pull imprint `main` changes back into confirm `main`. 
+5. (automatic) create and merge a PR on the imprint repo
+6. (automatic) pull imprint `main` changes back into confirm `main`. 
 
 Step 7 needs to be triggered when the imprint `sync` branch is merged into `main`. 
 The end of the discussion here would be useful for building this. 

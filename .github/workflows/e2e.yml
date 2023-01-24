@@ -70,4 +70,4 @@ jobs:
         
       - name: Clear Clickhouse Test DBs
         run: |
-          poetry run python confirm/cloud/clear_clickhouse_test.py
+          poetry run python confirm/cloud/clear_test_dbs.py

@@ -17,11 +17,11 @@ def check(db, snapshot, only_lams=False):
     np.testing.assert_allclose(lamss, snapshot(lamss))
 
     all_tiles_df = db.get_results().set_index("id")
-    check_cols = ["theta0", "radii0", "null_truth0"] + [
+    check_cols = ['step_id', "theta0", "radii0", "null_truth0"] + [
         c for c in all_tiles_df.columns if "lams" in c
     ]
     check_subset = (
-        all_tiles_df[check_cols].sort_values(by=["theta0"]).reset_index(drop=True)
+        all_tiles_df[check_cols].sort_values(by=['step_id', "theta0"]).reset_index(drop=True)
     )
     compare = snapshot(check_subset)
     # SP = all_tiles_df.\
@@ -73,14 +73,13 @@ def test_adagrid(snapshot):
 
 
 @pytest.mark.slow
-def test_adagrid_packet1(snapshot):
+def test_adagrid_packetsize1(snapshot):
     snapshot.set_test_name("test_adagrid")
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     iter, reports, db = ada.ada_calibrate(
         ZTest1D, g=g, nB=5, tile_batch_size=1, packet_size=1
     )
     check(db, snapshot, only_lams=True)
-
 
 @pytest.mark.slow
 def test_adagrid_clickhouse(snapshot):
@@ -125,7 +124,7 @@ def test_adagrid_clickhouse_distributed(snapshot):
         image=modal_util.get_image(dependency_groups=["test", "cloud"]),
         retries=0,
         mounts=modal.create_package_mounts(["confirm", "imprint"]),
-        secret=modal.Secret.from_name("confirm-secrets"),
+        secret=modal.Secret.from_name("kms-sops"),
         serialized=True,
     )
     def worker(i):
@@ -133,6 +132,8 @@ def test_adagrid_clickhouse_distributed(snapshot):
         import confirm.adagrid as ada
         from imprint.models.ztest import ZTest1D
         from jax.config import config
+        
+        modal_util.decrypt_secrets()
 
         config.update("jax_enable_x64", True)
         db = ch.Clickhouse.connect(job_id=job_id)

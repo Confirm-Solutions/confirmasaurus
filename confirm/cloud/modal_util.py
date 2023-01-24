@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import modal
@@ -64,3 +65,7 @@ def run_on_modal(f, **kwargs):
     wrapper = modalize(stub, **kwargs)(f)
     with stub.run():
         return wrapper.call()
+
+
+def decrypt_secrets(sops_binary='/go/bin/sops'):
+    subprocess.run([sops_binary, '-d', '--output', '.env', 'test_secrets.enc.env'])

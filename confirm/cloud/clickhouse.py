@@ -503,12 +503,12 @@ class Clickhouse:
 
 def does_table_exist(client, table_name: str) -> bool:
     return (
-        client.query_df(
+        len(client.query(
             f"""
         select * from information_schema.schemata
             where schema_name = '{table_name}'
         """
-        ).shape[0]
+        ).result_set)
         > 0
     )
 

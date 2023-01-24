@@ -1,4 +1,3 @@
-import subprocess
 import sys
 
 import modal
@@ -39,11 +38,8 @@ def run_tests(argv=None):
     secrets=[modal.Secret.from_name("kms-sops")],
 )
 def run_cloud_tests(argv=None):
-    decrypt_secrets(sops_binary='/go/bin/sops')
+    modal_util.decrypt_secrets()
     return run_tests(argv=argv)
-
-def decrypt_secrets(sops_binary='sops'):
-    subprocess.run([sops_binary, '-d', '--output', '.env', 'test_secrets.enc.env'])
 
 if __name__ == "__main__":
     # run_tests()
