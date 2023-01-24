@@ -90,9 +90,7 @@ jobs:
       - name: Pytest
         run: |
           sops -d test_secrets.enc.env > test_secrets.gitignore.env
-          cat test_secrets.gitignore.env
-          eval $(cat test_secrets.gitignore.env)
-          poetry run pytest -n auto -s
+          env $(cat test_secrets.gitignore.env) poetry run pytest -n auto -s
 
   push_to_imprint:
     # See docs/git_subrepo.md for further details on this stuff.
