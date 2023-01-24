@@ -89,8 +89,17 @@ jobs:
 
       - name: Pytest
         run: |
-          sops -d test_secrets.enc.env > test_secrets.gitignore.env
+          sops --verbose -d test_secrets.enc.env > test_secrets.gitignore.env
           source test_secrets.gitignore.env
+          if [[ -z "${CLICKHOUSE_HOST}" ]]; then
+            echo "EXISTS"
+            echo "EXISTS"
+            echo "EXISTS"
+          else
+            echo "NOPE"
+            echo "NOPE"
+            echo "NOPE"
+          fi
           poetry run pytest -n auto -s
 
   push_to_imprint:

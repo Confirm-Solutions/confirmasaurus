@@ -32,12 +32,14 @@ class TestClickhouseStore(StoreTester):
         return ch.Clickhouse.connect().store
 
 
+@pytest.mark.slow
 def test_connect_prod_no_job_id():
     with pytest.raises(RuntimeError) as excinfo:
         ch.Clickhouse.connect(host="fakeprod")
     assert "To run a production job" in str(excinfo.value)
 
 
+@pytest.mark.slow
 def test_clear_dbs_only_test():
     class FakeClient:
         def __init__(self):
