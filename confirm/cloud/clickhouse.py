@@ -479,7 +479,7 @@ class Clickhouse:
         """
         config = get_ch_config(host, port, username, password)
         if job_id is None:
-            test_host = getenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
+            test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
             if not (
                 (test_host is not None and test_host in config["host"])
                 or "localhost" in config["host"]
@@ -518,7 +518,7 @@ def get_redis_client(host=None, port=None, password=None):
 
 
 def get_redis_config(host=None, port=None, password=None):
-    env = getenv.dotenv_values()
+    env = dotenv.dotenv_values()
     if host is None:
         host = env["REDIS_HOST"]
     if port is None:
@@ -537,7 +537,7 @@ def get_ch_client(host=None, port=None, username=None, password=None, job_id=Non
 
 
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
-    env = getenv.dotenv_values()
+    env = dotenv.dotenv_values()
     if host is None:
         if "CLICKHOUSE_HOST" in env:
             host = env["CLICKHOUSE_HOST"]
@@ -576,7 +576,7 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False):
         names: default None, list of database names to drop. If None, drop all.
         yes: bool, if True, don't ask for confirmation
     """
-    test_host = getenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
+    test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
     if not (
         (test_host is not None and test_host in ch_client.url)
         or "localhost" in ch_client.url

@@ -1321,17 +1321,6 @@ files = [
 ]
 
 [[package]]
-name = "getenv"
-version = "0.2.0"
-description = "Environment variable definition with type"
-category = "dev"
-optional = false
-python-versions = "*"
-files = [
-    {file = "getenv-0.2.0-py3-none-any.whl", hash = "sha256:8469827f7c8bbf4f2d899655640b0bd1eeac546f526b2fe8b8435d8db0f2ab36"},
-]
-
-[[package]]
 name = "grpclib"
 version = "0.4.3"
 description = "Pure-Python gRPC implementation for asyncio"
@@ -3477,6 +3466,21 @@ files = [
 six = ">=1.5"
 
 [[package]]
+name = "python-dotenv"
+version = "0.21.1"
+description = "Read key-value pairs from a .env file and set them as environment variables"
+category = "dev"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "python-dotenv-0.21.1.tar.gz", hash = "sha256:1c93de8f636cde3ce377292818d0e440b6e45a82f215c3744979151fa8151c49"},
+    {file = "python_dotenv-0.21.1-py3-none-any.whl", hash = "sha256:41e12e0318bebc859fcc4d97d4db8d20ad21721a6aa5047dd59f090391cb549a"},
+]
+
+[package.extras]
+cli = ["click (>=5.0)"]
+
+[[package]]
 name = "python-json-logger"
 version = "2.0.4"
 description = "A python library adding a json log formatter"
@@ -4598,4 +4602,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "~3.10"
-content-hash = "1affe127ff0e879d30b50a014f9c162320ec162c3db3e1cffe8c2d9f4657a767"
+content-hash = "e12199f15e4924b04267b5acb24c6679de05b19d4a8cba50989bab6ed0f589ea"

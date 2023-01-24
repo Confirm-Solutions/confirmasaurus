@@ -20,7 +20,7 @@ Log into AWS using `aws sso configure`. Please do not stray far from these comma
 
 Then decrypt the secrets with:
 ```
-sops -d test_secrets.enc.env > .env
+sops -d --output .env test_secrets.enc.env
 ```
 
 ## Encrypting new secrets
@@ -30,7 +30,7 @@ Log into AWS using `aws sso configure`. Please do not stray far from these comma
 First, decrypt the secrets as above. Then, modify the secret or add a secret or whatever. Then, encrypt the new secrets with:
 
 ```
-sops -e .env > test_secrets.enc.env
+sops -e --output test_secrets.enc.env .env
 ```
 
 ## Accessing secrets in code

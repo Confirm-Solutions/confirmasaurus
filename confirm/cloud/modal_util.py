@@ -9,15 +9,30 @@ def get_image(dependency_groups=["cloud"]):
     context_files = {
         "/.pyproject.toml": str(poetry_dir.joinpath("pyproject.toml")),
         "/.poetry.lock": str(poetry_dir.joinpath("poetry.lock")),
+        "/.test_secrets.enc.env": str(poetry_dir.joinpath("test_secrets.enc.env")),
     }
 
     dockerfile_commands = [
+        """
+        RUN apt-get update && \\
+            apt-get install -y golang && \\
+            mkdir /go && \\
+            export GOPATH=/go && \\
+            go install go.mozilla.org/sops/cmd/sops@latest
+        """,
+        # Modal doesn't support ENV yet so we COPY sops. Might be nice to
+        # replace the COPY with this once it is supported.
+        # "ENV PATH=/go/bin:$PATH",
+        # "COPY /go/bin/sops /usr/bin/sops",
+        "COPY /.test_secrets.enc.env /root/test_secrets.enc.env",
         "RUN python -m pip install poetry",
         "COPY /.poetry.lock /tmp/poetry/poetry.lock",
         "COPY /.pyproject.toml /tmp/poetry/pyproject.toml",
-        "RUN cd /tmp/poetry && \\ ",
-        "  poetry config virtualenvs.create false && \\ ",
-        f"  poetry install --with={','.join(dependency_groups)} --no-root",
+        f"""
+        RUN cd /tmp/poetry && \\
+            poetry config virtualenvs.create false && \\
+            poetry install --with={','.join(dependency_groups)} --no-root
+        """,
     ]
 
     return modal.Image.from_dockerhub(
