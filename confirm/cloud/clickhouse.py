@@ -16,18 +16,6 @@ from typing import List
 
 import clickhouse_connect
 
-try:
-    import keyring
-
-    assert keyring.get_keyring().priority
-except (ImportError, AssertionError):
-    # No suitable keyring is available, so mock the interface
-    # to simulate no pw.
-    # https://github.com/jeffwidman/bitbucket-issue-migration/commit/f4a2e18b1a8e54ee8e265bf71d0808c5a99f66f9
-    class keyring:
-        get_password = staticmethod(lambda system, username: None)
-
-
 import pyarrow
 import redis
 import pandas as pd
@@ -464,10 +452,8 @@ class Clickhouse:
             CLICKHOUSE_PASSWORD: The Clickhouse username.
 
         If the environment variables are not set, the defaults will be:
-            host: keyring entry "clickhouse-confirm-test-host"
             port: 8443
             username: "default"
-            password: keyring entry "clickhouse-confirm-test-password"
 
         For Redis, we will use the following environment variables:
             REDIS_HOST: The hostname for the Redis server.
@@ -475,9 +461,7 @@ class Clickhouse:
             REDIS_PASSWORD: The Redis password.
 
         If the environment variables are not set, the defaults will be:
-            host: keyring entry "upstash-confirm-coord-test-host"
             port: 37085
-            password: keyring entry "upstash-confirm-coord-test-password"
 
         Args:
             job_id: The job_id. Defaults to None.
@@ -494,7 +478,7 @@ class Clickhouse:
         """
         config = get_ch_config(host, port, username, password)
         if job_id is None:
-            test_host = get_ch_test_host()
+            test_host = os.environ["CLICKHOUSE_TEST_HOST"]
             if not (
                 (test_host is not None and test_host in config["host"])
                 or "localhost" in config["host"]
@@ -534,24 +518,14 @@ def get_redis_client(host=None, port=None, password=None):
 
 def get_redis_config(host=None, port=None, password=None):
     if host is None:
-        if "REDIS_HOST" in os.environ:
-            host = os.environ["REDIS_HOST"]
-        else:
-            host = keyring.get_password(
-                "upstash-confirm-coord-test-host", os.environ["USER"]
-            )
+        host = os.environ["REDIS_HOST"]
     if port is None:
         if "REDIS_PORT" in os.environ:
             port = os.environ["REDIS_PORT"]
         else:
             port = 37085
     if password is None:
-        if "REDIS_PASSWORD" in os.environ:
-            password = os.environ["REDIS_PASSWORD"]
-        else:
-            password = keyring.get_password(
-                "upstash-confirm-coord-test-password", os.environ["USER"]
-            )
+        password = os.environ["REDIS_PASSWORD"]
     return dict(host=host, port=port, password=password)
 
 
@@ -565,7 +539,7 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
         if "CLICKHOUSE_HOST" in os.environ:
             host = os.environ["CLICKHOUSE_HOST"]
         else:
-            host = get_ch_test_host()
+            host = os.environ["CLICKHOUSE_TEST_HOST"]
     if port is None:
         if "CLICKHOUSE_PORT" in os.environ:
             port = os.environ["CLICKHOUSE_PORT"]
@@ -577,23 +551,11 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
         else:
             username = "default"
     if password is None:
-        if "CLICKHOUSE_PASSWORD" in os.environ:
-            password = os.environ["CLICKHOUSE_PASSWORD"]
-        else:
-            password = keyring.get_password(
-                "clickhouse-confirm-test-password", os.environ["USER"]
-            )
+        password = os.environ["CLICKHOUSE_PASSWORD"]
     logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
         host=host, port=port, username=username, password=password, database=database
     )
-
-
-def get_ch_test_host():
-    if "CLICKHOUSE_TEST_HOST" in os.environ:
-        return os.environ["CLICKHOUSE_TEST_HOST"]
-    else:
-        return keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
 
 
 def clear_dbs(ch_client, redis_client, names=None, yes=False):
@@ -611,7 +573,7 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False):
         names: default None, list of database names to drop. If None, drop all.
         yes: bool, if True, don't ask for confirmation
     """
-    test_host = get_ch_test_host()
+    test_host = os.environ["CLICKHOUSE_TEST_HOST"]
     if not (
         (test_host is not None and test_host in ch_client.url)
         or "localhost" in ch_client.url
