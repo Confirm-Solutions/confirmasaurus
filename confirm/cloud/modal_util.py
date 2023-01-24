@@ -67,5 +67,5 @@ def run_on_modal(f, **kwargs):
         return wrapper.call()
 
 
-def decrypt_secrets(sops_binary='/go/bin/sops'):
-    subprocess.run([sops_binary, '-d', '--output', '.env', 'test_secrets.enc.env'])
+def decrypt_secrets(sops_binary="/go/bin/sops"):
+    subprocess.run([sops_binary, "-d", "--output", ".env", "test_secrets.enc.env"])

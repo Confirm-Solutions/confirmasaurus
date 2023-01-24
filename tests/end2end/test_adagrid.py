@@ -17,11 +17,13 @@ def check(db, snapshot, only_lams=False):
     np.testing.assert_allclose(lamss, snapshot(lamss))
 
     all_tiles_df = db.get_results().set_index("id")
-    check_cols = ['step_id', "theta0", "radii0", "null_truth0"] + [
+    check_cols = ["step_id", "theta0", "radii0", "null_truth0"] + [
         c for c in all_tiles_df.columns if "lams" in c
     ]
     check_subset = (
-        all_tiles_df[check_cols].sort_values(by=['step_id', "theta0"]).reset_index(drop=True)
+        all_tiles_df[check_cols]
+        .sort_values(by=["step_id", "theta0"])
+        .reset_index(drop=True)
     )
     compare = snapshot(check_subset)
     # SP = all_tiles_df.\
@@ -81,6 +83,7 @@ def test_adagrid_packetsize1(snapshot):
     )
     check(db, snapshot, only_lams=True)
 
+
 @pytest.mark.slow
 def test_adagrid_clickhouse(snapshot):
     snapshot.set_test_name("test_adagrid")
@@ -132,7 +135,7 @@ def test_adagrid_clickhouse_distributed(snapshot):
         import confirm.adagrid as ada
         from imprint.models.ztest import ZTest1D
         from jax.config import config
-        
+
         modal_util.decrypt_secrets()
 
         config.update("jax_enable_x64", True)

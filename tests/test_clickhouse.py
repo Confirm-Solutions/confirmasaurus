@@ -1,11 +1,10 @@
-import pytest
 import numpy as np
-import imprint as ip
-
+import pytest
 from test_db import DBTester
 from test_store import StoreTester
 
 import confirm.cloud.clickhouse as ch
+import imprint as ip
 
 
 def test_ch_not_slow():

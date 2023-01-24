@@ -7,7 +7,6 @@ Speeding up clickhouse stuff by using threading and specifying column_types:
 Fast min/max with clickhouse:
     https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
 """
-import os
 import uuid
 from ast import literal_eval
 from dataclasses import dataclass
@@ -16,15 +15,13 @@ from typing import List
 
 import clickhouse_connect
 import dotenv
-
+import pandas as pd
 import pyarrow
 import redis
-import pandas as pd
-
-from confirm.adagrid.store import is_table_name
-from confirm.adagrid.store import Store
 
 import imprint.log
+from confirm.adagrid.store import is_table_name
+from confirm.adagrid.store import Store
 
 logger = imprint.log.getLogger(__name__)
 
@@ -503,12 +500,14 @@ class Clickhouse:
 
 def does_table_exist(client, table_name: str) -> bool:
     return (
-        len(client.query(
-            f"""
+        len(
+            client.query(
+                f"""
         select * from information_schema.schemata
             where schema_name = '{table_name}'
         """
-        ).result_set)
+            ).result_set
+        )
         > 0
     )
 

@@ -1,4 +1,3 @@
-import os
 import shutil
 
 import aws_cdk as cdk
@@ -138,7 +137,7 @@ class BatchCdkStack(Stack):
         )
 
 
-env = cdk.Environment(account='644171722153', region="us-east-1")
+env = cdk.Environment(account="644171722153", region="us-east-1")
 app = cdk.App()
 BatchCdkStack(app, "batch-cdk", env=env)
 

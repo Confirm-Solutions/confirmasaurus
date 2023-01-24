@@ -41,6 +41,7 @@ def run_cloud_tests(argv=None):
     modal_util.decrypt_secrets()
     return run_tests(argv=argv)
 
+
 if __name__ == "__main__":
     # run_tests()
     with stub.run():
