@@ -14,5 +14,8 @@
     "**/node_modules": true,
     "**/__pycache__": true,
     "research/archive": true
-  }
+  },
+  "python.testing.pytestArgs": [
+    "--runslow"
+  ]
 }
