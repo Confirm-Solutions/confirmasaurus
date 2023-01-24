@@ -18,20 +18,34 @@ brew install sops
 
 Log into AWS using `aws sso configure`. Please do not stray far from these commands. 
 
+Then decrypt the secrets with:
 ```
-sops -d --input-type dotenv test_secrets.enc.env > test_secrets.gitignore.env
+sops -d --output .env test_secrets.enc.env
 ```
 
 ## Encrypting new secrets
 
 Log into AWS using `aws sso configure`. Please do not stray far from these commands. 
 
-First, decrypt the secrets as above. Then, modify the secret or add a secret or whatever. Then:
+First, decrypt the secrets as above. Then, modify the secret or add a secret or whatever. Then, encrypt the new secrets with:
 
 ```
-sops -e --input-type dotenv test_secrets.gitignore.env > test_secrets.enc.env
+sops -e --output test_secrets.enc.env .env
 ```
 
-## Accessing secrets in GitHub actions
+## Accessing secrets in code
+
+Use the `getenv` package to load the `.env` file and access its entries. For example:
+
+```
+import getenv
+host = getenv.dotenv_values()['CLICKHOUSE_HOST']
+```
+
+## Decrypting secrets in GitHub actions
 
 I followed [the directions here](https://www.automat-it.com/post/using-github-actions-with-aws-iam-roles) to set up GitHub Actions to access KMS and decrypt the secrets. I created a permissions policy in AWS named "AccessSecrets" following [the instructions here](https://github.com/mozilla/sops#assuming-roles-and-using-kms-in-various-aws-accounts). I created a "GitHubActionsRole" that has that permissions policy attached.
+
+## Decrypting secrets in other services (e.g. Modal)
+
+The "AccessSecrets" IAM User can be used for decrypting secrets.
