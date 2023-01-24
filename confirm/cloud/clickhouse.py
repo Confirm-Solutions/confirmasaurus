@@ -1,32 +1,32 @@
-import os
-import time
+"""
+Some notes I don't want to lose:
+
+Speeding up clickhouse stuff by using threading and specifying column_types:
+    https://clickhousedb.slack.com/archives/CU478UEQZ/p1673560678632889
+
+Fast min/max with clickhouse:
+    https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
+"""
 import uuid
+from ast import literal_eval
 from dataclasses import dataclass
 from typing import Dict
 from typing import List
 
 import clickhouse_connect
-import pottery
-
-try:
-    import keyring
-
-    assert keyring.get_keyring().priority
-except (ImportError, AssertionError):
-    # No suitable keyring is available, so mock the interface
-    # to simulate no pw.
-    # https://github.com/jeffwidman/bitbucket-issue-migration/commit/f4a2e18b1a8e54ee8e265bf71d0808c5a99f66f9
-    class keyring:
-        get_password = staticmethod(lambda system, username: None)
-
-
+import dotenv
+import pandas as pd
 import pyarrow
 import redis
 
+import imprint.log
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
 
+logger = imprint.log.getLogger(__name__)
+
 type_map = {
+    "uint8": "UInt8",
     "uint32": "UInt32",
     "uint64": "UInt64",
     "float32": "Float32",
@@ -72,6 +72,7 @@ class ClickhouseStore(Store):
     """
 
     client: clickhouse_connect.driver.httpclient.HttpClient
+    job_id: str
 
     def __post_init__(self):
         self.client.command(
@@ -84,7 +85,7 @@ class ClickhouseStore(Store):
 
     def get(self, key):
         exists, table_name = self._exists(key)
-        print(exists, table_name)
+        logger.debug(f"get({key}) -> {exists} {table_name}")
         if exists:
             return _query_df(self.client, f"select * from {table_name}")
         else:
@@ -105,23 +106,23 @@ class ClickhouseStore(Store):
                     else f"_store_{table_id}"
                 )
             self.client.command(
-                "insert into store_tables values (%s, %s)", (key, table_name)
+                "insert into store_tables values (%s, %s)",
+                (key, table_name),
             )
+        logger.debug(f"set({key}) -> {exists} {table_name}")
         cols = get_create_table_cols(df)
-        # if "id" not in df.columns:
-        #     df["id"] = df.index
         self.client.command(
             f"""
             create table {table_name} ({",".join(cols)})
                 engine = MergeTree() order by tuple()
         """
         )
-        _insert_df(self.client, table_name, df)
+        _insert_df(self.client, self.job_id + "." + table_name, df)
 
     def set_or_append(self, key, df):
         exists, table_name = self._exists(key)
+        logger.debug(f"set_or_append({key}) -> {exists} {table_name}")
         if exists:
-            print("exists", table_name, df)
             _insert_df(self.client, table_name, df)
         else:
             self.set(key, df)
@@ -136,7 +137,9 @@ class ClickhouseStore(Store):
             return True, table_name[0][0]
 
     def exists(self, key):
-        return self._exists(key)[0]
+        out = self._exists(key)[0]
+        logger.debug(f"exists({key}) = {out}")
+        return out
 
 
 @dataclass
@@ -144,7 +147,7 @@ class Clickhouse:
     """
     A tile database built on top of Clickhouse. This should be very fast and
     robust and is preferred for large runs. Latency will be worse than with
-    DuckDB because a network request will be required for each query.
+    DuckDB because network requests will be required for each query.
 
     See the DuckDBTiles or PandasTiles implementations for details on the
     Adagrid tile database interface.
@@ -159,23 +162,29 @@ class Clickhouse:
 
     active: True if the tile is a leaf in the tile tree. Specified in two ways
         - the "active" column in the tiles table
-        - the "tiles_inactive" table, which contains tiles that are inactive
-        - a tile is only active is active=True and id not in tiles_inactive
+        - the "done" table, which contains a column indicating which
+          tiles are inactive.
+        - a tile is only active is active=True and id not in inactive
 
     eligible: True if the tile is eligible to be selected for work. Specified in
          two ways
         - the "eligibile" column in the tiles table
-        - the "work" table, which contains tiles that are ineligible because
-          they either are being worked on or have been worked on
-        - a tile is only eligible if eligible=True and id not in tiles_ineligible
+        - the "tiles_work" table, which contains tiles that are ineligible
+          because they either are being worked on or have been worked on
+        - a tile is only eligible if eligible=True and id not in tiles_work
 
     The reason for these dual sources of information is the desire to only
     rarely update rows that have already been written. Updating data is painful
     in Clickhouse. We could periodically flush the tiles_ineligible and
-    tiles_inactive tables to corresponding columns in the tiles table. This
+    inactive tables to corresponding columns in the tiles table. This
     would reduce the size of the subqueries and probably improve performance
     for very large jobs. But, this flushing would probably only need to happen
     once every few hours.
+
+    Packets: A packet is a distributed unit of work. We check the convergence
+    criterion once an entire packet of work is done. This removes data race
+    conditions where one worker might finish work before or after another thus
+    affecting the convergence criterion and tile selection process.
 
     NOTE: A tile may be active but ineligible if it was selected for work but the
     criterion decided it was not worth refining or deepening.
@@ -188,154 +197,235 @@ class Clickhouse:
     connection_details: Dict[str, str]
     client: clickhouse_connect.driver.httpclient.HttpClient
     redis_con: redis.Redis
-    host: str
     job_id: str
-    _columns: List[str] = None
+    _tiles_columns: List[str] = None
+    _results_columns: List[str] = None
     _d: int = None
+    _results_table_exists: bool = False
+
+    def __post_init__(self):
+        self.lock = redis.lock.Lock(self.redis_con, f"{self.job_id}:next_lock")
+
+    @property
+    def _host(self):
+        return self.connection_details["host"]
 
     @property
     def store(self):
-        return ClickhouseStore(self.client)
+        return ClickhouseStore(self.client, self.job_id)
 
     def dimension(self):
         if self._d is None:
-            self._d = (
-                max([int(c[5:]) for c in self.columns() if c.startswith("theta")]) + 1
-            )
+            cols = self.tiles_columns()
+            self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
         return self._d
 
-    def columns(self):
-        if self._columns is None:
-            self._columns = _query_df(
+    def tiles_columns(self):
+        if self._tiles_columns is None:
+            self._tiles_columns = _query_df(
                 self.client, "select * from tiles limit 1"
             ).columns
-        return self._columns
+        return self._tiles_columns
 
-    def get_all(self):
-        cols = ",".join([c for c in self.columns() if c not in ["active", "eligible"]])
+    def results_columns(self):
+        if self._results_columns is None:
+            self._results_columns = _query_df(
+                self.client, "select * from results limit 1"
+            ).columns
+        return self._results_columns
+
+    def get_tiles(self):
+        cols = ",".join(
+            [c for c in self.tiles_columns() if c not in ["active", "eligible"]]
+        )
         return _query_df(
             self.client,
             f"""
             select {cols},
-                and(active=true, (id not in (select id from tiles_inactive))) as active,
-                and(eligible=true, (id not in (select id from work))) as eligible
+                and(active=true,
+                    (id not in (select id from inactive)))
+                    as active
             from tiles
         """,
         )
 
-    def write(self, df):
+    def get_results(self):
+        cols = ",".join(
+            [c for c in self.results_columns() if c not in ["active", "eligible"]]
+        )
+        return _query_df(
+            self.client,
+            f"""
+            select {cols},
+                and(active=true,
+                    (id not in (select id from inactive)))
+                    as active,
+                and(eligible=true,
+                    (id not in (select id from done)))
+                    as eligible
+            from results
+        """,
+        )
+
+    def get_step_info(self):
+        out = literal_eval(self.redis_con.get(f"{self.job_id}:step_info").decode())
+        logger.debug("get step info: %s", out)
+        return out
+
+    def set_step_info(self, *, step_id: int, step_iter: int, n_iter: int, n_tiles: int):
+        step_info = (step_id, step_iter, n_iter, n_tiles)
+        logger.debug("set step info: %s", step_info)
+        self.redis_con.set(f"{self.job_id}:step_info", str(step_info))
+
+    def n_processed_tiles(self, step_id: int) -> int:
+        # This checks the number of tiles for which both:
+        # - there are results
+        # - the parent tile is done
+        # This is a good way to check if a step is done because it ensures that
+        # all relevant inserts are done.
+        #
+        if not self._results_table_exists:
+            self._results_table_exists = does_table_exist(self.client, "results")
+            if not self._results_table_exists:
+                return -1
+
+        R = self.client.query(
+            f"""
+            select count(*) from tiles
+                where
+                    step_id = {step_id}
+                    and id in (select id from results)
+                    and parent_id in (select id from done)
+            """
+        )
+        return R.result_set[0][0]
+
+    def insert_tiles(self, df: pd.DataFrame):
+        logger.debug(f"writing {df.shape[0]} tiles")
         _insert_df(self.client, "tiles", df)
+
+    def insert_results(self, df: pd.DataFrame):
+        self._create_results_table(df)
+        logger.debug(f"writing {df.shape[0]} results")
+        _insert_df(self.client, "results", df)
 
     def worst_tile(self, order_col):
         return _query_df(
             self.client,
             f"""
-            select * from tiles where
-                active=true
-                and id not in (select * from tiles_inactive)
+            select * from results r
+                where
+                    active=true
+                    and id not in (select id from inactive)
             order by {order_col} limit 1
         """,
         )
 
-    def next(self, n, order_col, worker_id):
-        lock = pottery.Redlock(
-            key=f"{self.host}/{self.job_id}/lock", masters={self.redis_con}
-        )
-        with lock:
-            out = _query_df(
-                self.client,
-                f"""
-                select * from tiles where
-                    eligible=true
-                    and id not in (select id from work)
-                order by {order_col} asc limit {n}
+    def get_work(self, step_id, step_iter):
+        return _query_df(
+            self.client,
+            f"""
+            select * from tiles
+                where
+                    step_id = {step_id}
+                    and step_iter = {step_iter}
             """,
-            )
-            T = time.time()
-            out["time"] = T
-            out["worker_id"] = worker_id
-            _insert_df(self.client, "work", out[["id", "time", "worker_id"]])
+        )
 
-        # No need to check for conflicts because we are using a lock but if we
-        # were to check for conflicts, it would look something like this
-        # conflicts = _query_df(
-        # self.client,
-        #     f"""
-        #     with mine as (
-        #         select id, time from work where
-        #             worker_id={self.worker_id}
-        #             and time={T}
-        #     )
-        #     select worker_id, time from work
-        #         join mine on (
-        #             work.id=mine.id
-        #             and work.worker_id != {self.worker_id}
-        #         )
-        #         where work.time <= mine.time
-        # """
-        # )
-        # assert conflicts.shape[0] == 0
-        return out
+    def select_tiles(self, n, order_col):
+        return _query_df(
+            self.client,
+            f"""
+            select * from results
+                where
+                    eligible=true
+                    and id not in (select id from done)
+            order by {order_col} asc limit {n}
+        """,
+        )
 
     def finish(self, which):
-        _insert_df(self.client, "tiles_inactive", which.loc[~which["active"]][["id"]])
+        logger.debug(f"finish: {which.head()}")
+        _insert_df(self.client, "done", which)
 
     def bootstrap_lamss(self):
         # Get the number of bootstrap lambda* columns
-        nB = max([int(c[6:]) for c in self.columns() if c.startswith("B_lams")]) + 1
+        nB = (
+            max([int(c[6:]) for c in self.results_columns() if c.startswith("B_lams")])
+            + 1
+        )
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
         lamss = self.client.query(
             f"""
-            select {cols} from tiles where
+            select {cols} from results where
                 active=true
-                and id not in (select id from tiles_inactive)
+                and id not in (select id from inactive)
         """
         ).result_set[0]
 
         return lamss
 
+    def _create_results_table(self, results_df):
+        if self._results_table_exists:
+            return
+        self._results_table_exists = True
+        results_cols = get_create_table_cols(results_df)
+        cmd = f"""
+        create table if not exists results ({",".join(results_cols)})
+            engine = MergeTree() order by orderer
+        """
+        self.client.command(cmd)
+        self.insert_results(results_df)
+
     def close(self):
         self.client.close()
+        self.redis_con.close()
 
-    def init_tiles(self, df):
-        cols = get_create_table_cols(df)
-        orderby = "orderer" if "orderer" in df.columns else "id"
-        self.client.command(
-            f"""
-            create table tiles ({",".join(cols)})
-                engine = MergeTree() order by {orderby}
-        """
-        )
+    def init_tiles(self, tiles_df):
+        # tables:
+        # - tiles: id, lots of other stuff...
+        # - packet: id
+        # - work: id
+        # - done: id, active
+        # - inactive: materialized view based on done
+        tiles_cols = get_create_table_cols(tiles_df)
 
-        id_type = type_map[df["id"].dtype.name]
-        self.client.command(
+        id_type = type_map[tiles_df["id"].dtype.name]
+        commands = [
             f"""
-            create table tiles_inactive (id {id_type})
+            create table tiles ({",".join(tiles_cols)})
+                engine = MergeTree() order by (step_id, step_iter, id)
+            """,
+            # TODO: could leave this uncreated until we need it
+            f"""
+            create table done (
+                    id {id_type},
+                    step_id UInt32,
+                    step_iter UInt32,
+                    active Bool,
+                    query_time Float64,
+                    finisher_id UInt32,
+                    refine Bool,
+                    deepen Bool)
                 engine = MergeTree() order by id
+            """,
             """
-        )
-        self.client.command(
-            f"""
-            create table work
-                (id {id_type}, time Float64, worker_id UInt32)
-                engine = MergeTree() order by (worker_id, id)
-            """
-        )
-        self.write(df)
+            create materialized view inactive
+                engine = MergeTree() order by id
+                as select id from done where active=false
+            """,
+        ]
+        for c in commands:
+            self.client.command(c)
+        self.client.command("insert into done values (0, 0, 0, 0, 0, 0, 0, 0)")
+        self.insert_tiles(tiles_df)
+        self.set_step_info(step_id=-1, step_iter=0, n_iter=0, n_tiles=0)
 
     def new_worker(self):
-        host = self.connection_details["host"]
-        return (
-            next(
-                pottery.NextId(
-                    key=f"{host}/{self.job_id}/worker_id",
-                    masters={self.redis_con},
-                )
-            )
-            - 1
-        )
+        with self.lock:
+            return self.redis_con.incr(f"{self.job_id}:worker_id") + 1
 
     def connect(
         job_id: int = None,
@@ -360,10 +450,8 @@ class Clickhouse:
             CLICKHOUSE_PASSWORD: The Clickhouse username.
 
         If the environment variables are not set, the defaults will be:
-            host: keyring entry "clickhouse-confirm-test-host"
             port: 8443
             username: "default"
-            password: keyring entry "clickhouse-confirm-test-password"
 
         For Redis, we will use the following environment variables:
             REDIS_HOST: The hostname for the Redis server.
@@ -371,9 +459,7 @@ class Clickhouse:
             REDIS_PASSWORD: The Redis password.
 
         If the environment variables are not set, the defaults will be:
-            host: keyring entry "upstash-confirm-coordinator-host"
             port: 37085
-            password: keyring entry "upstash-confirm-coordinator-password"
 
         Args:
             job_id: The job_id. Defaults to None.
@@ -388,9 +474,9 @@ class Clickhouse:
         Returns:
             A Clickhouse tile database object.
         """
+        config = get_ch_config(host, port, username, password)
         if job_id is None:
-            config = get_ch_config(host, port, username, password)
-            test_host = get_ch_test_host()
+            test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
             if not (
                 (test_host is not None and test_host in config["host"])
                 or "localhost" in config["host"]
@@ -398,98 +484,83 @@ class Clickhouse:
                 raise RuntimeError(
                     "To run a production job, please choose an explicit unique job_id."
                 )
-            client = clickhouse_connect.get_client(**config)
-            job_id = find_unique_job_id(client)
+            job_id = uuid.uuid4().hex
+
+        # Create job_id database if it doesn't exist
+        client = clickhouse_connect.get_client(**config)
+        client.command(f"create database if not exists {job_id}")
+
         connection_details = get_ch_config(host, port, username, password, job_id)
-        host = connection_details["host"]
         client = clickhouse_connect.get_client(**connection_details)
-        redis_con = redis.Redis(
-            **get_redis_config(redis_host, redis_port, redis_password)
+
+        redis_con = get_redis_client(redis_host, redis_port, redis_password)
+        logger.info(f"Connected to job {job_id}")
+        return Clickhouse(connection_details, client, redis_con, job_id)
+
+
+def does_table_exist(client, table_name: str) -> bool:
+    return (
+        len(
+            client.query(
+                f"""
+        select * from information_schema.schemata
+            where schema_name = '{table_name}'
+        """
+            ).result_set
         )
-        print(f"Connected to job {job_id}")
-        return Clickhouse(connection_details, client, redis_con, host, job_id)
+        > 0
+    )
+
+
+def get_redis_client(host=None, port=None, password=None):
+    return redis.Redis(**get_redis_config(host, port, password))
 
 
 def get_redis_config(host=None, port=None, password=None):
+    env = dotenv.dotenv_values()
     if host is None:
-        if "REDIS_HOST" in os.environ:
-            host = os.environ["REDIS_HOST"]
-        else:
-            host = keyring.get_password(
-                "upstash-confirm-coordinator-host", os.environ["USER"]
-            )
+        host = env["REDIS_HOST"]
     if port is None:
-        if "REDIS_PORT" in os.environ:
-            port = os.environ["REDIS_PORT"]
+        if "REDIS_PORT" in env:
+            port = env["REDIS_PORT"]
         else:
             port = 37085
     if password is None:
-        if "REDIS_PASSWORD" in os.environ:
-            password = os.environ["REDIS_PASSWORD"]
-        else:
-            password = keyring.get_password(
-                "upstash-confirm-coordinator-password", os.environ["USER"]
-            )
+        password = env["REDIS_PASSWORD"]
     return dict(host=host, port=port, password=password)
 
 
+def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):
+    connection_details = get_ch_config(host, port, username, password, job_id)
+    return clickhouse_connect.get_client(**connection_details)
+
+
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
+    env = dotenv.dotenv_values()
     if host is None:
-        if "CLICKHOUSE_HOST" in os.environ:
-            host = os.environ["CLICKHOUSE_HOST"]
+        if "CLICKHOUSE_HOST" in env:
+            host = env["CLICKHOUSE_HOST"]
         else:
-            host = get_ch_test_host()
+            host = env["CLICKHOUSE_TEST_HOST"]
     if port is None:
-        if "CLICKHOUSE_PORT" in os.environ:
-            port = os.environ["CLICKHOUSE_PORT"]
+        if "CLICKHOUSE_PORT" in env:
+            port = env["CLICKHOUSE_PORT"]
         else:
             port = 8443
     if username is None:
-        if "CLICKHOUSE_USERNAME" in os.environ:
-            username = os.environ["CLICKHOUSE_USERNAME"]
+        if "CLICKHOUSE_USERNAME" in env:
+            username = env["CLICKHOUSE_USERNAME"]
         else:
             username = "default"
     if password is None:
-        if "CLICKHOUSE_PASSWORD" in os.environ:
-            password = os.environ["CLICKHOUSE_PASSWORD"]
-        else:
-            password = keyring.get_password(
-                "clickhouse-confirm-test-password", os.environ["USER"]
-            )
-    print(f"Connecting to {host}:{port}/{database} as {username}.")
+        password = env["CLICKHOUSE_PASSWORD"]
+    logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
         host=host, port=port, username=username, password=password, database=database
     )
 
 
-def get_ch_test_host():
-    if "CLICKHOUSE_TEST_HOST" in os.environ:
-        return os.environ["CLICKHOUSE_TEST_HOST"]
-    else:
-        return keyring.get_password("clickhouse-confirm-test-host", os.environ["USER"])
-
-
-def find_unique_job_id(client, attempts=3):
-    for i in range(attempts):
-        job_id = uuid.uuid4().hex
-        query = (
-            "select * from information_schema.schemata"
-            f"  where schema_name = '{job_id}'"
-        )
-        df = client.query_df(query)
-        if df.shape[0] == 0:
-            break
-
-        print("OMG WOW UUID COLLISION. GO TELL YOUR FRIENDS.")
-        if i == attempts - 1:
-            raise Exception(
-                "Could not find a unique job id." " This should never happen"
-            )
-    client.command(f"create database {job_id}")
-    return job_id
-
-
-def clear_dbs(client):
+def clear_dbs(ch_client, redis_client, names=None, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -500,27 +571,45 @@ def clear_dbs(client):
     should only work for our test database or for localhost.
 
     Args:
-        client: _description_
+        client: Clickhouse client
+        names: default None, list of database names to drop. If None, drop all.
+        yes: bool, if True, don't ask for confirmation
     """
-    test_host = get_ch_test_host()
+    test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
     if not (
-        (test_host is not None and test_host in client.url) or "localhost" in client.url
+        (test_host is not None and test_host in ch_client.url)
+        or "localhost" in ch_client.url
     ):
         raise RuntimeError("This function is only for localhost or test databases.")
 
-    to_drop = []
-    for db in client.query_df("show databases")["name"]:
-        if db not in ["default", "INFORMATION_SCHEMA", "information_schema", "system"]:
-            to_drop.append(db)
+    if names is None:
+        to_drop = []
+        for db in ch_client.query_df("show databases")["name"]:
+            if db not in [
+                "default",
+                "INFORMATION_SCHEMA",
+                "information_schema",
+                "system",
+            ]:
+                to_drop.append(db)
+    else:
+        to_drop = names
+
     if len(to_drop) == 0:
         print("No databases to drop.")
         return
 
     print("Dropping the following databases:")
     print(to_drop)
-    print("Are you sure? [yN]")
-    if input() == "y":
+    if not yes:
+        print("Are you sure? [yN]")
+        yes = input() == "y"
+
+    if yes:
         for db in to_drop:
             cmd = f"drop database {db}"
             print(cmd)
-            client.command(cmd)
+            ch_client.command(cmd)
+            keys = list(redis_client.scan_iter("*{db}*"))
+            print("deleting redis keys", keys)
+            redis_client.delete(*keys)

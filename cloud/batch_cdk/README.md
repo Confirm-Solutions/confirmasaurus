@@ -5,12 +5,12 @@ What are we here to do?
 - Why not use AWS Lambda? Lambda doesn't run on GPUs!
 
 The current set up:
-- Active already-deployed AWS Batch cluster. See [the AWS CDK code here](../cloud/batch_cdk)
+- Active already-deployed AWS Batch cluster. See [the AWS CDK code here](./)
 - Use the `confirm.cloud.awsbatch.remote_run` function to launch arbitrary
   functions and closures on the cluster.
 - Use `confirm.cloud.awsbatch.include_package` to pass a package along with the
   function.
-- See [an example here](../cloud/batch_cdk/run_confirm.py).
+- See [an example here](./run_confirm.py).
 
 Useful documentation:
 - a fully worked example for using AWS Batch. This code is mostly based off this example:

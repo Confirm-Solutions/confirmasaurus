@@ -5,14 +5,14 @@ import pytest
 
 import confirm.cloud.modal_util as modal_util
 
-stub = modal.Stub("e2e_runner")
+stub = modal.Stub("test_runner")
 
 img = modal_util.get_image(dependency_groups=["test", "cloud"])
 
 
 def run_tests(argv=None):
     if argv is None:
-        argv = ["--runslow", "tests", "imprint/tests"]
+        argv = []
     print(argv)
     exitcode = pytest.main(argv)
     print(exitcode)
@@ -35,9 +35,10 @@ def run_tests(argv=None):
         ]
     ),
     timeout=60 * 60 * 1,
-    secrets=[modal.Secret.from_name("confirm-secrets")],
+    secrets=[modal.Secret.from_name("kms-sops")],
 )
 def run_cloud_tests(argv=None):
+    modal_util.decrypt_secrets()
     return run_tests(argv=argv)
 
 

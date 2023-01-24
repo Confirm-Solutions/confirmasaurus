@@ -57,7 +57,7 @@ This stuff is on shaky footing. See the issue here: https://github.com/Confirm-S
 
 ## AWS Batch
 
-See [our documentation on the AWS Batch setup](../docs/aws_batch.md).
+See [our documentation on the AWS Batch setup](./batch_cdk/README.md).
 
 ## Our data on AWS
 

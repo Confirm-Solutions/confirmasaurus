@@ -13,10 +13,10 @@ packages = [
 [tool.poetry.dependencies]
 python = "~3.10"
 numpy = "^1.24.1"
-scipy = "^1.9.3"
+scipy = "^1.10.0"
 sympy = "^1.11.1"
-matplotlib = "^3.6.2"
-pandas = "^1.5.2"
+matplotlib = "^3.6.3"
+pandas = "^1.5.3"
 jax = "0.3.24"
 numpyro = "^0.10.1"
 jaxlib = [
@@ -29,23 +29,22 @@ duckdb = "^0.6.1"
 optional = true
 
 [tool.poetry.group.test.dependencies]
-pytest = "^7.2.0"
+pytest = "^7.2.1"
 pre-commit = "^2.21.0"
 pytest-xdist = {extras = ["psutil"], version = "^3.1.0"}
-ipython = "^8.7.0"
-nbformat = "^5.7.1"
+ipython = "^8.8.0"
+nbformat = "^5.7.3"
 
 [tool.poetry.group.cloud]
 optional = true
 
 [tool.poetry.group.cloud.dependencies]
 pyarrow = "^10.0.1"
-boto3 = "^1.26.40"
+boto3 = "^1.26.54"
 cloudpickle = "~2.0.0"
-clickhouse-connect = "^0.5.0"
-redis = "^4.4.0"
-pottery = "^3.0.0"
-keyring = "^23.13.1"
+clickhouse-connect = "^0.5.2"
+redis = "^4.4.2"
+python-dotenv = "^0.21.1"
 
 [tool.poetry.group.dev]
 optional = true
@@ -65,8 +64,8 @@ ipdb = "^0.13.11"
 optional = true
 
 [tool.poetry.group.cloud_dev.dependencies]
-aws-cdk-lib = "^2.58.0"
-aws-cdk-aws-batch-alpha = "^2.58.0a0"
+aws-cdk-lib = "^2.61.1"
+aws-cdk-aws-batch-alpha = "^2.61.1a0"
 modal-client = "^0.43.586"
 
 [[tool.poetry.source]]
