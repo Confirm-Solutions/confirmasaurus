@@ -1,7 +1,8 @@
-import pytest
 import numpy as np
+import pytest
 
 import imprint.bound.binomial as binomial
+
 
 def test_fwd_binomial_scalar():
     fwd = binomial.BinomialBound.get_forward_bound({"n": 10})
