@@ -15,7 +15,8 @@ on:
       - "**.ipynb"
       - "**.md"
 permissions:
- id-token: write
+  id-token: write
+  contents: read
 jobs:
   lint:
     if: github.event.pull_request.draft == false

@@ -34,4 +34,4 @@ sops -e --input-type dotenv test_secrets.gitignore.env > test_secrets.enc.env
 
 ## Accessing secrets in GitHub actions
 
-I followed [the directions here](https://www.automat-it.com/post/using-github-actions-with-aws-iam-roles) to set up GitHub Actions to access KMS and decrypt the secrets. I created a permissions policy in AWS named "SecretsAccess" following the instructions here: https://github.com/mozilla/sops#assuming-roles-and-using-kms-in-various-aws-accounts
+I followed [the directions here](https://www.automat-it.com/post/using-github-actions-with-aws-iam-roles) to set up GitHub Actions to access KMS and decrypt the secrets. I created a permissions policy in AWS named "AccessSecrets" following [the instructions here](https://github.com/mozilla/sops#assuming-roles-and-using-kms-in-various-aws-accounts). I created a "GitHubActionsRole" that has that permissions policy attached.
