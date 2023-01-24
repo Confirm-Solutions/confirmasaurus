@@ -42,6 +42,30 @@ The great glossary of adagrid:
 - processing tiles: deciding to refine or deepen and then simulating for those
   new tiles that resulted from refining or deepening.
 - worst tile: the tile for which lams is smallest. `lams[worst_tile] == lamss`
+
+
+TODO: Code snippet for running bootstrap calibration on a particular grid. Left this
+here because this is not as easy as it should be.
+```
+from confirm.adagrid.calibration import AdaCalibrationDriver, CalibrationConfig
+import json
+gtemp = ip.Grid(db1.get_all())
+null_hypos = [ip.hypo("x0 < 0")]
+c= CalibrationConfig(
+    ZTest1D,
+    *[None] * 16,
+    defaults=db1.store.get('config').iloc[0].to_dict()
+)
+model = ZTest1D(
+    seed=c.model_seed,
+    max_K=c.init_K * 2**c.n_K_double,
+    **json.loads(c.model_kwargs),
+)
+driver = AdaCalibrationDriver(None, model, null_hypos, c)
+driver.bootstrap_calibrate(gtemp.df, 0.025)
+gtemp.df['K'].value_counts()
+```
+
 """
 import copy
 import json
