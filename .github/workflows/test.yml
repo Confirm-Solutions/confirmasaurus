@@ -89,7 +89,7 @@ jobs:
 
       - name: Pytest
         run: |
-          sops -d test_secrets.enc.env > .env
+          sops -d --output .env test_secrets.enc.env
           poetry run pytest -n auto -s
 
   push_to_imprint:
