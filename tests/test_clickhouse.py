@@ -1,21 +1,20 @@
 import pytest
+import numpy as np
+import imprint as ip
+
 from test_db import DBTester
 from test_store import StoreTester
 
 import confirm.cloud.clickhouse as ch
 
 
-# TODO: adding this requires adding secrets to github actions. that should
-# probably just be done through SOPS/AWS KMS.
-# import numpy as np
-# import imprint as ip
-# def test_ch_not_slow():
-#     g = ip.cartesian_grid([-1, -2], [1, 2], n=[3, 3])
-#     g.df["step_id"] = 1
-#     g.df["step_iter"] = 1
-#     db = ch.Clickhouse.connect()
-#     db.init_tiles(g.df)
-#     np.testing.assert_allclose(db.get_tiles()["theta0"], g.df["theta0"])
+def test_ch_not_slow():
+    g = ip.cartesian_grid([-1, -2], [1, 2], n=[3, 3])
+    g.df["step_id"] = 1
+    g.df["step_iter"] = 1
+    db = ch.Clickhouse.connect()
+    db.init_tiles(g.df)
+    np.testing.assert_allclose(db.get_tiles()["theta0"], g.df["theta0"])
 
 
 @pytest.mark.slow

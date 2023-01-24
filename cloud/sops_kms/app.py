@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 
-import keyring
 import aws_cdk as cdk
 
 from aws_cdk import Stack
@@ -34,8 +33,7 @@ class BatchCdkStack(Stack):
         )
 
 
-aws_account_id = keyring.get_password("aws-confirm-account-id", os.environ["USER"])
-env = cdk.Environment(account=aws_account_id, region="us-east-1")
+env = cdk.Environment(account='644171722153', region="us-east-1")
 app = cdk.App()
 BatchCdkStack(app, "sops-key", env=env)
 
