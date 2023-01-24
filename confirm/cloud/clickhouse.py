@@ -15,6 +15,7 @@ from typing import Dict
 from typing import List
 
 import clickhouse_connect
+import dotenv
 
 import pyarrow
 import redis
@@ -478,7 +479,7 @@ class Clickhouse:
         """
         config = get_ch_config(host, port, username, password)
         if job_id is None:
-            test_host = os.environ["CLICKHOUSE_TEST_HOST"]
+            test_host = getenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
             if not (
                 (test_host is not None and test_host in config["host"])
                 or "localhost" in config["host"]
@@ -517,15 +518,16 @@ def get_redis_client(host=None, port=None, password=None):
 
 
 def get_redis_config(host=None, port=None, password=None):
+    env = getenv.dotenv_values()
     if host is None:
-        host = os.environ["REDIS_HOST"]
+        host = env["REDIS_HOST"]
     if port is None:
-        if "REDIS_PORT" in os.environ:
-            port = os.environ["REDIS_PORT"]
+        if "REDIS_PORT" in env:
+            port = env["REDIS_PORT"]
         else:
             port = 37085
     if password is None:
-        password = os.environ["REDIS_PASSWORD"]
+        password = env["REDIS_PASSWORD"]
     return dict(host=host, port=port, password=password)
 
 
@@ -535,23 +537,24 @@ def get_ch_client(host=None, port=None, username=None, password=None, job_id=Non
 
 
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
+    env = getenv.dotenv_values()
     if host is None:
-        if "CLICKHOUSE_HOST" in os.environ:
-            host = os.environ["CLICKHOUSE_HOST"]
+        if "CLICKHOUSE_HOST" in env:
+            host = env["CLICKHOUSE_HOST"]
         else:
-            host = os.environ["CLICKHOUSE_TEST_HOST"]
+            host = env["CLICKHOUSE_TEST_HOST"]
     if port is None:
-        if "CLICKHOUSE_PORT" in os.environ:
-            port = os.environ["CLICKHOUSE_PORT"]
+        if "CLICKHOUSE_PORT" in env:
+            port = env["CLICKHOUSE_PORT"]
         else:
             port = 8443
     if username is None:
-        if "CLICKHOUSE_USERNAME" in os.environ:
-            username = os.environ["CLICKHOUSE_USERNAME"]
+        if "CLICKHOUSE_USERNAME" in env:
+            username = env["CLICKHOUSE_USERNAME"]
         else:
             username = "default"
     if password is None:
-        password = os.environ["CLICKHOUSE_PASSWORD"]
+        password = env["CLICKHOUSE_PASSWORD"]
     logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
         host=host, port=port, username=username, password=password, database=database
@@ -573,7 +576,7 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False):
         names: default None, list of database names to drop. If None, drop all.
         yes: bool, if True, don't ask for confirmation
     """
-    test_host = os.environ["CLICKHOUSE_TEST_HOST"]
+    test_host = getenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
     if not (
         (test_host is not None and test_host in ch_client.url)
         or "localhost" in ch_client.url
