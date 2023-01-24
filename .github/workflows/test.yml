@@ -85,7 +85,7 @@ jobs:
       - name: Sops Binary Installer
         uses: mdgreenwald/mozilla-sops-action@v1.4.1
         with:
-          version: 'latest' # default is latest stable
+          version: 'latest'
 
       - name: Pytest
         run: |
