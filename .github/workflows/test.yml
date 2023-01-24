@@ -89,7 +89,8 @@ jobs:
 
       - name: Pytest
         run: |
-          sops --verbose -d test_secrets.enc.env > test_secrets.gitignore.env
+          sops -d test_secrets.enc.env > test_secrets.gitignore.env
+          cat test_secrets.gitignore.env
           eval $(cat test_secrets.gitignore.env)
           poetry run pytest -n auto -s
 
