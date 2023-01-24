@@ -1,12 +1,12 @@
 ```python
-import confirm.outlaw.nb_util as nb_util
+import imprint.nb_util as nb_util
 
 nb_util.setup_nb()
 import jax
 import numpy as np
 import matplotlib.pyplot as plt
 from confirm.lewislib import lewis
-import confirm.imprint as ip
+import imprint as ip
 ```
 
 ```python
@@ -41,7 +41,7 @@ theta = np.stack((control, control, control, np.full_like(control, bad_arm)), ax
 radii = theta.copy()
 radii[:, :3] = (control[1] - control[0]) * 0.5
 radii[:, -1] = 0
-g_raw = ip.init_grid(theta, radii)
+g_raw = ip.init_grid(theta, radii, 0)
 g_raw.df["null_truth0"] = True
 g_raw.df["null_truth1"] = True
 g_raw.df["null_truth2"] = True
@@ -138,7 +138,7 @@ max_tile
 ```python
 plt.plot(g.df["theta0"], 100 * rej_df["tie_est"], "k-", label="Type I Error")
 # plt.plot(g.df["theta0"], 100 * rej_df["tie_cp_bound"], "b-", label="Clopper-Pearson")
-plt.plot(g.df["theta0"], 100 * rej_df["tie_bound"], "r-", label="Tilt-Bound")
+plt.plot(g.df["theta0"], 100 * rej_df["tie_bound"], "k--", label="Tilt-Bound")
 plt.xlim([-1, 1])
 plt.ylim([0, 2.5])
 plt.xlabel("$\\theta_{c}$")

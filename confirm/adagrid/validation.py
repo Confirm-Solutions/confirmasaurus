@@ -56,7 +56,7 @@ def ada_validate(
     global_target=0.002,
     # grid_target=None, # might be a nice feature?
     # sim_target=None, # might be a nice feature?
-    iter_size=2**10,
+    packet_size=2**10,
     n_iter=1000,
     model_kwargs=None,
 ):
@@ -107,7 +107,7 @@ def ada_validate(
             f"         and (total_cost > {global_target}"
             f"              or (total_cost > {max_target}"
             f"                    and tie_bound > {max_tie_est}))"
-            f" limit {iter_size}"
+            f" limit {packet_size}"
         ).df()
 
         # step 2: check if there's anything left to do

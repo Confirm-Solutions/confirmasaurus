@@ -2,7 +2,6 @@ import os
 import shutil
 
 import aws_cdk as cdk
-import keyring
 from aws_cdk import aws_batch_alpha as batch
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr_assets
@@ -139,18 +138,8 @@ class BatchCdkStack(Stack):
         )
 
 
-aws_account_id = keyring.get_password("aws-confirm-account-id", os.environ["USER"])
-env = cdk.Environment(account=aws_account_id, region="us-east-1")
+env = cdk.Environment(account='644171722153', region="us-east-1")
 app = cdk.App()
 BatchCdkStack(app, "batch-cdk", env=env)
 
 app.synth()
-
-# my_instance = ec2.Instance(
-#     self,
-#     "Instance",
-#     instance_type=ec2.InstanceType("t3.micro"),
-#     machine_image=ec2.MachineImage.latest_amazon_linux(),
-#     vpc=my_vpc,
-#     security_group=my_sg,
-# )

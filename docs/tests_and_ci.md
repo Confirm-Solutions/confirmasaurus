@@ -8,7 +8,7 @@ Use `@pytest.mark.slow` to indicate that a test is slow and should not be run by
 
 ## Nightly end to end tests
 
-Our end to end tests are run nightly via the [.github/workflows/e2e.yml](../.github/workflows/e2e.yml) actions workflow which launches [confirm/cloud/e2e_runner.py](../confirm/cloud/e2e_runner.py). That script runs all tests including slow tests on a Modal server with a single GPU.
+Our end to end tests are run nightly via the [.github/workflows/e2e.yml](../.github/workflows/e2e.yml) actions workflow which launches [confirm/cloud/modal_test_runner.py](../confirm/cloud/modal_test_runner.py). That script runs all tests including slow tests on a Modal server with a single GPU.
 
 ## Tools
 - renovatebot is used to maintain dependency version:
