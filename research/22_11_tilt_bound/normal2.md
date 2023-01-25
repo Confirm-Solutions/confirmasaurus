@@ -4,8 +4,7 @@
 ```
 
 ```python
-import imprint.bound.normal2 as normal2
-import imprint.bound.normal as normal
+from imprint.bound import normal, normal2
 import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
@@ -14,7 +13,7 @@ import matplotlib.pyplot as plt
 ```python
 n = jnp.array([5, 3, 10])
 theta1 = jnp.array([-0.1, 0.4, 0.2])
-theta2 = jnp.array([-0.5, -0.5, -0.5]) / 0.00001
+theta2 = jnp.array([-0.5, -0.5, -0.5])
 v1 = 0.1 * jnp.ones(len(n))
 v2 = 0.01 * jnp.ones(len(n))
 f0 = 0.025

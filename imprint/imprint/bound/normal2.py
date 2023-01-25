@@ -300,8 +300,13 @@ class Normal2Bound:
 
         def backward_bound(alpha_target, theta0, vertices):
             v = vertices - theta0
-            q_opt = bwd_solver.solve(theta0, v, alpha_target)
-            return tilt_bound_bwd_tile(q_opt, n, theta0, v, alpha_target)
+            mid = len(theta0) // 2
+            theta01, theta02 = theta0[:mid], theta0[mid:]
+            v1s, v2s = v[:, 0], v[:, 1]
+            q_opt = bwd_solver.solve(theta01, theta02, v1s, v2s, alpha_target)
+            return tilt_bound_bwd_tile(
+                q_opt, n, theta01, theta02, v1s, v2s, alpha_target
+            )
 
         return jax.jit(jax.vmap(backward_bound, in_axes=(None, 0, 0)))
 
@@ -311,8 +316,11 @@ class Normal2Bound:
         fwd_solver = TileForwardQCPSolver(n)
 
         def forward_bound(f0, theta0, vertices):
-            vs = vertices - theta0
-            q_opt = fwd_solver.solve(theta0, vs, f0)
-            return tilt_bound_fwd_tile(q_opt, n, theta0, vs, f0)
+            v = vertices - theta0
+            mid = len(theta0) // 2
+            theta01, theta02 = theta0[:mid], theta0[mid:]
+            v1s, v2s = v[:, 0], v[:, 1]
+            q_opt = fwd_solver.solve(theta01, theta02, v1s, v2s, f0)
+            return tilt_bound_fwd_tile(q_opt, n, theta01, theta02, v1s, v2s, f0)
 
         return jax.jit(jax.vmap(forward_bound))
