@@ -15,7 +15,5 @@
     "**/__pycache__": true,
     "research/archive": true
   },
-  "python.testing.pytestArgs": [
-    "--runslow"
-  ]
+  "python.testing.pytestArgs": []
 }

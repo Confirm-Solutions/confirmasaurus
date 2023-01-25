@@ -41,29 +41,39 @@ $H_0: \theta \leq \theta_0$.
 alpha = 0.025  # target nominal level
 sigma_0 = 2  # fixed boundary of null hypothesis
 n_samples = 10  # number of samples
-n_gridpts = 1000  # number of grid-points
+n_gridpts = 100  # number of grid-points
 n_sims = 2**13  # number of simulations
-theta_min = -0.5
-theta_max = -0.5 / (sigma_0**2)
+theta_min = -0.5  # minimum theta in grid
+theta_max = -0.5 / (sigma_0**2)  # maximum theta in grid
+lam = -(sigma_0**2) * scipy.stats.chi2.isf(
+    alpha, df=n_samples - 1
+)  # critical threshold
+```
 
-# construct grid away from 0 to have a well-defined model.
+The model can be expressed in many ways and we show that both methods will result in the same bounds.
+As described above, the data can be seen as being drawn from a normal family.
+However, since the test only depends on $T$, which is known to be distributed $\sigma^2 \chi^2_{n-1}$,
+we can also view the model as having a single draw of a $\sigma^2 \chi^2_{n-1}$ random variable.
+This distinction changes the `family` type of the model,
+which will ultimately decide how the Tilt-Bound should be constructed.
+However, in this case, both `family` type of `normal2` or `chisq` will result in the same bounds.
+
+
+## Family `normal2`
+
+
+By parametrizing the data distribution as `normal2`,
+we are treating both the mean and variance parameters as unknown.
+Then, we only grid along the variance component and keep the mean parameter fixed at $0$.
+
+```python
+# construct theta1 away from -infinity to have a well-defined model.
 grid = ip.cartesian_grid(
     theta_min=[0, theta_min],
     theta_max=[0, theta_max],
     n=[1, n_gridpts],
     null_hypos=[ip.hypo(f"x1 <= {theta_max}")],
 )
-lam = -(sigma_0**2) * scipy.stats.chi2.isf(alpha, df=n_samples - 1)
-```
-
-As a sanity check, we plot the true Type I Error curve as a function of $\theta$.
-
-```python
-theta = grid.get_theta()[:, 1]
-true_tie = scipy.stats.chi2.sf(2 * lam * theta, df=n_samples - 1)
-plt.plot(theta, true_tie)
-plt.vlines(x=theta_max, ymin=0, ymax=alpha, linestyles="--", color="black")
-plt.hlines(y=alpha, xmin=theta_min, xmax=theta_max, linestyles="--", color="black")
 ```
 
 ```python
@@ -76,6 +86,7 @@ rej_df.tail()
 ```python
 g_rej = grid.add_cols(rej_df)
 g_rej.df.sort_values("theta1", inplace=True)
+theta = grid.get_theta()
 true_err = scipy.stats.chi2.sf(2 * lam * theta, df=n_samples - 1)
 
 plt.plot(
@@ -114,4 +125,32 @@ plt.legend(fontsize=11, bbox_to_anchor=(0.05, 0.94), loc="upper left")
 plt.xlabel("$z$")
 plt.ylabel(r"Type I Error (\%)")
 plt.show()
+```
+
+## Family `scaled_chisq`
+
+
+By parametrizing the data distribution as `scaled_chisq`,
+we are treating only the variance parameter as unknown.
+Then, we only grid along the variance component.
+
+```python
+# construct theta1 away from -infinity to have a well-defined model.
+grid = ip.cartesian_grid(
+    theta_min=[theta_min],
+    theta_max=[theta_max],
+    n=[n_gridpts],
+    null_hypos=[ip.hypo(f"x0 <= {theta_max}")],
+)
+```
+
+```python
+rej_df = ip.validate(
+    ChiSqTest,
+    grid,
+    lam,
+    K=n_sims,
+    model_kwargs={"n_samples": n_samples, "family": "scaled_chisq"},
+)
+rej_df.tail()
 ```

@@ -27,27 +27,12 @@ def logistic_secant(t, v, q, b):
     return ls_1 + ls_2
 
 
-def A(n, t):
-    """
-    Log-partition function of a Bernoulli family with d-arms
-    where arm i has n Bernoullis with logit t_i.
-    """
-    return jnp.sum(n * logistic(t))
-
-
 def A_secant(n, t, v, q, b):
     """
     Numerically stable implementation of the secant of A:
         (A(t + q * v) - A(b)) / q
     """
     return jnp.sum(n * logistic_secant(t, v, q, b))
-
-
-def dA(n, t):
-    """
-    Gradient of the log-partition function A.
-    """
-    return n * jax.nn.sigmoid(t)
 
 
 class BaseTileQCPSolver:

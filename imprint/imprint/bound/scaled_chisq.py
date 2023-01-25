@@ -1,7 +1,7 @@
 """
-Normal Tilt-Bound with unknown mean and variance (2 parameters).
-Assumes multi-arm Normal with possibly different
-(mean, variance) parameters and sample size in each arm.
+Scaled chi^2 Tilt-Bound with unknown scale and known degrees of freedom.
+Assumes multi-arm scaled chi^2 with possibly different
+(scale, df) parameters in each arm as well as sample size.
 """
 import jax
 import jax.numpy as jnp
@@ -9,13 +9,28 @@ import jax.numpy as jnp
 from . import optimizer as opt
 
 
+def A(n, theta1, theta2):
+    """
+    Log-partition function for d-arm univariate normal distributions.
+    Each arm i has sample size n[i] and natural parameter (theta1[i], theta2[i]).
+
+    Parameters:
+    -----------
+    n:  a scalar or (d,)-vector of sample sizes for each arm.
+    theta1:     a (d,)-array where theta1[i] is the
+                1st order natural parameter of arm i.
+    theta2:     a (d,)-array where theta2[i] is the
+                2nd order natural parameter of arm i.
+    """
+    return -0.25 * jnp.sum(theta1**2 / theta2) - 0.5 * jnp.sum(
+        n * jnp.log(-2 * theta2)
+    )
+
+
 def A_secant(n, theta1, theta2, v1, v2, q):
     """
     Numerically stable implementation of the secant of A:
         (A(theta + qv) - A(theta)) / q
-    It is only well-defined if q < min_{i : v2[i] > 0} (v2[i] / theta2[i])
-    (if the set is empty, then the minimum is defined to be infinity).
-    No error-checking is done for performance reasons.
 
     Parameters:
     ----------
@@ -38,6 +53,30 @@ def A_secant(n, theta1, theta2, v1, v2, q):
     )
 
 
+def dA(n, theta1, theta2):
+    """
+    Gradient of the log-partition function A.
+
+    Parameters:
+    -----------
+    n:  a scalar or (d,)-vector of sample sizes for each arm.
+    theta1:     a (d,)-array where theta1[i] is the
+                1st order natural parameter of arm i.
+    theta2:     a (d,)-array where theta2[i] is the
+                2nd order natural parameter of arm i.
+
+    Return:
+    -------
+    dA1, dA2
+
+    dA1:    a (d,)-array gradient of A with respect to each theta1[i].
+    dA2:    a (d,)-array gradient of A with respect to each theta2[i].
+    """
+    dA1 = -0.5 * theta1 / theta2
+    dA2 = dA1 * dA1 - 0.5 * n / theta2
+    return dA1, dA2
+
+
 class BaseTileQCPSolver:
     def __init__(self, n, m=1, M=1e7, tol=1e-5, eps=1e-6):
         self.n = n
@@ -51,12 +90,15 @@ class BaseTileQCPSolver:
 
         # return shrunken maximum so that the
         # maximum q results in well-defined objective.
-        return jnp.min(
-            jnp.where(
-                max_v2s > 0,
-                -theta_02 / max_v2s * self.shrink_factor,
-                jnp.inf,
-            )
+        return jnp.minimum(
+            self.max,
+            jnp.min(
+                jnp.where(
+                    max_v2s > 0,
+                    -theta_02 / max_v2s * self.shrink_factor,
+                    jnp.inf,
+                )
+            ),
         )
 
 
@@ -98,16 +140,16 @@ class TileForwardQCPSolver(BaseTileQCPSolver):
             in_axes=(None, None, None, None, 0, None),
         )(theta_01, theta_02, v1s, v2s, qs, loga)
 
-    def solve(self, theta_01, theta_02, v1s, v2s, a):
+    def solve(self, theta_01, theta_02, v1s, v2s, a, eps=1e-6):
         loga = jnp.log(a)
-        max_q_valid = self._compute_max_bound(theta_02, v2s)
+        max_trunc = self._compute_max_bound(theta_02, v2s)
         return jax.lax.cond(
             loga < -1e10,
-            lambda: max_q_valid,
+            lambda: jnp.inf,
             lambda: opt._simple_bisection(
                 lambda x: self.obj_vmap(theta_01, theta_02, v1s, v2s, x, loga),
                 self.min,
-                jnp.minimum(max_q_valid, self.max),
+                max_trunc,
                 self.tol,
             ),
         )
@@ -154,14 +196,14 @@ class TileBackwardQCPSolver(BaseTileQCPSolver):
 
     def solve(self, theta_01, theta_02, v1s, v2s, a):
         loga = jnp.log(a)
-        max_q_valid = self._compute_max_bound(theta_02, v2s)
+        max_trunc = self._compute_max_bound(theta_02, v2s)
         return jax.lax.cond(
             loga < -1e10,
-            lambda: max_q_valid,
+            lambda: jnp.inf,
             lambda: opt._simple_bisection(
                 lambda x: self.obj_vmap(theta_01, theta_02, v1s, v2s, x, loga),
                 self.min,
-                jnp.minimum(max_q_valid, self.max),
+                max_trunc,
                 self.tol,
             ),
         )
