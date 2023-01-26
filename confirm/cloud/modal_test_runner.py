@@ -1,5 +1,8 @@
-
+"""
+This file is used to run tests in the cloud using Modal.
+"""
 import sys
+import copy
 
 import modal
 import pytest
@@ -49,7 +52,24 @@ def run_cloud_tests(argv=None):
 
 if __name__ == "__main__":
     # run_tests()
+    argv = None if len(sys.argv) == 1 else sys.argv[1:]
+    print('Running Modal safe tests first.')
     with stub.run():
-        argv = None if len(sys.argv) == 1 else sys.argv[1:]
-        exitcode = run_cloud_tests.call(argv)
+        modal_argv = copy.copy(sys.argv)
+        modal_argv.insert(0, "--run-modal-safe")
+        modal_exitcode = run_cloud_tests.call(modal_argv)
+        
+    print('Running Modal unsafe tests.')
+    argv.insert(0, "--run-modal-unsafe")
+    local_exitcode = run_tests(argv)
+
+    # Combine exit codes:
+    # We arbitrarily give preference to the modal exitcode if they are both
+    # nonzero
+    exitcode = 0
+    if modal_exitcode != 0:
+        exitcode = modal_exitcode
+    elif local_exitcode != 0:
+        exitcode = local_exitcode
+
     sys.exit(exitcode)

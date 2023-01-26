@@ -58,7 +58,7 @@ jobs:
       - name: Run tests
         run: |
           sops -d --output .env test_secrets.enc.env
-          poetry run python confirm/cloud/modal_test_runner.py --runslow tests imprint/tests
+          poetry run python confirm/cloud/modal_test_runner.py --run-slow tests imprint/tests
         
       - name: Clear Clickhouse Test DBs
         run: |

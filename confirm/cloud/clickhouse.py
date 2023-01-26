@@ -204,7 +204,9 @@ class Clickhouse:
     _results_table_exists: bool = False
 
     def __post_init__(self):
-        self.lock = redis.lock.Lock(self.redis_con, f"{self.job_id}:next_lock", timeout=60)
+        self.lock = redis.lock.Lock(
+            self.redis_con, f"{self.job_id}:next_lock", timeout=60
+        )
 
     @property
     def _host(self):
@@ -560,7 +562,9 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
     )
 
 
-def clear_dbs(ch_client, redis_client, names=None, yes=False, drop_all_redis_keys=False):
+def clear_dbs(
+    ch_client, redis_client, names=None, yes=False, drop_all_redis_keys=False
+):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -612,12 +616,14 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False, drop_all_redis_key
                 print(cmd)
                 ch_client.command(cmd)
                 if redis_client is not None:
-                    keys = list(redis_client.scan_iter("*{db}*"))
+                    keys = list(redis_client.scan_iter("*{db}*")) + list(
+                        redis_client.scan_iter("{db}*")
+                    )
                     print("deleting redis keys", keys)
                     redis_client.delete(*keys)
                 else:
                     print("no redis client, skipping redis keys")
-    
+
     if drop_all_redis_keys:
         keys = list(redis_client.scan_iter("*"))
         print("drop_all_redis_keys=True, deleting redis keys", keys)
