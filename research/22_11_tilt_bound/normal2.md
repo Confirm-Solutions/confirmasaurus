@@ -20,11 +20,10 @@ f0 = 0.025
 ```
 
 ```python
-tbf_vmap = jax.vmap(normal2.tilt_bound_fwd, in_axes=(0, None, None, None, None, None, None))
+tbf_vmap = jax.vmap(normal2.tilt_bound_fwd_tile, in_axes=(0, None, None, None, None, None, None))
 qs = jnp.linspace(1, jnp.min(jnp.where(v2 > 0, -theta2 / v2, 100)), 2000000, endpoint=False)
-#qs = jnp.linspace(1, 4, 1000, endpoint=False)
 
-bounds = tbf_vmap(qs, n, theta1, theta2, v1, v2, f0)
+bounds = tbf_vmap(qs, n, theta1, theta2, v1[None], v2[None], f0)
 plt.plot(qs, bounds)
 
 min_bound_idx = jnp.argmin(bounds)
@@ -35,16 +34,16 @@ print(qs[min_bound_idx])
 ```python
 fwd_solver = normal2.TileForwardQCPSolver(n)
 q_opt = fwd_solver.solve(theta1, theta2, v1[None], v2[None], f0)
-b_opt = normal2.tilt_bound_fwd(q_opt, n, theta1, theta2, v1, v2, f0)
+b_opt = normal2.tilt_bound_fwd_tile(q_opt, n, theta1, theta2, v1[None], v2[None], f0)
 plt.plot(qs, bounds)
 plt.scatter(q_opt, b_opt, color='r')
 print(q_opt)
 ```
 
 ```python
-tbb_vmap = jax.vmap(normal2.tilt_bound_bwd, in_axes=(0, None, None, None, None, None, None))
+tbb_vmap = jax.vmap(normal2.tilt_bound_bwd_tile, in_axes=(0, None, None, None, None, None, None))
 
-bounds = tbb_vmap(qs, n, theta1, theta2, v1, v2, f0)
+bounds = tbb_vmap(qs, n, theta1, theta2, v1[None], v2[None], f0)
 plt.plot(qs, bounds)
 
 max_bound_idx = jnp.argmax(bounds)
@@ -55,12 +54,8 @@ print(qs[max_bound_idx], bounds[max_bound_idx])
 ```python
 bwd_solver = normal2.TileBackwardQCPSolver(n)
 q_opt = bwd_solver.solve(theta1, theta2, v1[None], v2[None], f0)
-b_opt = normal2.tilt_bound_bwd(q_opt, n, theta1, theta2, v1, v2, f0)
+b_opt = normal2.tilt_bound_bwd_tile(q_opt, n, theta1, theta2, v1[None], v2[None], f0)
 plt.plot(qs, bounds)
 plt.scatter(q_opt, b_opt, color='r')
 print(q_opt)
-```
-
-```python
-
 ```
