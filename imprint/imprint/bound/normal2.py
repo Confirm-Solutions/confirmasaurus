@@ -167,20 +167,6 @@ class TileBackwardQCPSolver(BaseTileQCPSolver):
         )
 
 
-def tilt_bound_fwd(
-    q,
-    n,
-    theta_01,
-    theta_02,
-    v1,
-    v2,
-    f0,
-):
-    expo = A_secant(n, theta_01, theta_02, v1, v2, q)
-    expo = expo - A_secant(n, theta_01, theta_02, v1, v2, 1)
-    return f0 ** (1 - 1 / q) * jnp.exp(expo)
-
-
 def tilt_bound_fwd_tile(
     q,
     n,
@@ -195,30 +181,16 @@ def tilt_bound_fwd_tile(
         expo = expo - A_secant(n, theta_01, theta_02, v1, v2, 1)
         return expo
 
-    max_expo = jnp.max(jax.vmap(_expo, in_axes=(0, 0))(v1s, v2s))
-    return f0 ** (1 - 1 / q) * jnp.exp(max_expo)
-
-
-def tilt_bound_bwd(
-    q,
-    n,
-    theta_01,
-    theta_02,
-    v1,
-    v2,
-    alpha,
-):
-    def _bound(q):
-        p = 1 / (1 - 1 / q)
-        slope_diff = A_secant(n, theta_01, theta_02, v1, v2, q)
-        slope_diff = slope_diff - A_secant(n, theta_01, theta_02, v1, v2, 1)
-        return (alpha * jnp.exp(-slope_diff)) ** p
+    def _expo_inf(v1, v2):
+        expo = jnp.sum(v1**2 / v2) + jnp.where(jnp.any(v2 > 0), jnp.nan, 0)
+        expo = expo - A_secant(n, theta_01, theta_02, v1, v2, 1)
+        return expo
 
     return jax.lax.cond(
-        q <= 1,
-        lambda _: (alpha >= 1) + 0.0,
-        _bound,
-        q,
+        q == jnp.inf,
+        lambda: f0 * jnp.exp(jnp.max(jax.vmap(_expo_inf, in_axes=(0, 0))(v1s, v2s))),
+        lambda: f0 ** (1 - 1 / q)
+        * jnp.exp(jnp.max(jax.vmap(_expo, in_axes=(0, 0))(v1s, v2s))),
     )
 
 
