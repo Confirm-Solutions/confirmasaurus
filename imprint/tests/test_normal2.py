@@ -60,7 +60,7 @@ def test_A_secant_coincide_A():
     theta2 = np.array([-0.1, -0.2])
     v1 = np.array([-0.2, 0.1])
     v2 = np.array([-0.1, -10])
-    qs = np.array([1, 2, 5, 10, 100])
+    qs = np.logspace(1, 3, 100)
 
     for q in qs:
         actual = normal2.A_secant(n, theta1, theta2, v1, v2, q)
@@ -74,7 +74,7 @@ def test_A_secant_coincide_A_numerical():
     theta2 = np.array([-0.1, -0.2])
     v1 = np.array([-0.2, 0.1])
     v2 = np.array([-0.1, -10])
-    qs = np.array([1, 2, 5, 10, 100])
+    qs = np.logspace(1, 3, 100)
 
     for q in qs:
         actual = normal2.A_secant(n, theta1, theta2, v1, v2, q)

@@ -130,13 +130,13 @@ class TileBackwardQCPSolver(BaseTileQCPSolver):
 
     def obj(self, theta_0, vs, q, loga):
         p = 1.0 / (1.0 - 1.0 / q)
-        _obj_each_vmap = jax.vmap(self.obj_v, in_axes=(None, None, 0, 0, None))
+        _obj_each_vmap = jax.vmap(self.obj_v, in_axes=(None, 0, None))
         return p * (jnp.max(_obj_each_vmap(theta_0, vs, q)) - loga)
 
     def obj_vmap(self, theta_0, vs, qs, loga):
         return jax.vmap(
             self.obj,
-            in_axes=(None, None, None, None, 0, None),
+            in_axes=(None, None, 0, None),
         )(theta_0, vs, qs, loga)
 
     def solve(self, theta_0, vs, a):
@@ -167,8 +167,16 @@ def tilt_bound_fwd_tile(
         expo = expo - A_secant(n, df, theta_0, v, 1)
         return expo
 
-    max_expo = jnp.max(jax.vmap(_expo, in_axes=(0,))(vs))
-    return f0 ** (1 - 1 / q) * jnp.exp(max_expo)
+    def _expo_inf(v):
+        expo = jnp.where(jnp.any(v > 0), jnp.nan, 0)
+        expo = expo - A_secant(n, df, theta_0, v, 1)
+        return expo
+
+    return jax.lax.cond(
+        q == jnp.inf,
+        lambda: f0 * jnp.exp(jnp.max(jax.vmap(_expo_inf, in_axes=(0,))(vs))),
+        lambda: f0 ** (1 - 1 / q) * jnp.exp(jnp.max(jax.vmap(_expo, in_axes=(0,))(vs))),
+    )
 
 
 def tilt_bound_bwd_tile(
@@ -186,14 +194,27 @@ def tilt_bound_bwd_tile(
         slope_diff = slope_diff - A_secant(n, df, theta_0, v, 1)
         return slope_diff
 
+    def _expo_inf(v):
+        expo = jnp.where(jnp.any(v > 0), jnp.nan, 0)
+        expo = expo - A_secant(n, df, theta_0, v, 1)
+        return expo
+
     def _bound():
         max_expo = jnp.max(jax.vmap(_expo, in_axes=(0,))(vs))
+        return (alpha * jnp.exp(-max_expo)) ** p
+
+    def _bound_inf():
+        max_expo = jnp.max(jax.vmap(_expo_inf, in_axes=(0,))(vs))
         return (alpha * jnp.exp(-max_expo)) ** p
 
     return jax.lax.cond(
         q <= 1,
         lambda: (alpha >= 1) + 0.0,
-        _bound,
+        lambda: jax.lax.cond(
+            q == jnp.inf,
+            _bound_inf,
+            _bound,
+        ),
     )
 
 
