@@ -17,24 +17,19 @@ For the most part, while developing confirm we can act like the open source impr
 
 ## Automated pushes from confirm to imprint
 
-See [the actions workflow here](../.github/workflows/test.yml) for pushing to
-imprint and [here](../.github/workflows/pull-from-imprint.yml) for pulling from
-imprint and [here](../imprint/.github/workflows/test.yml) for triggering a pull
-from imprint.
-
 The flow from confirm to imprint looks like:
 1. (manual) Merge PR to main in confirm
-2. (automatic) on the imprint repo, rebase the `sync` branch on top of `main`.
-3. (automatic) from confirm repo, subrepo pull the latest changes from the imprint `sync` into confirm `main` --> this is merging the latest changes so we can push
-4. (automatic) from confirm repo, subrepo push confirm `main` to imprint `sync`
-5. (automatic) create and merge a PR on the imprint repo
-6. (automatic) pull imprint `main` changes back into confirm `main`. 
-
-Step 7 needs to be triggered when the imprint `sync` branch is merged into `main`. 
-The end of the discussion here would be useful for building this. 
-https://github.com/orgs/community/discussions/26323
+2. (automatic) The confirmasaurus repo CI run will reach the `push_to_imprint` job only if the tests pass. 
+3. (automatic) `push_to_imprint` will push the `imprint/` subrepo to the `imprint` repo. See [the actions workflow here](../.github/workflows/test.yml)
 
 ## Contributing changes to imprint
+
+The flow from imprint to confirm looks like:
+1. (automatic) The `imprint` CI will run [this actions workflow](../imprint/.github/workflows/push_to_confirm.yml) to send the updated subrepo back to `confirmasaurus`.
+2. (automatic) That will trigger the [actions workflow here](../.github/workflows/pull-from-imprint.yml) which pulls the new changes into `confirmasaurus` main.
+
+
+## Manually contributing changes to imprint
 
 This should not normally be necessary due to the automated push/pull workflow above.
 
@@ -42,7 +37,7 @@ This should not normally be necessary due to the automated push/pull workflow ab
 git subrepo push imprint --branch sync --squash --debug --verbose --message "Subrepo push to imprint"
 ```
 
-## Pulling changes from imprint
+## Manually pulling changes from imprint
 
 This should not normally be necessary due to the automated push/pull workflow above.
 
