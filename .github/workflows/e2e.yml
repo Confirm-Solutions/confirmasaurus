@@ -5,6 +5,7 @@ on:
   schedule:
     # Runs at 02:57am every day.
     - cron: '57 2 * * *'
+  workflow_dispatch:
 jobs:
   test:
     timeout-minutes: 60
