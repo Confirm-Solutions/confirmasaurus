@@ -328,6 +328,7 @@ class AdaCalibrationDriver:
                         # the work is probably incomplete. We should wait a
                         # very short time and try again.
                         logger.debug("No work despite step_iter < step_n_iter.")
+                        wait = 0.1
 
                 # If there are no iterations left in the step, we check if the
                 # step is complete. For a step to be complete means that all
