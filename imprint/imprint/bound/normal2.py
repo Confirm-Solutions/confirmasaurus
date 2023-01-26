@@ -205,19 +205,32 @@ def tilt_bound_bwd_tile(
 ):
     p = 1 / (1 - 1 / q)
 
-    def _expo(v1s, v2s):
-        slope_diff = A_secant(n, theta_01, theta_02, v1s, v2s, q)
-        slope_diff = slope_diff - A_secant(n, theta_01, theta_02, v1s, v2s, 1)
+    def _expo(v1, v2):
+        slope_diff = A_secant(n, theta_01, theta_02, v1, v2, q)
+        slope_diff = slope_diff - A_secant(n, theta_01, theta_02, v1, v2, 1)
         return slope_diff
+
+    def _expo_inf(v1, v2):
+        expo = jnp.sum(v1**2 / v2) + jnp.where(jnp.any(v2 > 0), jnp.nan, 0)
+        expo = expo - A_secant(n, theta_01, theta_02, v1, v2, 1)
+        return expo
 
     def _bound():
         max_expo = jnp.max(jax.vmap(_expo, in_axes=(0, 0))(v1s, v2s))
         return (alpha * jnp.exp(-max_expo)) ** p
 
+    def _bound_exp():
+        max_expo = jnp.max(jax.vmap(_expo_inf, in_axes=(0, 0))(v1s, v2s))
+        return (alpha * jnp.exp(-max_expo)) ** p
+
     return jax.lax.cond(
         q <= 1,
         lambda: (alpha >= 1) + 0.0,
-        _bound,
+        lambda: jax.lax.cond(
+            q == jnp.inf,
+            _bound_exp,
+            _bound,
+        ),
     )
 
 

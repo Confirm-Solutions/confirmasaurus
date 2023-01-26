@@ -144,3 +144,23 @@ def test_fwd_bound():
         np.inf, n, theta1, theta2, v1[None], v2[None], alpha
     )
     assert not np.isnan(actual)
+
+
+def test_bwd_bound():
+    n = np.array([10, 20])
+    theta1 = np.array([5, 2])
+    theta2 = np.array([-0.1, -0.2])
+    v1 = np.array([-0.2, 0.1])
+    v2 = np.array([0.05, -0.001])
+    alpha = 0.025
+
+    actual = normal2.tilt_bound_bwd_tile(
+        np.inf, n, theta1, theta2, v1[None], v2[None], alpha
+    )
+    assert np.isnan(actual)
+
+    v2 = np.array([-0.05, -0.001])
+    actual = normal2.tilt_bound_bwd_tile(
+        np.inf, n, theta1, theta2, v1[None], v2[None], alpha
+    )
+    assert not np.isnan(actual)
