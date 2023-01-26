@@ -83,44 +83,47 @@ def test_adagrid_packetsize1(snapshot):
     )
     check(db, snapshot, only_lams=True)
 
+@pytest.fixture()
+def ch_db():
+    import confirm.cloud.clickhouse as ch
+    db = ch.Clickhouse.connect()
+    yield db
+    db.close()
+    ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
 
 @pytest.mark.slow
-def test_adagrid_clickhouse(snapshot):
+def test_adagrid_clickhouse(snapshot, ch_db):
     snapshot.set_test_name("test_adagrid")
-    import confirm.cloud.clickhouse as ch
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db = ch.Clickhouse.connect()
         iter, reports, db = ada.ada_calibrate(
-            ZTest1D, g=g, db=db, nB=5, tile_batch_size=1
+            ZTest1D, g=g, db=ch_db, nB=5, tile_batch_size=1
         )
 
     check(db, snapshot)
 
 
 @pytest.mark.slow
-def test_adagrid_clickhouse_distributed(snapshot):
+def test_adagrid_clickhouse_distributed(snapshot, ch_db):
     snapshot.set_test_name("test_adagrid")
-    import confirm.cloud.clickhouse as ch
     import confirm.cloud.modal_util as modal_util
     import modal
 
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    db = ch.Clickhouse.connect()
     iter, reports, db = ada.ada_calibrate(
         ZTest1D,
         g=g,
-        db=db,
+        db=ch_db,
         nB=5,
         packet_size=1,
         n_iter=0,
         tile_batch_size=1,
     )
 
-    job_id = db.job_id
+    job_id = ch_db.job_id
     stub = modal.Stub("test_adagrid_clickhouse_distributed")
 
     @stub.function(
@@ -145,7 +148,7 @@ def test_adagrid_clickhouse_distributed(snapshot):
     with stub.run():
         list(worker.map(range(4)))
 
-    check(db, snapshot, only_lams=True)
+    check(ch_db, snapshot, only_lams=True)
 
 
 @pytest.mark.slow
