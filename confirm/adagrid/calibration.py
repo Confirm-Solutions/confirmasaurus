@@ -320,13 +320,14 @@ class AdaCalibrationDriver:
                             n_iter=step_n_iter,
                             n_tiles=step_n_tiles,
                         )
+                        logger.debug('Returning %s tiles.', work.shape[0])
                         return status, work, self.report
                     else:
                         # If step_iter < step_n_iter but there's no work, then
                         # The INSERT into tiles that was supposed to populate
                         # the work is probably incomplete. We should wait a
                         # very short time and try again.
-                        wait = 0.1
+                        logger.debug("No work despite step_iter < step_n_iter.")
 
                 # If there are no iterations left in the step, we check if the
                 # step is complete. For a step to be complete means that all
@@ -342,10 +343,12 @@ class AdaCalibrationDriver:
                         )
                         start = time.time()
                         if status:
+                            logger.debug("Convergence!!")
                             return WorkerStatus.CONVERGED, None, self.report
 
                         if step_id >= self.c.n_steps - 1:
                             # We've completed all the steps, so we're done.
+                            logger.debug("Reached max number of steps. Terminating.")
                             return WorkerStatus.REACHED_N_STEPS, None, self.report
 
                         # If we haven't converged, we create a new step.
@@ -356,12 +359,17 @@ class AdaCalibrationDriver:
                         if new_step_id == "empty":
                             # New packet is empty so we have terminated but
                             # failed to converge.
+                            logger.debug(
+                                "New packet is empty. Terminating despite "
+                                "failure to converge."
+                            )
                             return WorkerStatus.FAILED, None, self.report
                         else:
                             # Successful new packet. We should check for work again
                             # immediately.
                             status = WorkerStatus.NEW_STEP
                             wait = 0
+                            logger.debug("Successfully created new packet.")
                     else:
                         # No work available, but the packet is incomplete. This is
                         # because other workers have claimed all the work but have not
@@ -369,7 +377,9 @@ class AdaCalibrationDriver:
                         # In this situation, we should release the lock and wait for
                         # other workers to finish.
                         wait = 1
+                        logger.debug("No work available, but packet is incomplete.")
             if wait > 0:
+                logger.debug("Waiting %s seconds and checking for work again.", wait)
                 time.sleep(wait)
             if i > 2:
                 logger.warning(

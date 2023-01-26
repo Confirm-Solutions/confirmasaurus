@@ -204,7 +204,7 @@ class Clickhouse:
     _results_table_exists: bool = False
 
     def __post_init__(self):
-        self.lock = redis.lock.Lock(self.redis_con, f"{self.job_id}:next_lock")
+        self.lock = redis.lock.Lock(self.redis_con, f"{self.job_id}:next_lock", timeout=60)
 
     @property
     def _host(self):
@@ -560,7 +560,7 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
     )
 
 
-def clear_dbs(ch_client, redis_client, names=None, yes=False):
+def clear_dbs(ch_client, redis_client, names=None, yes=False, drop_all_redis_keys=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -596,23 +596,30 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False):
         to_drop = names
 
     if len(to_drop) == 0:
-        print("No databases to drop.")
-        return
+        print("No Clickhouse databases to drop.")
+    else:
+        print("Dropping the following databases:")
+        print(to_drop)
+        if not yes:
+            print("Are you sure? [yN]")
+            yes = input() == "y"
 
-    print("Dropping the following databases:")
-    print(to_drop)
-    if not yes:
-        print("Are you sure? [yN]")
-        yes = input() == "y"
-
-    if yes:
-        for db in to_drop:
-            cmd = f"drop database {db}"
-            print(cmd)
-            ch_client.command(cmd)
-            if redis_client is not None:
-                keys = list(redis_client.scan_iter("*{db}*"))
-                print("deleting redis keys", keys)
-                redis_client.delete(*keys)
-            else:
-                print("no redis client, skipping redis keys")
+        if yes:
+            for db in to_drop:
+                cmd = f"drop database {db}"
+                print(cmd)
+                ch_client.command(cmd)
+                if redis_client is not None:
+                    keys = list(redis_client.scan_iter("*{db}*"))
+                    print("deleting redis keys", keys)
+                    redis_client.delete(*keys)
+                else:
+                    print("no redis client, skipping redis keys")
+    
+    if drop_all_redis_keys:
+        keys = list(redis_client.scan_iter("*"))
+        print("drop_all_redis_keys=True, deleting redis keys", keys)
+        if not yes:
+            print("Are you sure? [yN]")
+            yes = input() == "y"
+        redis_client.delete(*keys)

@@ -57,11 +57,18 @@ def _groupby_apply_K(df, f):
     def f_wrap(df):
         K = df["K"].iloc[0]
         return f(K, df)
-    return df.groupby("K", group_keys=False).apply(f_wrap)
-    # out = []
-    # for K, K_df in df.groupby("K", group_keys=False):
-    #     out.append(f(K, K_df))
-    # return pd.concat(out).loc[df.index]
+    A = df.groupby("K", group_keys=False).apply(f_wrap)
+
+    out = []
+    for K, K_df in df.groupby("K", group_keys=False):
+        out.append(f(K, K_df))
+    B = pd.concat(out).loc[df.index]
+    try:
+        pd.testing.assert_frame_equal(A, B)
+    except:
+        print(A, B)
+        raise
+    return A
 
 
 class Driver:
