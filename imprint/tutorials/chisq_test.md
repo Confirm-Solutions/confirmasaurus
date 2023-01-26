@@ -50,13 +50,15 @@ lam = -(sigma_0**2) * scipy.stats.chi2.isf(
 )  # critical threshold
 ```
 
-The model can be expressed in many ways and we show that both methods will result in the same bounds.
+The model can be expressed in many ways and we show that both methods will result in similar bounds.
 As described above, the data can be seen as being drawn from a normal family.
 However, since the test only depends on $T$, which is known to be distributed $\sigma^2 \chi^2_{n-1}$,
 we can also view the model as having a single draw of a $\sigma^2 \chi^2_{n-1}$ random variable.
 This distinction changes the `family` type of the model,
 which will ultimately decide how the Tilt-Bound should be constructed.
-However, in this case, both `family` type of `normal2` or `chisq` will result in the same bounds.
+In this case, `chisq` will provide a slightly better bound,
+since we are using more assumptions about the model itself,
+i.e. the distribution of the test statistic.
 
 
 ## Family `normal2`
@@ -78,7 +80,11 @@ grid = ip.cartesian_grid(
 
 ```python
 rej_df = ip.validate(
-    ChiSqTest, grid, lam, K=n_sims, model_kwargs={"n_samples": n_samples}
+    ChiSqTest,
+    grid,
+    lam,
+    K=n_sims,
+    model_kwargs={"n_samples": n_samples, "family": "normal2"},
 )
 rej_df.tail()
 ```
