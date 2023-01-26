@@ -7,13 +7,19 @@ on:
     - cron: '57 2 * * *'
   workflow_dispatch:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths-ignore:
       - "research/**"
       - "**.ipynb"
       - "**.md"
+permissions:
+  id-token: write
+  contents: read
 jobs:
   test:
+    # NOTE: Add the "Run E2E" label to a PR in order to cause the E2E tests to run.
+    # https://stackoverflow.com/a/74829754/3817027
+    if: ${{ contains(github.event.*.labels.*.name, 'Run E2E') || (github.ref == 'refs/heads/main') }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
