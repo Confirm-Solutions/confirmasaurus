@@ -610,6 +610,9 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False):
             cmd = f"drop database {db}"
             print(cmd)
             ch_client.command(cmd)
-            keys = list(redis_client.scan_iter("*{db}*"))
-            print("deleting redis keys", keys)
-            redis_client.delete(*keys)
+            if redis_client is not None:
+                keys = list(redis_client.scan_iter("*{db}*"))
+                print("deleting redis keys", keys)
+                redis_client.delete(*keys)
+            else:
+                print("no redis client, skipping redis keys")

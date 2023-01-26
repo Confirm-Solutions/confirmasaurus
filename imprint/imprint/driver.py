@@ -54,10 +54,14 @@ def _groupby_apply_K(df, f):
     
     So, we work around this by just implementing our own groupby.apply.
     """
-    out = []
-    for K, K_df in df.groupby("K", group_keys=False):
-        out.append(f(K, K_df))
-    return pd.concat(out).loc[df.index]
+    def f_wrap(df):
+        K = df["K"].iloc[0]
+        return f(K, df)
+    return df.groupby("K", group_keys=False).apply(f_wrap)
+    # out = []
+    # for K, K_df in df.groupby("K", group_keys=False):
+    #     out.append(f(K, K_df))
+    # return pd.concat(out).loc[df.index]
 
 
 class Driver:

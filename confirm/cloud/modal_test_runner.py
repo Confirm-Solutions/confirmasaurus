@@ -1,9 +1,14 @@
+
 import sys
 
 import modal
 import pytest
 
 import confirm.cloud.modal_util as modal_util
+
+# Load environment variables from .env file before using modal
+import dotenv
+dotenv.load_dotenv()
 
 stub = modal.Stub("test_runner")
 
