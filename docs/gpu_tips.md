@@ -32,3 +32,17 @@ The full error from JAX:
 2022-08-05 20:19:36.537524: E external/org_tensorflow/tensorflow/stream_executor/cuda/cuda_driver.cc:265] failed call to cuInit: CUDA_ERROR_SYSTEM_DRIVER_MISMATCH: system has unsupported display driver / cuda driver combination
 2022-08-05 20:19:36.537838: E external/org_tensorflow/tensorflow/stream_executor/cuda/cuda_diagnostics.cc:313] kernel version 515.65.1 does not match DSO version 515.48.7 -- cannot find working devices in this configuration
 ```
+
+### PyTest is super slow using GPU and sometimes crashes
+
+It is likely that you are running multiple processes
+by running tests separately, i.e. clicking the play button
+on multiple tests separately.
+PyTest seems to create separate processes per click.
+This causes an issue with JAX pre-allocation since
+multiple processes will attempt to allocate 90% of the GPU memory
+(default behavior of JAX as documented [here](https://jax.readthedocs.io/en/latest/gpu_memory_allocation.html)).
+The workaround currently is to simply run 1 test at a time,
+i.e. clicking the "play" button once.
+This means you can click "play" once on a single individual test,
+file, or whole directory.
