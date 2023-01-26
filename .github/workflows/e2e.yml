@@ -5,8 +5,21 @@ on:
   schedule:
     # Runs at 02:57am every day.
     - cron: '57 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths-ignore:
+      - "research/**"
+      - "**.ipynb"
+      - "**.md"
+permissions:
+  id-token: write
+  contents: read
 jobs:
   test:
+    # NOTE: Add the "Run E2E" label to a PR in order to cause the E2E tests to run.
+    # https://stackoverflow.com/a/74829754/3817027
+    if: ${{ contains(github.event.*.labels.*.name, 'Run E2E') || (github.ref == 'refs/heads/main') }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -30,14 +43,22 @@ jobs:
       - name: Update environment
         run: |
           poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud,cloud_dev
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::644171722153:role/GitHubActionsRole
+          aws-region: us-east-1
+            
+      - name: Sops Binary Installer
+        uses: mdgreenwald/mozilla-sops-action@v1.4.1
+        with:
+          version: 'latest'
 
       - name: Run tests
         run: |
-          poetry run modal token set \
-            --token-id ${{ secrets.MODAL_TOKEN_ID }} \
-            --token-secret ${{ secrets.MODAL_TOKEN_SECRET }}
-            # --env=confirm_solutions
-          poetry run python confirm/cloud/modal_test_runner.py --runslow tests imprint/tests
+          sops -d --output .env test_secrets.enc.env
+          poetry run python confirm/cloud/modal_test_runner.py --run-slow tests imprint/tests
         
       - name: Clear Clickhouse Test DBs
         run: |

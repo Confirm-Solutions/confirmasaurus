@@ -39,7 +39,7 @@ class DBTester:
         g.df.index = g.df.index.astype(np.uint64)
         pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
-        db_tiles = self.dbtype.connect()
+        db_tiles = self.connect()
         db_tiles.init_tiles(g.df)
         return g, pd_tiles, db_tiles
 
@@ -48,6 +48,9 @@ class DBTester:
         work["orderer"] = np.linspace(5, 6, work.shape[0])
         work["eligible"] = True
         db.insert_results(work)
+
+    def test_connect(self):
+        self.connect()
 
     def test_create(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
@@ -197,7 +200,7 @@ class DBTester:
         pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
         pd_tiles.insert_results(g.df)
-        db_tiles = self.dbtype.connect()
+        db_tiles = self.connect()
         db_tiles.init_tiles(g.df)
         db_tiles.insert_results(g.df)
 
@@ -206,14 +209,15 @@ class DBTester:
         )
 
     def test_new_worker(self):
-        db = self.dbtype.connect()
+        db = self.connect()
         assert db.new_worker() == 2
         assert db.new_worker() == 3
         assert db.new_worker() == 4
 
 
 class TestDuckDB(DBTester):
-    dbtype = db.DuckDBTiles
+    def connect(self):
+        return db.DuckDBTiles.connect()
 
     def test_duckdb_load(self):
         g = example_grid(-1, 1)

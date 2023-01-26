@@ -156,6 +156,10 @@ class AdaCalibrationDriver:
         self.packet_size = self.c.packet_size
 
     def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
+        tile_batch_size = (
+            self.tile_batch_size if tile_batch_size is None else tile_batch_size
+        )
+
         def _batched(K, theta, vertices, null_truth):
             # NOTE: sort of a todo. having the simulations loop as the outer batch
             # is faster than the other way around. But, we need all simulations in
@@ -169,17 +173,13 @@ class AdaCalibrationDriver:
                 alpha0,
             )
 
-        def f(K_df):
-            _tbs = self.tile_batch_size if tile_batch_size is None else tile_batch_size
-
-            K = K_df["K"].iloc[0]
-            assert all(K_df["K"] == K)
+        def f(K, K_df):
             K_g = grid.Grid(K_df, self.c.worker_id)
 
             theta, vertices = K_g.get_theta_and_vertices()
             bootstrap_lams, alpha0 = batching.batch(
                 _batched,
-                _tbs,
+                tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
 
@@ -203,20 +203,25 @@ class AdaCalibrationDriver:
 
             return lams_df
 
-        return df.groupby("K", group_keys=False).apply(f)
+        return driver._groupby_apply_K(df, f)
 
     def many_rej(self, df, lams_arr):
-        def f(K_df):
-            K = K_df["K"].iloc[0]
+        def f(K, K_df):
             K_g = grid.Grid(K_df, self.c.worker_id)
+
             theta = K_g.get_theta()
+
+            # NOTE: no batching implemented here. Currently, this function is only
+            # called with a single tile so it's not necessary.
             stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
             tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
-            return tie_sum
+            return pd.DataFrame(
+                tie_sum,
+                index=K_df.index,
+                columns=[str(i) for i in range(lams_arr.shape[0])],
+            )
 
-        # NOTE: no batching implemented here. Currently, this function is only
-        # called with a single tile so it's not necessary.
-        return df.groupby("K", group_keys=False).apply(f)
+        return driver._groupby_apply_K(df, f)
 
     def process_tiles(self, *, tiles_df):
         # This method actually runs the calibration and bootstrapping.
@@ -315,12 +320,14 @@ class AdaCalibrationDriver:
                             n_iter=step_n_iter,
                             n_tiles=step_n_tiles,
                         )
+                        logger.debug("Returning %s tiles.", work.shape[0])
                         return status, work, self.report
                     else:
                         # If step_iter < step_n_iter but there's no work, then
                         # The INSERT into tiles that was supposed to populate
                         # the work is probably incomplete. We should wait a
                         # very short time and try again.
+                        logger.debug("No work despite step_iter < step_n_iter.")
                         wait = 0.1
 
                 # If there are no iterations left in the step, we check if the
@@ -337,10 +344,12 @@ class AdaCalibrationDriver:
                         )
                         start = time.time()
                         if status:
+                            logger.debug("Convergence!!")
                             return WorkerStatus.CONVERGED, None, self.report
 
                         if step_id >= self.c.n_steps - 1:
                             # We've completed all the steps, so we're done.
+                            logger.debug("Reached max number of steps. Terminating.")
                             return WorkerStatus.REACHED_N_STEPS, None, self.report
 
                         # If we haven't converged, we create a new step.
@@ -351,12 +360,17 @@ class AdaCalibrationDriver:
                         if new_step_id == "empty":
                             # New packet is empty so we have terminated but
                             # failed to converge.
+                            logger.debug(
+                                "New packet is empty. Terminating despite "
+                                "failure to converge."
+                            )
                             return WorkerStatus.FAILED, None, self.report
                         else:
                             # Successful new packet. We should check for work again
                             # immediately.
                             status = WorkerStatus.NEW_STEP
                             wait = 0
+                            logger.debug("Successfully created new packet.")
                     else:
                         # No work available, but the packet is incomplete. This is
                         # because other workers have claimed all the work but have not
@@ -364,7 +378,9 @@ class AdaCalibrationDriver:
                         # In this situation, we should release the lock and wait for
                         # other workers to finish.
                         wait = 1
+                        logger.debug("No work available, but packet is incomplete.")
             if wait > 0:
+                logger.debug("Waiting %s seconds and checking for work again.", wait)
                 time.sleep(wait)
             if i > 2:
                 logger.warning(
@@ -397,7 +413,7 @@ class AdaCalibrationDriver:
         B_lamss = self.db.bootstrap_lamss()
         worst_tile_tie_sum = self.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
-        ).iloc[0][0]
+        ).iloc[0]
         worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
 
         # Given these TIE values, we can compute bias, standard deviation and

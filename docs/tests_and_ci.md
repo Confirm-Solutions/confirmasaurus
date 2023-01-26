@@ -4,7 +4,11 @@ Related: [docs/packaging.md](./packaging.md)
 
 ## Slow tests
 
-Use `@pytest.mark.slow` to indicate that a test is slow and should not be run by default. To run slow tests, add the `--runslow` flag to pytest. Slow tests will not be run by the fast CI on PRs but will be run by the nightly end to end tests.
+Use `@pytest.mark.slow` to indicate that a test is slow and should not be run by default. To run slow tests, add the `--run-slow` flag to pytest. Slow tests will not be run by the fast CI on PRs but will be run by the nightly end to end tests.
+
+## Tests that use Modal
+
+If a test uses Modal to do distributed stuff, add `@pytest.mark.modal_unsafe` so that it won't be launched from inside Modal. Modal-inside-Modal is not currently working.
 
 ## Nightly end to end tests
 

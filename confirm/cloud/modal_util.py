@@ -52,7 +52,7 @@ def modalize(stub, **kwargs):
             image=get_image(dependency_groups=["test", "cloud"]),
             retries=0,
             mounts=(modal.create_package_mounts(["confirm", "imprint"])),
-            secret=modal.Secret.from_name("confirm-secrets"),
+            secret=modal.Secret.from_name("kms-sops"),
             name=f.__qualname__,
             **kwargs,
         )()
