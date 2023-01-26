@@ -83,13 +83,16 @@ def test_adagrid_packetsize1(snapshot):
     )
     check(db, snapshot, only_lams=True)
 
+
 @pytest.fixture()
 def ch_db():
     import confirm.cloud.clickhouse as ch
+
     db = ch.Clickhouse.connect()
     yield db
     db.close()
     ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
+
 
 @pytest.mark.slow
 def test_adagrid_clickhouse(snapshot, ch_db):

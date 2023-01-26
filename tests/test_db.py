@@ -48,7 +48,7 @@ class DBTester:
         work["orderer"] = np.linspace(5, 6, work.shape[0])
         work["eligible"] = True
         db.insert_results(work)
-        
+
     def test_connect(self):
         self.connect()
 

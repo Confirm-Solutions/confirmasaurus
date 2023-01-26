@@ -320,7 +320,7 @@ class AdaCalibrationDriver:
                             n_iter=step_n_iter,
                             n_tiles=step_n_tiles,
                         )
-                        logger.debug('Returning %s tiles.', work.shape[0])
+                        logger.debug("Returning %s tiles.", work.shape[0])
                         return status, work, self.report
                     else:
                         # If step_iter < step_n_iter but there's no work, then

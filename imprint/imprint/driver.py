@@ -51,24 +51,13 @@ def _groupby_apply_K(df, f):
     Pandas groupby.apply catches TypeError and tries again. This is unpleasant
     because it often causes double exceptions. See:
     https://github.com/pandas-dev/pandas/issues/50980
-    
+
     So, we work around this by just implementing our own groupby.apply.
     """
-    def f_wrap(df):
-        K = df["K"].iloc[0]
-        return f(K, df)
-    A = df.groupby("K", group_keys=False).apply(f_wrap)
-
     out = []
     for K, K_df in df.groupby("K", group_keys=False):
         out.append(f(K, K_df))
-    B = pd.concat(out).loc[df.index]
-    try:
-        pd.testing.assert_frame_equal(A, B)
-    except:
-        print(A, B)
-        raise
-    return A
+    return pd.concat(out).loc[df.index]
 
 
 class Driver:

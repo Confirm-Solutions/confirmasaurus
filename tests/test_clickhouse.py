@@ -4,25 +4,28 @@ from test_store import StoreTester
 
 import confirm.cloud.clickhouse as ch
 
+
 class ClickhouseCleanup:
     def setup_method(self, method):
         self.dbs = []
-    
+
     def teardown_method(self, method):
         client = ch.get_ch_client()
         job_ids = [db.job_id for db in self.dbs]
         for db in self.dbs:
             db.close()
         ch.clear_dbs(client, None, names=job_ids, yes=True)
-        
+
     def _connect(self):
         self.dbs.append(ch.Clickhouse.connect())
         return self.dbs[-1]
+
 
 @pytest.mark.slow
 class TestClickhouse(DBTester, ClickhouseCleanup):
     def connect(self):
         return self._connect()
+
 
 @pytest.mark.slow
 class TestClickhouseStore(StoreTester, ClickhouseCleanup):
