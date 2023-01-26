@@ -14,6 +14,8 @@ The tools involved are:
 brew install sops
 ```
 
+On Ubuntu, go to https://github.com/mozilla/sops/releases/ and download the latest `.deb` file and install with `dpkg -i filename`.
+
 ## Decrypting the secrets
 
 Log into AWS using `aws sso configure`. Please do not stray far from these commands. 

@@ -156,6 +156,10 @@ class AdaCalibrationDriver:
         self.packet_size = self.c.packet_size
 
     def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
+        tile_batch_size = (
+            self.tile_batch_size if tile_batch_size is None else tile_batch_size
+        )
+
         def _batched(K, theta, vertices, null_truth):
             # NOTE: sort of a todo. having the simulations loop as the outer batch
             # is faster than the other way around. But, we need all simulations in
@@ -169,17 +173,13 @@ class AdaCalibrationDriver:
                 alpha0,
             )
 
-        def f(K_df):
-            _tbs = self.tile_batch_size if tile_batch_size is None else tile_batch_size
-
-            K = K_df["K"].iloc[0]
-            assert all(K_df["K"] == K)
+        def f(K, K_df):
             K_g = grid.Grid(K_df, self.c.worker_id)
 
             theta, vertices = K_g.get_theta_and_vertices()
             bootstrap_lams, alpha0 = batching.batch(
                 _batched,
-                _tbs,
+                tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
 
@@ -203,20 +203,25 @@ class AdaCalibrationDriver:
 
             return lams_df
 
-        return df.groupby("K", group_keys=False).apply(f)
+        return driver._groupby_apply_K(df, f)
 
     def many_rej(self, df, lams_arr):
-        def f(K_df):
-            K = K_df["K"].iloc[0]
+        def f(K, K_df):
             K_g = grid.Grid(K_df, self.c.worker_id)
+
             theta = K_g.get_theta()
+
+            # NOTE: no batching implemented here. Currently, this function is only
+            # called with a single tile so it's not necessary.
             stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
             tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
-            return tie_sum
+            return pd.DataFrame(
+                tie_sum,
+                index=K_df.index,
+                columns=[str(i) for i in range(lams_arr.shape[0])],
+            )
 
-        # NOTE: no batching implemented here. Currently, this function is only
-        # called with a single tile so it's not necessary.
-        return df.groupby("K", group_keys=False).apply(f)
+        return driver._groupby_apply_K(df, f)
 
     def process_tiles(self, *, tiles_df):
         # This method actually runs the calibration and bootstrapping.
@@ -397,7 +402,7 @@ class AdaCalibrationDriver:
         B_lamss = self.db.bootstrap_lamss()
         worst_tile_tie_sum = self.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
-        ).iloc[0][0]
+        ).iloc[0]
         worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
 
         # Given these TIE values, we can compute bias, standard deviation and
