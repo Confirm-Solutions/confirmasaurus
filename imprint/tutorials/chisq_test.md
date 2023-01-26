@@ -154,3 +154,47 @@ rej_df = ip.validate(
 )
 rej_df.tail()
 ```
+
+```python
+g_rej = grid.add_cols(rej_df)
+g_rej.df.sort_values("theta0", inplace=True)
+theta = grid.get_theta()
+true_err = scipy.stats.chi2.sf(2 * lam * theta, df=n_samples - 1)
+
+plt.plot(
+    g_rej.df["theta0"],
+    100 * g_rej.df["tie_est"],
+    "k--o",
+    markersize=0.5,
+    label="Monte Carlo estimate",
+)
+plt.plot(
+    g_rej.df["theta0"],
+    100 * g_rej.df["tie_cp_bound"],
+    "b--o",
+    markersize=0.5,
+    label="Clopper-Pearson Bound",
+)
+plt.plot(
+    g_rej.df["theta0"],
+    100 * g_rej.df["tie_bound"],
+    "r--o",
+    markersize=0.5,
+    label="Tilt Bound",
+)
+plt.plot(
+    g_rej.df["theta0"],
+    100 * true_err,
+    "r-*",
+    linewidth=0.5,
+    markersize=0.5,
+    label="True Type I Error",
+)
+plt.axhline(2.5, color="k")
+plt.axvline(0, color="k")
+plt.ylim([0, 2.6])
+plt.legend(fontsize=11, bbox_to_anchor=(0.05, 0.94), loc="upper left")
+plt.xlabel("$z$")
+plt.ylabel(r"Type I Error (\%)")
+plt.show()
+```

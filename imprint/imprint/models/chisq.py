@@ -19,7 +19,7 @@ class ChiSqTest:
         if family == "normal2":
             self.family_params = {"n": n_samples}
         elif family == "scaled_chisq":
-            self.family_params = {"df": df}
+            self.family_params = {"n": 1, "df": df}
         else:
             raise RuntimeError("Unrecognized family.")
         self.dtype = jnp.float32
