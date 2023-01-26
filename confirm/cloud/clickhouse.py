@@ -567,13 +567,15 @@ def clear_dbs(ch_client, redis_client, names=None, yes=False, drop_all_redis_key
         would be bad. There's a built-in safeguard to prevent this, but it's
         not foolproof.
 
-    Clear all databases (and database tables) from the Clickhouse server. This
-    should only work for our test database or for localhost.
+    Clear all databases (and database tables) from the Clickhouse and Redis
+    servers. This should only work for our test database or for localhost.
 
     Args:
-        client: Clickhouse client
+        ch_client: Clickhouse client
+        redis_client: Redis client
         names: default None, list of database names to drop. If None, drop all.
-        yes: bool, if True, don't ask for confirmation
+        yes: bool, if True, don't ask for confirmation before dropping.
+        drop_all_redis_keys: bool, if True, drop all Redis keys.
     """
     test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
     if not (
