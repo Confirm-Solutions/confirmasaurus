@@ -34,7 +34,7 @@ let $T^i$ denote the test statistic at stage $i$ ($0 \leq i \leq I$) with $N_i$ 
 Then,
 $$
 \begin{align*}
-    T^i &:= \frac{A_i - N_i(\mu - \mu_0)}{N_i \sqrt{\frac{B_i}{N_i-1}}} \\
+    T^i &:= \frac{A_i - N_i\mu_0}{\sqrt{N_i \frac{B_i}{N_i-1}}} \\
     A_i &:= \sum\limits_{j=1}^{N_i} X_j \\
     B_i &:= \sum\limits_{j=1}^{N_i} (X_j - \bar{X}_i)^2 \\
     \bar{X}_i &:= \frac{A_i}{N_i}
@@ -71,7 +71,7 @@ $$
 \begin{align*}
     \bar{X}_i - \bar{X}_{i-1}
     &=
-    \left(\frac{1}{N_i} - \frac{1}{N_{i-1}}\right) A_{N_i}
+    \left(\frac{1}{N_i} - \frac{1}{N_{i-1}}\right) A_{i}
     + \frac{1}{N_{i-1}} \Delta_i
     =
     \frac{n_i}{N_{i-1}} \left(\frac{\Delta_i}{n_i} - \bar{X}_i\right)
@@ -93,19 +93,58 @@ $$
 \end{align*}
 $$
 
+Let $\Delta_i = \sqrt{n_i} \sigma Z_i + n_i \mu$. Then,
+$$
+\begin{align*}
+    A_i &= \sigma \sum\limits_{j=0}^i \sqrt{n_j} Z_j + \mu N_i = \sigma C_i + \mu N_i \\
+    C_i &:= \sum\limits_{j=0}^i \sqrt{n_j} Z_j
+\end{align*}
+$$
+And,
+$$
+\begin{align*}
+    \frac{\Delta_i}{n_i} - \frac{A_{i-1}}{N_{i-1}}
+    &=
+    \sigma \left(
+    \frac{Z_i}{\sqrt{n_i}} - \frac{C_{i-1}}{N_{i-1}}
+    \right)
+\end{align*}
+$$
+So,
+$$
+\begin{align*}
+    B_i = \sigma^2 \sum\limits_{j=0}^i \left(
+        \chi^2_{n_j-1} + \frac{n_j N_{j-1}}{N_j} \left(
+            \frac{Z_j}{\sqrt{n_j}} - \frac{C_{j-1}}{N_{j-1}}
+        \right)^2
+    \right)
+    =: \sigma^2 D_i
+\end{align*}
+$$
+
+Putting everything together,
+$$
+\begin{align*}
+    T^i 
+    &=
+    \frac{\frac{C_i}{N_i} + \frac{\mu-\mu_0}{\sigma}}{\sqrt{\frac{D_i}{N_i(N_i-1)}}}
+\end{align*}
+$$
+
 ```python
 mu_0 = 0  # fixed threshold for null hypothesis
-theta_min = [-1, -1]  # minimum for theta
+theta_min = [-0.2, -1]  # minimum for theta
 theta_max = [0, -0.1]  # maximum for theta
-n_init = 20  # initial number of Gaussian draws
-n_samples_per_interim = 20  # number of Gaussian draws per interim
-n_interims = 1  # number of interims
-n_gridpts = [100, 100]  # number of grid-points along each direction
+n_init = 100  # initial number of Gaussian draws
+n_samples_per_interim = 50  # number of Gaussian draws per interim
+n_interims = 3  # number of interims
+n_gridpts = [200, 200]  # number of grid-points along each direction
 alpha = 0.025  # target nominal level
 n_sims = 8192  # number of simulations
 
 # try true critical threshold when 0 interims in the lambda space
-lam = -scipy.stats.t.isf(alpha, df=n_samples - 1)
+df = n_init + n_interims * n_samples_per_interim - 1
+lam = -scipy.stats.t.isf(alpha, df=df)
 ```
 
 ```python
@@ -131,4 +170,48 @@ rej_df = ip.validate(
     },
 )
 rej_df.tail()
+```
+
+```python
+# compute true TIE with 0 interims
+def true_tie(theta, mu_0, n_samples, crit_thresh):
+    sig = jnp.sqrt(-0.5 / theta[1])
+    mu_div_sig = theta[0] * sig
+    mu_0_div_sig = mu_0 / sig
+    shift = jnp.sqrt(n_samples) * (mu_div_sig - mu_0_div_sig)
+    df = n_samples - 1
+    factor = crit_thresh / jnp.sqrt(df)
+    xs = jnp.logspace(0, 10, 1000)
+
+    def integrand(x):
+        return (
+            1 - jax.scipy.stats.norm.cdf(factor * jnp.sqrt(x) - shift)
+        ) * jax.scipy.stats.chi2.pdf(x, df)
+
+    ys = jax.vmap(integrand, in_axes=(0,))(xs)
+
+    return jnp.trapz(ys, xs)
+
+
+true_tie_vmap = jax.vmap(true_tie, in_axes=(0, None, None, None))
+rej_df["true_tie_no_int"] = true_tie_vmap(grid.get_theta(), mu_0, df + 1, -lam)
+```
+
+```python
+s = 3
+plt.figure(figsize=(10, 10), constrained_layout=True)
+names = ["true_tie_no_int", "tie_est", "tie_cp_bound", "tie_bound"]
+titles = ["True TIE (0 interims)", "TIE Estimate", "TIE CP Bound", "TIE Bound"]
+vmax = rej_df[names].max().max()
+for i, (name, title) in enumerate(zip(names, titles)):
+    plt.subplot(2, 2, i + 1)
+    plt.title(title)
+    plt.scatter(
+        grid.df["theta0"], grid.df["theta1"], c=rej_df[name], s=s, vmin=0, vmax=vmax
+    )
+    plt.colorbar()
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+
+plt.show()
 ```
