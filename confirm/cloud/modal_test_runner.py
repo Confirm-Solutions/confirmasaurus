@@ -1,18 +1,27 @@
+"""
+This file is used to run tests in the cloud using Modal.
+"""
+import copy
 import sys
 
+import dotenv
 import modal
 import pytest
 
 import confirm.cloud.modal_util as modal_util
 
-stub = modal.Stub("e2e_runner")
+# Load environment variables from .env file before using modal
+
+dotenv.load_dotenv()
+
+stub = modal.Stub("test_runner")
 
 img = modal_util.get_image(dependency_groups=["test", "cloud"])
 
 
 def run_tests(argv=None):
     if argv is None:
-        argv = ["--runslow", "tests", "imprint/tests"]
+        argv = []
     print(argv)
     exitcode = pytest.main(argv)
     print(exitcode)
@@ -35,15 +44,33 @@ def run_tests(argv=None):
         ]
     ),
     timeout=60 * 60 * 1,
-    secrets=[modal.Secret.from_name("confirm-secrets")],
+    secrets=[modal.Secret.from_name("kms-sops")],
 )
 def run_cloud_tests(argv=None):
+    modal_util.decrypt_secrets()
     return run_tests(argv=argv)
 
 
 if __name__ == "__main__":
     # run_tests()
+    argv = None if len(sys.argv) == 1 else sys.argv[1:]
+    print("Running Modal safe tests first.")
     with stub.run():
-        argv = None if len(sys.argv) == 1 else sys.argv[1:]
-        exitcode = run_cloud_tests.call(argv)
+        modal_argv = copy.copy(sys.argv)
+        modal_argv.insert(0, "--run-modal-safe")
+        modal_exitcode = run_cloud_tests.call(modal_argv)
+
+    print("Running Modal unsafe tests.")
+    argv.insert(0, "--run-modal-unsafe")
+    local_exitcode = run_tests(argv)
+
+    # Combine exit codes:
+    # We arbitrarily give preference to the modal exitcode if they are both
+    # nonzero
+    exitcode = 0
+    if modal_exitcode != 0:
+        exitcode = modal_exitcode
+    elif local_exitcode != 0:
+        exitcode = local_exitcode
+
     sys.exit(exitcode)

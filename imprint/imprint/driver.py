@@ -6,8 +6,18 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 
+import imprint.bound as bound
 from . import batching
 from . import grid
+
+
+bound_dict = {
+    "normal": bound.normal.NormalBound,
+    "normal2": bound.normal2.Normal2Bound,
+    "scaled_chisq": bound.scaled_chisq.ScaledChiSqBound,
+    "binomial": bound.binomial.BinomialBound,
+    "exponential": bound.exponential.ExponentialBound,
+}
 
 
 # TODO: Need to clean up the interface from driver to the bounds.
@@ -15,13 +25,7 @@ from . import grid
 #   __init__?
 # - can we pass a single vertex array as a substitute for the many vertex case?
 def get_bound(family, family_params):
-    if family == "normal":
-        from imprint.bound.normal import NormalBound as bound_type
-    elif family == "binomial":
-        from imprint.bound.binomial import BinomialBound as bound_type
-    else:
-        raise Exception("unknown family")
-
+    bound_type = bound_dict[family]
     return (
         bound_type.get_forward_bound(family_params),
         bound_type.get_backward_bound(family_params),
@@ -42,6 +46,20 @@ def calc_tuning_threshold(sorted_stats, sorted_order, alpha):
     return sorted_stats[sorted_order[cv_idx]]
 
 
+def _groupby_apply_K(df, f):
+    """
+    Pandas groupby.apply catches TypeError and tries again. This is unpleasant
+    because it often causes double exceptions. See:
+    https://github.com/pandas-dev/pandas/issues/50980
+
+    So, we work around this by just implementing our own groupby.apply.
+    """
+    out = []
+    for K, K_df in df.groupby("K", group_keys=False):
+        out.append(f(K, K_df))
+    return pd.concat(out).loc[df.index]
+
+
 class Driver:
     def __init__(self, model, *, tile_batch_size):
         self.model = model
@@ -57,82 +75,67 @@ class Driver:
             )
         )
 
-    def _stats(self, K_df):
-        K = K_df["K"].iloc[0]
-        K_g = grid.Grid(K_df)
-        theta = K_g.get_theta()
-        # TODO: batching
-        stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-        return stats
-
     def stats(self, df):
-        return df.groupby("K", group_keys=False).apply(self._stats)
+        def f(K, K_df):
+            K = K_df["K"].iloc[0]
+            K_g = grid.Grid(K_df)
+            theta = K_g.get_theta()
+            # TODO: batching
+            stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
+            return stats
 
-    def _batched_validate(self, K, theta, null_truth, lam):
-        stats = self.model.sim_batch(0, K, theta, null_truth)
-        return jnp.sum(stats < lam, axis=-1)
-
-    def _validate(self, K_df, lam, delta):
-        K = K_df["K"].iloc[0]
-        K_g = grid.Grid(K_df)
-        theta = K_g.get_theta()
-
-        tie_sum = batching.batch(
-            self._batched_validate,
-            self.tile_batch_size,
-            in_axes=(None, 0, 0, None),
-        )(K, theta, K_g.get_null_truth(), lam)
-
-        tie_cp_bound = clopper_pearson(tie_sum, K, delta)
-        theta, vertices = K_g.get_theta_and_vertices()
-        tie_bound = self.forward_boundv(tie_cp_bound, theta, vertices)
-
-        return pd.DataFrame(
-            dict(
-                tie_sum=tie_sum,
-                tie_est=tie_sum / K,
-                tie_cp_bound=tie_cp_bound,
-                tie_bound=tie_bound,
-            )
-        )
+        return _groupby_apply_K(df, f)
 
     def validate(self, df, lam, *, delta=0.01):
-        # The execution trace of a driver:
-        # entry point: (validate)
-        #     for each K: (_validate)
-        #         for each batch of tiles: (_batched_validate)
-        #             simulate
-        return (
-            df.groupby("K", group_keys=False)
-            .apply(lambda K_df: self._validate(K_df, lam, delta))
-            .reset_index(drop=True)
-        )
+        def _batched(K, theta, null_truth):
+            stats = self.model.sim_batch(0, K, theta, null_truth)
+            return jnp.sum(stats < lam, axis=-1)
 
-    def _batched_calibrate(self, K, theta, vertices, null_truth, alpha):
-        stats = self.model.sim_batch(0, K, theta, null_truth)
-        sorted_stats = jnp.sort(stats, axis=-1)
-        alpha0 = self.backward_boundv(alpha, theta, vertices)
-        bootstrap_lams = self.calibratev(sorted_stats, np.arange(K), alpha0)
-        return bootstrap_lams
+        def f(K, K_df):
+            K_g = grid.Grid(K_df, None)
+            theta = K_g.get_theta()
 
-    def _calibrate(self, K_df, alpha):
-        K = K_df["K"].iloc[0]
-        K_g = grid.Grid(K_df)
+            tie_sum = batching.batch(
+                _batched,
+                self.tile_batch_size,
+                in_axes=(None, 0, 0),
+            )(K, theta, K_g.get_null_truth())
 
-        theta, vertices = K_g.get_theta_and_vertices()
-        bootstrap_lams = batching.batch(
-            self._batched_calibrate,
-            self.tile_batch_size,
-            in_axes=(None, 0, 0, 0, None),
-        )(K, theta, vertices, K_g.get_null_truth(), alpha)
-        return pd.DataFrame(bootstrap_lams, columns=["lams"])
+            tie_cp_bound = clopper_pearson(tie_sum, K, delta)
+            theta, vertices = K_g.get_theta_and_vertices()
+            tie_bound = self.forward_boundv(tie_cp_bound, theta, vertices)
+
+            return pd.DataFrame(
+                dict(
+                    tie_sum=tie_sum,
+                    tie_est=tie_sum / K,
+                    tie_cp_bound=tie_cp_bound,
+                    tie_bound=tie_bound,
+                )
+            )
+
+        return _groupby_apply_K(df, f)
 
     def calibrate(self, df, alpha):
-        return (
-            df.groupby("K", group_keys=False)
-            .apply(lambda K_df: self._calibrate(K_df, alpha))
-            .reset_index(drop=True)
-        )
+        def _batched(K, theta, vertices, null_truth):
+            stats = self.model.sim_batch(0, K, theta, null_truth)
+            sorted_stats = jnp.sort(stats, axis=-1)
+            alpha0 = self.backward_boundv(alpha, theta, vertices)
+            bootstrap_lams = self.calibratev(sorted_stats, np.arange(K), alpha0)
+            return bootstrap_lams
+
+        def f(K, K_df):
+            K_g = grid.Grid(K_df, None)
+
+            theta, vertices = K_g.get_theta_and_vertices()
+            bootstrap_lams = batching.batch(
+                _batched,
+                self.tile_batch_size,
+                in_axes=(None, 0, 0, 0),
+            )(K, theta, vertices, K_g.get_null_truth())
+            return pd.DataFrame(bootstrap_lams, columns=["lams"])
+
+        return _groupby_apply_K(df, f)
 
 
 def _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size):

@@ -13,10 +13,10 @@ packages = [
 [tool.poetry.dependencies]
 python = "~3.10"
 numpy = "^1.24.1"
-scipy = "^1.9.3"
+scipy = "^1.10.0"
 sympy = "^1.11.1"
-matplotlib = "^3.6.2"
-pandas = "^1.5.2"
+matplotlib = "^3.6.3"
+pandas = "^1.5.3"
 jax = "0.3.24"
 numpyro = "^0.10.1"
 jaxlib = [
@@ -29,45 +29,44 @@ duckdb = "^0.6.1"
 optional = true
 
 [tool.poetry.group.test.dependencies]
-pytest = "^7.2.0"
-pre-commit = "^2.21.0"
+pytest = "^7.2.1"
+pre-commit = "^3.0.0"
 pytest-xdist = {extras = ["psutil"], version = "^3.1.0"}
-ipython = "^8.7.0"
-nbformat = "^5.7.1"
+ipython = "^8.8.0"
+nbformat = "^5.7.3"
 
 [tool.poetry.group.cloud]
 optional = true
 
 [tool.poetry.group.cloud.dependencies]
 pyarrow = "^10.0.1"
-boto3 = "^1.26.40"
-cloudpickle = "~2.0.0"
-clickhouse-connect = "^0.5.0"
-redis = "^4.4.0"
-pottery = "^3.0.0"
-keyring = "^23.13.1"
+boto3 = "^1.26.56"
+cloudpickle = "<2.1"
+clickhouse-connect = "^0.5.3"
+redis = "^4.4.2"
+python-dotenv = "^0.21.1"
 
 [tool.poetry.group.dev]
 optional = true
 
 [tool.poetry.group.dev.dependencies]
 black = {extras = ["jupyter"], version = "^22.12.0"}
-line-profiler = "^3.5.1"
+line-profiler = "^4.0.2"
 jupytext = "^1.14.4"
 reorder-python-imports = "^3.9.0"
-flake8 = "^5.0.4"
-typer = "^0.6.1"
+flake8 = "^6.0.0"
+typer = "^0.7.0"
 jupyter = "^1.0.0"
-rich = "^12.6.0"
+rich = "^13.2.0"
 ipdb = "^0.13.11"
 
 [tool.poetry.group.cloud_dev]
 optional = true
 
 [tool.poetry.group.cloud_dev.dependencies]
-aws-cdk-lib = "^2.58.0"
-aws-cdk-aws-batch-alpha = "^2.58.0a0"
-modal-client = "^0.43.586"
+aws-cdk-lib = "^2.61.1"
+aws-cdk-aws-batch-alpha = "^2"
+modal-client = "^0.45.890"
 
 [[tool.poetry.source]]
 name = "jax"

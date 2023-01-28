@@ -42,6 +42,30 @@ The great glossary of adagrid:
 - processing tiles: deciding to refine or deepen and then simulating for those
   new tiles that resulted from refining or deepening.
 - worst tile: the tile for which lams is smallest. `lams[worst_tile] == lamss`
+
+
+TODO: Code snippet for running bootstrap calibration on a particular grid. Left this
+here because this is not as easy as it should be.
+```
+from confirm.adagrid.calibration import AdaCalibrationDriver, CalibrationConfig
+import json
+gtemp = ip.Grid(db1.get_all())
+null_hypos = [ip.hypo("x0 < 0")]
+c= CalibrationConfig(
+    ZTest1D,
+    *[None] * 16,
+    defaults=db1.store.get('config').iloc[0].to_dict()
+)
+model = ZTest1D(
+    seed=c.model_seed,
+    max_K=c.init_K * 2**c.n_K_double,
+    **json.loads(c.model_kwargs),
+)
+driver = AdaCalibrationDriver(None, model, null_hypos, c)
+driver.bootstrap_calibrate(gtemp.df, 0.025)
+gtemp.df['K'].value_counts()
+```
+
 """
 import copy
 import json
@@ -49,18 +73,22 @@ import platform
 import subprocess
 import time
 from dataclasses import dataclass
-from pprint import pprint
+from pprint import pformat
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
+import imprint.log
 from .db import DuckDBTiles
+from confirm.adagrid.convergence import WorkerStatus
 from imprint import batching
 from imprint import driver
 from imprint import grid
 from imprint.timer import simple_timer
+
+logger = imprint.log.getLogger(__name__)
 
 
 class AdaCalibrationDriver:
@@ -125,83 +153,97 @@ class AdaCalibrationDriver:
         self.bias_target = self.c.bias_target
         self.grid_target = self.c.grid_target
         self.std_target = self.c.std_target
-        self.iter_size = self.c.iter_size
-
-    def _batched_bootstrap_calibrate(self, K, theta, vertices, null_truth, alpha):
-        # NOTE: sort of a todo. having the simulations loop as the outer batch
-        # is faster than the other way around. But, we need all simulations in
-        # order to calibrate. So, the likely fastest solution is to have multiple
-        # layers of batching. This is not currently implemented.
-        stats = self.model.sim_batch(0, K, theta, null_truth)
-        sorted_stats = jnp.sort(stats, axis=-1)
-        alpha0 = self.backward_boundv(alpha, theta, vertices)
-        return self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0), alpha0
-
-    def _bootstrap_calibrate(self, K_df, alpha, tile_batch_size=None):
-        if tile_batch_size is None:
-            tile_batch_size = self.tile_batch_size
-
-        K = K_df["K"].iloc[0]
-        assert all(K_df["K"] == K)
-        K_g = grid.Grid(K_df)
-
-        theta, vertices = K_g.get_theta_and_vertices()
-        bootstrap_lams, alpha0 = batching.batch(
-            self._batched_bootstrap_calibrate,
-            tile_batch_size,
-            in_axes=(None, 0, 0, 0, None),
-        )(K, theta, vertices, K_g.get_null_truth(), alpha)
-
-        cols = ["lams"]
-        for i in range(self.nB):
-            cols.append(f"B_lams{i}")
-        for i in range(self.nB):
-            cols.append(f"twb_lams{i}")
-        lams_df = pd.DataFrame(bootstrap_lams, index=K_df.index, columns=cols)
-        lams_df["twb_min_lams"] = bootstrap_lams[:, 1 + self.nB :].min(axis=1)
-        lams_df["twb_mean_lams"] = bootstrap_lams[:, 1 + self.nB :].mean(axis=1)
-        lams_df["twb_max_lams"] = bootstrap_lams[:, 1 + self.nB :].max(axis=1)
-
-        lams_df.insert(0, "alpha0", alpha0)
-        return lams_df
+        self.packet_size = self.c.packet_size
 
     def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
-        return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._bootstrap_calibrate(K_df, alpha, tile_batch_size)
+        tile_batch_size = (
+            self.tile_batch_size if tile_batch_size is None else tile_batch_size
         )
 
-    def _many_rej(self, K_df, lams_arr):
-        K = K_df["K"].iloc[0]
-        K_g = grid.Grid(K_df)
-        theta = K_g.get_theta()
-        stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-        tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
-        return tie_sum
+        def _batched(K, theta, vertices, null_truth):
+            # NOTE: sort of a todo. having the simulations loop as the outer batch
+            # is faster than the other way around. But, we need all simulations in
+            # order to calibrate. So, the likely fastest solution is to have multiple
+            # layers of batching. This is not currently implemented.
+            stats = self.model.sim_batch(0, K, theta, null_truth)
+            sorted_stats = jnp.sort(stats, axis=-1)
+            alpha0 = self.backward_boundv(alpha, theta, vertices)
+            return (
+                self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0),
+                alpha0,
+            )
+
+        def f(K, K_df):
+            K_g = grid.Grid(K_df, self.c.worker_id)
+
+            theta, vertices = K_g.get_theta_and_vertices()
+            bootstrap_lams, alpha0 = batching.batch(
+                _batched,
+                tile_batch_size,
+                in_axes=(None, 0, 0, 0),
+            )(K, theta, vertices, K_g.get_null_truth())
+
+            cols = ["lams"]
+            for i in range(self.nB):
+                cols.append(f"B_lams{i}")
+            for i in range(self.nB):
+                cols.append(f"twb_lams{i}")
+            lams_df = pd.DataFrame(bootstrap_lams, index=K_df.index, columns=cols)
+
+            lams_df.insert(
+                0, "twb_min_lams", bootstrap_lams[:, 1 + self.nB :].min(axis=1)
+            )
+            lams_df.insert(
+                0, "twb_mean_lams", bootstrap_lams[:, 1 + self.nB :].mean(axis=1)
+            )
+            lams_df.insert(
+                0, "twb_max_lams", bootstrap_lams[:, 1 + self.nB :].max(axis=1)
+            )
+            lams_df.insert(0, "alpha0", alpha0)
+
+            return lams_df
+
+        return driver._groupby_apply_K(df, f)
 
     def many_rej(self, df, lams_arr):
-        # NOTE: no batching implemented here. Currently, this function is only
-        # called with a single tile so it's not necessary.
-        return df.groupby("K", group_keys=False).apply(
-            lambda K_df: self._many_rej(K_df, lams_arr)
-        )
+        def f(K, K_df):
+            K_g = grid.Grid(K_df, self.c.worker_id)
 
-    def _process_tiles(self, g, i):
+            theta = K_g.get_theta()
+
+            # NOTE: no batching implemented here. Currently, this function is only
+            # called with a single tile so it's not necessary.
+            stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
+            tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
+            return pd.DataFrame(
+                tie_sum,
+                index=K_df.index,
+                columns=[str(i) for i in range(lams_arr.shape[0])],
+            )
+
+        return driver._groupby_apply_K(df, f)
+
+    def process_tiles(self, *, tiles_df):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.bootstrap_calibrate(g.df, self.alpha)
+        lams_df = self.bootstrap_calibrate(tiles_df, self.alpha)
+        lams_df.insert(0, "processor_id", self.c.worker_id)
+        lams_df.insert(1, "processing_time", simple_timer())
+        lams_df.insert(2, "eligible", True)
+
         # we use insert here to order columns nicely for reading raw data
-        lams_df.insert(1, "grid_cost", self.alpha - lams_df["alpha0"])
+        lams_df.insert(3, "grid_cost", self.alpha - lams_df["alpha0"])
         lams_df.insert(
-            2,
+            4,
             "impossible",
-            lams_df["alpha0"] < (self.calibration_min_idx + 1) / (g.df["K"] + 1),
+            lams_df["alpha0"] < (self.calibration_min_idx + 1) / (tiles_df["K"] + 1),
         )
 
         lams_df.insert(
-            3,
+            5,
             "orderer",
             # Where calibration is impossible due to either small K or small alpha0,
             # the orderer is set to -inf so that such tiles are guaranteed to
@@ -211,29 +253,158 @@ class AdaCalibrationDriver:
                 np.where(lams_df["impossible"], -np.inf, np.inf),
             ),
         )
-        g_calibrated = g.add_cols(lams_df)
-        g_calibrated.df["worker_id"] = self.c.worker_id
-        g_calibrated.df["birthiter"] = i
-        g_calibrated.df["birthtime"] = simple_timer()
-        g_calibrated.df["eligible"] = True
-        return g_calibrated
+        return pd.concat((tiles_df, lams_df), axis=1)
 
-    def step(self, i):
+    def step(self, worker_iter):
         """
         One iteration of the adagrid algorithm.
+
+        Parallelization:
+        There are four main portions of the adagrid algo:
+        - Convergence criterion --> serialize to avoid data races.
+        - Tile selection --> serialize to avoid data races.
+        - Deciding whether to refine or deepen --> parallelize.
+        - Simulation and CSE --> parallelize.
+        By using a distributed lock around the convergence/tile selection, we can have
+        equality between workers and not need to have a leader node.
 
         Args:
             i: The iteration number.
 
         Returns:
-            done: True if the algorithm has converged.
+            done: A value from the Enum Convergence:
+                 (INCOMPLETE, CONVERGED, FAILED).
             report: A dictionary of information about the iteration.
         """
 
-        start_convergence = time.time()
+        start = time.time()
+        self.report = dict(worker_iter=worker_iter, worker_id=self.c.worker_id)
+
         ########################################
-        # Step 1: Calculate bias and standard deviation of TIE
+        # Step 1: Get the next batch of tiles to process. We do this before
+        # checking for convergence because part of the convergence criterion is
+        # whether there are any impossible tiles.
         ########################################
+        max_loops = 25
+        i = 0
+        status = WorkerStatus.WORK
+        self.report["runtime_wait_for_lock"] = 0
+        self.report["runtime_wait_for_work"] = 0
+        while i < max_loops:
+            self.report["waitings"] = i
+            with self.db.lock:
+                self.report["runtime_wait_for_lock"] += time.time() - start
+                start = time.time()
+
+                step_id, step_iter, step_n_iter, step_n_tiles = self.db.get_step_info()
+                self.report["step_id"] = step_id
+                self.report["step_iter"] = step_iter
+                self.report["step_n_iter"] = step_n_iter
+                self.report["step_n_tiles"] = step_n_tiles
+
+                # Check if there are iterations left in this step.
+                # If there are, get the next batch of tiles to process.
+                if step_iter < step_n_iter:
+                    logger.debug(f"get_work(step_id={step_id}, step_iter={step_iter})")
+                    work = self.db.get_work(step_id, step_iter)
+                    self.report["runtime_get_work"] = time.time() - start
+                    self.report["work_extraction_time"] = time.time()
+                    self.report["n_processed"] = work.shape[0]
+                    logger.debug(f"get_work(...) returned {work.shape[0]} tiles")
+
+                    # If there's work, return it!
+                    if work.shape[0] > 0:
+                        self.db.set_step_info(
+                            step_id=step_id,
+                            step_iter=step_iter + 1,
+                            n_iter=step_n_iter,
+                            n_tiles=step_n_tiles,
+                        )
+                        logger.debug("Returning %s tiles.", work.shape[0])
+                        return status, work, self.report
+                    else:
+                        # If step_iter < step_n_iter but there's no work, then
+                        # The INSERT into tiles that was supposed to populate
+                        # the work is probably incomplete. We should wait a
+                        # very short time and try again.
+                        logger.debug("No work despite step_iter < step_n_iter.")
+                        wait = 0.1
+
+                # If there are no iterations left in the step, we check if the
+                # step is complete. For a step to be complete means that all
+                # tiles have results.
+                else:
+                    n_processed_tiles = self.db.n_processed_tiles(step_id)
+                    self.report["n_finished_tiles"] = n_processed_tiles
+                    if n_processed_tiles == step_n_tiles:
+                        # If a packet has just been completed, we check for convergence.
+                        status = self.convergence_criterion()
+                        self.report["runtime_convergence_criterion"] = (
+                            time.time() - start
+                        )
+                        start = time.time()
+                        if status:
+                            logger.debug("Convergence!!")
+                            return WorkerStatus.CONVERGED, None, self.report
+
+                        if step_id >= self.c.n_steps - 1:
+                            # We've completed all the steps, so we're done.
+                            logger.debug("Reached max number of steps. Terminating.")
+                            return WorkerStatus.REACHED_N_STEPS, None, self.report
+
+                        # If we haven't converged, we create a new step.
+                        new_step_id = self.new_step(step_id + 1)
+
+                        self.report["runtime_new_step"] = time.time() - start
+                        start = time.time()
+                        if new_step_id == "empty":
+                            # New packet is empty so we have terminated but
+                            # failed to converge.
+                            logger.debug(
+                                "New packet is empty. Terminating despite "
+                                "failure to converge."
+                            )
+                            return WorkerStatus.FAILED, None, self.report
+                        else:
+                            # Successful new packet. We should check for work again
+                            # immediately.
+                            status = WorkerStatus.NEW_STEP
+                            wait = 0
+                            logger.debug("Successfully created new packet.")
+                    else:
+                        # No work available, but the packet is incomplete. This is
+                        # because other workers have claimed all the work but have not
+                        # processsed yet.
+                        # In this situation, we should release the lock and wait for
+                        # other workers to finish.
+                        wait = 1
+                        logger.debug("No work available, but packet is incomplete.")
+            if wait > 0:
+                logger.debug("Waiting %s seconds and checking for work again.", wait)
+                time.sleep(wait)
+            if i > 2:
+                logger.warning(
+                    f"Worker {self.c.worker_id} has been waiting for work for"
+                    f" {i} iterations. This might indicate a bug."
+                )
+            self.report["runtime_wait_for_work"] += time.time() - start
+            i += 1
+
+        return WorkerStatus.STUCK, None, self.report
+
+    def convergence_criterion(self):
+        ########################################
+        # Step 2: Convergence criterion! In terms of:
+        # - bias
+        # - standard deviation
+        # - grid cost (i.e. alpha - alpha0)
+        #
+        # The bias and standard deviation are calculated using the bootstrap.
+        ########################################
+        any_impossible = self.db.worst_tile("impossible")["impossible"].iloc[0]
+        if any_impossible:
+            return False
+
         worst_tile = self.db.worst_tile("lams")
         lamss = worst_tile["lams"].iloc[0]
 
@@ -242,7 +413,7 @@ class AdaCalibrationDriver:
         B_lamss = self.db.bootstrap_lamss()
         worst_tile_tie_sum = self.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
-        ).iloc[0][0]
+        ).iloc[0]
         worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
 
         # Given these TIE values, we can compute bias, standard deviation and
@@ -252,43 +423,37 @@ class AdaCalibrationDriver:
         spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
         grid_cost = worst_tile["grid_cost"].iloc[0]
 
-        ########################################
-        # Step 2: Get the next batch of tiles to process. We do this before
-        # checking for convergence because part of the convergence criterion is
-        # whether there are any impossible tiles .
-        ########################################
-        work = self.db.next(self.iter_size, "orderer", self.c.worker_id)
+        self.report.update(
+            dict(
+                bias_tie=bias_tie,
+                std_tie=std_tie,
+                spread_tie=spread_tie,
+                grid_cost=grid_cost,
+                lamss=lamss,
+            )
+        )
+        self.report["min(B_lamss)"] = min(B_lamss)
+        self.report["max(B_lamss)"] = max(B_lamss)
+        self.report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
+        self.report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
 
-        ########################################
-        # Step 3: Convergence criterion! In terms of:
-        # - bias
-        # - standard deviation
-        # - grid cost (i.e. alpha - alpha0)
-        ########################################
-        done = (
+        # The convergence criterion itself.
+        self.report["converged"] = (
             (bias_tie < self.bias_target)
             and (std_tie < self.std_target)
             and (grid_cost < self.grid_target)
-            # if there are any impossible tiles left, we keep going!
-            and (~work["impossible"]).all()
         )
+        return self.report["converged"]
 
-        report = dict(
-            i=i,
-            bias_tie=bias_tie,
-            std_tie=std_tie,
-            spread_tie=spread_tie,
-            grid_cost=grid_cost,
-            lamss=lamss,
+    def new_step(self, new_step_id):
+        tiles = self.db.select_tiles(self.c.step_size, "orderer")
+        logger.info(
+            f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
         )
-        report["min(B_lamss)"] = min(B_lamss)
-        report["max(B_lamss)"] = max(B_lamss)
-        report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
-        report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
-        report["n_impossible"] = work["impossible"].sum()
-        report["runtime_convergence_check"] = time.time() - start_convergence
-        if done:
-            return True, report
+        tiles["finisher_id"] = self.c.worker_id
+        tiles["query_time"] = simple_timer()
+        if tiles.shape[0] == 0:
+            return "empty"
 
         ########################################
         # Step 4: Is deepening likely to be enough?
@@ -312,8 +477,7 @@ class AdaCalibrationDriver:
         #
         # If the tile's mean lambda* is less the mean lambda* of this modified
         # tile, then the tile actually has a chance of being the worst tile. In
-        # which case, we prefer to refine it.
-        start_refine_deepen = time.time()
+        # which case, we choose the more expensive option of refining the tile.
         twb_worst_tile = self.db.worst_tile("twb_mean_lams")
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
@@ -323,76 +487,114 @@ class AdaCalibrationDriver:
             twb_worst_tile, self.alpha, tile_batch_size=1
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
-        deepen_likely_to_work = work["twb_mean_lams"] > twb_worst_tile_mean_lams
+        deepen_likely_to_work = tiles["twb_mean_lams"] > twb_worst_tile_mean_lams
 
         ########################################
         # Step 5: Decide whether to refine or deepen
         # THIS IS IT! This is where we decide whether to refine or deepen.
+        #
+        # The decision criteria is best described by the code below.
         ########################################
-        at_max_K = work["K"] == self.max_K
-        work["refine"] = at_max_K
-        work["refine"] |= (grid_cost > self.grid_target) & (~deepen_likely_to_work)
-        work["deepen"] = ~work["refine"]
-        work["active"] = ~(work["refine"] | work["deepen"])
+        at_max_K = tiles["K"] == self.max_K
+        tiles["refine"] = (tiles["grid_cost"] > self.grid_target) & (
+            (~deepen_likely_to_work) | at_max_K
+        )
+        tiles["deepen"] = (~tiles["refine"]) & (~at_max_K)
+        tiles["active"] = ~(tiles["refine"] | tiles["deepen"])
+
+        # Record what we decided to do.
+        self.db.finish(
+            tiles[
+                [
+                    "id",
+                    "step_id",
+                    "step_iter",
+                    "active",
+                    "query_time",
+                    "finisher_id",
+                    "refine",
+                    "deepen",
+                ]
+            ]
+        )
+
+        n_refine = tiles["refine"].sum()
+        n_deepen = tiles["deepen"].sum()
+        self.report.update(
+            dict(
+                n_impossible=tiles["impossible"].sum(),
+                n_refine=n_refine,
+                n_deepen=n_deepen,
+                n_complete=tiles["active"].sum(),
+            )
+        )
 
         ########################################
         # Step 6: Deepen and refine tiles.
         ########################################
-        n_refine = work["refine"].sum()
-        n_deepen = work["deepen"].sum()
         nothing_to_do = n_refine == 0 and n_deepen == 0
-        if not nothing_to_do:
-            g_new = refine_deepen(work, self.null_hypos)
-
-            report["runtime_refine_deepen"] = time.time() - start_refine_deepen
-            start_processing = time.time()
-            g_calibrated_new = self._process_tiles(g_new, i)
-            report["runtime_processing"] = time.time() - start_processing
-            start_cleanup = time.time()
-            self.db.write(g_calibrated_new.df)
-            report.update(
-                dict(
-                    n_processed=g_calibrated_new.n_tiles,
-                    K_distribution=g_calibrated_new.df["K"].value_counts().to_dict(),
-                )
-            )
-
-        ########################################
-        # Step 8: Finish up!
-        ########################################
-        # We need to report back to the TileDB that we're done with this batch
-        # of tiles and whether any of the tiles are still active.
-        self.db.finish(work)
         if nothing_to_do:
-            report["runtime_cleanup"] = time.time() - start_refine_deepen
-        else:
-            report["runtime_cleanup"] = time.time() - start_cleanup
+            return "empty"
 
-        report.update(
-            dict(
-                n_refine=n_refine,
-                n_deepen=n_deepen,
-                n_complete=work["active"].sum(),
-            )
+        df = refine_deepen(tiles, self.null_hypos, self.max_K, self.c.worker_id).df
+        df["step_id"] = new_step_id
+        df["step_iter"], n_packets = step_iter_assignments(df, self.c.packet_size)
+        df["creator_id"] = self.c.worker_id
+        df["creation_time"] = simple_timer()
+
+        n_tiles = df.shape[0]
+        logger.debug(
+            f"new step {(new_step_id, 0, n_packets, n_tiles)} "
+            f"n_tiles={n_tiles} packet_size={self.c.packet_size}"
+        )
+        self.db.set_step_info(
+            step_id=new_step_id, step_iter=0, n_iter=n_packets, n_tiles=n_tiles
         )
 
-        return False, report
+        self.db.insert_tiles(df)
+        self.report.update(
+            dict(
+                n_new_tiles=n_tiles, new_K_distribution=df["K"].value_counts().to_dict()
+            )
+        )
+        return new_step_id
 
 
-def refine_deepen(g, null_hypos):
-    g_deepen_in = grid.Grid(g.loc[g["deepen"]])
+def step_iter_assignments(df, packet_size):
+    # Randomly assign tiles to packets.
+    # TODO: this could be improved to better balance the load.
+    # There are two load balancing concerns:
+    # - a packet with tiles with a given K value should have lots of
+    #   that K so that we have enough work to saturate GPU threads.
+    # - we should divide the work evenly among the workers.
+    n_tiles = df.shape[0]
+    n_packets = int(np.ceil(n_tiles / packet_size))
+    splits = np.array_split(np.arange(n_tiles), n_packets)
+    assignment = np.empty(n_tiles, dtype=np.int32)
+    for i in range(n_packets):
+        assignment[splits[i]] = i
+    rng = np.random.default_rng()
+    rng.shuffle(assignment)
+    return assignment, n_packets
+
+
+# TODO: rename
+def refine_deepen(g, null_hypos, max_K, worker_id):
+    g_deepen_in = grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)], worker_id)
     g_deepen = grid.init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
-        g_deepen_in.df["id"],
+        worker_id=worker_id,
+        parents=g_deepen_in.df["id"],
     )
+
     # We just multiply K by 2 to deepen.
     # TODO: it's possible to do better by multiplying by 4 or 8
     # sometimes when a tile clearly needs *way* more sims. how to
     # determine this?
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
 
-    g_refine_in = grid.Grid(g.loc[g["refine"]])
+    g_refine_in = grid.Grid(g.loc[g["refine"]], worker_id)
     inherit_cols = ["K"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.
@@ -407,15 +609,19 @@ def refine_deepen(g, null_hypos):
 def print_report(_iter, report, _ada):
     ready = report.copy()
     for k in ready:
-        if isinstance(ready[k], float) or isinstance(ready[k], jnp.DeviceArray):
+        if (
+            isinstance(ready[k], float)
+            or isinstance(ready[k], np.floating)
+            or isinstance(ready[k], jnp.DeviceArray)
+        ):
             ready[k] = f"{ready[k]:.6f}"
-    pprint(ready)
+    logger.debug(pformat(ready))
 
 
 def _run(cmd):
     try:
         return (
-            subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=True)
+            subprocess.check_output(" ".join(cmd), stderr=subprocess.STDOUT, shell=True)
             .decode("utf-8")
             .strip()
         )
@@ -457,12 +663,18 @@ calibration_defaults = dict(
     bias_target=0.001,
     std_target=0.002,
     calibration_min_idx=40,
-    iter_size=2**10,
+    n_steps=100,
+    step_size=2**10,
     n_iter=100,
+    packet_size=None,
+    prod=True,
     worker_id=None,
     git_hash=None,
     git_diff=None,
     nvidia_smi=None,
+    pip_freeze=None,
+    conda_list=None,
+    platform=None,
 )
 
 
@@ -487,8 +699,11 @@ class CalibrationConfig:
     bias_target: float
     std_target: float
     calibration_min_idx: int
-    iter_size: int
+    n_steps: int
+    step_size: int
     n_iter: int
+    packet_size: int
+    prod: bool
     worker_id: int
     git_hash: str = None
     git_diff: str = None
@@ -499,12 +714,17 @@ class CalibrationConfig:
     defaults: dict = None
 
     def __post_init__(self):
+
         self.git_hash = _get_git_revision_hash()
         self.git_diff = _get_git_diff()
         self.platform = platform.platform()
         self.nvidia_smi = _get_nvidia_smi()
-        self.pip_freeze = _get_pip_freeze()
-        self.conda_list = _get_conda_list()
+        if self.prod:
+            self.pip_freeze = _get_pip_freeze()
+            self.conda_list = _get_conda_list()
+        else:
+            self.pip_freeze = "skipped for non-prod run"
+            self.conda_list = "skipped for non-prod run"
 
         self.tile_batch_size = self.tile_batch_size or (
             64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
@@ -513,7 +733,7 @@ class CalibrationConfig:
         if self.model_kwargs is None:
             self.model_kwargs = {}
         # TODO: is json suitable for all models? are there models that are going to
-        # want to have large objects as parameters?
+        # want to have large non-jsonable objects as parameters?
         self.model_kwargs = json.dumps(self.model_kwargs)
 
         continuation = True
@@ -524,6 +744,9 @@ class CalibrationConfig:
         for k in self.defaults:
             if self.__dict__[k] is None:
                 self.__dict__[k] = self.defaults[k]
+
+        if self.packet_size is None:
+            self.packet_size = self.step_size
 
         # If we're continuing a calibration, make sure that fixed parameters
         # are the same across all workers.
@@ -582,10 +805,13 @@ def ada_calibrate(
     tile_batch_size: int = None,
     grid_target: float = None,
     bias_target: float = None,
+    n_steps: int = None,
+    step_size: int = None,
+    n_iter: int = None,
+    packet_size: int = None,
     std_target: float = None,
     calibration_min_idx: int = None,
-    iter_size: int = None,
-    n_iter: int = None,
+    prod: bool = True,
     callback=print_report,
 ):
     """
@@ -613,14 +839,25 @@ def ada_calibrate(
         std_target: Part of the stopping criterion: the target standard
                     deviation of the type I error as calculated by the
                     bootstrap. Defaults to 0.002.
-        iter_size: The number of tiles to process per iteration. Defaults to 2**10.
+        n_steps: The number of Adagrid steps to run. Defaults to 100.
+        step_size: The number of tiles in an Adagrid step produced by a single
+                   Adagrid tile selection step. This is different from
+                   packet_size because we select tiles once and then run many
+                   simulation "iterations" in parallel to process those
+                   tiles. Defaults to 2**10.
+        n_iter: The number of packets to simulate. Defaults to None which
+                places no limit. Limiting the number of packets is useful for
+                stopping a worker after a specified amount of work.
+        packet_size: The number of tiles to process per iteration. Defaults to
+                     None. If None, we use the same value as step_size.
         calibration_min_idx: The minimum calibration selection index. We enforce that:
                         `alpha0 >= (calibration_min_idx + 1) / (K + 1)`
                         A larger value will reduce the variance of lambda* but
                         will require more computational effort because K and/or
                         alpha0 will need to be larger. Defaults to 40.
-        n_iter: The number of adagrid iterations to run.
-                Defaults to 100.
+        prod: Is this a production run? If so, we will collection extra system
+              configuration info. Setting this to False will make startup time
+              a bit faster. Defaults to True.
         callback: A function accepting three arguments (ada_iter, report, ada)
                   that can perform some reporting or printing at each iteration.
                   Defaults to print_report.
@@ -640,6 +877,7 @@ def ada_calibrate(
     if db is None:
         db = DuckDBTiles.connect()
     worker_id = db.new_worker()
+    imprint.log.worker_id.set(worker_id)
 
     ########################################
     # Store config
@@ -663,8 +901,11 @@ def ada_calibrate(
         bias_target,
         std_target,
         calibration_min_idx,
-        iter_size,
+        n_steps,
+        step_size,
         n_iter,
+        packet_size,
+        prod,
         worker_id,
         defaults=defaults,
     )
@@ -688,33 +929,58 @@ def ada_calibrate(
 
     if g is not None:
         # Copy the input grid so that the caller is not surprised by any changes.
-        g = copy.deepcopy(g)
-        g.df["K"] = c.init_K
+        df = copy.deepcopy(g.df)
+        df["K"] = c.init_K
+        df["step_id"] = 0
+        df["step_iter"], n_packets = step_iter_assignments(df, c.packet_size)
+        df["creator_id"] = worker_id
+        df["creation_time"] = simple_timer()
 
-        # We process the tiles before adding them to the database so that the
-        # database will be initialized with the correct set of columns.
-        g_calibrated = ada_driver._process_tiles(g, 0)
-        db.init_tiles(g_calibrated.df)
+        db.init_tiles(df)
         _store_null_hypos(db, null_hypos)
+
+        n_tiles = df.shape[0]
+        logger.debug(
+            f"first step {(0, 0, n_packets, n_tiles)} "
+            f"n_tiles={n_tiles} packet_size={c.packet_size}"
+        )
+        db.set_step_info(step_id=0, step_iter=0, n_iter=n_packets, n_tiles=n_tiles)
 
     ########################################
     # Run adagrid!
     ########################################
+    if c.n_iter == 0:
+        return 0, [], db
 
     reports = []
-    for ada_iter in range(c.n_iter):
+    for worker_iter in range(c.n_iter):
         try:
-            done, report = ada_driver.step(ada_iter)
+            start = time.time()
+            status, work, report = ada_driver.step(worker_iter)
+            report["runtime_not_processing"] = time.time() - start
+            report["status"] = status.name
+            if work is not None and work.shape[0] > 0:
+                start = time.time()
+                results = ada_driver.process_tiles(tiles_df=work)
+                report["runtime_processing"] = time.time() - start
+                db.insert_results(results)
+
             if callback is not None:
-                callback(ada_iter, report, ada_driver)
+                callback(worker_iter, report, ada_driver)
             reports.append(report)
-            if done:
+
+            if status.done():
+                # We just stop this worker. The other workers will continue to run
+                # but will stop once they reached the convergence criterion check.
+                # It might be faster to stop all the workers immediately, but that
+                # would be more engineering effort.
                 break
         except KeyboardInterrupt:
+            # TODO: we want to die robustly when there's a keyboard interrupt.
             print("KeyboardInterrupt")
-            return ada_iter, reports, db
+            return worker_iter, reports, db
 
-    return ada_iter + 1, reports, db
+    return worker_iter + 1, reports, db
 
 
 def verify_adagrid(df):

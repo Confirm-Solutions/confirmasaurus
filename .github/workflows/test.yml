@@ -14,6 +14,9 @@ on:
       - "research/**"
       - "**.ipynb"
       - "**.md"
+permissions:
+  id-token: write
+  contents: read
 jobs:
   lint:
     if: github.event.pull_request.draft == false
@@ -72,9 +75,23 @@ jobs:
       - name: Update environment
         run: |
           poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::644171722153:role/GitHubActionsRole
+          aws-region: us-east-1
+            
+      - name: Sops Binary Installer
+        uses: mdgreenwald/mozilla-sops-action@v1.4.1
+        with:
+          version: 'latest'
 
       - name: Pytest
-        run: poetry run pytest -n auto -s
+        run: |
+          sops -d --output .env test_secrets.enc.env
+          poetry run pytest -n auto -s
+
   push_to_imprint:
     # See docs/git_subrepo.md for further details on this stuff.
     # See docs/git_subrepo.md for further details on this stuff.

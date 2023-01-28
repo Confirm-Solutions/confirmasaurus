@@ -5,37 +5,21 @@ on:
   schedule:
     # Runs at 02:57am every day.
     - cron: '57 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths-ignore:
+      - "research/**"
+      - "**.ipynb"
+      - "**.md"
+permissions:
+  id-token: write
+  contents: read
 jobs:
-  # We only run the end to end tests if there have been new commits in the last
-  # 24 hours.
-  # https://stackoverflow.com/questions/63014786/how-to-schedule-a-github-actions-nightly-build-but-run-it-only-when-there-where
-  check_date:
-   runs-on: ubuntu-latest
-   name: Check latest commit
-   outputs:
-     should_run: ${{ steps.should_run.outputs.should_run }}
-   steps:
-     - uses: actions/checkout@v3
-
-     - name: print latest_commit
-       run: echo ${{ github.sha }}
- 
-     - id: should_run
-       continue-on-error: true
-       name: Check latest commit is less than a day old.
-       if: ${{ github.event_name == 'schedule' }}
-       run: |
-          sha=$(git rev-list --after="24 hours" ${{ github.sha }})
-          if test -z $sha
-          then
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          fi
-
   test:
-    needs: check_date
-    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    # NOTE: Add the "Run E2E" label to a PR in order to cause the E2E tests to run.
+    # https://stackoverflow.com/a/74829754/3817027
+    if: ${{ contains(github.event.*.labels.*.name, 'Run E2E') || (github.ref == 'refs/heads/main') }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -59,11 +43,23 @@ jobs:
       - name: Update environment
         run: |
           poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud,cloud_dev
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::644171722153:role/GitHubActionsRole
+          aws-region: us-east-1
+            
+      - name: Sops Binary Installer
+        uses: mdgreenwald/mozilla-sops-action@v1.4.1
+        with:
+          version: 'latest'
 
       - name: Run tests
         run: |
-          poetry run modal token set \
-            --token-id ${{ secrets.MODAL_TOKEN_ID }} \
-            --token-secret ${{ secrets.MODAL_TOKEN_SECRET }}
-            # --env=confirm_solutions
-          poetry run python confirm/cloud/e2e_runner.py
+          sops -d --output .env test_secrets.enc.env
+          poetry run python confirm/cloud/modal_test_runner.py --run-slow tests imprint/tests
+        
+      - name: Clear Clickhouse Test DBs
+        run: |
+          poetry run python confirm/cloud/clear_test_dbs.py
