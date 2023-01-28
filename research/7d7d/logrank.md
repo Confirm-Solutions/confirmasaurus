@@ -16,7 +16,7 @@ import imprint as ip
 ```python
 @jax.jit
 def logrank_test(all_rvs, group, censoring_time):
-    n = all_rvs.shape[0]
+    n0 = jnp.array([jnp.sum(~group), jnp.sum(group)])
     ordering = jnp.argsort(all_rvs)
     ordered = all_rvs[ordering]
     ordered_group = group[ordering]
@@ -25,7 +25,7 @@ def logrank_test(all_rvs, group, censoring_time):
     events_so_far = jnp.concatenate(
         (jnp.zeros((2, 1)), event_now.cumsum(axis=1)[:, :-1]), axis=1
     )
-    Nij = n - events_so_far
+    Nij = n0[:, None] - events_so_far
     Oij = event_now
     Nj = Nij.sum(axis=0)
     Oj = Oij.sum(axis=0)
@@ -33,13 +33,23 @@ def logrank_test(all_rvs, group, censoring_time):
     Vij = Eij * ((Nj - Oj) / Nj) * ((Nj - Nij) / (Nj - 1))
     denom = jnp.sum(jnp.where(~jnp.isnan(Vij[0]), Vij[0], 0), axis=0)
     return jnp.sum(Oij[0] - Eij[0], axis=0) / jnp.sqrt(denom)
-    # To match with the lifelines implementation, we square everything. This is
-    # a weird because it means that a one sided test is impossible.
-    # To match with the C++ imprint implementation, we don't square anything.
-    # This seems obviously better because otherwise a one sided test would be
-    # impossible.
-    # return jnp.sum(Oij[0] - Eij[0], axis=0) ** 2 / denom
 
+```
+
+```python
+import scipy.stats
+import lifelines
+from lifelines.statistics import multivariate_logrank_test
+
+rvs = scipy.stats.expon.rvs(size=(10, 2))
+control_rvs = rvs[:,0] 
+hazard_ratio = 0.7
+treatment_rvs = rvs[:,1] / hazard_ratio
+all_rvs = np.concatenate([control_rvs, treatment_rvs])
+group = np.concatenate([np.zeros(control_rvs.shape[0]), np.ones(treatment_rvs.shape[0])]).astype(bool)
+ours = logrank_test(all_rvs, group, censoring_time=10000)
+theirs = multivariate_logrank_test(all_rvs, group, t0=10000).test_statistic
+ours**2, theirs
 ```
 
 ```python
@@ -82,7 +92,7 @@ g = ip.cartesian_grid([1, 1], [1, 1], n=[1, 1], null_hypos=[ip.hypo("theta0 > th
 ```
 
 ```python
-lr = LogRank(0, 10000, n=100, censoring_time=10000000)
+lr = LogRank(0, 1000, n=10000, censoring_time=10000000)
 stats = lr.sim_batch(0, lr.max_K, g.get_theta(), g.get_null_truth())
 ```
 
@@ -102,7 +112,7 @@ The log rank test statistic should be asymptotically standard normal when the nu
 
 ```python
 plt.title('$\lambda_0 = 1, \lambda_1 = 1$')
-plt.hist(stats.flatten(), density=True, label='logrank stat')
+plt.hist(stats.flatten(), bins=100, density=True, label='logrank stat')
 xs = np.linspace(-4, 4, 100)
 plt.plot(xs, scipy.stats.norm.pdf(xs), label='N(0,1)')
 plt.xlabel('$z$')
@@ -116,7 +126,7 @@ g = ip.cartesian_grid([0.5, 0.5], [2, 2], n=[20, 20], null_hypos=[ip.hypo("theta
 ```
 
 ```python
-rej_df = ip.validate(LogRank, g=g, lam=-0.2, model_kwargs=dict(n=30, censoring_time=12))
+rej_df = ip.validate(LogRank, g=g, lam=-1.96, model_kwargs=dict(n=30, censoring_time=12))
 ```
 
 ```python
@@ -127,7 +137,11 @@ rej_df
 import matplotlib.pyplot as plt
 plt.scatter(g.df['theta0'], g.df['theta1'], c=rej_df['tie_est'])
 plt.xlabel('$\lambda_0$')
-plt.xlabel('$\lambda_1$')
+plt.ylabel('$\lambda_1$')
 plt.colorbar()
 plt.show()
+```
+
+```python
+
 ```

@@ -154,6 +154,12 @@ def logrank_test(all_rvs, group, censoring_time):
     Eij = Nij * (Oj / Nj)
     Vij = Eij * ((Nj - Oj) / Nj) * ((Nj - Nij) / (Nj - 1))
     denom = jnp.sum(jnp.where(~jnp.isnan(Vij[0]), Vij[0], 0), axis=0)
+    # return jnp.sum(Oij[0] - Eij[0], axis=0) / jnp.sqrt(denom)
+    # To match with the lifelines implementation, we square everything. This is
+    # a weird because it means that a one sided test is impossible.
+    # To match with the C++ imprint implementation, we don't square anything.
+    # This seems obviously better because otherwise a one sided test would be
+    # impossible.
     return jnp.sum(Oij[0] - Eij[0], axis=0) ** 2 / denom
 
 jax.vmap(logrank_test)(jnp.array([all_rvs]), jnp.array([group]), jnp.array([censoring_time]))
