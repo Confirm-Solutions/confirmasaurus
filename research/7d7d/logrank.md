@@ -112,11 +112,11 @@ plt.show()
 ```
 
 ```python
-g = ip.cartesian_grid([0.2, 0.2], [4, 4], n=[10, 10], null_hypos=[ip.hypo("theta0 > theta1")])
+g = ip.cartesian_grid([0.5, 0.5], [2, 2], n=[20, 20], null_hypos=[ip.hypo("theta0 > theta1")])
 ```
 
 ```python
-rej_df = ip.validate(LogRank, g=g, lam=0.025, model_kwargs=dict(n=30, censoring_time=12))
+rej_df = ip.validate(LogRank, g=g, lam=-0.2, model_kwargs=dict(n=30, censoring_time=12))
 ```
 
 ```python
@@ -126,6 +126,8 @@ rej_df
 ```python
 import matplotlib.pyplot as plt
 plt.scatter(g.df['theta0'], g.df['theta1'], c=rej_df['tie_est'])
+plt.xlabel('$\lambda_0$')
+plt.xlabel('$\lambda_1$')
 plt.colorbar()
 plt.show()
 ```
