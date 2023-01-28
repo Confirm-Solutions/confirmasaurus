@@ -71,7 +71,7 @@ plt.show()
 ```
 
 ```python
-censoring_time = 2
+censoring_time = 4
 all_rvs = np.concatenate([control_rvs, treatment_rvs])
 group = np.concatenate([np.zeros(control_rvs.shape[0]), np.ones(treatment_rvs.shape[0])]).astype(bool)
 ```
@@ -105,19 +105,30 @@ multivariate_logrank_test(ordered, ordered_group, t0=4).test_statistic
 ```
 
 ```python
+all_rvs
+```
+
+```python
 ordering = jnp.argsort(all_rvs)
 ordered = all_rvs[ordering]
 ordered_group = group[ordering]
 max_idx = jnp.argmin(ordered <= censoring_time)
-event_now = jnp.stack((~ordered_group, ordered_group), axis=0) * (jnp.arange(ordered.shape[0]) < max_idx)
-events_so_far = jnp.concatenate((jnp.zeros((2, 1)), event_now.cumsum(axis=1)[:, :-1]), axis=1)
+if max_idx == 0 and jnp.all(ordered <= censoring_time):
+    max_idx = ordered.shape[0]
+event_now = jnp.stack((~ordered_group, ordered_group), axis=0) * (
+    jnp.arange(ordered.shape[0]) < max_idx
+)
+events_so_far = jnp.concatenate(
+    (jnp.zeros((2, 1)), event_now.cumsum(axis=1)[:, :-1]), axis=1
+)
 Nij = rvs.shape[0] - events_so_far
 Oij = event_now
 Nj = Nij.sum(axis=0)
 Oj = Oij.sum(axis=0)
 Eij = Nij * (Oj / Nj)
 Vij = Eij * ((Nj - Oj) / Nj) * ((Nj - Nij) / (Nj - 1))
-test_stat = jnp.sum(Oij[0] - Eij[0], axis=0) ** 2 / jnp.sum(Vij[0], axis=0)
+denom = jnp.sum(jnp.where(~jnp.isnan(Vij[0]), Vij[0], 0), axis=0)
+test_stat = jnp.sum(Oij[0] - Eij[0], axis=0) ** 2 / denom
 ```
 
 ```python
@@ -127,23 +138,26 @@ test_stat
 ```python
 @jax.vmap
 @jax.jit
-def logrank_test(all_rvs, group):
+def logrank_test(all_rvs, group, censoring_time):
     ordering = jnp.argsort(all_rvs)
     ordered = all_rvs[ordering]
     ordered_group = group[ordering]
-    max_idx = jnp.argmin(ordered <= censoring_time)
-    event_now = jnp.stack((~ordered_group, ordered_group), axis=0) * (jnp.arange(ordered.shape[0]) < max_idx)
-    events_so_far = jnp.concatenate((jnp.zeros((2, 1)), event_now.cumsum(axis=1)[:, :-1]), axis=1)
+    include = ordered <= censoring_time
+    event_now = jnp.stack((~ordered_group, ordered_group), axis=0) * include
+    events_so_far = jnp.concatenate(
+        (jnp.zeros((2, 1)), event_now.cumsum(axis=1)[:, :-1]), axis=1
+    )
     Nij = rvs.shape[0] - events_so_far
     Oij = event_now
     Nj = Nij.sum(axis=0)
     Oj = Oij.sum(axis=0)
     Eij = Nij * (Oj / Nj)
     Vij = Eij * ((Nj - Oj) / Nj) * ((Nj - Nij) / (Nj - 1))
-    test_stat = jnp.sum(Oij[0] - Eij[0], axis=0) ** 2 / jnp.sum(Vij[0], axis=0)
-    return test_stat
+    denom = jnp.sum(jnp.where(~jnp.isnan(Vij[0]), Vij[0], 0), axis=0)
+    return jnp.sum(Oij[0] - Eij[0], axis=0) ** 2 / denom
 
-logrank_test(jnp.array([all_rvs]), jnp.array([group]))
+logrank_test(jnp.array([all_rvs]), jnp.array([group]), jnp.array([censoring_time]))
+
 ```
 
 ```python
@@ -153,15 +167,12 @@ hazard_rate = 0.7
 treatment_rvs = rvs[:,:,1] / hazard_rate
 all_rvs = np.concatenate([control_rvs, treatment_rvs], axis=1)
 group = np.concatenate([np.zeros(control_rvs.shape), np.ones(treatment_rvs.shape)], axis=1).astype(bool)
+censoring_time = np.full(control_rvs.shape[0], 4)
 ```
 
 ```python
 %%time
-logrank_test(all_rvs, group)
-```
-
-```python
-0.008 / rvs.shape[0] * 1e9
+np.any(np.isnan(logrank_test(all_rvs, group, censoring_time)))
 ```
 
 ```python
@@ -170,6 +181,7 @@ logrank_test(all_rvs, group)
 # - observe them until censoring_time.
 class LogRank:
     def __init__(self, seed, max_K, *, n, censoring_time):
-        
-        self.censoring_time
+        self.censoring_time = censoring_time
+        self.n = n
+        self.family = 
 ```
