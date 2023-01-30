@@ -213,6 +213,6 @@ for i, (name, title) in enumerate(zip(names, titles)):
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
 
-plt.show()
 plt.savefig("figures/t_test_adaptive.pdf", bbox_inches="tight")
+plt.show()
 ```
