@@ -214,4 +214,5 @@ for i, (name, title) in enumerate(zip(names, titles)):
     plt.ylabel(r"$\theta_1$")
 
 plt.show()
+plt.savefig("figures/t_test_adaptive.pdf", bbox_inches="tight")
 ```
