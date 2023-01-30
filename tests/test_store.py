@@ -44,8 +44,16 @@ class StoreTester:
         c.set("key", ex)
         pd.testing.assert_frame_equal(c.get("key"), ex)
         c.set_or_append("key", ex2)
+        # NOTE: it's possible for the first insert to happen *after* the second
+        # insert because of Clickhouse's very weak consistency guarantees.
+        # Currently, we tolerate this. This test accomodates this rare
+        # possibility by sorting the data.
         pd.testing.assert_frame_equal(
-            c.get("key"), pd.concat([ex, ex2], axis=0).reset_index(drop=True)
+            c.get("key").sort_values(by=["a"]).reset_index(drop=True),
+            pd.concat([ex, ex2], axis=0)
+            .sort_values(by=["a"])
+            .sort_values(by=["a"])
+            .reset_index(drop=True),
         )
 
     def test_get_not_exists(self):
