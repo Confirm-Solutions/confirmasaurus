@@ -1,4 +1,3 @@
-import json
 import logging
 import platform
 import subprocess
@@ -22,26 +21,6 @@ def _run(cmd):
         return f"ERROR: {exc.returncode} {exc.output}"
 
 
-def _get_git_revision_hash() -> str:
-    return _run(["git", "rev-parse", "HEAD"])
-
-
-def _get_git_diff() -> str:
-    return _run(["git", "diff", "HEAD"])
-
-
-def _get_nvidia_smi() -> str:
-    return _run(["nvidia-smi"])
-
-
-def _get_pip_freeze() -> str:
-    return _run(["pip", "freeze"])
-
-
-def _get_conda_list() -> str:
-    return _run(["conda", "list"])
-
-
 def prepare_config(cfg_dict, overrides, worker_id, prod):
     cfg = dict()
     cfg["worker_id"] = worker_id
@@ -53,40 +32,30 @@ def prepare_config(cfg_dict, overrides, worker_id, prod):
         else:
             cfg[k] = cfg_dict[k]
 
-    for k, v in get_system_info(prod).items():
-        cfg[k] = v
+    cfg.update(
+        dict(
+            git_hash=_run(["git", "rev-parse", "HEAD"]),
+            git_diff=_run(["git", "diff", "HEAD"]),
+            platform=platform.platform(),
+            nvidia_smi=_run(["nvidia-smi"]),
+            jax_backend=jax.lib.xla_bridge.get_backend().platform,
+        )
+    )
+    if prod:
+        cfg["pip_freeze"] = _run(["pip", "freeze"])
+        cfg["conda_list"] = _run(["conda", "list"])
+    else:
+        cfg["pip_freeze"] = "skipped because prod=False"
+        cfg["conda_list"] = "skipped because prod=False"
 
     cfg["tile_batch_size"] = cfg["tile_batch_size"] or (
         64 if cfg["jax_backend"] == "gpu" else 4
     )
 
-    if cfg["model_kwargs"] is None:
-        cfg["model_kwargs"] = {}
-        # TODO: is json suitable for all models? are there models that are going to
-        # want to have large non-jsonable objects as parameters?
-    cfg["model_kwargs"] = json.dumps(cfg["model_kwargs"])
-
     if cfg["packet_size"] is None:
         cfg["packet_size"] = cfg["step_size"]
 
     return cfg
-
-
-def get_system_info(prod: bool):
-    out = dict(
-        git_hash=_get_git_revision_hash(),
-        git_diff=_get_git_diff(),
-        platform=platform.platform(),
-        nvidia_smi=_get_nvidia_smi(),
-        jax_backend=jax.lib.xla_bridge.get_backend().platform,
-    )
-    if prod:
-        out["pip_freeze"] = _get_pip_freeze()
-        out["conda_list"] = _get_conda_list()
-    else:
-        out["pip_freeze"] = "skipped for non-prod run"
-        out["conda_list"] = "skipped for non-prod run"
-    return out
 
 
 def print_report(_iter, report, _db):

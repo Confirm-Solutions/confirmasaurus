@@ -36,14 +36,10 @@ def check(db, snapshot, only_lams=False):
         .reset_index(drop=True)
     )
     compare = snapshot(check_subset)
-    # SP = all_tiles_df.\
-    #   sort_values(by=['theta0']).\
-    #   reset_index(drop=True).\
-    #   join(compare, rsuffix='_true')
-    # SP.loc[(SP['twb_lams0'] - SP['twb_lams0_true']).nlargest().index]
 
     # First check the calibration outputs. These are the most important values
     # to get correct.
+    print(check_subset.columns, compare.columns)
     pd.testing.assert_frame_equal(check_subset, compare, check_dtype=False)
     if only_lams:
         return
@@ -100,8 +96,25 @@ def ch_db():
 
     db = ch.Clickhouse.connect()
     yield db
-    db.close()
-    ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # TODO: re-enable
+    # db.close()
+    # ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
 
 
 @pytest.mark.slow
@@ -127,7 +140,7 @@ def test_adagrid_clickhouse_distributed(snapshot, ch_db):
     import modal
 
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    iter, reports, db = ada.ada_calibrate(
+    iter, reports, _ = ada.ada_calibrate(
         ZTest1D,
         g=g,
         db=ch_db,
@@ -157,7 +170,7 @@ def test_adagrid_clickhouse_distributed(snapshot, ch_db):
 
         config.update("jax_enable_x64", True)
         db = ch.Clickhouse.connect(job_id=job_id)
-        ada.ada_calibrate(ZTest1D, db=db, n_iter=100)
+        ada.ada_calibrate(ZTest1D, db=db, overrides=dict(n_iter=100))
 
     with stub.run():
         list(worker.map(range(4)))
@@ -176,7 +189,9 @@ def test_adagrid_checkpointing():
             ZTest1D, g=g, db=db, nB=3, init_K=4, n_iter=2
         )
 
-        iter_two2, reports_two2, db_two2 = ada.ada_calibrate(ZTest1D, db=db, n_iter=1)
+        iter_two2, reports_two2, db_two2 = ada.ada_calibrate(
+            ZTest1D, db=db, overrides=dict(n_iter=1)
+        )
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(

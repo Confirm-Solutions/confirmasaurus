@@ -134,7 +134,12 @@ def run(algo, db, report, n_steps):
                     # In this situation, we should release the lock and wait for
                     # other workers to finish.
                     wait = 1
-                    logger.debug("No work available, but packet is incomplete.")
+                    logger.debug(
+                        "No work available, but packet is incomplete"
+                        " with %s/%s tiles complete.",
+                        n_processed_tiles,
+                        step_n_tiles,
+                    )
         if wait > 0:
             logger.debug("Waiting %s seconds and checking for work again.", wait)
             time.sleep(wait)

@@ -296,7 +296,9 @@ class AdaCalibration:
         if nothing_to_do:
             return "empty"
 
-        df = refine_deepen(tiles, self.null_hypos, self.max_K, self.c["worker_id"]).df
+        df = refine_and_deepen(
+            tiles, self.null_hypos, self.max_K, self.c["worker_id"]
+        ).df
         df["step_id"] = new_step_id
         df["step_iter"], n_packets = step_iter_assignments(df, self.c["packet_size"])
         df["creator_id"] = self.c["worker_id"]
@@ -338,8 +340,7 @@ def step_iter_assignments(df, packet_size):
     return assignment, n_packets
 
 
-# TODO: rename
-def refine_deepen(g, null_hypos, max_K, worker_id):
+def refine_and_deepen(g, null_hypos, max_K, worker_id):
     g_deepen_in = grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)], worker_id)
     g_deepen = grid.init_grid(
         g_deepen_in.get_theta(),
@@ -366,6 +367,7 @@ def refine_deepen(g, null_hypos, max_K, worker_id):
     return g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols).prune()
 
 
+# TODO: move towards NullHypo class
 def _load_null_hypos(db):
     d = db.dimension()
     null_hypos_df = db.store.get("null_hypos")
@@ -479,17 +481,19 @@ def ada_calibrate(
     if db is None:
         db = DuckDBTiles.connect()
 
-    is_continuation = g is None
     worker_id = db.new_worker()
     imprint.log.worker_id.set(worker_id)
 
     ########################################
     # Store config
     ########################################
-
+    if model_kwargs is None:
+        model_kwargs = {}
     model_name = modeltype.__name__
-    if is_continuation:
+
+    if g is None:
         cfg_dict = db.store.get("config").iloc[0].to_dict()
+        model_kwargs = json.loads(cfg_dict["model_kwargs_json"])
         overrides = overrides or {}
         # Some parameters cannot be overridden because the job just wouldn't
         # make sense anymore.
@@ -506,12 +510,23 @@ def ada_calibrate(
             if k in overrides:
                 raise ValueError(f"Parameter {k} cannot be overridden.")
     else:
-        cfg_dict = locals()
+        # Using locals() is a simple way to get all the config vars in the
+        # function definition. But, we need to erase fields that are not part
+        # of the "config".
+        cfg_dict = copy.copy(locals())
+        for k in ["modeltype", "g", "db", "overrides", "callback", "model_kwargs"]:
+            del cfg_dict[k]
+        cfg_dict["model_kwargs_json"] = json.dumps(model_kwargs)
+
         if overrides is not None:
             warnings.warn("Overrides are ignored when starting a new job.")
         overrides = {}
+
     c = config.prepare_config(cfg_dict, overrides, worker_id, prod)
-    db.store.set_or_append("config", pd.DataFrame([c]))
+    config_df = pd.DataFrame([c])
+    print(config_df)
+    print(config_df.columns)
+    db.store.set_or_append("config", config_df)
 
     ########################################
     # Set up model, driver and grid
@@ -524,7 +539,7 @@ def ada_calibrate(
     model = modeltype(
         seed=c["model_seed"],
         max_K=c["init_K"] * 2 ** c["n_K_double"],
-        **json.loads(c["model_kwargs"]),
+        **model_kwargs,
     )
     null_hypos = _load_null_hypos(db) if g is None else g.null_hypos
     cal_algo = AdaCalibration(db, model, null_hypos, c)

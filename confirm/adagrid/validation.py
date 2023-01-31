@@ -4,40 +4,52 @@ from pprint import pprint
 
 import pandas as pd
 
-from .calibration import refine_deepen
+from .calibration import refine_and_deepen
 from .db import DuckDBTiles
 from imprint import driver
 
 
-def _validation_process_tiles(db, driver, g, lam, delta, i, transformation):
-    print("processing ", g.n_tiles)
-    if transformation is None:
-        computational_df = g.df
-    else:
-        theta, radii, null_truth = transformation(
-            g.get_theta(), g.get_radii(), g.get_null_truth()
-        )
-        d = theta.shape[1]
-        indict = {}
-        indict["K"] = g.df["K"]
-        for i in range(d):
-            indict[f"theta{i}"] = theta[:, i]
-        for i in range(d):
-            indict[f"radii{i}"] = radii[:, i]
-        for j in range(null_truth.shape[1]):
-            indict[f"null_truth{j}"] = null_truth[:, j]
-        computational_df = pd.DataFrame(indict)
+def _validation_process_tiles():
+    pd.read_csv()
 
-    rej_df = driver.validate(computational_df, lam, delta=delta)
-    rej_df["grid_cost"] = rej_df["tie_bound"] - rej_df["tie_cp_bound"]
-    rej_df["sim_cost"] = rej_df["tie_cp_bound"] - rej_df["tie_est"]
-    rej_df["total_cost"] = rej_df["grid_cost"] + rej_df["sim_cost"]
 
-    g_val = g.add_cols(rej_df)
-    g_val.df["worker_id"] = db.worker_id
-    g_val.df["birthiter"] = i
-    g_val.df["birthtime"] = time.time()
-    return g_val
+# class AdaValidate:
+#     def __init__(
+#         self,
+#         db,
+#     ):
+#         self.driver = db
+
+#     # def process_tiles(db, driver, g, lam, delta, i, transformation):
+#     def process_tiles(self, *, tiles_df, report):
+#         print("processing ", g.n_tiles)
+#         # if transformation is None:
+#         #     computational_df = g.df
+#         # else:
+#         #     theta, radii, null_truth = transformation(
+#         #         g.get_theta(), g.get_radii(), g.get_null_truth()
+#         #     )
+#         #     d = theta.shape[1]
+#         #     indict = {}
+#         #     indict["K"] = g.df["K"]
+#         #     for i in range(d):
+#         #         indict[f"theta{i}"] = theta[:, i]
+#         #     for i in range(d):
+#         #         indict[f"radii{i}"] = radii[:, i]
+#         #     for j in range(null_truth.shape[1]):
+#         #         indict[f"null_truth{j}"] = null_truth[:, j]
+#         #     computational_df = pd.DataFrame(indict)
+
+#         rej_df = driver.validate(tiles_df, lam, delta=self.delta)
+#         rej_df["grid_cost"] = rej_df["tie_bound"] - rej_df["tie_cp_bound"]
+#         rej_df["sim_cost"] = rej_df["tie_cp_bound"] - rej_df["tie_est"]
+#         rej_df["total_cost"] = rej_df["grid_cost"] + rej_df["sim_cost"]
+
+#         g_val = g.add_cols(rej_df)
+#         g_val.df["worker_id"] = db.worker_id
+#         g_val.df["birthiter"] = i
+#         g_val.df["birthtime"] = time.time()
+#         return g_val
 
 
 def ada_validate(
@@ -154,7 +166,7 @@ def ada_validate(
         )
         nothing_to_do = n_refine == 0 and n_deepen == 0
         if not nothing_to_do:
-            g_new = refine_deepen(work, null_hypos)
+            g_new = refine_and_deepen(work, null_hypos)
             report["runtime_refine_deepen"] = time.time() - start_refine_deepen
 
             start_processing = time.time()
