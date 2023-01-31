@@ -57,9 +57,9 @@ c= CalibrationConfig(
     defaults=db1.store.get('config').iloc[0].to_dict()
 )
 model = ZTest1D(
-    seed=c.model_seed,
-    max_K=c.init_K * 2**c.n_K_double,
-    **json.loads(c.model_kwargs),
+    seed=c['model_seed'],
+    max_K=c['init_K'] * 2**c['n_K_double'],
+    **json.loads(c['model_kwargs']),
 )
 driver = AdaCalibrationDriver(None, model, null_hypos, c)
 driver.bootstrap_calibrate(gtemp.df, 0.025)
@@ -70,9 +70,8 @@ gtemp.df['K'].value_counts()
 import copy
 import json
 import time
-from pprint import pformat
+import warnings
 
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
@@ -109,15 +108,15 @@ class AdaCalibration:
         self.null_hypos = null_hypos
         self.c = c
 
-        self.Ks = self.c.init_K * 2 ** np.arange(self.c.n_K_double + 1)
+        self.Ks = self.c["init_K"] * 2 ** np.arange(self.c["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
         self.driver = bootstrap.BootstrapCalibrate(
             model,
-            self.c.bootstrap_seed,
-            self.c.nB,
+            self.c["bootstrap_seed"],
+            self.c["nB"],
             self.Ks,
-            tile_batch_size=self.c.tile_batch_size,
-            worker_id=self.c.worker_id,
+            tile_batch_size=self.c["tile_batch_size"],
+            worker_id=self.c["worker_id"],
         )
 
     def process_tiles(self, *, tiles_df, report):
@@ -126,17 +125,18 @@ class AdaCalibration:
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.c.alpha)
-        lams_df.insert(0, "processor_id", self.c.worker_id)
+        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.c["alpha"])
+        lams_df.insert(0, "processor_id", self.c["worker_id"])
         lams_df.insert(1, "processing_time", simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data
-        lams_df.insert(3, "grid_cost", self.c.alpha - lams_df["alpha0"])
+        lams_df.insert(3, "grid_cost", self.c["alpha"] - lams_df["alpha0"])
         lams_df.insert(
             4,
             "impossible",
-            lams_df["alpha0"] < (self.c.calibration_min_idx + 1) / (tiles_df["K"] + 1),
+            lams_df["alpha0"]
+            < (self.c["calibration_min_idx"] + 1) / (tiles_df["K"] + 1),
         )
 
         lams_df.insert(
@@ -199,18 +199,18 @@ class AdaCalibration:
 
         # The convergence criterion itself.
         report["converged"] = (
-            (bias_tie < self.c.bias_target)
-            and (std_tie < self.c.std_target)
-            and (grid_cost < self.c.grid_target)
+            (bias_tie < self.c["bias_target"])
+            and (std_tie < self.c["std_target"])
+            and (grid_cost < self.c["grid_target"])
         )
         return report["converged"]
 
     def new_step(self, new_step_id, report):
-        tiles = self.db.select_tiles(self.c.step_size, "orderer")
+        tiles = self.db.select_tiles(self.c["step_size"], "orderer")
         logger.info(
             f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
         )
-        tiles["finisher_id"] = self.c.worker_id
+        tiles["finisher_id"] = self.c["worker_id"]
         tiles["query_time"] = simple_timer()
         if tiles.shape[0] == 0:
             return "empty"
@@ -244,7 +244,7 @@ class AdaCalibration:
                 twb_worst_tile[col] = 1e-6
         twb_worst_tile["K"] = self.max_K
         twb_worst_tile_lams = self.driver.bootstrap_calibrate(
-            twb_worst_tile, self.c.alpha, tile_batch_size=1
+            twb_worst_tile, self.c["alpha"], tile_batch_size=1
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles["twb_mean_lams"] > twb_worst_tile_mean_lams
@@ -256,7 +256,7 @@ class AdaCalibration:
         # The decision criteria is best described by the code below.
         ########################################
         at_max_K = tiles["K"] == self.max_K
-        tiles["refine"] = (tiles["grid_cost"] > self.c.grid_target) & (
+        tiles["refine"] = (tiles["grid_cost"] > self.c["grid_target"]) & (
             (~deepen_likely_to_work) | at_max_K
         )
         tiles["deepen"] = (~tiles["refine"]) & (~at_max_K)
@@ -296,16 +296,16 @@ class AdaCalibration:
         if nothing_to_do:
             return "empty"
 
-        df = refine_deepen(tiles, self.null_hypos, self.max_K, self.c.worker_id).df
+        df = refine_deepen(tiles, self.null_hypos, self.max_K, self.c["worker_id"]).df
         df["step_id"] = new_step_id
-        df["step_iter"], n_packets = step_iter_assignments(df, self.c.packet_size)
-        df["creator_id"] = self.c.worker_id
+        df["step_iter"], n_packets = step_iter_assignments(df, self.c["packet_size"])
+        df["creator_id"] = self.c["worker_id"]
         df["creation_time"] = simple_timer()
 
         n_tiles = df.shape[0]
         logger.debug(
             f"new step {(new_step_id, 0, n_packets, n_tiles)} "
-            f"n_tiles={n_tiles} packet_size={self.c.packet_size}"
+            f"n_tiles={n_tiles} packet_size={self.c['packet_size']}"
         )
         self.db.set_step_info(
             step_id=new_step_id, step_iter=0, n_iter=n_packets, n_tiles=n_tiles
@@ -366,18 +366,6 @@ def refine_deepen(g, null_hypos, max_K, worker_id):
     return g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols).prune()
 
 
-def print_report(_iter, report, _db):
-    ready = report.copy()
-    for k in ready:
-        if (
-            isinstance(ready[k], float)
-            or isinstance(ready[k], np.floating)
-            or isinstance(ready[k], jnp.DeviceArray)
-        ):
-            ready[k] = f"{ready[k]:.6f}"
-    logger.debug(pformat(ready))
-
-
 def _load_null_hypos(db):
     d = db.dimension()
     null_hypos_df = db.store.get("null_hypos")
@@ -403,24 +391,25 @@ def ada_calibrate(
     *,
     g=None,
     db=None,
-    model_seed: int = None,
-    model_kwargs=None,
-    alpha: float = None,
-    init_K: int = None,
-    n_K_double: int = None,
-    bootstrap_seed: int = None,
-    nB: int = None,
+    model_seed: int = 0,
+    model_kwargs: dict = None,
+    alpha: float = 0.025,
+    init_K: int = 2**13,
+    n_K_double: int = 4,
+    bootstrap_seed: int = 0,
+    nB: int = 50,
     tile_batch_size: int = None,
-    grid_target: float = None,
-    bias_target: float = None,
-    n_steps: int = None,
-    step_size: int = None,
-    n_iter: int = None,
+    grid_target: float = 0.001,
+    bias_target: float = 0.001,
+    std_target: float = 0.002,
+    calibration_min_idx: int = 40,
+    n_steps: int = 100,
+    step_size: int = 2**10,
+    n_iter: int = 100,
     packet_size: int = None,
-    std_target: float = None,
-    calibration_min_idx: int = None,
     prod: bool = True,
-    callback=print_report,
+    overrides: dict = None,
+    callback=config.print_report,
 ):
     """
     The main entrypoint for the adaptive calibration algorithm.
@@ -447,6 +436,11 @@ def ada_calibrate(
         std_target: Part of the stopping criterion: the target standard
                     deviation of the type I error as calculated by the
                     bootstrap. Defaults to 0.002.
+        calibration_min_idx: The minimum calibration selection index. We enforce that:
+                        `alpha0 >= (calibration_min_idx + 1) / (K + 1)`
+                        A larger value will reduce the variance of lambda* but
+                        will require more computational effort because K and/or
+                        alpha0 will need to be larger. Defaults to 40.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
         step_size: The number of tiles in an Adagrid step produced by a single
                    Adagrid tile selection step. This is different from
@@ -458,14 +452,14 @@ def ada_calibrate(
                 stopping a worker after a specified amount of work.
         packet_size: The number of tiles to process per iteration. Defaults to
                      None. If None, we use the same value as step_size.
-        calibration_min_idx: The minimum calibration selection index. We enforce that:
-                        `alpha0 >= (calibration_min_idx + 1) / (K + 1)`
-                        A larger value will reduce the variance of lambda* but
-                        will require more computational effort because K and/or
-                        alpha0 will need to be larger. Defaults to 40.
         prod: Is this a production run? If so, we will collection extra system
               configuration info. Setting this to False will make startup time
               a bit faster. Defaults to True.
+        overrides: If this call represents a continuation of an existing
+                   adagrid job, the overrides dictionary will be used to override the
+                   preset configuration settings. All other arguments will be ignored.
+                   If this calls represents a new adagrid job, this argument is
+                   ignored.
         callback: A function accepting three arguments (iter, report, db)
                   that can perform some reporting or printing at each iteration.
                   Defaults to print_report.
@@ -484,6 +478,8 @@ def ada_calibrate(
 
     if db is None:
         db = DuckDBTiles.connect()
+
+    is_continuation = g is None
     worker_id = db.new_worker()
     imprint.log.worker_id.set(worker_id)
 
@@ -491,33 +487,31 @@ def ada_calibrate(
     # Store config
     ########################################
 
-    defaults = None
-    if g is None:
-        defaults = db.store.get("config").iloc[0].to_dict()
-
-    c = config.CalibrationConfig(
-        modeltype,
-        model_seed,
-        model_kwargs,
-        alpha,
-        init_K,
-        n_K_double,
-        bootstrap_seed,
-        nB,
-        tile_batch_size,
-        grid_target,
-        bias_target,
-        std_target,
-        calibration_min_idx,
-        n_steps,
-        step_size,
-        n_iter,
-        packet_size,
-        prod,
-        worker_id,
-        defaults=defaults,
-    )
-    db.store.set_or_append("config", c.config_df)
+    model_name = modeltype.__name__
+    if is_continuation:
+        cfg_dict = db.store.get("config").iloc[0].to_dict()
+        overrides = overrides or {}
+        # Some parameters cannot be overridden because the job just wouldn't
+        # make sense anymore.
+        for k in [
+            "model_seed",
+            "model_kwargs",
+            "alpha",
+            "init_K",
+            "n_K_double",
+            "bootstrap_seed",
+            "nB",
+            "model_name",
+        ]:
+            if k in overrides:
+                raise ValueError(f"Parameter {k} cannot be overridden.")
+    else:
+        cfg_dict = locals()
+        if overrides is not None:
+            warnings.warn("Overrides are ignored when starting a new job.")
+        overrides = {}
+    c = config.prepare_config(cfg_dict, overrides, worker_id, prod)
+    db.store.set_or_append("config", pd.DataFrame([c]))
 
     ########################################
     # Set up model, driver and grid
@@ -528,9 +522,9 @@ def ada_calibrate(
     # 1. We can pass the seed here.
     # 2. We can pass the correct max_K and avoid a class of errors.
     model = modeltype(
-        seed=c.model_seed,
-        max_K=c.init_K * 2**c.n_K_double,
-        **json.loads(c.model_kwargs),
+        seed=c["model_seed"],
+        max_K=c["init_K"] * 2 ** c["n_K_double"],
+        **json.loads(c["model_kwargs"]),
     )
     null_hypos = _load_null_hypos(db) if g is None else g.null_hypos
     cal_algo = AdaCalibration(db, model, null_hypos, c)
@@ -538,9 +532,9 @@ def ada_calibrate(
     if g is not None:
         # Copy the input grid so that the caller is not surprised by any changes.
         df = copy.deepcopy(g.df)
-        df["K"] = c.init_K
+        df["K"] = c["init_K"]
         df["step_id"] = 0
-        df["step_iter"], n_packets = step_iter_assignments(df, c.packet_size)
+        df["step_iter"], n_packets = step_iter_assignments(df, c["packet_size"])
         df["creator_id"] = worker_id
         df["creation_time"] = simple_timer()
 
@@ -550,22 +544,22 @@ def ada_calibrate(
         n_tiles = df.shape[0]
         logger.debug(
             f"first step {(0, 0, n_packets, n_tiles)} "
-            f"n_tiles={n_tiles} packet_size={c.packet_size}"
+            f"n_tiles={n_tiles} packet_size={c['packet_size']}"
         )
         db.set_step_info(step_id=0, step_iter=0, n_iter=n_packets, n_tiles=n_tiles)
 
     ########################################
     # Run adagrid!
     ########################################
-    if c.n_iter == 0:
+    if c["n_iter"] == 0:
         return 0, [], db
 
     reports = []
-    for worker_iter in range(c.n_iter):
+    for worker_iter in range(c["n_iter"]):
         try:
             report = dict(worker_iter=worker_iter, worker_id=worker_id)
             start = time.time()
-            status, report = distributed.run(cal_algo, db, report, c.n_steps)
+            status, report = distributed.run(cal_algo, db, report, c["n_steps"])
             report["status"] = status.name
             report["runtime_full_iter"] = time.time() - start
 

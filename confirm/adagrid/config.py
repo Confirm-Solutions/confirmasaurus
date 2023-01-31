@@ -1,10 +1,14 @@
 import json
+import logging
 import platform
 import subprocess
-from dataclasses import dataclass
+from pprint import pformat
 
 import jax
-import pandas as pd
+import jax.numpy as jnp
+import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def _run(cmd):
@@ -38,122 +42,60 @@ def _get_conda_list() -> str:
     return _run(["conda", "list"])
 
 
-calibration_defaults = dict(
-    model_name="invalid",
-    model_seed=0,
-    model_kwargs=None,
-    alpha=0.025,
-    init_K=2**13,
-    n_K_double=4,
-    bootstrap_seed=0,
-    nB=50,
-    tile_batch_size=None,
-    grid_target=0.001,
-    bias_target=0.001,
-    std_target=0.002,
-    calibration_min_idx=40,
-    n_steps=100,
-    step_size=2**10,
-    n_iter=100,
-    packet_size=None,
-    prod=True,
-    worker_id=None,
-    git_hash=None,
-    git_diff=None,
-    nvidia_smi=None,
-    pip_freeze=None,
-    conda_list=None,
-    platform=None,
-)
+def prepare_config(cfg_dict, overrides, worker_id, prod):
+    cfg = dict()
+    cfg["worker_id"] = worker_id
+    cfg["prod"] = prod
 
-
-@dataclass
-class CalibrationConfig:
-    """
-    CalibrationConfig is a dataclass that holds all the configuration for a
-    calibration run. For each worker, the data here will be written to the
-    database so that we can keep track of what was run and how.
-    """
-
-    modeltype: type
-    model_seed: int
-    model_kwargs: dict
-    alpha: float
-    init_K: int
-    n_K_double: int
-    bootstrap_seed: int
-    nB: int
-    tile_batch_size: int
-    grid_target: float
-    bias_target: float
-    std_target: float
-    calibration_min_idx: int
-    n_steps: int
-    step_size: int
-    n_iter: int
-    packet_size: int
-    prod: bool
-    worker_id: int
-    git_hash: str = None
-    git_diff: str = None
-    nvidia_smi: str = None
-    pip_freeze: str = None
-    conda_list: str = None
-    platform: str = None
-    defaults: dict = None
-
-    def __post_init__(self):
-
-        self.git_hash = _get_git_revision_hash()
-        self.git_diff = _get_git_diff()
-        self.platform = platform.platform()
-        self.nvidia_smi = _get_nvidia_smi()
-        if self.prod:
-            self.pip_freeze = _get_pip_freeze()
-            self.conda_list = _get_conda_list()
+    for k in cfg_dict:
+        if k in overrides:
+            cfg[k] = overrides[k]
         else:
-            self.pip_freeze = "skipped for non-prod run"
-            self.conda_list = "skipped for non-prod run"
+            cfg[k] = cfg_dict[k]
 
-        self.tile_batch_size = self.tile_batch_size or (
-            64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
-        )
-        self.model_name = self.modeltype.__name__  # noqa
-        if self.model_kwargs is None:
-            self.model_kwargs = {}
+    for k, v in get_system_info(prod).items():
+        cfg[k] = v
+
+    cfg["tile_batch_size"] = cfg["tile_batch_size"] or (
+        64 if cfg["jax_backend"] == "gpu" else 4
+    )
+
+    if cfg["model_kwargs"] is None:
+        cfg["model_kwargs"] = {}
         # TODO: is json suitable for all models? are there models that are going to
         # want to have large non-jsonable objects as parameters?
-        self.model_kwargs = json.dumps(self.model_kwargs)
+    cfg["model_kwargs"] = json.dumps(cfg["model_kwargs"])
 
-        continuation = True
-        if self.defaults is None:
-            self.defaults = calibration_defaults
-            continuation = False
+    if cfg["packet_size"] is None:
+        cfg["packet_size"] = cfg["step_size"]
 
-        for k in self.defaults:
-            if self.__dict__[k] is None:
-                self.__dict__[k] = self.defaults[k]
+    return cfg
 
-        if self.packet_size is None:
-            self.packet_size = self.step_size
 
-        # If we're continuing a calibration, make sure that fixed parameters
-        # are the same across all workers.
-        if continuation:
-            for k in [
-                "model_seed",
-                "model_kwargs",
-                "alpha",
-                "init_K",
-                "n_K_double",
-                "bootstrap_seed",
-                "nB",
-                "model_name",
-            ]:
-                if self.__dict__[k] != self.defaults[k]:
-                    raise ValueError(
-                        f"Fixed parameter {k} has different values across workers."
-                    )
+def get_system_info(prod: bool):
+    out = dict(
+        git_hash=_get_git_revision_hash(),
+        git_diff=_get_git_diff(),
+        platform=platform.platform(),
+        nvidia_smi=_get_nvidia_smi(),
+        jax_backend=jax.lib.xla_bridge.get_backend().platform,
+    )
+    if prod:
+        out["pip_freeze"] = _get_pip_freeze()
+        out["conda_list"] = _get_conda_list()
+    else:
+        out["pip_freeze"] = "skipped for non-prod run"
+        out["conda_list"] = "skipped for non-prod run"
+    return out
 
-        config_dict = {k: self.__dict__[k] for k in self.defaults}
-        self.config_df = pd.DataFrame([config_dict])
+
+def print_report(_iter, report, _db):
+    ready = report.copy()
+    for k in ready:
+        if (
+            isinstance(ready[k], float)
+            or isinstance(ready[k], np.floating)
+            or isinstance(ready[k], jnp.DeviceArray)
+        ):
+            ready[k] = f"{ready[k]:.6f}"
+    logger.debug(pformat(ready))
