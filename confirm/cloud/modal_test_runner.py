@@ -10,7 +10,7 @@ import pytest
 
 import confirm.cloud.modal_util as modal_util
 
-# Load environment variables from .env file before using modal
+# Load environment variables from .env file to get Modal tokens.
 
 dotenv.load_dotenv()
 

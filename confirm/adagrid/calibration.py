@@ -69,20 +69,17 @@ gtemp.df['K'].value_counts()
 """
 import copy
 import json
-import platform
-import subprocess
 import time
-from dataclasses import dataclass
 from pprint import pformat
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 import imprint.log
-from .bootstrap import BootstrapCalibrate
-from .convergence import WorkerStatus
+from . import bootstrap
+from . import config
+from . import distributed
 from .db import DuckDBTiles
 from imprint import grid
 from imprint.timer import simple_timer
@@ -90,7 +87,7 @@ from imprint.timer import simple_timer
 logger = imprint.log.getLogger(__name__)
 
 
-class AdaCalibrationDriver:
+class AdaCalibration:
     """
     Driver classes are the layer of imprint that is directly responsible for
     asking the Model for simulations.
@@ -106,15 +103,15 @@ class AdaCalibrationDriver:
     For the basic `validate` and `calibrate` drivers, see `driver.py`.
     """
 
-    def __init__(self, db, model, null_hypos, config):
+    def __init__(self, db, model, null_hypos, c):
         self.db = db
         self.model = model
         self.null_hypos = null_hypos
-        self.c = config
+        self.c = c
 
         self.Ks = self.c.init_K * 2 ** np.arange(self.c.n_K_double + 1)
         self.max_K = self.Ks[-1]
-        self.driver = BootstrapCalibrate(
+        self.driver = bootstrap.BootstrapCalibrate(
             model,
             self.c.bootstrap_seed,
             self.c.nB,
@@ -123,7 +120,7 @@ class AdaCalibrationDriver:
             worker_id=self.c.worker_id,
         )
 
-    def process_tiles(self, *, tiles_df):
+    def process_tiles(self, *, tiles_df, report):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
@@ -155,144 +152,7 @@ class AdaCalibrationDriver:
         )
         return pd.concat((tiles_df, lams_df), axis=1)
 
-    def step(self, worker_iter):
-        """
-        One iteration of the adagrid algorithm.
-
-        Parallelization:
-        There are four main portions of the adagrid algo:
-        - Convergence criterion --> serialize to avoid data races.
-        - Tile selection --> serialize to avoid data races.
-        - Deciding whether to refine or deepen --> parallelize.
-        - Simulation and CSE --> parallelize.
-        By using a distributed lock around the convergence/tile selection, we can have
-        equality between workers and not need to have a leader node.
-
-        Args:
-            i: The iteration number.
-
-        Returns:
-            done: A value from the Enum Convergence:
-                 (INCOMPLETE, CONVERGED, FAILED).
-            report: A dictionary of information about the iteration.
-        """
-
-        start = time.time()
-        self.report = dict(worker_iter=worker_iter, worker_id=self.c.worker_id)
-
-        ########################################
-        # Step 1: Get the next batch of tiles to process. We do this before
-        # checking for convergence because part of the convergence criterion is
-        # whether there are any impossible tiles.
-        ########################################
-        max_loops = 25
-        i = 0
-        status = WorkerStatus.WORK
-        self.report["runtime_wait_for_lock"] = 0
-        self.report["runtime_wait_for_work"] = 0
-        while i < max_loops:
-            self.report["waitings"] = i
-            with self.db.lock:
-                self.report["runtime_wait_for_lock"] += time.time() - start
-                start = time.time()
-
-                step_id, step_iter, step_n_iter, step_n_tiles = self.db.get_step_info()
-                self.report["step_id"] = step_id
-                self.report["step_iter"] = step_iter
-                self.report["step_n_iter"] = step_n_iter
-                self.report["step_n_tiles"] = step_n_tiles
-
-                # Check if there are iterations left in this step.
-                # If there are, get the next batch of tiles to process.
-                if step_iter < step_n_iter:
-                    logger.debug(f"get_work(step_id={step_id}, step_iter={step_iter})")
-                    work = self.db.get_work(step_id, step_iter)
-                    self.report["runtime_get_work"] = time.time() - start
-                    self.report["work_extraction_time"] = time.time()
-                    self.report["n_processed"] = work.shape[0]
-                    logger.debug(f"get_work(...) returned {work.shape[0]} tiles")
-
-                    # If there's work, return it!
-                    if work.shape[0] > 0:
-                        self.db.set_step_info(
-                            step_id=step_id,
-                            step_iter=step_iter + 1,
-                            n_iter=step_n_iter,
-                            n_tiles=step_n_tiles,
-                        )
-                        logger.debug("Returning %s tiles.", work.shape[0])
-                        return status, work, self.report
-                    else:
-                        # If step_iter < step_n_iter but there's no work, then
-                        # The INSERT into tiles that was supposed to populate
-                        # the work is probably incomplete. We should wait a
-                        # very short time and try again.
-                        logger.debug("No work despite step_iter < step_n_iter.")
-                        wait = 0.1
-
-                # If there are no iterations left in the step, we check if the
-                # step is complete. For a step to be complete means that all
-                # tiles have results.
-                else:
-                    n_processed_tiles = self.db.n_processed_tiles(step_id)
-                    self.report["n_finished_tiles"] = n_processed_tiles
-                    if n_processed_tiles == step_n_tiles:
-                        # If a packet has just been completed, we check for convergence.
-                        status = self.convergence_criterion()
-                        self.report["runtime_convergence_criterion"] = (
-                            time.time() - start
-                        )
-                        start = time.time()
-                        if status:
-                            logger.debug("Convergence!!")
-                            return WorkerStatus.CONVERGED, None, self.report
-
-                        if step_id >= self.c.n_steps - 1:
-                            # We've completed all the steps, so we're done.
-                            logger.debug("Reached max number of steps. Terminating.")
-                            return WorkerStatus.REACHED_N_STEPS, None, self.report
-
-                        # If we haven't converged, we create a new step.
-                        new_step_id = self.new_step(step_id + 1)
-
-                        self.report["runtime_new_step"] = time.time() - start
-                        start = time.time()
-                        if new_step_id == "empty":
-                            # New packet is empty so we have terminated but
-                            # failed to converge.
-                            logger.debug(
-                                "New packet is empty. Terminating despite "
-                                "failure to converge."
-                            )
-                            return WorkerStatus.FAILED, None, self.report
-                        else:
-                            # Successful new packet. We should check for work again
-                            # immediately.
-                            status = WorkerStatus.NEW_STEP
-                            wait = 0
-                            logger.debug("Successfully created new packet.")
-                    else:
-                        # No work available, but the packet is incomplete. This is
-                        # because other workers have claimed all the work but have not
-                        # processsed yet.
-                        # In this situation, we should release the lock and wait for
-                        # other workers to finish.
-                        wait = 1
-                        logger.debug("No work available, but packet is incomplete.")
-            if wait > 0:
-                logger.debug("Waiting %s seconds and checking for work again.", wait)
-                time.sleep(wait)
-            if i > 2:
-                logger.warning(
-                    f"Worker {self.c.worker_id} has been waiting for work for"
-                    f" {i} iterations. This might indicate a bug."
-                )
-            self.report["runtime_wait_for_work"] += time.time() - start
-            i += 1
-
-        return WorkerStatus.STUCK, None, self.report
-
-    def convergence_criterion(self):
+    def convergence_criterion(self, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -323,7 +183,7 @@ class AdaCalibrationDriver:
         spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
         grid_cost = worst_tile["grid_cost"].iloc[0]
 
-        self.report.update(
+        report.update(
             dict(
                 bias_tie=bias_tie,
                 std_tie=std_tie,
@@ -332,20 +192,20 @@ class AdaCalibrationDriver:
                 lamss=lamss,
             )
         )
-        self.report["min(B_lamss)"] = min(B_lamss)
-        self.report["max(B_lamss)"] = max(B_lamss)
-        self.report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
-        self.report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
+        report["min(B_lamss)"] = min(B_lamss)
+        report["max(B_lamss)"] = max(B_lamss)
+        report["tie_{k}(lamss)"] = worst_tile_tie_est[0]
+        report["tie + slack"] = worst_tile_tie_est[0] + grid_cost + bias_tie
 
         # The convergence criterion itself.
-        self.report["converged"] = (
+        report["converged"] = (
             (bias_tie < self.c.bias_target)
             and (std_tie < self.c.std_target)
             and (grid_cost < self.c.grid_target)
         )
-        return self.report["converged"]
+        return report["converged"]
 
-    def new_step(self, new_step_id):
+    def new_step(self, new_step_id, report):
         tiles = self.db.select_tiles(self.c.step_size, "orderer")
         logger.info(
             f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
@@ -420,7 +280,7 @@ class AdaCalibrationDriver:
 
         n_refine = tiles["refine"].sum()
         n_deepen = tiles["deepen"].sum()
-        self.report.update(
+        report.update(
             dict(
                 n_impossible=tiles["impossible"].sum(),
                 n_refine=n_refine,
@@ -452,7 +312,7 @@ class AdaCalibrationDriver:
         )
 
         self.db.insert_tiles(df)
-        self.report.update(
+        report.update(
             dict(
                 n_new_tiles=n_tiles, new_K_distribution=df["K"].value_counts().to_dict()
             )
@@ -506,7 +366,7 @@ def refine_deepen(g, null_hypos, max_K, worker_id):
     return g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols).prune()
 
 
-def print_report(_iter, report, _ada):
+def print_report(_iter, report, _db):
     ready = report.copy()
     for k in ready:
         if (
@@ -516,158 +376,6 @@ def print_report(_iter, report, _ada):
         ):
             ready[k] = f"{ready[k]:.6f}"
     logger.debug(pformat(ready))
-
-
-def _run(cmd):
-    try:
-        return (
-            subprocess.check_output(" ".join(cmd), stderr=subprocess.STDOUT, shell=True)
-            .decode("utf-8")
-            .strip()
-        )
-    except subprocess.CalledProcessError as exc:
-        return f"ERROR: {exc.returncode} {exc.output}"
-
-
-def _get_git_revision_hash() -> str:
-    return _run(["git", "rev-parse", "HEAD"])
-
-
-def _get_git_diff() -> str:
-    return _run(["git", "diff", "HEAD"])
-
-
-def _get_nvidia_smi() -> str:
-    return _run(["nvidia-smi"])
-
-
-def _get_pip_freeze() -> str:
-    return _run(["pip", "freeze"])
-
-
-def _get_conda_list() -> str:
-    return _run(["conda", "list"])
-
-
-calibration_defaults = dict(
-    model_name="invalid",
-    model_seed=0,
-    model_kwargs=None,
-    alpha=0.025,
-    init_K=2**13,
-    n_K_double=4,
-    bootstrap_seed=0,
-    nB=50,
-    tile_batch_size=None,
-    grid_target=0.001,
-    bias_target=0.001,
-    std_target=0.002,
-    calibration_min_idx=40,
-    n_steps=100,
-    step_size=2**10,
-    n_iter=100,
-    packet_size=None,
-    prod=True,
-    worker_id=None,
-    git_hash=None,
-    git_diff=None,
-    nvidia_smi=None,
-    pip_freeze=None,
-    conda_list=None,
-    platform=None,
-)
-
-
-@dataclass
-class CalibrationConfig:
-    """
-    CalibrationConfig is a dataclass that holds all the configuration for a
-    calibration run. For each worker, the data here will be written to the
-    database so that we can keep track of what was run and how.
-    """
-
-    modeltype: type
-    model_seed: int
-    model_kwargs: dict
-    alpha: float
-    init_K: int
-    n_K_double: int
-    bootstrap_seed: int
-    nB: int
-    tile_batch_size: int
-    grid_target: float
-    bias_target: float
-    std_target: float
-    calibration_min_idx: int
-    n_steps: int
-    step_size: int
-    n_iter: int
-    packet_size: int
-    prod: bool
-    worker_id: int
-    git_hash: str = None
-    git_diff: str = None
-    nvidia_smi: str = None
-    pip_freeze: str = None
-    conda_list: str = None
-    platform: str = None
-    defaults: dict = None
-
-    def __post_init__(self):
-
-        self.git_hash = _get_git_revision_hash()
-        self.git_diff = _get_git_diff()
-        self.platform = platform.platform()
-        self.nvidia_smi = _get_nvidia_smi()
-        if self.prod:
-            self.pip_freeze = _get_pip_freeze()
-            self.conda_list = _get_conda_list()
-        else:
-            self.pip_freeze = "skipped for non-prod run"
-            self.conda_list = "skipped for non-prod run"
-
-        self.tile_batch_size = self.tile_batch_size or (
-            64 if jax.lib.xla_bridge.get_backend().platform == "gpu" else 4
-        )
-        self.model_name = self.modeltype.__name__  # noqa
-        if self.model_kwargs is None:
-            self.model_kwargs = {}
-        # TODO: is json suitable for all models? are there models that are going to
-        # want to have large non-jsonable objects as parameters?
-        self.model_kwargs = json.dumps(self.model_kwargs)
-
-        continuation = True
-        if self.defaults is None:
-            self.defaults = calibration_defaults
-            continuation = False
-
-        for k in self.defaults:
-            if self.__dict__[k] is None:
-                self.__dict__[k] = self.defaults[k]
-
-        if self.packet_size is None:
-            self.packet_size = self.step_size
-
-        # If we're continuing a calibration, make sure that fixed parameters
-        # are the same across all workers.
-        if continuation:
-            for k in [
-                "model_seed",
-                "model_kwargs",
-                "alpha",
-                "init_K",
-                "n_K_double",
-                "bootstrap_seed",
-                "nB",
-                "model_name",
-            ]:
-                if self.__dict__[k] != self.defaults[k]:
-                    raise ValueError(
-                        f"Fixed parameter {k} has different values across workers."
-                    )
-
-        config_dict = {k: self.__dict__[k] for k in self.defaults}
-        self.config_df = pd.DataFrame([config_dict])
 
 
 def _load_null_hypos(db):
@@ -758,7 +466,7 @@ def ada_calibrate(
         prod: Is this a production run? If so, we will collection extra system
               configuration info. Setting this to False will make startup time
               a bit faster. Defaults to True.
-        callback: A function accepting three arguments (ada_iter, report, ada)
+        callback: A function accepting three arguments (iter, report, db)
                   that can perform some reporting or printing at each iteration.
                   Defaults to print_report.
 
@@ -787,7 +495,7 @@ def ada_calibrate(
     if g is None:
         defaults = db.store.get("config").iloc[0].to_dict()
 
-    c = CalibrationConfig(
+    c = config.CalibrationConfig(
         modeltype,
         model_seed,
         model_kwargs,
@@ -825,7 +533,7 @@ def ada_calibrate(
         **json.loads(c.model_kwargs),
     )
     null_hypos = _load_null_hypos(db) if g is None else g.null_hypos
-    ada_driver = AdaCalibrationDriver(db, model, null_hypos, c)
+    cal_algo = AdaCalibration(db, model, null_hypos, c)
 
     if g is not None:
         # Copy the input grid so that the caller is not surprised by any changes.
@@ -855,18 +563,14 @@ def ada_calibrate(
     reports = []
     for worker_iter in range(c.n_iter):
         try:
+            report = dict(worker_iter=worker_iter, worker_id=worker_id)
             start = time.time()
-            status, work, report = ada_driver.step(worker_iter)
-            report["runtime_not_processing"] = time.time() - start
+            status, report = distributed.run(cal_algo, db, report, c.n_steps)
             report["status"] = status.name
-            if work is not None and work.shape[0] > 0:
-                start = time.time()
-                results = ada_driver.process_tiles(tiles_df=work)
-                report["runtime_processing"] = time.time() - start
-                db.insert_results(results)
+            report["runtime_full_iter"] = time.time() - start
 
             if callback is not None:
-                callback(worker_iter, report, ada_driver)
+                callback(worker_iter, report, db)
             reports.append(report)
 
             if status.done():
