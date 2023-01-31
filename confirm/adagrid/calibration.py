@@ -81,10 +81,9 @@ import numpy as np
 import pandas as pd
 
 import imprint.log
+from .bootstrap import BootstrapCalibrate
+from .convergence import WorkerStatus
 from .db import DuckDBTiles
-from confirm.adagrid.convergence import WorkerStatus
-from imprint import batching
-from imprint import driver
 from imprint import grid
 from imprint.timer import simple_timer
 
@@ -112,116 +111,17 @@ class AdaCalibrationDriver:
         self.model = model
         self.null_hypos = null_hypos
         self.c = config
-        self.forward_boundv, self.backward_boundv = driver.get_bound(
-            model.family, model.family_params if hasattr(model, "family_params") else {}
-        )
 
-        self.calibratevv = jax.jit(
-            jax.vmap(
-                jax.vmap(driver.calc_tuning_threshold, in_axes=(None, 0, None)),
-                in_axes=(0, None, 0),
-            )
-        )
-
-        bootstrap_key = jax.random.PRNGKey(self.c.bootstrap_seed)
-        self.init_K = self.c.init_K
         self.Ks = self.c.init_K * 2 ** np.arange(self.c.n_K_double + 1)
         self.max_K = self.Ks[-1]
-        self.nB = self.c.nB
-        self.bootstrap_idxs = {
-            K: jnp.concatenate(
-                (
-                    jnp.arange(K)[None, :],
-                    jnp.sort(
-                        jax.random.choice(
-                            bootstrap_key,
-                            K,
-                            shape=(self.c.nB + self.c.nB, K),
-                            replace=True,
-                        ),
-                        axis=-1,
-                    ),
-                )
-            ).astype(jnp.int32)
-            for K in self.Ks
-        }
-
-        self.tile_batch_size = self.c.tile_batch_size
-
-        self.alpha = self.c.alpha
-        self.calibration_min_idx = self.c.calibration_min_idx
-        self.bias_target = self.c.bias_target
-        self.grid_target = self.c.grid_target
-        self.std_target = self.c.std_target
-        self.packet_size = self.c.packet_size
-
-    def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
-        tile_batch_size = (
-            self.tile_batch_size if tile_batch_size is None else tile_batch_size
+        self.driver = BootstrapCalibrate(
+            model,
+            self.c.bootstrap_seed,
+            self.c.nB,
+            self.Ks,
+            tile_batch_size=self.c.tile_batch_size,
+            worker_id=self.c.worker_id,
         )
-
-        def _batched(K, theta, vertices, null_truth):
-            # NOTE: sort of a todo. having the simulations loop as the outer batch
-            # is faster than the other way around. But, we need all simulations in
-            # order to calibrate. So, the likely fastest solution is to have multiple
-            # layers of batching. This is not currently implemented.
-            stats = self.model.sim_batch(0, K, theta, null_truth)
-            sorted_stats = jnp.sort(stats, axis=-1)
-            alpha0 = self.backward_boundv(alpha, theta, vertices)
-            return (
-                self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0),
-                alpha0,
-            )
-
-        def f(K, K_df):
-            K_g = grid.Grid(K_df, self.c.worker_id)
-
-            theta, vertices = K_g.get_theta_and_vertices()
-            bootstrap_lams, alpha0 = batching.batch(
-                _batched,
-                tile_batch_size,
-                in_axes=(None, 0, 0, 0),
-            )(K, theta, vertices, K_g.get_null_truth())
-
-            cols = ["lams"]
-            for i in range(self.nB):
-                cols.append(f"B_lams{i}")
-            for i in range(self.nB):
-                cols.append(f"twb_lams{i}")
-            lams_df = pd.DataFrame(bootstrap_lams, index=K_df.index, columns=cols)
-
-            lams_df.insert(
-                0, "twb_min_lams", bootstrap_lams[:, 1 + self.nB :].min(axis=1)
-            )
-            lams_df.insert(
-                0, "twb_mean_lams", bootstrap_lams[:, 1 + self.nB :].mean(axis=1)
-            )
-            lams_df.insert(
-                0, "twb_max_lams", bootstrap_lams[:, 1 + self.nB :].max(axis=1)
-            )
-            lams_df.insert(0, "alpha0", alpha0)
-
-            return lams_df
-
-        return driver._groupby_apply_K(df, f)
-
-    def many_rej(self, df, lams_arr):
-        def f(K, K_df):
-            K_g = grid.Grid(K_df, self.c.worker_id)
-
-            theta = K_g.get_theta()
-
-            # NOTE: no batching implemented here. Currently, this function is only
-            # called with a single tile so it's not necessary.
-            stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
-            tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
-            return pd.DataFrame(
-                tie_sum,
-                index=K_df.index,
-                columns=[str(i) for i in range(lams_arr.shape[0])],
-            )
-
-        return driver._groupby_apply_K(df, f)
 
     def process_tiles(self, *, tiles_df):
         # This method actually runs the calibration and bootstrapping.
@@ -229,17 +129,17 @@ class AdaCalibrationDriver:
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.bootstrap_calibrate(tiles_df, self.alpha)
+        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.c.alpha)
         lams_df.insert(0, "processor_id", self.c.worker_id)
         lams_df.insert(1, "processing_time", simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data
-        lams_df.insert(3, "grid_cost", self.alpha - lams_df["alpha0"])
+        lams_df.insert(3, "grid_cost", self.c.alpha - lams_df["alpha0"])
         lams_df.insert(
             4,
             "impossible",
-            lams_df["alpha0"] < (self.calibration_min_idx + 1) / (tiles_df["K"] + 1),
+            lams_df["alpha0"] < (self.c.calibration_min_idx + 1) / (tiles_df["K"] + 1),
         )
 
         lams_df.insert(
@@ -411,7 +311,7 @@ class AdaCalibrationDriver:
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
         B_lamss = self.db.bootstrap_lamss()
-        worst_tile_tie_sum = self.many_rej(
+        worst_tile_tie_sum = self.driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0]
         worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
@@ -439,9 +339,9 @@ class AdaCalibrationDriver:
 
         # The convergence criterion itself.
         self.report["converged"] = (
-            (bias_tie < self.bias_target)
-            and (std_tie < self.std_target)
-            and (grid_cost < self.grid_target)
+            (bias_tie < self.c.bias_target)
+            and (std_tie < self.c.std_target)
+            and (grid_cost < self.c.grid_target)
         )
         return self.report["converged"]
 
@@ -483,8 +383,8 @@ class AdaCalibrationDriver:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
         twb_worst_tile["K"] = self.max_K
-        twb_worst_tile_lams = self.bootstrap_calibrate(
-            twb_worst_tile, self.alpha, tile_batch_size=1
+        twb_worst_tile_lams = self.driver.bootstrap_calibrate(
+            twb_worst_tile, self.c.alpha, tile_batch_size=1
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles["twb_mean_lams"] > twb_worst_tile_mean_lams
@@ -496,7 +396,7 @@ class AdaCalibrationDriver:
         # The decision criteria is best described by the code below.
         ########################################
         at_max_K = tiles["K"] == self.max_K
-        tiles["refine"] = (tiles["grid_cost"] > self.grid_target) & (
+        tiles["refine"] = (tiles["grid_cost"] > self.c.grid_target) & (
             (~deepen_likely_to_work) | at_max_K
         )
         tiles["deepen"] = (~tiles["refine"]) & (~at_max_K)

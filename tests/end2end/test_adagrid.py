@@ -12,6 +12,16 @@ from imprint.models.ztest import ZTest1D
 config.update("jax_enable_x64", True)
 
 
+def test_bootstrap_calibrate(snapshot):
+    g = ip.cartesian_grid(
+        theta_min=[-1], theta_max=[1], n=[10], null_hypos=[ip.hypo("x0 < 0")]
+    )
+    cal_df = ada.bootstrap.bootstrap_calibrate(ZTest1D, g=g, nB=5)
+    twb_cols = [c for c in cal_df.columns if "twb_lams" in c]
+    np.testing.assert_allclose(cal_df["twb_mean_lams"], cal_df[twb_cols].mean(axis=1))
+    np.testing.assert_allclose(cal_df, snapshot(cal_df))
+
+
 def check(db, snapshot, only_lams=False):
     lamss = db.worst_tile("lams")["lams"].iloc[0]
     np.testing.assert_allclose(lamss, snapshot(lamss))
