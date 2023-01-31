@@ -120,7 +120,6 @@ def test_adagrid_clickhouse(snapshot, ch_db):
 
 
 @pytest.mark.slow
-@pytest.mark.modal_unsafe
 def test_adagrid_clickhouse_distributed(snapshot, ch_db):
     snapshot.set_test_name("test_adagrid")
     import confirm.cloud.modal_util as modal_util
