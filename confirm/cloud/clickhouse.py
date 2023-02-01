@@ -287,7 +287,9 @@ class Clickhouse:
         # all relevant inserts are done.
         #
         if not self._results_table_exists:
-            self._results_table_exists = does_table_exist(self.client, "results")
+            self._results_table_exists = does_table_exist(
+                self.client, self.job_id, "results"
+            )
             if not self._results_table_exists:
                 return -1
 
@@ -500,13 +502,14 @@ class Clickhouse:
         return Clickhouse(connection_details, client, redis_con, job_id)
 
 
-def does_table_exist(client, table_name: str) -> bool:
+def does_table_exist(client, job_id: str, table_name: str) -> bool:
     return (
         len(
             client.query(
                 f"""
-        select * from information_schema.schemata
-            where schema_name = '{table_name}'
+        select * from information_schema.tables
+            where table_schema = '{job_id}'
+                and table_name = '{table_name}'
         """
             ).result_set
         )

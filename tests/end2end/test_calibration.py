@@ -39,7 +39,6 @@ def check(db, snapshot, only_lams=False):
 
     # First check the calibration outputs. These are the most important values
     # to get correct.
-    print(check_subset.columns, compare.columns)
     pd.testing.assert_frame_equal(check_subset, compare, check_dtype=False)
     if only_lams:
         return
@@ -57,7 +56,7 @@ def check(db, snapshot, only_lams=False):
 
 
 @pytest.mark.slow
-def test_adagrid(snapshot):
+def test_calibration(snapshot):
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
@@ -81,7 +80,7 @@ def test_adagrid(snapshot):
 
 
 @pytest.mark.slow
-def test_adagrid_packetsize1(snapshot):
+def test_calibration_packetsize1(snapshot):
     snapshot.set_test_name("test_adagrid")
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     iter, reports, db = ada.ada_calibrate(
@@ -96,29 +95,12 @@ def ch_db():
 
     db = ch.Clickhouse.connect()
     yield db
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # TODO: re-enable
-    # db.close()
-    # ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
+    db.close()
+    ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
 
 
 @pytest.mark.slow
-def test_adagrid_clickhouse(snapshot, ch_db):
+def test_calibration_clickhouse(snapshot, ch_db):
     snapshot.set_test_name("test_adagrid")
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
@@ -134,7 +116,7 @@ def test_adagrid_clickhouse(snapshot, ch_db):
 
 @pytest.mark.slow
 @pytest.mark.modal_unsafe
-def test_adagrid_clickhouse_distributed(snapshot, ch_db):
+def test_calibration_clickhouse_distributed(snapshot, ch_db):
     snapshot.set_test_name("test_adagrid")
     import confirm.cloud.modal_util as modal_util
     import modal
@@ -179,7 +161,7 @@ def test_adagrid_clickhouse_distributed(snapshot, ch_db):
 
 
 @pytest.mark.slow
-def test_adagrid_checkpointing():
+def test_calibration_checkpointing():
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]

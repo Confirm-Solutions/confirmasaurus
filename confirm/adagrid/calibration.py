@@ -67,21 +67,13 @@ gtemp.df['K'].value_counts()
 ```
 
 """
-import copy
-import json
-import time
-import warnings
-
 import numpy as np
 import pandas as pd
 
 import imprint.log
+from . import adagrid
 from . import bootstrap
 from . import config
-from . import distributed
-from .db import DuckDBTiles
-from imprint import grid
-from imprint.timer import simple_timer
 
 logger = imprint.log.getLogger(__name__)
 
@@ -127,7 +119,7 @@ class AdaCalibration:
 
         lams_df = self.driver.bootstrap_calibrate(tiles_df, self.c["alpha"])
         lams_df.insert(0, "processor_id", self.c["worker_id"])
-        lams_df.insert(1, "processing_time", simple_timer())
+        lams_df.insert(1, "processing_time", imprint.timer.simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data
@@ -211,7 +203,7 @@ class AdaCalibration:
             f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
         )
         tiles["finisher_id"] = self.c["worker_id"]
-        tiles["query_time"] = simple_timer()
+        tiles["query_time"] = imprint.timer.simple_timer()
         if tiles.shape[0] == 0:
             return "empty"
 
@@ -296,13 +288,15 @@ class AdaCalibration:
         if nothing_to_do:
             return "empty"
 
-        df = refine_and_deepen(
+        df = adagrid.refine_and_deepen(
             tiles, self.null_hypos, self.max_K, self.c["worker_id"]
         ).df
         df["step_id"] = new_step_id
-        df["step_iter"], n_packets = step_iter_assignments(df, self.c["packet_size"])
+        df["step_iter"], n_packets = adagrid.step_iter_assignments(
+            df, self.c["packet_size"]
+        )
         df["creator_id"] = self.c["worker_id"]
-        df["creation_time"] = simple_timer()
+        df["creation_time"] = imprint.timer.simple_timer()
 
         n_tiles = df.shape[0]
         logger.debug(
@@ -320,72 +314,6 @@ class AdaCalibration:
             )
         )
         return new_step_id
-
-
-def step_iter_assignments(df, packet_size):
-    # Randomly assign tiles to packets.
-    # TODO: this could be improved to better balance the load.
-    # There are two load balancing concerns:
-    # - a packet with tiles with a given K value should have lots of
-    #   that K so that we have enough work to saturate GPU threads.
-    # - we should divide the work evenly among the workers.
-    n_tiles = df.shape[0]
-    n_packets = int(np.ceil(n_tiles / packet_size))
-    splits = np.array_split(np.arange(n_tiles), n_packets)
-    assignment = np.empty(n_tiles, dtype=np.int32)
-    for i in range(n_packets):
-        assignment[splits[i]] = i
-    rng = np.random.default_rng()
-    rng.shuffle(assignment)
-    return assignment, n_packets
-
-
-def refine_and_deepen(g, null_hypos, max_K, worker_id):
-    g_deepen_in = grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)], worker_id)
-    g_deepen = grid.init_grid(
-        g_deepen_in.get_theta(),
-        g_deepen_in.get_radii(),
-        worker_id=worker_id,
-        parents=g_deepen_in.df["id"],
-    )
-
-    # We just multiply K by 2 to deepen.
-    # TODO: it's possible to do better by multiplying by 4 or 8
-    # sometimes when a tile clearly needs *way* more sims. how to
-    # determine this?
-    g_deepen.df["K"] = g_deepen_in.df["K"] * 2
-
-    g_refine_in = grid.Grid(g.loc[g["refine"]], worker_id)
-    inherit_cols = ["K"]
-    # TODO: it's possible to do better by refining by more than just a
-    # factor of 2.
-    g_refine = g_refine_in.refine(inherit_cols)
-
-    ########################################
-    # Step 7: Simulate the new tiles and write to the DB.
-    ########################################
-    return g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols).prune()
-
-
-# TODO: move towards NullHypo class
-def _load_null_hypos(db):
-    d = db.dimension()
-    null_hypos_df = db.store.get("null_hypos")
-    null_hypos = []
-    for i in range(null_hypos_df.shape[0]):
-        n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
-        c = null_hypos_df["c"].iloc[i]
-        null_hypos.append(grid.HyperPlane(n, c))
-    return null_hypos
-
-
-def _store_null_hypos(db, null_hypos):
-    d = db.dimension()
-    n_hypos = len(null_hypos)
-    cols = {f"n{i}": [null_hypos[j].n[i] for j in range(n_hypos)] for i in range(d)}
-    cols["c"] = [null_hypos[j].c for j in range(n_hypos)]
-    null_hypos_df = pd.DataFrame(cols)
-    db.store.set("null_hypos", null_hypos_df)
 
 
 def ada_calibrate(
@@ -471,138 +399,4 @@ def ada_calibrate(
         reports: A list of the report dicts from each iteration.
         ada: The Adagrid object after the final iteration.
     """
-
-    ########################################
-    # Setup the database, load
-    ########################################
-    if g is None and db is None:
-        raise ValueError("Must provide either an initial grid or a database!")
-
-    if db is None:
-        db = DuckDBTiles.connect()
-
-    worker_id = db.new_worker()
-    imprint.log.worker_id.set(worker_id)
-
-    ########################################
-    # Store config
-    ########################################
-    if model_kwargs is None:
-        model_kwargs = {}
-    model_name = modeltype.__name__
-
-    if g is None:
-        cfg_dict = db.store.get("config").iloc[0].to_dict()
-        model_kwargs = json.loads(cfg_dict["model_kwargs_json"])
-        overrides = overrides or {}
-        # Some parameters cannot be overridden because the job just wouldn't
-        # make sense anymore.
-        for k in [
-            "model_seed",
-            "model_kwargs",
-            "alpha",
-            "init_K",
-            "n_K_double",
-            "bootstrap_seed",
-            "nB",
-            "model_name",
-        ]:
-            if k in overrides:
-                raise ValueError(f"Parameter {k} cannot be overridden.")
-    else:
-        # Using locals() is a simple way to get all the config vars in the
-        # function definition. But, we need to erase fields that are not part
-        # of the "config".
-        cfg_dict = copy.copy(locals())
-        for k in ["modeltype", "g", "db", "overrides", "callback", "model_kwargs"]:
-            del cfg_dict[k]
-        cfg_dict["model_kwargs_json"] = json.dumps(model_kwargs)
-
-        if overrides is not None:
-            warnings.warn("Overrides are ignored when starting a new job.")
-        overrides = {}
-
-    c = config.prepare_config(cfg_dict, overrides, worker_id, prod)
-    config_df = pd.DataFrame([c])
-    print(config_df)
-    print(config_df.columns)
-    db.store.set_or_append("config", config_df)
-
-    ########################################
-    # Set up model, driver and grid
-    ########################################
-
-    # Why initialize the model here rather than relying on the user to pass an
-    # already constructed model object?
-    # 1. We can pass the seed here.
-    # 2. We can pass the correct max_K and avoid a class of errors.
-    model = modeltype(
-        seed=c["model_seed"],
-        max_K=c["init_K"] * 2 ** c["n_K_double"],
-        **model_kwargs,
-    )
-    null_hypos = _load_null_hypos(db) if g is None else g.null_hypos
-    cal_algo = AdaCalibration(db, model, null_hypos, c)
-
-    if g is not None:
-        # Copy the input grid so that the caller is not surprised by any changes.
-        df = copy.deepcopy(g.df)
-        df["K"] = c["init_K"]
-        df["step_id"] = 0
-        df["step_iter"], n_packets = step_iter_assignments(df, c["packet_size"])
-        df["creator_id"] = worker_id
-        df["creation_time"] = simple_timer()
-
-        db.init_tiles(df)
-        _store_null_hypos(db, null_hypos)
-
-        n_tiles = df.shape[0]
-        logger.debug(
-            f"first step {(0, 0, n_packets, n_tiles)} "
-            f"n_tiles={n_tiles} packet_size={c['packet_size']}"
-        )
-        db.set_step_info(step_id=0, step_iter=0, n_iter=n_packets, n_tiles=n_tiles)
-
-    ########################################
-    # Run adagrid!
-    ########################################
-    if c["n_iter"] == 0:
-        return 0, [], db
-
-    reports = []
-    for worker_iter in range(c["n_iter"]):
-        try:
-            report = dict(worker_iter=worker_iter, worker_id=worker_id)
-            start = time.time()
-            status, report = distributed.run(cal_algo, db, report, c["n_steps"])
-            report["status"] = status.name
-            report["runtime_full_iter"] = time.time() - start
-
-            if callback is not None:
-                callback(worker_iter, report, db)
-            reports.append(report)
-
-            if status.done():
-                # We just stop this worker. The other workers will continue to run
-                # but will stop once they reached the convergence criterion check.
-                # It might be faster to stop all the workers immediately, but that
-                # would be more engineering effort.
-                break
-        except KeyboardInterrupt:
-            # TODO: we want to die robustly when there's a keyboard interrupt.
-            print("KeyboardInterrupt")
-            return worker_iter, reports, db
-
-    return worker_iter + 1, reports, db
-
-
-def verify_adagrid(df):
-    inactive_ids = df.loc[~df["active"], "id"]
-    assert inactive_ids.unique().shape == inactive_ids.shape
-
-    parents = df["parent_id"].unique()
-    parents_that_dont_exist = np.setdiff1d(parents, inactive_ids)
-    inactive_tiles_with_no_children = np.setdiff1d(inactive_ids, parents)
-    assert parents_that_dont_exist.shape[0] == 1
-    assert parents_that_dont_exist[0] == 0
-    assert inactive_tiles_with_no_children.shape[0] == 0
+    return adagrid.run(modeltype, g, db, locals(), "calibration", callback)
