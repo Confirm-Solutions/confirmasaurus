@@ -47,7 +47,7 @@ class DBTester:
         work = db.get_tiles().nsmallest(100, "theta0")
         work["orderer"] = np.linspace(5, 6, work.shape[0])
         work["eligible"] = True
-        db.insert_results(work)
+        db.insert_results(work, "orderer")
 
     def test_connect(self):
         self.connect()
@@ -199,10 +199,10 @@ class DBTester:
 
         pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
-        pd_tiles.insert_results(g.df)
+        pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
         db_tiles.init_tiles(g.df)
-        db_tiles.insert_results(g.df)
+        db_tiles.insert_results(g.df, "orderer")
 
         np.testing.assert_allclose(
             pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()
