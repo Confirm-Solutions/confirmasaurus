@@ -73,7 +73,7 @@ class PandasTiles:
         df.insert(0, "id", df.index)
         self.tiles_df = pd.concat((self.tiles_df, df), axis=0)
 
-    def insert_results(self, df: pd.DataFrame) -> None:
+    def insert_results(self, df: pd.DataFrame, orderer: str) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         if self.results_df is None:
@@ -178,14 +178,14 @@ class DuckDBTiles:
         s = self.con.execute("select * from step_info").df().iloc[0]
         return s["step_id"], s["step_iter"], s["n_iter"], s["n_tiles"]
 
-    def set_step_info(self, *, step_id, step_iter, n_iter, n_tiles):
+    def set_step_info(self, *, step_id: int, step_iter: int, n_iter: int, n_tiles: int):
         self.con.execute("delete from step_info")
         self.con.execute(
             "insert into step_info values "
             f"({step_id}, {step_iter}, {n_iter}, {n_tiles})"
         )
 
-    def n_processed_tiles(self, step_id):
+    def n_processed_tiles(self, step_id: int):
         return self.con.execute(
             f"""
             select count(*) from tiles
@@ -195,11 +195,11 @@ class DuckDBTiles:
         """
         ).fetchone()[0]
 
-    def insert_tiles(self, df):
+    def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self.tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
-    def insert_results(self, df):
+    def insert_results(self, df: pd.DataFrame, orderer: str):
         if not self._results_table_exists:
             self.con.execute("create table if not exists results as select * from df")
             self._results_table_exists = True
@@ -209,7 +209,7 @@ class DuckDBTiles:
 
     def worst_tile(self, order_col):
         return self.con.execute(
-            f"select * from results where active=true order by {order_col} asc limit 1"
+            f"select * from results where active=true order by {order_col} limit 1"
         ).df()
 
     def get_work(self, step_id, step_iter):
@@ -230,7 +230,7 @@ class DuckDBTiles:
             f"""
             select * from results where eligible=true
             order by {order_col} asc limit {n}
-            """,
+            """
         ).df()
         t.commit()
         return out
