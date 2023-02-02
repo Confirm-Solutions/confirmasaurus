@@ -199,7 +199,7 @@ class DuckDBTiles:
         column_order = ",".join(self.tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
-    def insert_results(self, df):
+    def insert_results(self, df, orderer):
         if not self._results_table_exists:
             self.con.execute("create table if not exists results as select * from df")
             self._results_table_exists = True
@@ -209,7 +209,7 @@ class DuckDBTiles:
 
     def worst_tile(self, order_col):
         return self.con.execute(
-            f"select * from results where active=true order by {order_col} asc limit 1"
+            f"select * from results where active=true order by {order_col} limit 1"
         ).df()
 
     def get_work(self, step_id, step_iter):
@@ -230,7 +230,7 @@ class DuckDBTiles:
             f"""
             select * from results where eligible=true
             order by {order_col} asc limit {n}
-            """,
+            """
         ).df()
         t.commit()
         return out

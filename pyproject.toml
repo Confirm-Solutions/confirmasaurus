@@ -78,7 +78,7 @@ secondary = false
 profile = "black"
 
 [tool.pytest.ini_options]
-addopts = "-p imprint.testing -s --tb=short --strict-markers --doctest-modules"
+addopts = "-p imprint.testing --capture=no --show-capture=no --tb=short --strict-markers --doctest-modules"
 testpaths = [
     "tests",
     "imprint/tests",

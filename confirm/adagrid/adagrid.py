@@ -1,21 +1,25 @@
 import copy
+import json
 import logging
+import platform
+import subprocess
 import time
+import warnings
+from pprint import pformat
 
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 import imprint
-from . import calibration
-from . import config
-from . import validation
 from .convergence import WorkerStatus
 from .db import DuckDBTiles
 
 logger = logging.getLogger(__name__)
 
 
-def run(modeltype, g, db, locals_, run_type, callback):
+def run(modeltype, g, db, locals_, algo_type, callback):
     if g is None and db is None:
         raise ValueError("Must provide either an initial grid or a database!")
 
@@ -27,26 +31,101 @@ def run(modeltype, g, db, locals_, run_type, callback):
 
     # locals() is a handy way to pass all the arguments to prepare_config, but
     # it has the downside of being too magic.
-    c, model_kwargs = config.prepare_config(db, locals_, worker_id)
+    g = locals_["g"]
+    overrides = locals_["overrides"]
+
+    if g is None:
+        load_cfg_df = db.store.get("config")
+        cfg = load_cfg_df.iloc[0].to_dict()
+        # Very important not to share worker_id between workers!!
+        cfg["worker_id"] = None
+        model_kwargs = json.loads(cfg["model_kwargs_json"])
+        for k in overrides:
+            # Some parameters cannot be overridden because the job just wouldn't
+            # make sense anymore.
+            if k in [
+                "model_seed",
+                "model_kwargs",
+                "alpha",
+                "init_K",
+                "n_K_double",
+                "bootstrap_seed",
+                "nB",
+                "model_name",
+            ]:
+                raise ValueError(f"Parameter {k} cannot be overridden.")
+            cfg[k] = overrides[k]
+
+    else:
+        # Using locals() is a simple way to get all the config vars in the
+        # function definition. But, we need to erase fields that are not part
+        # of the "config".
+        cfg = {
+            k: v
+            for k, v in locals_.items()
+            if k
+            not in [
+                "modeltype",
+                "g",
+                "db",
+                "overrides",
+                "callback",
+                "model_kwargs",
+                "transformation",
+            ]
+        }
+        cfg["model_name"] = locals_["modeltype"].__name__
+
+        model_kwargs = locals_["model_kwargs"]
+        if model_kwargs is None:
+            model_kwargs = {}
+        cfg["model_kwargs_json"] = json.dumps(model_kwargs)
+
+        if overrides is not None:
+            warnings.warn("Overrides are ignored when starting a new job.")
+
+    cfg["worker_id"] = worker_id
+    cfg["jax_backend"] = jax.lib.xla_bridge.get_backend().platform
+    cfg["tile_batch_size"] = cfg["tile_batch_size"] or (
+        64 if cfg["jax_backend"] == "gpu" else 4
+    )
+
+    if cfg["packet_size"] is None:
+        cfg["packet_size"] = cfg["step_size"]
+
+    cfg.update(
+        dict(
+            git_hash=_run(["git", "rev-parse", "HEAD"]),
+            git_diff=_run(["git", "diff", "HEAD"]),
+            platform=platform.platform(),
+            nvidia_smi=_run(["nvidia-smi"]),
+        )
+    )
+    if locals_["prod"]:
+        cfg["pip_freeze"] = _run(["pip", "freeze"])
+        cfg["conda_list"] = _run(["conda", "list"])
+    else:
+        cfg["pip_freeze"] = "skipped because prod=False"
+        cfg["conda_list"] = "skipped because prod=False"
+
+    cfg_df = pd.DataFrame([cfg])
+    db.store.set_or_append("config", cfg_df)
 
     model = modeltype(
-        seed=c["model_seed"],
-        max_K=c["init_K"] * 2 ** c["n_K_double"],
+        seed=cfg["model_seed"],
+        max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
         **model_kwargs,
     )
     null_hypos = _load_null_hypos(db) if g is None else g.null_hypos
 
-    if run_type == "validation":
-        algo = validation.AdaValidation(db, model, null_hypos, c)
-    elif run_type == "calibration":
-        algo = calibration.AdaCalibration(db, model, null_hypos, c)
+    algo = algo_type(db, model, null_hypos, cfg)
 
     if g is not None:
         # Copy the input grid so that the caller is not surprised by any changes.
         df = copy.deepcopy(g.df)
-        df["K"] = c["init_K"]
+        df["K"] = cfg["init_K"]
         df["step_id"] = 0
-        df["step_iter"], n_packets = step_iter_assignments(df, c["packet_size"])
+        df["step_iter"], n_packets = step_iter_assignments(df, cfg["packet_size"])
         df["creator_id"] = worker_id
         df["creation_time"] = imprint.timer.simple_timer()
 
@@ -56,19 +135,19 @@ def run(modeltype, g, db, locals_, run_type, callback):
         n_tiles = df.shape[0]
         logger.debug(
             f"first step {(0, 0, n_packets, n_tiles)} "
-            f"n_tiles={n_tiles} packet_size={c['packet_size']}"
+            f"n_tiles={n_tiles} packet_size={cfg['packet_size']}"
         )
         db.set_step_info(step_id=0, step_iter=0, n_iter=n_packets, n_tiles=n_tiles)
 
-    if c["n_iter"] == 0:
+    if cfg["n_iter"] == 0:
         return 0, [], db
 
     reports = []
-    for worker_iter in range(c["n_iter"]):
+    for worker_iter in range(cfg["n_iter"]):
         try:
             report = dict(worker_iter=worker_iter, worker_id=worker_id)
             start = time.time()
-            status, report = run_iter(algo, db, report, c["n_steps"])
+            status, report = run_iter(algo, db, report, cfg["n_steps"])
             report["status"] = status.name
             report["runtime_full_iter"] = time.time() - start
 
@@ -142,27 +221,27 @@ def run_iter(algo, db, report, n_steps):
             # If there are, get the next batch of tiles to process.
             if step_iter < step_n_iter:
                 logger.debug("get_work(step_id=%s, step_iter=%s)", step_id, step_iter)
-                work = db.get_work(step_id, step_iter)
+                work_df = db.get_work(step_id, step_iter)
                 report["runtime_get_work"] = time.time() - start
                 start = time.time()
                 report["work_extraction_time"] = time.time()
-                report["n_processed"] = work.shape[0]
-                logger.debug("get_work(...) returned %s tiles.", work.shape[0])
+                report["n_processed"] = work_df.shape[0]
+                logger.debug("get_work(...) returned %s tiles.", work_df.shape[0])
 
                 # If there's work, return it!
-                if work.shape[0] > 0:
+                if work_df.shape[0] > 0:
                     db.set_step_info(
                         step_id=step_id,
                         step_iter=step_iter + 1,
                         n_iter=step_n_iter,
                         n_tiles=step_n_tiles,
                     )
-                    logger.debug("Processing %s tiles.", work.shape[0])
+                    logger.debug("Processing %s tiles.", work_df.shape[0])
                     report["runtime_update_step_info"] = time.time() - start
                     start = time.time()
-                    results = algo.process_tiles(tiles_df=work, report=report)
+                    results = algo.process_tiles(tiles_df=work_df, report=report)
                     report["runtime_processing"] = time.time() - start
-                    db.insert_results(results)
+                    db.insert_results(results, algo.get_orderer())
                     return status, report
                 else:
                     # If step_iter < step_n_iter but there's no work, then
@@ -180,7 +259,7 @@ def run_iter(algo, db, report, n_steps):
                 report["n_finished_tiles"] = n_processed_tiles
                 if n_processed_tiles == step_n_tiles:
                     # If a packet has just been completed, we check for convergence.
-                    status = algo.convergence_criterion(report=report)
+                    status, convergence_data = algo.convergence_criterion(report=report)
                     report["runtime_convergence_criterion"] = time.time() - start
                     start = time.time()
                     if status:
@@ -193,7 +272,7 @@ def run_iter(algo, db, report, n_steps):
                         return WorkerStatus.REACHED_N_STEPS, report
 
                     # If we haven't converged, we create a new step.
-                    new_step_id = algo.new_step(step_id + 1, report=report)
+                    new_step_id = algo.new_step(step_id + 1, report, convergence_data)
 
                     report["runtime_new_step"] = time.time() - start
                     start = time.time()
@@ -318,3 +397,26 @@ def verify_adagrid(df):
     assert parents_that_dont_exist.shape[0] == 1
     assert parents_that_dont_exist[0] == 0
     assert inactive_tiles_with_no_children.shape[0] == 0
+
+
+def _run(cmd):
+    try:
+        return (
+            subprocess.check_output(" ".join(cmd), stderr=subprocess.STDOUT, shell=True)
+            .decode("utf-8")
+            .strip()
+        )
+    except subprocess.CalledProcessError as exc:
+        return f"ERROR: {exc.returncode} {exc.output}"
+
+
+def print_report(_iter, report, _db):
+    ready = report.copy()
+    for k in ready:
+        if (
+            isinstance(ready[k], float)
+            or isinstance(ready[k], np.floating)
+            or isinstance(ready[k], jnp.DeviceArray)
+        ):
+            ready[k] = f"{ready[k]:.6f}"
+    logger.debug(pformat(ready))

@@ -73,7 +73,6 @@ import pandas as pd
 import imprint.log
 from . import adagrid
 from . import bootstrap
-from . import config
 
 logger = imprint.log.getLogger(__name__)
 
@@ -110,6 +109,9 @@ class AdaCalibration:
             tile_batch_size=self.c["tile_batch_size"],
             worker_id=self.c["worker_id"],
         )
+
+    def get_orderer(self):
+        return "orderer"
 
     def process_tiles(self, *, tiles_df, report):
         # This method actually runs the calibration and bootstrapping.
@@ -195,9 +197,9 @@ class AdaCalibration:
             and (std_tie < self.c["std_target"])
             and (grid_cost < self.c["grid_target"])
         )
-        return report["converged"]
+        return report["converged"], None
 
-    def new_step(self, new_step_id, report):
+    def new_step(self, new_step_id, report, convergence_data):
         tiles = self.db.select_tiles(self.c["step_size"], "orderer")
         logger.info(
             f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
@@ -339,7 +341,7 @@ def ada_calibrate(
     packet_size: int = None,
     prod: bool = True,
     overrides: dict = None,
-    callback=config.print_report,
+    callback=adagrid.print_report,
 ):
     """
     The main entrypoint for the adaptive calibration algorithm.
@@ -399,4 +401,4 @@ def ada_calibrate(
         reports: A list of the report dicts from each iteration.
         ada: The Adagrid object after the final iteration.
     """
-    return adagrid.run(modeltype, g, db, locals(), "calibration", callback)
+    return adagrid.run(modeltype, g, db, locals(), AdaCalibration, callback)
