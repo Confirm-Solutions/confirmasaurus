@@ -147,7 +147,13 @@ def run(modeltype, g, db, locals_, algo_type, callback):
         try:
             report = dict(worker_iter=worker_iter, worker_id=worker_id)
             start = time.time()
-            status, report = run_iter(algo, db, report, cfg["n_steps"])
+            status, work_df, report = run_iter(algo, db, report, cfg["n_steps"])
+            if work_df is not None and work_df.shape[0] > 0:
+                logger.debug("Processing %s tiles.", work_df.shape[0])
+                start = time.time()
+                results = algo.process_tiles(tiles_df=work_df, report=report)
+                report["runtime_processing"] = time.time() - start
+                db.insert_results(results, algo.get_orderer())
             report["status"] = status.name
             report["runtime_full_iter"] = time.time() - start
 
@@ -228,21 +234,19 @@ def run_iter(algo, db, report, n_steps):
                 report["n_processed"] = work_df.shape[0]
                 logger.debug("get_work(...) returned %s tiles.", work_df.shape[0])
 
-                # If there's work, return it!
                 if work_df.shape[0] > 0:
+                    # If there's work, update the step info and return the work!
+                    report["runtime_update_step_info"] = time.time() - start
                     db.set_step_info(
                         step_id=step_id,
                         step_iter=step_iter + 1,
                         n_iter=step_n_iter,
                         n_tiles=step_n_tiles,
                     )
-                    logger.debug("Processing %s tiles.", work_df.shape[0])
-                    report["runtime_update_step_info"] = time.time() - start
-                    start = time.time()
-                    results = algo.process_tiles(tiles_df=work_df, report=report)
-                    report["runtime_processing"] = time.time() - start
-                    db.insert_results(results, algo.get_orderer())
-                    return status, report
+                    # Why do we return the work instead of just processing it here?
+                    # Because the database is currently locked and we would
+                    # like to release the lock while we process tiles!
+                    return status, work_df, report
                 else:
                     # If step_iter < step_n_iter but there's no work, then
                     # The INSERT into tiles that was supposed to populate
@@ -264,12 +268,12 @@ def run_iter(algo, db, report, n_steps):
                     start = time.time()
                     if status:
                         logger.debug("Convergence!!")
-                        return WorkerStatus.CONVERGED, report
+                        return WorkerStatus.CONVERGED, None, report
 
                     if step_id >= n_steps - 1:
                         # We've completed all the steps, so we're done.
                         logger.debug("Reached max number of steps. Terminating.")
-                        return WorkerStatus.REACHED_N_STEPS, report
+                        return WorkerStatus.REACHED_N_STEPS, None, report
 
                     # If we haven't converged, we create a new step.
                     new_step_id = algo.new_step(step_id + 1, report, convergence_data)
@@ -283,7 +287,7 @@ def run_iter(algo, db, report, n_steps):
                             "New packet is empty. Terminating despite "
                             "failure to converge."
                         )
-                        return WorkerStatus.FAILED, report
+                        return WorkerStatus.FAILED, None, report
                     else:
                         # Successful new packet. We should check for work again
                         # immediately.
@@ -315,7 +319,7 @@ def run_iter(algo, db, report, n_steps):
         report["runtime_wait_for_work"] += time.time() - start
         i += 1
 
-    return WorkerStatus.STUCK, report
+    return WorkerStatus.STUCK, None, report
 
 
 def step_iter_assignments(df, packet_size):
