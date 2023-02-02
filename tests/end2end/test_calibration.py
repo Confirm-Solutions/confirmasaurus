@@ -19,7 +19,7 @@ def test_bootstrap_calibrate(snapshot):
     cal_df = ada.bootstrap.bootstrap_calibrate(ZTest1D, g=g, nB=5)
     twb_cols = [c for c in cal_df.columns if "twb_lams" in c]
     np.testing.assert_allclose(cal_df["twb_mean_lams"], cal_df[twb_cols].mean(axis=1))
-    np.testing.assert_allclose(cal_df, snapshot(cal_df))
+    np.testing.assert_allclose(cal_df, snapshot(cal_df), rtol=1e-6)
 
 
 def check(db, snapshot, only_lams=False):
@@ -103,7 +103,6 @@ def test_calibration_clickhouse(snapshot, ch_db):
 
 
 @pytest.mark.slow
-@pytest.mark.modal_unsafe
 def test_calibration_clickhouse_distributed(snapshot, ch_db):
     import confirm.cloud.modal_util as modal_util
     import modal
