@@ -157,7 +157,7 @@ class AdaCalibration:
         ########################################
         any_impossible = self.db.worst_tile("impossible")["impossible"].iloc[0]
         if any_impossible:
-            return False
+            return False, None
 
         worst_tile = self.db.worst_tile("lams")
         lamss = worst_tile["lams"].iloc[0]
