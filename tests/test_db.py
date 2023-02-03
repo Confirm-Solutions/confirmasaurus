@@ -47,7 +47,7 @@ class DBTester:
         work = db.get_tiles().nsmallest(100, "theta0")
         work["orderer"] = np.linspace(5, 6, work.shape[0])
         work["eligible"] = True
-        db.insert_results(work)
+        db.insert_results(work, "orderer")
 
     def test_connect(self):
         self.connect()
@@ -108,13 +108,13 @@ class DBTester:
             pd_tiles.worst_tile("orderer"), db_tiles.worst_tile("orderer")
         )
 
-    def test_select_tiles(self):
+    def test_next(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
 
-        pd_work = pd_tiles.select_tiles(3, "theta0")
-        db_work = db_tiles.select_tiles(3, "theta0")
+        pd_work = pd_tiles.next(3, "theta0")
+        db_work = db_tiles.next(3, "theta0")
         assert_frame_equal_special(pd_work, db_work)
         assert_frame_equal_special(pd_tiles.get_results(), db_tiles.get_results())
 
@@ -141,8 +141,8 @@ class DBTester:
         finish(db_work, pd_work)
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-        pd_work = pd_tiles.select_tiles(7, "theta0")
-        db_work = db_tiles.select_tiles(7, "theta0")
+        pd_work = pd_tiles.next(7, "theta0")
+        db_work = db_tiles.next(7, "theta0")
         assert pd_work.shape[0] == 2
         assert db_work.shape[0] == 2
         assert_frame_equal_special(pd_work, db_work)
@@ -199,10 +199,10 @@ class DBTester:
 
         pd_tiles = db.PandasTiles()
         pd_tiles.init_tiles(g.df)
-        pd_tiles.insert_results(g.df)
+        pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
         db_tiles.init_tiles(g.df)
-        db_tiles.insert_results(g.df)
+        db_tiles.insert_results(g.df, "orderer")
 
         np.testing.assert_allclose(
             pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()

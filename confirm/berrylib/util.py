@@ -2,11 +2,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# this let's me leave in the "@profile" lines when I'm not running
-# line_profiler.
-if "profile" not in __builtins__:
-    __builtins__["profile"] = lambda x: x
-
 
 @dataclass
 class QuadRule:

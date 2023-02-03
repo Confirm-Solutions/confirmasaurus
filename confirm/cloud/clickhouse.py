@@ -255,7 +255,7 @@ class Clickhouse:
         cols = ",".join(
             [c for c in self.results_columns() if c not in ["active", "eligible"]]
         )
-        return _query_df(
+        out = _query_df(
             self.client,
             f"""
             select {cols},
@@ -268,6 +268,9 @@ class Clickhouse:
             from results
         """,
         )
+        out["active"] = out["active"].astype(bool)
+        out["eligible"] = out["eligible"].astype(bool)
+        return out
 
     def get_step_info(self):
         out = literal_eval(self.redis_con.get(f"{self.job_id}:step_info").decode())
@@ -287,7 +290,9 @@ class Clickhouse:
         # all relevant inserts are done.
         #
         if not self._results_table_exists:
-            self._results_table_exists = does_table_exist(self.client, "results")
+            self._results_table_exists = does_table_exist(
+                self.client, self.job_id, "results"
+            )
             if not self._results_table_exists:
                 return -1
 
@@ -306,8 +311,8 @@ class Clickhouse:
         logger.debug(f"writing {df.shape[0]} tiles")
         _insert_df(self.client, "tiles", df)
 
-    def insert_results(self, df: pd.DataFrame):
-        self._create_results_table(df)
+    def insert_results(self, df: pd.DataFrame, orderer: str):
+        self._create_results_table(df, orderer)
         logger.debug(f"writing {df.shape[0]} results")
         _insert_df(self.client, "results", df)
 
@@ -334,7 +339,7 @@ class Clickhouse:
             """,
         )
 
-    def select_tiles(self, n, order_col):
+    def next(self, n, order_col):
         return _query_df(
             self.client,
             f"""
@@ -369,17 +374,17 @@ class Clickhouse:
 
         return lamss
 
-    def _create_results_table(self, results_df):
+    def _create_results_table(self, results_df, orderer):
         if self._results_table_exists:
             return
         self._results_table_exists = True
         results_cols = get_create_table_cols(results_df)
         cmd = f"""
         create table if not exists results ({",".join(results_cols)})
-            engine = MergeTree() order by orderer
+            engine = MergeTree() order by ({orderer})
         """
         self.client.command(cmd)
-        self.insert_results(results_df)
+        self.insert_results(results_df, orderer)
 
     def close(self):
         self.client.close()
@@ -500,13 +505,14 @@ class Clickhouse:
         return Clickhouse(connection_details, client, redis_con, job_id)
 
 
-def does_table_exist(client, table_name: str) -> bool:
+def does_table_exist(client, job_id: str, table_name: str) -> bool:
     return (
         len(
             client.query(
                 f"""
-        select * from information_schema.schemata
-            where schema_name = '{table_name}'
+        select * from information_schema.tables
+            where table_schema = '{job_id}'
+                and table_name = '{table_name}'
         """
             ).result_set
         )

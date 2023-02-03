@@ -111,7 +111,8 @@ class Driver:
                     tie_est=tie_sum / K,
                     tie_cp_bound=tie_cp_bound,
                     tie_bound=tie_bound,
-                )
+                ),
+                index=K_df.index,
             )
 
         return _groupby_apply_K(df, f)
@@ -133,12 +134,12 @@ class Driver:
                 self.tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
-            return pd.DataFrame(bootstrap_lams, columns=["lams"])
+            return pd.DataFrame(bootstrap_lams, columns=["lams"], index=K_df.index)
 
         return _groupby_apply_K(df, f)
 
 
-def _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size):
+def _setup(modeltype, g, model_seed, K, model_kwargs):
     g = copy.deepcopy(g)
     if K is not None:
         g.df["K"] = K
@@ -148,19 +149,21 @@ def _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size):
         default_K = 2**14
         if "K" not in g.df.columns:
             g.df["K"] = default_K
+        # If the K column is present but has some 0s, we replace those with the
+        # default value.
         g.df.loc[g.df["K"] == 0, "K"] = default_K
 
     if model_kwargs is None:
         model_kwargs = {}
     model = modeltype(model_seed, g.df["K"].max(), **model_kwargs)
-    return Driver(model, tile_batch_size=tile_batch_size), g
+    return model, g
 
 
 def validate(
     modeltype,
+    *,
     g,
     lam,
-    *,
     delta=0.01,
     model_seed=0,
     K=None,
@@ -186,30 +189,31 @@ def validate(
                       Defaults to None.
 
     Returns:
-        A dataframe with the following columns:
+        A dataframe with one row for each tile with the following columns:
         - tie_sum: The number of test statistics below the critical threshold.
         - tie_est: The estimated Type I Error at the simulation points.
         - tie_cp_bound: The Clopper-Pearson bound on the Type I error at the
                         simulation point.
         - tie_bound: The bound on the Type I error over the whole tile.
     """
-    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size)
+    model, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    driver = Driver(model, tile_batch_size=tile_batch_size)
     rej_df = driver.validate(g.df, lam, delta=delta)
     return rej_df
 
 
 def calibrate(
     modeltype,
-    g,
     *,
-    model_seed=0,
+    g,
     alpha=0.025,
+    model_seed=0,
     K=None,
     tile_batch_size=64,
     model_kwargs=None
 ):
     """
-    calibrate the critical threshold for a given level of Type I Error control.
+    Calibrate the critical threshold for a given level of Type I Error control.
 
     Args:
         modeltype: The model class.
@@ -224,8 +228,10 @@ def calibrate(
            Defaults to None.
 
     Returns:
-        _description_
+        A dataframe with one row for each tile containing just the "lams"
+        column, which contains lambda* for each tile.
     """
-    driver, g = _setup(modeltype, g, model_seed, K, model_kwargs, tile_batch_size)
+    model, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    driver = Driver(model, tile_batch_size=tile_batch_size)
     calibrate_df = driver.calibrate(g.df, alpha)
     return calibrate_df
