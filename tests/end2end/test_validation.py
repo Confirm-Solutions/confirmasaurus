@@ -44,13 +44,14 @@ def check(db, snapshot):
     pd.testing.assert_frame_equal(check_subset, compare, check_dtype=False)
 
 
-@pytest.mark.slow
 def test_validation(snapshot):
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, db = ada.ada_validate(ZTest1D, g=g, lam=-1.96, tile_batch_size=1)
+        iter, reports, db = ada.ada_validate(
+            ZTest1D, g=g, lam=-1.96, prod=False, tile_batch_size=1
+        )
     check(db, snapshot)
 
 
@@ -65,3 +66,30 @@ def test_validation_clickhouse(snapshot, ch_db):
         )
 
     check(db, snapshot)
+
+
+def test_validation_nonadagrid_using_adagrid(snapshot):
+    g = ip.cartesian_grid([-1], [1], n=[10], null_hypos=[ip.hypo("x < 0")])
+    # lam = -1.96 because we negated the statistics so we can do a less than
+    # comparison.
+    lam = -1.96
+    K = 2**13
+    iter, reports, db = ada.ada_validate(
+        ZTest1D,
+        lam=lam,
+        g=g,
+        init_K=K,
+        n_K_double=0,
+        max_target=0,
+        global_target=0,
+        step_size=2**20,
+        n_steps=1,
+        tile_batch_size=1,
+        prod=False,
+    )
+    results_df_nonada = ip.validate(ZTest1D, lam=lam, g=g, K=K, tile_batch_size=1)
+    results_df_ada = db.get_results().sort_values(by=["theta0"])[
+        ["tie_sum", "tie_est", "tie_cp_bound", "tie_bound"]
+    ]
+    pd.testing.assert_frame_equal(results_df_ada, results_df_nonada)
+    pd.testing.assert_frame_equal(results_df_ada, snapshot(results_df_ada))

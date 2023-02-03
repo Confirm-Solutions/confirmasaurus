@@ -51,6 +51,7 @@ class AdaValidate:
         rej_df.insert(3, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
         rej_df.insert(4, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
         rej_df.insert(5, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])
+
         # The orderer for validation consists of a tuple
         # total_cost_order: the first entry is the total_cost thresholded by
         #   whether the total_cost is greater than the convergence criterion.
@@ -100,111 +101,49 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    def new_step(self, new_step_id, report, max_tie_est):
+    def select_tiles(self, report, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         # TODO: lots of new_step is duplicated with calibration.
-        raw_tiles = self.db.select_tiles(
+        raw_tiles = self.db.next(
             self.c["step_size"], "total_cost_order, tie_bound_order"
         )
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
-        tiles = raw_tiles[include].copy()
-        logger.info(
-            f"Preparing new step {new_step_id} with {tiles.shape[0]} parent tiles."
-        )
-        tiles["finisher_id"] = self.c["worker_id"]
-        tiles["query_time"] = imprint.timer.simple_timer()
-        if tiles.shape[0] == 0:
+        tiles_df = raw_tiles[include].copy()
+        logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
+        tiles_df["finisher_id"] = self.c["worker_id"]
+        tiles_df["query_time"] = imprint.timer.simple_timer()
+        if tiles_df.shape[0] == 0:
             return "empty"
 
         report.update(
             dict(
-                n_tiles=tiles.shape[0],
-                step_max_total_cost=tiles["total_cost"].max(),
-                step_max_grid_cost=tiles["grid_cost"].max(),
-                step_max_sim_cost=tiles["sim_cost"].max(),
+                n_tiles=tiles_df.shape[0],
+                step_max_total_cost=tiles_df["total_cost"].max(),
+                step_max_grid_cost=tiles_df["grid_cost"].max(),
+                step_max_sim_cost=tiles_df["sim_cost"].max(),
             )
         )
 
-        deepen_cheaper = tiles["sim_cost"] > tiles["grid_cost"]
-        needs_refine = (tiles["grid_cost"] > self.c["global_target"]) | (
-            (tiles["grid_cost"] > self.c["max_target"])
-            & (tiles["tie_bound"] > max_tie_est)
+        deepen_cheaper = tiles_df["sim_cost"] > tiles_df["grid_cost"]
+        needs_refine = (tiles_df["grid_cost"] > self.c["global_target"]) | (
+            (tiles_df["grid_cost"] > self.c["max_target"])
+            & (tiles_df["tie_bound"] > max_tie_est)
         )
-        tiles["deepen"] = deepen_cheaper & (tiles["K"] < self.max_K)
-        tiles["refine"] = (~tiles["deepen"]) & needs_refine
-        tiles["refine"] |= ((~tiles["refine"]) & (~tiles["deepen"])) & (
-            tiles["grid_cost"] > (tiles["sim_cost"] / 5)
+        tiles_df["deepen"] = deepen_cheaper & (tiles_df["K"] < self.max_K)
+        tiles_df["refine"] = (~tiles_df["deepen"]) & needs_refine
+        tiles_df["refine"] |= ((~tiles_df["refine"]) & (~tiles_df["deepen"])) & (
+            tiles_df["grid_cost"] > (tiles_df["sim_cost"] / 5)
         )
-        tiles["active"] = ~(tiles["refine"] | tiles["deepen"])
-
-        # Record what we decided to do.
-        self.db.finish(
-            tiles[
-                [
-                    "id",
-                    "step_id",
-                    "step_iter",
-                    "active",
-                    "query_time",
-                    "finisher_id",
-                    "refine",
-                    "deepen",
-                ]
-            ]
-        )
-
-        n_refine = tiles["refine"].sum()
-        n_deepen = tiles["deepen"].sum()
-        report.update(
-            dict(
-                n_refine=n_refine,
-                n_deepen=n_deepen,
-                n_complete=tiles["active"].sum(),
-            )
-        )
-
-        ########################################
-        # Step 6: Deepen and refine tiles.
-        ########################################
-        nothing_to_do = n_refine == 0 and n_deepen == 0
-        if nothing_to_do:
-            return "empty"
-
-        df = adagrid.refine_and_deepen(
-            tiles, self.null_hypos, self.max_K, self.c["worker_id"]
-        ).df
-        df["step_id"] = new_step_id
-        df["step_iter"], n_packets = adagrid.step_iter_assignments(
-            df, self.c["packet_size"]
-        )
-        df["creator_id"] = self.c["worker_id"]
-        df["creation_time"] = imprint.timer.simple_timer()
-
-        n_tiles = df.shape[0]
-        logger.debug(
-            f"new step {(new_step_id, 0, n_packets, n_tiles)} "
-            f"n_tiles={n_tiles} packet_size={self.c['packet_size']}"
-        )
-        self.db.set_step_info(
-            step_id=new_step_id, step_iter=0, n_iter=n_packets, n_tiles=n_tiles
-        )
-
-        self.db.insert_tiles(df)
-        report.update(
-            dict(
-                n_new_tiles=n_tiles, new_K_distribution=df["K"].value_counts().to_dict()
-            )
-        )
-        return new_step_id
+        tiles_df["active"] = ~(tiles_df["refine"] | tiles_df["deepen"])
+        return tiles_df
 
 
 def ada_validate(
     modeltype,
-    lam,
     *,
+    lam,
     g=None,
     db=None,
-    transformation=None,
     model_seed=0,
     model_kwargs=None,
     delta=0.01,
@@ -221,4 +160,67 @@ def ada_validate(
     overrides: dict = None,
     callback=adagrid.print_report,
 ):
-    return adagrid.run(modeltype, g, db, locals(), AdaValidate, callback)
+    """
+    The entrypoint for the adaptive validation algorithm.
+
+    Args:
+        modeltype: The model class to use.
+        lam: The test statistic threshold to use for deciding to reject the
+            null hypothesis.
+        g: The initial grid. If not provided, the grid is assumed to be stored
+            in the database. At least one of `g` or `db` must be provided.
+        db: The database backend to use. Defaults to `db.DuckDB.connect()`.
+        model_seed: The random seed for the model. Defaults to 0.
+        model_kwargs: Additional keyword arguments for constructing the Model
+            object. Defaults to None.
+        delta: The pointwise Clopper-Pearson confidence intervals will have a
+            fractional width of 1 - `delta`. Defaults to 0.01 which results in a
+            99% confidence interval.
+        init_K: Initial K for the first tiles. Defaults to 2**13.
+        n_K_double: The number of doublings of K. The maximum K will be
+            `init_K * 2 ** (n_K_double + 1)`. Defaults to 4.
+        tile_batch_size: The number of tiles to simulate in a single batch.
+            Defaults to 64 on GPU and 4 on CPU.
+        max_target: The limit on allowed slack in fraction Type I Error for
+            tiles that have a Type I Error bound that is above the worst case
+            simulated Type I Error. This convergence criterion parameter is
+            useful for tightening the bound in the areas where it matters most.
+            Defaults to 0.002.
+        global_target: The limit on allowed slack in fraction Type I Error for
+            any tile regardless of its Type I Error bound value. This convergence
+            criterion parameter is useful for getting a tighter fit to the Type I
+            Error surface throughout parameter space regardless of the value of the
+            Type I Error. Defaults to 0.005.
+        n_steps: The number of Adagrid steps to run. Defaults to 100.
+        step_size: The number of tiles in an Adagrid step produced by a single
+           Adagrid tile selection step. This is different from
+           packet_size because we select tiles once and then run many
+           simulation "iterations" in parallel each processing one
+           packet of tiles. Defaults to 2**10.
+        n_iter: The number of packets this worker should simulate before
+            exiting. Defaults to None which places no limit. Limiting the number of
+            packets is useful for stopping a worker after a specified amount of
+            work.
+        packet_size: The number of tiles to process per iteration. Defaults to
+            None. If None, we use the same value as step_size.
+        prod: Is this a production run? If so, we will collection extra system
+            configuration info. Setting this to False will make startup time
+            a bit faster. Defaults to True.
+        overrides: If this call represents a continuation of an existing
+            adagrid job, the overrides dictionary will be used to override the
+            preset configuration settings. All other arguments will be ignored.
+            If this calls represents a new adagrid job, this argument is
+            ignored.
+        callback: A function accepting three arguments (iter, report, db)
+            that can perform some reporting or printing at each iteration.
+            Defaults to print_report.
+
+    Returns:
+        ada_iter: The final iteration number.
+        reports: A list of the report dicts from each iteration.
+        db: The database object used for the run. This can be used to
+            inspect the results of the run.
+    """
+    return adagrid.AdagridRunner(
+        modeltype, g, db, locals(), AdaValidate, callback
+    ).run()
