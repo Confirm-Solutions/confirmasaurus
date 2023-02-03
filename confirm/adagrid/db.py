@@ -87,7 +87,7 @@ class PandasTiles:
         )
         return self.tiles_df.loc[where]
 
-    def select_tiles(self, n: int, order_col: str) -> pd.DataFrame:
+    def next(self, n: int, order_col: str) -> pd.DataFrame:
         out = self.results_df.loc[self.results_df["eligible"]].nsmallest(n, order_col)
         return out
 
@@ -222,7 +222,7 @@ class DuckDBTiles:
             """,
         ).df()
 
-    def select_tiles(self, n, order_col):
+    def next(self, n, order_col):
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
         t = self.con.begin()

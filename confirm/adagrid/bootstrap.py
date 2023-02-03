@@ -9,9 +9,25 @@ from imprint import grid
 
 
 class BootstrapCalibrate:
+    """
+    Driver classes are the layer of imprint that is directly responsible for
+    asking the Model for simulations.
+
+    This driver has two entrypoints:
+    1. `bootstrap_calibrate(...)`: calibrates (calculating lambda*) for every tile in a
+       grid. The calibration is performed for many bootstrap resamplings of the
+       simulated test statistics. This bootstrap gives a picture of the
+       distribution of lambda*.
+    2. `many_rej(...)`: calculates the number of rejections for many different
+       values values of lambda*.
+
+    For the basic `validate` and `calibrate` drivers, see `imprint.driver`.
+    """
+
     def __init__(
         self, model, bootstrap_seed, nB, Ks, tile_batch_size=64, worker_id=None
     ):
+
         self.model = model
         self.worker_id = worker_id
         self.forward_boundv, self.backward_boundv = driver.get_bound(
@@ -24,28 +40,48 @@ class BootstrapCalibrate:
             )
         )
 
-        bootstrap_key = jax.random.PRNGKey(bootstrap_seed)
+        self.tile_batch_size = tile_batch_size
+
         self.Ks = Ks
         self.nB = nB
+        np.random.seed(bootstrap_seed)
         self.bootstrap_idxs = {
-            K: jnp.concatenate(
+            K: np.concatenate(
                 (
-                    jnp.arange(K)[None, :],
-                    jnp.sort(
-                        jax.random.choice(
-                            bootstrap_key,
-                            K,
-                            shape=(self.nB + self.nB, K),
-                            replace=True,
-                        ),
+                    np.arange(K)[None, :],
+                    np.sort(
+                        np.random.choice(K, size=(self.nB + self.nB, K), replace=True),
                         axis=-1,
                     ),
                 )
-            ).astype(jnp.int32)
+            ).astype(np.int32)
             for K in Ks
         }
 
-        self.tile_batch_size = tile_batch_size
+        # Sampling using JAX is substantially slower on CPU than numpy.
+        # I'm unsure what the performance ratio is like on GPU.
+        # But, fast sampling for small nB and K is important for rapid
+        # development, debugging and testing. I'm leaving this here so that
+        # we can easily switch back to JAX sampling if we need to.
+        #
+        # bootstrap_key = jax.random.PRNGKey(bootstrap_seed)
+        # self.bootstrap_idxs = {
+        #     K: jnp.concatenate(
+        #         (
+        #             jnp.arange(K)[None, :],
+        #             jnp.sort(
+        #                 jax.random.choice(
+        #                     bootstrap_key,
+        #                     K,
+        #                     shape=(self.nB + self.nB, K),
+        #                     replace=True,
+        #                 ),
+        #                 axis=-1,
+        #             ),
+        #         )
+        #     ).astype(jnp.int32)
+        #     for K in Ks
+        # }
 
     def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
         tile_batch_size = tile_batch_size or self.tile_batch_size
@@ -116,16 +152,60 @@ class BootstrapCalibrate:
 
 def bootstrap_calibrate(
     modeltype,
-    g: grid.Grid,
     *,
+    g: grid.Grid,
+    alpha: float = 0.025,
     model_seed: int = 0,
     bootstrap_seed: int = 0,
     nB: int = 50,
-    alpha: float = 0.025,
     K: int = None,
     tile_batch_size: int = 64,
     model_kwargs: dict = None,
 ):
+    """
+    Calibrate the critical threshold for a given level of Type I Error control.
+
+    Additionally, repeat this calibration for a two sets of bootstrap
+    resamplings of the simulations:
+    - the B (aka "bias") bootstrap resamples the simulations in order to
+      estimate the bias in the calibrated lambda** (min of lambda*).
+    - the twb (aka "tile-wise bootstrap") resamples the simulations in order
+      to estimate the variance in lambda*
+
+    The motivation for having these two bootstraps comes from the Adagrid
+    algorithm where the bias bootstrap is used to estimate bias for the
+    convergence criterion whereas the twb bootstrap is used to decide whether
+    to add more simulations to a tile.
+
+    Args:
+        modeltype: The model class.
+        g: The grid.
+        alpha: The Type I Error control level. Defaults to 0.025.
+        model_seed: The random seed. Defaults to 0.
+        bootstrap_seed: The seed used for drawing the bootstrap resamples.
+            Defaults to 0.
+        nB: The number of resamples for both the bias and the tilewise
+            bootstraps. That is to say, the total number of resamplings will be
+            2*nB. Defaults to 50.
+        K: The number of simulations. If this is unspecified, it is assumed
+           that the grid has a "K" column containing per-tile simulation counts.
+           Defaults to None.
+        tile_batch_size: The number of tiles to simulate in a single batch.
+        model_kwargs: Keyword arguments passed to the model constructor.
+           Defaults to None.
+
+    Returns:
+        A dataframe with one row for each tile containing the columns:
+        - lams: The calibrated lambda* from the original sample.
+        - B_lams{i}: nB columns containing the calibrated lambda* from the
+            bias bootstrap resamples.
+        - twb_lams{i}: nB columns containing the calibrated lambda* from the
+            tilewise bootstrap resamples.
+        - twb_min_lams: The minimum of the twb_lams{i} columns.
+        - twb_mean_lams: The mean of the twb_lams{i} columns.
+        - twb_max_lams: The maximum of the twb_lams{i} columns.
+        - alpha0: The alpha0 value used to calibrate the lambda*.
+    """
     model, g = driver._setup(modeltype, g, model_seed, K, model_kwargs)
     Ks = np.sort(g.df["K"].unique())
     cal_df = BootstrapCalibrate(

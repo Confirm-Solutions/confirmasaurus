@@ -339,7 +339,7 @@ class Clickhouse:
             """,
         )
 
-    def select_tiles(self, n, order_col):
+    def next(self, n, order_col):
         return _query_df(
             self.client,
             f"""
