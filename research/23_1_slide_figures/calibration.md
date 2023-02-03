@@ -36,7 +36,8 @@ ax.scatter(np.full(len(ties), theta0), ties, s=30, color='b', label='$f_{\lambda
 ax.scatter(theta0, alpha, s=70, color='r', marker='*', label='$f_{\lambda^*}(\\theta_0)$')
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
-ax.spines['left'].set_visible(False)
+#ax.spines['left'].set_visible(False)
+ax.set_ylabel('Type I Error $\\rightarrow$')
 ax.axes.set_xticks([theta0], labels=['$\\theta_0$'])
 ax.axes.set_yticks([alpha], labels=['$\\alpha$'])
 ax.set_xlim(left=theta0-0.1, right=theta0+0.1)
@@ -55,6 +56,7 @@ def calib_tie(theta0, n_sims, alpha):
 ```python
 n_sims_list = np.array([50, 70, 80])
 calib_ties = np.array([calib_tie(theta0, n, alpha) for n in n_sims_list])
+calib_ties = np.sort(calib_ties) # just for visuals
 
 fig = plt.figure()
 ax = plt.subplot(1,1,1)
@@ -66,7 +68,7 @@ for n_sim, tie in zip(n_sims_list, calib_ties):
     )
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
-ax.spines['left'].set_visible(False)
+ax.set_ylabel('Type I Error $\\rightarrow$')
 ax.axes.set_xticks([theta0], labels=['$\\theta_0$'])
 ax.axes.set_yticks([alpha], labels=['$\\alpha$'])
 ax.set_xlim(left=theta0-0.1, right=theta0+0.1)
@@ -89,7 +91,7 @@ ax.annotate("$\mathbb{E}[f_{\hat{{\lambda}}^*}(\\theta)]$", (theta, alpha * 1.05
 
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
-ax.spines['left'].set_visible(False)
+ax.set_ylabel('Type I Error $\\rightarrow$')
 ax.axes.set_xticks([theta0, theta], labels=['$\\theta_0$', '$\\theta$'])
 ax.axes.set_yticks([alpha], labels=['$\\alpha$'])
 ax.set_xlim(left=theta0-0.1, right=theta+0.1)
@@ -122,7 +124,7 @@ ax.plot(theta0 + vs, fwd_bounds, linestyle='--', color='b')
 
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
-ax.spines['left'].set_visible(False)
+ax.set_ylabel('Type I Error $\\rightarrow$')
 ax.axes.set_xticks([theta0, theta], labels=['$\\theta_0$', '$\\theta$'])
 ax.axes.set_yticks([alpha], labels=['$\\alpha$'])
 ax.set_xlim(left=theta0-0.1, right=theta+0.1)
@@ -172,5 +174,80 @@ plt.xticks(np.log(nsims), rotation=45)
 plt.gca().set_xticklabels(nsims)
 plt.xlabel("Number of Calibration Simulations")
 plt.savefig("figures/z-test-cost.pdf", bbox_inches="tight")
+plt.show()
+```
+
+```python
+def calib_full_tie(thetas, n_tiles, n_sim, seed=0, theta_min=theta_min, theta_max=theta_max, alpha=alpha):
+    key = jax.random.PRNGKey(seed)
+    norms = jax.random.normal(key, (n_sim,))
+    bwd_solver = normal.BackwardQCPSolver(1)
+
+    def _tie(t, max_theta, k):
+        return scipy.stats.beta.expect(
+            lambda x: scipy.stats.norm.cdf(
+                scipy.stats.norm.ppf(x) + 
+                + t - max_theta 
+            ),
+            (k, n_sim+1-k),
+        ) 
+        
+    _vtie = np.vectorize(_tie)
+
+    out = []
+    for n_tile in n_tiles:
+        grid = ip.cartesian_grid([theta_min], [theta_max], n=[n_tile], null_hypos=[ip.hypo("x <= 0")])
+        theta = grid.get_theta()[:, 0]
+        radius = grid.get_radii()[0, 0]
+        q_prime = bwd_solver.solve(radius, alpha)
+        alpha_prime = normal.tilt_bound_bwd_tile(q_prime, 1, radius, alpha)
+        k = int((n_sim + 1) * alpha_prime)
+        max_theta = np.max(theta)
+
+        out.append(_vtie(thetas, max_theta, k))
+        
+    return np.array(out)
+
+```
+
+```python
+thetas = np.linspace(theta_min, theta_max, 100)
+n_tiles = [2, 4, 10, 64]
+N_large = 1000
+ties_N = calib_full_tie(thetas, n_tiles, N_large)
+```
+
+```python
+n_sims = [50, 70, 100, 1000]
+I_large = 64
+ties_I = np.array([calib_full_tie(thetas, [I_large], n_sim)[0] for n_sim in n_sims])
+```
+
+```python
+fig, axes = plt.subplots(1, 2, figsize=(10, 6))
+
+for i, n_tile in enumerate(n_tiles):
+    tie_i = ties_N[i]
+    axes[0].plot(thetas, tie_i*100, linestyle='--', label=f"I={n_tile}")
+
+for i, n_sim in enumerate(n_sims):
+    tie_i = ties_I[i]
+    axes[1].plot(thetas, tie_i*100, linestyle='--', label=f"N={n_sim}")
+
+z_crit = scipy.stats.norm.isf(alpha)
+true_ties = tie(thetas, z_crit)
+
+for i in range(2):
+    axes[i].plot(thetas, true_ties*100, linestyle='-', label="Optimal Type I Error")
+    if i == 0:
+        title = f"$\mathbb{{E}}[f_{{\hat{{\lambda}}^*}}(\\theta)]$ (N={N_large})"
+    else:
+        title = f"$\mathbb{{E}}[f_{{\hat{{\lambda}}^*}}(\\theta)]$ (I={I_large})"
+    axes[i].set_title(title)
+    axes[i].legend()
+    axes[i].set_xlabel('$\\theta$')
+    axes[i].set_ylabel('Type I Error (\%)')
+plt.tight_layout()
+plt.savefig('figures/calibration_z_test.pdf', bbox_inches='tight')
 plt.show()
 ```
