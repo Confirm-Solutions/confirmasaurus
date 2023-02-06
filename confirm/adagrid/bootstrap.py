@@ -135,6 +135,7 @@ class BootstrapCalibrate:
         out["idx"] = driver._calibration_index(
             df["K"].to_numpy(), out["alpha0"].to_numpy()
         )
+        out["K"] = df["K"]
         return out
 
     def many_rej(self, df, lams_arr):
@@ -153,7 +154,9 @@ class BootstrapCalibrate:
                 columns=[str(i) for i in range(lams_arr.shape[0])],
             )
 
-        return driver._groupby_apply_K(df, f)
+        out = driver._groupby_apply_K(df, f)
+        out["K"] = df["K"]
+        return out
 
 
 def bootstrap_calibrate(

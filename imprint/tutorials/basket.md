@@ -56,10 +56,6 @@ g_val = g.add_cols(validation_df)
 ```
 
 ```python
-g_val.df
-```
-
-```python
 ip.setup_nb()
 plt.figure(figsize=(10, 4), constrained_layout=True)
 theta_tiles = g_val.get_theta()

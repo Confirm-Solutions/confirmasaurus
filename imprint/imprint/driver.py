@@ -118,7 +118,9 @@ class Driver:
                 index=K_df.index,
             )
 
-        return _groupby_apply_K(df, f)
+        out = _groupby_apply_K(df, f)
+        out["K"] = df["K"]
+        return out
 
     def calibrate(self, df, alpha):
         def _batched(K, theta, vertices, null_truth):
@@ -145,6 +147,7 @@ class Driver:
 
         out = _groupby_apply_K(df, f)
         out["idx"] = _calibration_index(df["K"].to_numpy(), out["alpha0"].to_numpy())
+        out["K"] = df["K"]
         return out
 
 
@@ -154,6 +157,8 @@ default_K = 2**14
 
 
 def _setup(modeltype, g, model_seed, K, model_kwargs):
+    # NOTE: a no_copy parameter would be sensible in cases where the grid is
+    # very large.
     g = copy.deepcopy(g)
     if K is not None:
         g.df["K"] = K
