@@ -22,51 +22,6 @@ def test_bootstrap_calibrate(snapshot):
     np.testing.assert_allclose(cal_df, snapshot(cal_df), rtol=1e-6)
 
 
-def check(db, snapshot, only_lams=False):
-    snapshot.set_test_name("test_calibration")
-    lamss = db.worst_tile("lams")["lams"].iloc[0]
-    np.testing.assert_allclose(lamss, snapshot(lamss))
-
-    all_tiles_df = db.get_results().set_index("id")
-    check_cols = ["step_id", "theta0", "radii0", "null_truth0"] + [
-        c for c in all_tiles_df.columns if "lams" in c
-    ]
-    check_subset = (
-        all_tiles_df[check_cols]
-        .sort_values(by=["step_id", "theta0"])
-        .reset_index(drop=True)
-    )
-    compare = snapshot(check_subset)
-
-    # First check the calibration outputs. These are the most important values
-    # to get correct.
-    pd.testing.assert_frame_equal(check_subset, compare, check_dtype=False)
-    if only_lams:
-        return
-
-    compare_all_cols = snapshot(all_tiles_df)
-    # Compare the shared columns. This is helpful for ensuring that existing
-    # columns are identical in a situation where we add a new column.
-    pd.testing.assert_frame_equal(
-        all_tiles_df[compare_all_cols.columns.tolist()],
-        compare_all_cols,
-        check_like=True,
-        check_index_type=False,
-        check_dtype=False,
-    )
-
-    # Second, we check the remaining values. These are less important to be
-    # precisely reproduced, but we still want to make sure they are
-    # deterministic.
-    pd.testing.assert_frame_equal(
-        all_tiles_df,
-        compare_all_cols,
-        check_like=True,
-        check_index_type=False,
-        check_dtype=False,
-    )
-
-
 def test_calibration_cheap(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     iter, reports, db = ada.ada_calibrate(
@@ -100,7 +55,9 @@ def test_calibration(snapshot):
         iter, reports, db = ada.ada_calibrate(
             ZTest1D, g=g, nB=5, prod=False, tile_batch_size=1
         )
-    check(db, snapshot)
+    ip.testing.check_imprint_results(
+        ip.Grid(db.get_results(), None), snapshot, ignore_story=False
+    )
 
     # Compare DuckDB against pandas
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
@@ -121,15 +78,17 @@ def test_calibration(snapshot):
 
 @pytest.mark.slow
 def test_calibration_packetsize1(snapshot):
+    snapshot.set_test_name("test_calibration")
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     iter, reports, db = ada.ada_calibrate(
         ZTest1D, g=g, nB=5, tile_batch_size=1, packet_size=1
     )
-    check(db, snapshot, only_lams=True)
+    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
 
 
 @pytest.mark.slow
 def test_calibration_clickhouse(snapshot, ch_db):
+    snapshot.set_test_name("test_calibration")
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
@@ -138,11 +97,12 @@ def test_calibration_clickhouse(snapshot, ch_db):
             ZTest1D, g=g, db=ch_db, nB=5, tile_batch_size=1
         )
 
-    check(db, snapshot)
+    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
 
 
 @pytest.mark.slow
 def test_calibration_clickhouse_distributed(snapshot, ch_db):
+    snapshot.set_test_name("test_calibration")
     import confirm.cloud.modal_util as modal_util
     import modal
 
@@ -182,7 +142,7 @@ def test_calibration_clickhouse_distributed(snapshot, ch_db):
     with stub.run():
         list(worker.map(range(4)))
 
-    check(ch_db, snapshot, only_lams=True)
+    ip.testing.check_imprint_results(ip.Grid(ch_db.get_results(), None), snapshot)
 
 
 @pytest.mark.slow
@@ -240,8 +200,7 @@ def test_calibration_nonadagrid_using_adagrid(snapshot):
         prod=False,
     )
     results_df_nonada = ip.calibrate(ZTest1D, g=g, K=K, tile_batch_size=1)
-    results_df_ada = db.get_results()
-    results_df_ada = results_df_ada[results_df_nonada.columns]
+    results_df_ada = db.get_results()[results_df_nonada.columns]
     pd.testing.assert_frame_equal(results_df_ada, results_df_nonada)
     pd.testing.assert_frame_equal(results_df_ada, snapshot(results_df_ada))
 

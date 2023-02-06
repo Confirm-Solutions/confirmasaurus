@@ -551,7 +551,7 @@ def _load_null_hypos(db):
     for i in range(null_hypos_df.shape[0]):
         n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
         c = null_hypos_df["c"].iloc[i]
-        null_hypos.append(imprint.grid.HyperPlane(n, c))
+        null_hypos.append(imprint.planar_null.HyperPlane(n, c))
     return null_hypos
 
 
