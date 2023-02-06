@@ -44,12 +44,23 @@ def check(db, snapshot, only_lams=False):
     if only_lams:
         return
 
+    compare_all_cols = snapshot(all_tiles_df)
+    # Compare the shared columns. This is helpful for ensuring that existing
+    # columns are identical in a situation where we add a new column.
+    pd.testing.assert_frame_equal(
+        all_tiles_df[compare_all_cols.columns.tolist()],
+        compare_all_cols,
+        check_like=True,
+        check_index_type=False,
+        check_dtype=False,
+    )
+
     # Second, we check the remaining values. These are less important to be
     # precisely reproduced, but we still want to make sure they are
     # deterministic.
     pd.testing.assert_frame_equal(
         all_tiles_df,
-        snapshot(all_tiles_df),
+        compare_all_cols,
         check_like=True,
         check_index_type=False,
         check_dtype=False,

@@ -43,7 +43,7 @@ def test_hypo():
 
 
 def test_split1d():
-    new_theta, new_radii = HyperPlane(np.array([-1]), 0)._split_intersections(
+    new_theta, new_radii = HyperPlane(np.array([-1]), 0).split(
         np.array([[1.0]]),
         np.array([[1.1]]),
         np.array([[[-0.1], [2.1]]]),
@@ -54,7 +54,7 @@ def test_split1d():
 
 
 def test_split2d():
-    new_theta, new_radii = HyperPlane(np.array([-1, 0]), -0.1)._split_intersections(
+    new_theta, new_radii = HyperPlane(np.array([-1, 0]), -0.1).split(
         np.array([[1.0, 1.0]]),
         np.array([[1.1, 1.1]]),
         np.array([[[-0.1, -0.1], [-0.1, 2.1], [2.1, -0.1], [2.1, 2.1]]]),

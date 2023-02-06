@@ -32,97 +32,31 @@ class HyperPlane(grid.NullHypothesis):
             return NotImplemented
         return np.allclose(self.n, other.n) and np.isclose(self.c, other.c)
 
-    def split(self, g, inherit_cols):
-        grid_dim = g.d
+    def _pad_n(self, d):
         hp_dim = self.n.shape[0]
 
-        if grid_dim < hp_dim:
+        if d < hp_dim:
             raise ValueError(
-                f"HyperPlane has higher dimension (d={hp_dim})"
-                f" than grid (d={grid_dim})."
+                f"HyperPlane has higher dimension (d={hp_dim})" f" than grid (d={d})."
             )
-        elif grid_dim > hp_dim:
-            logger.warning(
+        elif d > hp_dim:
+            logger.debug(
                 "HyperPlane has dimension %s but grid"
                 " has dimension %s. Padding with zeros.",
                 hp_dim,
-                grid_dim,
+                d,
             )
-            H = HyperPlane(np.pad(self.n, (0, grid_dim - hp_dim)), self.c)
-            return H.split(g, inherit_cols)
+            return np.pad(self.n, (0, d - hp_dim))
+        else:
+            return self.n
 
-        eps = 1e-15
+    def curve(self, theta):
+        return self._pad_n(theta.shape[1]).dot(theta.T) - self.c
 
-        hypo_idx = len(g.null_hypos)
-        g.null_hypos.append(self)
-
-        ########################################
-        # Step 1: Assign tile centers
-        ########################################
-        # Assign tiles to the null/alt hypothesis space depending on which side
-        # of the plane the tile lies. At the moment, we only check the tile
-        # centers. Any tiles that intersect the plane will be handled next.
-        theta, vertices = g.get_theta_and_vertices()
-        radii = g.get_radii()
-        gridpt_dist = theta.dot(self.n) - self.c
-        g.df[f"null_truth{hypo_idx}"] = gridpt_dist >= 0
-
-        ########################################
-        # Step 2: Check for intersection
-        ########################################
-        # If a tile is close to the plane, we need to check for intersection.
-        # "close" is defined by whether the bounding ball of the tile
-        # intersects the plane.
-        close = np.abs(gridpt_dist) <= np.sqrt(np.sum(g.get_radii() ** 2, axis=-1))
-        # We ignore intersections of inactive tiles.
-        close &= g.df["active"].values
-
-        # For each tile that is close to the plane, we check each vertex to
-        # find which side of the plane the vertex lies on.
-        vertex_dist = vertices[close].dot(self.n) - self.c
-        all_above = (vertex_dist >= -eps).all(axis=-1)
-        all_below = (vertex_dist <= eps).all(axis=-1)
-        # If all vertices are above or all the vertices are below the plane, we
-        # can ignore the tile.
-        close_intersects = ~(all_above | all_below)
-        if close_intersects.sum() == 0:
-            return g
-        intersects = np.zeros(g.n_tiles, dtype=bool)
-        intersects[close] = close_intersects
-
-        ########################################
-        # Step 3: Split intersecting tiles
-        ########################################
-        new_theta, new_radii = self._split_intersections(
-            theta[intersects],
-            radii[intersects],
-            vertices[intersects],
-            vertex_dist[close_intersects],
-        )
-
-        parent_id = np.repeat(g.df["id"].values[intersects], 2)
-        null_truth = np.ones_like(parent_id, dtype=bool)
-        null_truth[1::2] = False
-
-        # BELOW HERE SEEMS GENERAL PURPOSE.
-        new_g = grid.init_grid(new_theta, new_radii, g.worker_id, parents=parent_id)
-
-        grid.inherit(new_g.df, g.df[intersects], 2, inherit_cols)
-        for i in range(hypo_idx):
-            new_g.df[f"null_truth{i}"] = np.repeat(
-                g.df[f"null_truth{i}"].values[intersects], 2
-            )
-        new_g.df[f"null_truth{hypo_idx}"] = null_truth
-
-        # Any tile that has been split should be ignored going forward.
-        # We're done with these tiles!
-        g.df["active"].values[intersects] = False
-
-        return g.concat(new_g)
-
-    def _split_intersections(self, theta, radii, vertices, vertex_dist):
+    def split(self, theta, radii, vertices, vertex_dist):
         eps = 1e-15
         d = theta.shape[1]
+        n = self._pad_n(d)
 
         ########################################
         # Step 1. Intersect tile edges with the hyperplane.
@@ -137,7 +71,7 @@ class HyperPlane(grid.NullHypothesis):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             # Intersect each edge with the plane.
-            alpha = (self.c - split_vs.dot(self.n)) / (split_dir.dot(self.n))
+            alpha = (self.c - split_vs.dot(n)) / (split_dir.dot(n))
             # Now we need to identify the new tile vertices. We have three
             # possible cases here:
             # 1. Intersection: indicated by 0 < alpha < 1. We give a little
