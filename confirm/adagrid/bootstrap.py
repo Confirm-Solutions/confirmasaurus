@@ -133,7 +133,7 @@ class BootstrapCalibrate:
 
         out = driver._groupby_apply_K(df, f)
         out["idx"] = driver._calibration_index(
-            df["K"].to_numpy(), df["alpha0"].to_numpy()
+            df["K"].to_numpy(), out["alpha0"].to_numpy()
         )
         return out
 
