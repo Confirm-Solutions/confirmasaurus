@@ -35,6 +35,7 @@ def test_calibration_cheap(snapshot):
         prod=False,
         tile_batch_size=1,
     )
+    # TODO: use ip.testing.check_imprint_results
     results_df = db.get_results()
     subset = (
         results_df[

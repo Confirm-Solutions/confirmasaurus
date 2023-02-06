@@ -127,16 +127,13 @@ class BootstrapCalibrate:
             lams_df.insert(
                 0, "twb_max_lams", bootstrap_lams[:, 1 + self.nB :].max(axis=1)
             )
+            lams_df.insert(0, "idx", driver._calibration_index(K, alpha0))
             lams_df.insert(0, "alpha0", alpha0)
+            lams_df.insert(0, "K", K)
 
             return lams_df
 
-        out = driver._groupby_apply_K(df, f)
-        out["idx"] = driver._calibration_index(
-            df["K"].to_numpy(), out["alpha0"].to_numpy()
-        )
-        out["K"] = df["K"]
-        return out
+        return driver._groupby_apply_K(df, f)
 
     def many_rej(self, df, lams_arr):
         def f(K, K_df):
@@ -155,7 +152,7 @@ class BootstrapCalibrate:
             )
 
         out = driver._groupby_apply_K(df, f)
-        out["K"] = df["K"]
+        out.insert(0, "K", df["K"])
         return out
 
 
