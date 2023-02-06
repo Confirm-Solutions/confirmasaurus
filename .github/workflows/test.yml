@@ -108,12 +108,13 @@ jobs:
     # https://github.com/NxtLvLSoftware/git-subtree-action
     # https://github.com/paygoc6/action-pull-request-another-repo
     steps:
-      # NOTE: This is technically unnecessary for running on the main branch.
-      # But when debugging, it's nice to run in a PR, so I've left it here.
-      - name: Extract branch name
-        shell: bash
-        run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF#refs/heads/})"
-        id: extract_branch
+      # NOTE: This step is unnecessary for running on the main branch. But when
+      # debugging, it's nice to run in a PR, so I've left it here. You'll also
+      # need to uncomment the `ref:` line below in actions/checkout
+      # - name: Extract branch name
+      #   shell: bash
+      #   run: echo "##[set-output name=branch;]$(echo ${GITHUB_HEAD_REF#refs/heads/})"
+      #   id: extract_branch
 
       - name: Install subrepo
         run: |
@@ -127,7 +128,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-          ref: ${{ steps.extract_branch.outputs.branch }}
+          # ref: ${{ steps.extract_branch.outputs.branch }}
           # Important!! We need to replace the default token in order to also
           # access the imprint github repo.
           # https://github.com/actions/checkout/blob/b4626ce19ce1106186ddf9bb20e706842f11a7c3/adrs/0153-checkout-v2.md#persist-credentials
@@ -137,6 +138,7 @@ jobs:
       - name: Push to imprint
         run: |
           source ~/git-subrepo/.rc
+          git pull 
           git subrepo push imprint \
             --branch main \
             --squash \
