@@ -22,8 +22,10 @@ class NullHypothesis(ABC):
         The split method should return a new grid where tiles that cross the
         null hypothesis boundary have been split. Expectations:
         - the method should be append-only with the exception of the "active"
-          column. That is to say: the old tiles should not be removed and
-          should not be modified.
+          and the new "null_truth{i}" columns. That is to say: the old tiles
+          should not be removed and should not be modified.
+        - the output grid should have a new "null_truth{i}" column indicating
+          whether the null hypothesis is true or false.
         - for any splitting, the parent tiles should be marked as inactive via
           the "active" column (`g.df["active"] = False`)
         - the child tiles resulting from a split should inherit the specified
@@ -31,7 +33,7 @@ class NullHypothesis(ABC):
           on the number of simulations from parent to child tiles.
         - If no splitting is necessary the old grid should be returned if no
           splitting is necessary. This will avoid copies.
-        - It is acceptable to modify the grid in place!
+        - It is acceptable to modify the input grid in place!
 
 
         Design notes:
@@ -46,10 +48,10 @@ class NullHypothesis(ABC):
         `g = g.concat(H.split(g, inherit_cols))`
         But this would require the Grid class calling code to identify those
         tiles that have been split and mark them as inactive. A further tweak
-        would be to have H.split return info about the tiles to be constructed
-        and then construct those tiles in the Grid class. Both these designs
-        would benefit from a good way to indicate "what happened" inside the
-        `split` method.
+        would be to have H.split return info about the new tiles to be
+        constructed and then construct those tiles in shared code in the  Grid
+        class. Both these designs would benefit from a good way to indicate
+        "what happened" inside the `split` method.
         """
         pass
 

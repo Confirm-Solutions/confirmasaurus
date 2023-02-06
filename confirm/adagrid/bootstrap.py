@@ -35,7 +35,7 @@ class BootstrapCalibrate:
         )
         self.calibratevv = jax.jit(
             jax.vmap(
-                jax.vmap(driver.calc_tuning_threshold, in_axes=(None, 0, None)),
+                jax.vmap(driver.calc_calibration_threshold, in_axes=(None, 0, None)),
                 in_axes=(0, None, 0),
             )
         )
@@ -93,7 +93,9 @@ class BootstrapCalibrate:
             # layers of batching. This is not currently implemented.
             stats = self.model.sim_batch(0, K, theta, null_truth)
             sorted_stats = jnp.sort(stats, axis=-1)
-            alpha0 = self.backward_boundv(alpha, theta, vertices)
+            alpha0 = self.backward_boundv(
+                np.full(theta.shape[0], alpha), theta, vertices
+            )
             return (
                 self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0),
                 alpha0,
@@ -129,7 +131,11 @@ class BootstrapCalibrate:
 
             return lams_df
 
-        return driver._groupby_apply_K(df, f)
+        out = driver._groupby_apply_K(df, f)
+        out["idx"] = driver._calibration_index(
+            df["K"].to_numpy(), df["alpha0"].to_numpy()
+        )
+        return out
 
     def many_rej(self, df, lams_arr):
         def f(K, K_df):
