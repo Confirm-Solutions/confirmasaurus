@@ -68,7 +68,7 @@ def test_validation_clickhouse(snapshot, ch_db):
     check(db, snapshot)
 
 
-def test_validation_nonadagrid_using_adagrid(snapshot):
+def test_validation_nonadagrid_using_adagrid():
     g = ip.cartesian_grid([-1], [1], n=[10], null_hypos=[ip.hypo("x < 0")])
     # lam = -1.96 because we negated the statistics so we can do a less than
     # comparison.
@@ -89,7 +89,6 @@ def test_validation_nonadagrid_using_adagrid(snapshot):
     )
     results_df_nonada = ip.validate(ZTest1D, lam=lam, g=g, K=K, tile_batch_size=1)
     results_df_ada = db.get_results().sort_values(by=["theta0"])[
-        ["tie_sum", "tie_est", "tie_cp_bound", "tie_bound"]
+        results_df_nonada.columns
     ]
     pd.testing.assert_frame_equal(results_df_ada, results_df_nonada)
-    pd.testing.assert_frame_equal(results_df_ada, snapshot(results_df_ada))

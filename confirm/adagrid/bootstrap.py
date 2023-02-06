@@ -151,9 +151,7 @@ class BootstrapCalibrate:
                 columns=[str(i) for i in range(lams_arr.shape[0])],
             )
 
-        out = driver._groupby_apply_K(df, f)
-        out.insert(0, "K", df["K"])
-        return out
+        return driver._groupby_apply_K(df, f)
 
 
 def bootstrap_calibrate(

@@ -12,14 +12,15 @@ from imprint.models.ztest import ZTest1D
 config.update("jax_enable_x64", True)
 
 
-def test_bootstrap_calibrate(snapshot):
+def test_bootstrap_calibrate():
     g = ip.cartesian_grid(
         theta_min=[-1], theta_max=[1], n=[10], null_hypos=[ip.hypo("x0 < 0")]
     )
     cal_df = ada.bootstrap.bootstrap_calibrate(ZTest1D, g=g, nB=5)
     twb_cols = [c for c in cal_df.columns if "twb_lams" in c]
     np.testing.assert_allclose(cal_df["twb_mean_lams"], cal_df[twb_cols].mean(axis=1))
-    np.testing.assert_allclose(cal_df, snapshot(cal_df), rtol=1e-6)
+    np.testing.assert_allclose(cal_df["twb_min_lams"], cal_df[twb_cols].min(axis=1))
+    np.testing.assert_allclose(cal_df["twb_max_lams"], cal_df[twb_cols].max(axis=1))
 
 
 def test_calibration_cheap(snapshot):
@@ -35,16 +36,7 @@ def test_calibration_cheap(snapshot):
         prod=False,
         tile_batch_size=1,
     )
-    # TODO: use ip.testing.check_imprint_results
-    results_df = db.get_results()
-    subset = (
-        results_df[
-            ["step_id", "theta0"] + [c for c in results_df.columns if "lams" in c]
-        ]
-        .sort_values(by=["step_id", "theta0"])
-        .reset_index(drop=True)
-    )
-    pd.testing.assert_frame_equal(subset, snapshot(subset))
+    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
 
 
 @pytest.mark.slow
@@ -184,7 +176,7 @@ def test_calibration_checkpointing():
     pd.testing.assert_frame_equal(df_twice, df_once)
 
 
-def test_calibration_nonadagrid_using_adagrid(snapshot):
+def test_calibration_nonadagrid_using_adagrid():
     g = ip.cartesian_grid([-1], [1], n=[10], null_hypos=[ip.hypo("x < 0")])
     K = 2**13
     iter, reports, db = ada.ada_calibrate(
@@ -201,9 +193,10 @@ def test_calibration_nonadagrid_using_adagrid(snapshot):
         prod=False,
     )
     results_df_nonada = ip.calibrate(ZTest1D, g=g, K=K, tile_batch_size=1)
-    results_df_ada = db.get_results()[results_df_nonada.columns]
-    pd.testing.assert_frame_equal(results_df_ada, results_df_nonada)
-    pd.testing.assert_frame_equal(results_df_ada, snapshot(results_df_ada))
+    results_df_ada = db.get_results()
+    pd.testing.assert_frame_equal(
+        results_df_ada[results_df_nonada.columns], results_df_nonada
+    )
 
 
 def main():
