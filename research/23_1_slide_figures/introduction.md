@@ -71,25 +71,15 @@ def validate_2d(theta_min, theta_max, n, n_sims):
         ],
     )
     rej_df = ip.validate(
-        #TTest1DAda, 
         BayesianBasket,
-        grid,
+        g=grid,
         lam=0.05,
         K=n_sims,
-        #model_kwargs={
-        #    "n_init": 10,
-        #    "n_samples_per_interim": 10,
-        #    "n_interims": 3,
-        #    "mu0": 0,
-        #    "eff_size_thresh": 0.1,
-        #},
     )
     return grid, rej_df
 ```
 
 ```python
-#theta_min = [-0.5, -2]
-#theta_max = [0, -0.5]
 theta_min = [-3.5, -3.5, -2.3]
 theta_max = [1.0, 1.0, -2.3]
 ns = [2, 4, 8, 16, 256]
@@ -104,22 +94,22 @@ out = [validate_2d(theta_min, theta_max, [n0, n0, 1], n_sims) for n0 in ns]
 for i, (grid, validation_df) in enumerate(out):
     theta_tiles = grid.get_theta()
 
-    plt.title(f"Type I Error (I={ns[i]})")
+    plt.title(f"Type I Error CP Bound (I={ns[i]})")
     cntf = plt.tricontourf(
         theta_tiles[:, 0],
         theta_tiles[:, 1],
-        validation_df["tie_est"],
+        validation_df["tie_cp_bound"],
     )
     plt.tricontour(
         theta_tiles[:, 0],
         theta_tiles[:, 1],
-        validation_df["tie_est"],
+        validation_df["tie_cp_bound"],
         colors="k",
         linestyles="-",
         linewidths=0.5,
     )
     cbar = plt.colorbar(cntf)
-    cbar.set_label("Simulated fraction of Type I errors")
+    cbar.set_label("Clopper-Pearson Bound")
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
     plt.xlim(theta_min[0], theta_max[0])
@@ -131,29 +121,29 @@ for i, (grid, validation_df) in enumerate(out):
 ```python
 for i, (grid, validation_df) in enumerate(out):
     theta_tiles = grid.get_theta()
-    vmax = np.max(validation_df['tie_est'])
+    vmax = np.max(validation_df['tie_cp_bound'])
     vmax = np.maximum(np.max(validation_df['tie_bound']), vmax)
 
     plt.figure(figsize=(10, 5), constrained_layout=True)
     plt.subplot(1,2,1)
-    plt.title(f"Type I Error (I={ns[i]})")
+    plt.title(f"Type I Error CP Bound (I={ns[i]})")
     cntf = plt.tricontourf(
         theta_tiles[:, 0],
         theta_tiles[:, 1],
-        validation_df["tie_est"],
+        validation_df["tie_cp_bound"],
         vmax=vmax,
     )
     plt.tricontour(
         theta_tiles[:, 0],
         theta_tiles[:, 1],
-        validation_df["tie_est"],
+        validation_df["tie_cp_bound"],
         colors="k",
         linestyles="-",
         linewidths=0.5,
         vmax=vmax,
     )
     cbar = plt.colorbar(cntf)
-    cbar.set_label("Simulated fraction of Type I errors")
+    cbar.set_label("Clopper-Pearson")
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
     plt.xlim(theta_min[0], theta_max[0])
@@ -177,7 +167,7 @@ for i, (grid, validation_df) in enumerate(out):
         vmax=vmax,
     )
     cbar = plt.colorbar(cntf)
-    cbar.set_label("Simulated fraction of Type I errors")
+    cbar.set_label("Optimized Bound")
     plt.xlabel(r"$\theta_0$")
     plt.ylabel(r"$\theta_1$")
     plt.xlim(theta_min[0], theta_max[0])
