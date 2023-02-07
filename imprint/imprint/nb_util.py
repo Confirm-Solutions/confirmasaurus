@@ -8,6 +8,7 @@ Tools for working with Jupyter notebooks.
 import time
 import warnings
 from pathlib import Path
+from unittest import mock
 
 import IPython
 import matplotlib
@@ -182,14 +183,16 @@ def run_notebook(filepath, cell_indices=None):
     """
     # Using Agg backend to prevent figures from popping up
     matplotlib.use("Agg")
-    # mock pyplot so that we don't spend runtime on figures that are going to
-    # be thrown out.
-    ipy = IPython.terminal.embed.InteractiveShellEmbed()
-    start = time.time()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        safe_execfile_ipy(
-            ipy, filepath, cell_indices=cell_indices, raise_exceptions=True
-        )
-    end = time.time()
+
+    # mock pyplot because CI doesn't have latex and we don't want to install that.
+    with mock.patch("matplotlib.pyplot.show"):
+        with mock.patch("matplotlib.pyplot.savefig"):
+            ipy = IPython.terminal.embed.InteractiveShellEmbed()
+            start = time.time()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                safe_execfile_ipy(
+                    ipy, filepath, cell_indices=cell_indices, raise_exceptions=True
+                )
+            end = time.time()
     return ipy.user_ns, end - start
