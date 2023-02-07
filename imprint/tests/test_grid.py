@@ -248,12 +248,12 @@ n_theta_1d = 10
 
 
 def bench_f():
-    null_hypos = [HyperPlane(-np.identity(n_arms)[i], 2) for i in range(n_arms)]
-    t, r = grid._cartesian_gridpts(
-        np.full(n_arms, -3.5), np.full(n_arms, 1.0), np.full(n_arms, n_theta_1d)
+    return grid.cartesian_grid(
+        np.full(n_arms, -3.5),
+        np.full(n_arms, 1.0),
+        np.full(n_arms, n_theta_1d),
+        null_hypos=[HyperPlane(-np.identity(n_arms)[i], 2) for i in range(n_arms)],
     )
-    g = grid._raw_init_grid(t, r).add_null_hypos(null_hypos).prune()
-    return g
 
 
 def benchmark(f, iter=3):

@@ -13,7 +13,7 @@ def check(db, snapshot):
     snapshot.set_test_name("test_validation")
 
     # Leaving this here as an easy way to plot the results if debugging.
-    # results = ip.Grid(db.get_results(), None).active()
+    # results = ip.Grid(db.get_results(), None).prune_inactive()
     # import matplotlib.pyplot as plt
     # plt.plot(results.df["theta0"], results.df["tie_est"], 'ko')
     # plt.plot(results.df["theta0"], results.df["tie_cp_bound"], 'bo')
