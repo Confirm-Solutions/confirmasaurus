@@ -109,7 +109,7 @@ class AdaCalibration:
                 np.where(lams_df["impossible"], -np.inf, np.inf),
             ),
         )
-        return pd.concat((tiles_df, lams_df), axis=1)
+        return pd.concat((tiles_df.drop("K", axis=1), lams_df), axis=1)
 
     def convergence_criterion(self, report):
         ########################################
@@ -170,7 +170,7 @@ class AdaCalibration:
         tiles_df["finisher_id"] = self.c["worker_id"]
         tiles_df["query_time"] = imprint.timer.simple_timer()
         if tiles_df.shape[0] == 0:
-            return "empty"
+            return None
 
         ########################################
         # Is deepening likely to be enough?

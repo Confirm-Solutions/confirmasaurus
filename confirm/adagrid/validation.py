@@ -75,7 +75,7 @@ class AdaValidate:
             "tie_bound_order",
             -rej_df["tie_bound"] * (rej_df["total_cost"] > self.c["max_target"]),
         )
-        return pd.concat((tiles_df, rej_df), axis=1)
+        return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
     def convergence_criterion(self, report):
         max_tie_est = self.db.worst_tile("tie_est desc")["tie_est"].iloc[0]
@@ -113,7 +113,7 @@ class AdaValidate:
         tiles_df["finisher_id"] = self.c["worker_id"]
         tiles_df["query_time"] = imprint.timer.simple_timer()
         if tiles_df.shape[0] == 0:
-            return "empty"
+            return None
 
         report.update(
             dict(

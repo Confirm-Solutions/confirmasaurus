@@ -395,12 +395,9 @@ class AdagridRunner:
                         # If we haven't converged, we create a new step.
                         new_step_id = step_id + 1
                         tiles_df = self.algo.select_tiles(report, convergence_data)
-                        self.new_step(tiles_df, new_step_id, report)
 
-                        report["runtime_new_step"] = time.time() - start
-                        start = time.time()
-                        if new_step_id == "empty":
-                            # New packet is empty so we have terminated but
+                        if tiles_df is None:
+                            # New step is empty so we have terminated but
                             # failed to converge.
                             logger.debug(
                                 "New packet is empty. Terminating despite "
@@ -408,6 +405,9 @@ class AdagridRunner:
                             )
                             return WorkerStatus.FAILED, None, report
                         else:
+                            self.new_step(tiles_df, new_step_id, report)
+                            report["runtime_new_step"] = time.time() - start
+                            start = time.time()
                             # Successful new packet. We should check for work again
                             # immediately.
                             status = WorkerStatus.NEW_STEP
@@ -551,7 +551,7 @@ def _load_null_hypos(db):
     for i in range(null_hypos_df.shape[0]):
         n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
         c = null_hypos_df["c"].iloc[i]
-        null_hypos.append(imprint.grid.HyperPlane(n, c))
+        null_hypos.append(imprint.planar_null.HyperPlane(n, c))
     return null_hypos
 
 
