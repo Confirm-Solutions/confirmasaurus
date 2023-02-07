@@ -11,6 +11,7 @@ import imprint as ip
 import imprint.bound.normal as normal
 from imprint.models.ztest import ZTest1D
 from imprint.models.ttest_adaptive import TTest1DAda
+from imprint.models.basket import BayesianBasket
 ```
 
 ```python
@@ -58,5 +59,130 @@ plt.show()
 ```
 
 ```python
+def validate_2d(theta_min, theta_max, n, n_sims):
+    q0 = scipy.special.logit(0.1)
+    grid = ip.cartesian_grid(
+        theta_min=theta_min,
+        theta_max=theta_max,
+        n=n,
+        null_hypos=[
+            ip.hypo(f"x{i} <= {q0}")
+            for i in range(3)
+        ],
+    )
+    rej_df = ip.validate(
+        #TTest1DAda, 
+        BayesianBasket,
+        grid,
+        lam=0.05,
+        K=n_sims,
+        #model_kwargs={
+        #    "n_init": 10,
+        #    "n_samples_per_interim": 10,
+        #    "n_interims": 3,
+        #    "mu0": 0,
+        #    "eff_size_thresh": 0.1,
+        #},
+    )
+    return grid, rej_df
+```
 
+```python
+#theta_min = [-0.5, -2]
+#theta_max = [0, -0.5]
+theta_min = [-3.5, -3.5, -2.3]
+theta_max = [1.0, 1.0, -2.3]
+ns = [2, 4, 8, 16, 256]
+n_sims = 1000
+```
+
+```python
+out = [validate_2d(theta_min, theta_max, [n0, n0, 1], n_sims) for n0 in ns]
+```
+
+```python
+for i, (grid, validation_df) in enumerate(out):
+    theta_tiles = grid.get_theta()
+
+    plt.title(f"Type I Error (I={ns[i]})")
+    cntf = plt.tricontourf(
+        theta_tiles[:, 0],
+        theta_tiles[:, 1],
+        validation_df["tie_est"],
+    )
+    plt.tricontour(
+        theta_tiles[:, 0],
+        theta_tiles[:, 1],
+        validation_df["tie_est"],
+        colors="k",
+        linestyles="-",
+        linewidths=0.5,
+    )
+    cbar = plt.colorbar(cntf)
+    cbar.set_label("Simulated fraction of Type I errors")
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    plt.xlim(theta_min[0], theta_max[0])
+    plt.ylim(theta_min[1], theta_max[1])
+    plt.savefig(f"figures/introduction_rescue_{i}.pdf", bbox_inches='tight')
+    plt.show()
+```
+
+```python
+for i, (grid, validation_df) in enumerate(out):
+    theta_tiles = grid.get_theta()
+    vmax = np.max(validation_df['tie_est'])
+    vmax = np.maximum(np.max(validation_df['tie_bound']), vmax)
+
+    plt.figure(figsize=(10, 5), constrained_layout=True)
+    plt.subplot(1,2,1)
+    plt.title(f"Type I Error (I={ns[i]})")
+    cntf = plt.tricontourf(
+        theta_tiles[:, 0],
+        theta_tiles[:, 1],
+        validation_df["tie_est"],
+        vmax=vmax,
+    )
+    plt.tricontour(
+        theta_tiles[:, 0],
+        theta_tiles[:, 1],
+        validation_df["tie_est"],
+        colors="k",
+        linestyles="-",
+        linewidths=0.5,
+        vmax=vmax,
+    )
+    cbar = plt.colorbar(cntf)
+    cbar.set_label("Simulated fraction of Type I errors")
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    plt.xlim(theta_min[0], theta_max[0])
+    plt.ylim(theta_min[1], theta_max[1])
+
+    plt.subplot(1,2,2)
+    plt.title(f"Type I Error Bound (I={ns[i]})")
+    cntf = plt.tricontourf(
+        theta_tiles[:, 0],
+        theta_tiles[:, 1],
+        validation_df["tie_bound"],
+        vmax=vmax,
+    )
+    plt.tricontour(
+        theta_tiles[:, 0],
+        theta_tiles[:, 1],
+        validation_df["tie_bound"],
+        colors="k",
+        linestyles="-",
+        linewidths=0.5,
+        vmax=vmax,
+    )
+    cbar = plt.colorbar(cntf)
+    cbar.set_label("Simulated fraction of Type I errors")
+    plt.xlabel(r"$\theta_0$")
+    plt.ylabel(r"$\theta_1$")
+    plt.xlim(theta_min[0], theta_max[0])
+    plt.ylim(theta_min[1], theta_max[1])
+
+    plt.savefig(f"figures/berry_{i}.pdf", bbox_inches='tight')
+    plt.show()
 ```
