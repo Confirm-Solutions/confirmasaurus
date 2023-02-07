@@ -4,6 +4,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import field
 from itertools import product
+from typing import Any
 from typing import List
 
 import numpy as np
@@ -16,65 +17,65 @@ logger = imprint.log.getLogger(__name__)
 
 
 class NullHypothesis(ABC):
-    @abstractmethod
-    def split(
-        self,
-        theta: np.ndarray,
-        radii: np.ndarray,
-        vertices: np.ndarray,
-        vertex_dist: np.ndarray,
-    ):
+    def split(self, g: "Grid", curve_data: Any):
         """
-        split should return an array of theta and radii for the new tiles that
-        result from splitting the input tiles.
+        split returns a grid of new tiles that result from splitting the tiles
+        in the input grid.
+
+        This defaults to simply repeating each tile twice, but can be overridden
+        to implement more sophisticated splitting strategies.
 
         Args:
-            theta: The centers of the input tiles.
-            radii: The half-widths of the input tiles.
-            vertices: The vertices of the input tiles.
-            vertex_dist: The distance of each vertex from the null hypothesis
-                curve. In cases where the null hypothesis is a plane, this is
-                exact. In other cases, it may be an approximation.
+            g: The input grid.
+            curve_data: Arbitrary information describing the curve.
         """
-        pass
+        return g.repeat(2)
 
-    @abstractmethod
-    def curve(self, theta: np.ndarray):
+    def dist(self, theta: np.ndarray):
         """
         Curve describes the signed distance of a point from the null hypothesis
         curve.
+
+        Practically, this is used as a first pass to determine which tiles are
+        within a single `radii` distance to the curve before using `side` to
+        determine precisely which tiles intersect.
+
+        NOTE: If such a first pass doesn't make sense for your curve
+        implementation, you should return 0 so that all tiles are passed to
+        `side`.
 
         For example, if the null hypothesis is a plane, curve should return
         `x.dot(n) - c`, where n is the normal vector and c is the offset.
 
         Args:
-            theta: The points to evaluate the curve at.
+            theta: The points to evaluate the curve at. This array will be:
+                (n_points, n_dims) shaped.
+
+        Returns:
+            distance: The signed distance of each point from the curve.
+        """
+        return np.zeros(theta.shape[0])
+
+    @abstractmethod
+    def side(self, g: "Grid"):
+        """
+        Determine which side of the null hypothesis curve each tile is on.
+        If the tile is entirely above the curve, return 1. If the tile is
+        entirely below the curve, return -1. If the tile intersects the curve,
+        return 0.
+
+        Args:
+            g: The grid of tiles.
+
+        Returns:
+            intersects: an integer array for each tile, indicating whether:
+                -1: the tile is entirely below the curve
+                +1: the tile is entirely above the curve
+                0: the tile intersects the curve
+            curve_data: arbitrary information describing the curve that will be
+                passed onwards to `split`.
         """
         pass
-
-
-def check_side_of_curve(g, f):
-    eps = 1e-15
-    theta, vertices = g.get_theta_and_vertices()
-    gridpt_dist = f(theta)
-
-    # If a tile is close to the curve, we need to check for intersection.
-    # "close" is defined by whether the bounding ball of the tile
-    # intersects the plane.
-    close = np.abs(gridpt_dist) <= np.sqrt(np.sum(g.get_radii() ** 2, axis=-1))
-
-    # For each tile that is close to the plane, we check each vertex to
-    # find which side of the plane the vertex lies on.
-    vertex_dist = f(vertices[close].reshape((-1, g.d))).reshape((-1, vertices.shape[1]))
-
-    # If all vertices are above or all the vertices are below the plane, we
-    # can ignore the tile.
-    all_above = (vertex_dist >= -eps).all(axis=-1)
-    all_below = (vertex_dist <= eps).all(axis=-1)
-    intersects = np.zeros(g.n_tiles, dtype=bool)
-    close_intersects = ~(all_above | all_below)
-    intersects[close] = close_intersects
-    return intersects, gridpt_dist, vertex_dist[close_intersects]
 
 
 @dataclass
@@ -117,44 +118,55 @@ class Grid:
         return self.df["active"].sum()
 
     def _add_null_hypo(self, H: NullHypothesis, inherit_cols: List[str]):
-        g_active = self.active()
-        g_inactive = self.inactive()
-
         hypo_idx = len(self.null_hypos)
-        need_split, gridpt_dist, intersection_vertex_dist = check_side_of_curve(
-            g_active, H.curve
-        )
-        g_active.df[f"null_truth{hypo_idx}"] = gridpt_dist >= 0
-        g_inactive.df[f"null_truth{hypo_idx}"] = H.curve(g_inactive.get_theta()) >= 0
+        g_inactive = self.inactive()
+        g_inactive.df[f"null_truth{hypo_idx}"] = H.dist(g_inactive.get_theta()) >= 0
 
+        g_active = self.active()
         theta, vertices = g_active.get_theta_and_vertices()
         radii = g_active.get_radii()
-        if not need_split.any():
+        gridpt_dist = H.dist(theta)
+        g_active.df[f"null_truth{hypo_idx}"] = gridpt_dist >= 0
+
+        # If a tile is close to the curve, we need to check for intersection.
+        # "close" is defined by whether the bounding ball of the tile
+        # intersects the plane.
+
+        # For each tile that is close to the plane, we ask the curve to
+        # find which side of the plane the vertex lies on.
+        close = np.abs(gridpt_dist) <= np.sqrt(np.sum(radii**2, axis=-1))
+        side_close, curve_data = H.side(g_active.subset(close))
+        side = np.zeros(g_active.n_tiles, dtype=np.int8)
+        side[close] = side_close
+        side[~close] = np.sign(gridpt_dist[~close])
+        needs_split = side == 0
+
+        # If H.dist just always returns 0, then we should update the null_truth
+        # for all tiles here.
+        g_active.df.loc[close, f"null_truth{hypo_idx}"] = side_close > 0
+
+        if not needs_split.any():
             return g_inactive.concat(g_active)
 
-        new_theta, new_radii = H.split(
-            theta[need_split],
-            radii[need_split],
-            vertices[need_split],
-            intersection_vertex_dist,
-        )
+        g_needs_split = g_active.subset(needs_split)
+        g_split = H.split(g_needs_split, curve_data)
 
-        parent_id = np.repeat(g_active.df["id"].values[need_split], 2)
-        null_truth = np.ones_like(parent_id, dtype=bool)
-        null_truth[1::2] = False
-
-        g_split = init_grid(new_theta, new_radii, self.worker_id, parents=parent_id)
-
-        inherit(g_split.df, g_active.df[need_split], 2, inherit_cols)
+        # NOTE: currently assumes exactly two tiles are created for each split
+        # tile.
+        hypo_idx = len(g_needs_split.null_hypos)
         for i in range(hypo_idx):
             g_split.df[f"null_truth{i}"] = np.repeat(
-                g_active.df[f"null_truth{i}"].values[need_split], 2
+                g_needs_split.df[f"null_truth{i}"].values, 2
             )
+        null_truth = np.ones(g_split.n_tiles, dtype=bool)
+        null_truth[1::2] = False
         g_split.df[f"null_truth{hypo_idx}"] = null_truth
+
+        inherit(g_split.df, g_needs_split.df, 2, inherit_cols)
 
         # Any tile that has been split should be ignored going forward.
         # We're done with these tiles!
-        g_active.df["active"].values[need_split] = False
+        g_active.df["active"].values[needs_split] = False
 
         return g_inactive.concat(g_active, g_split)
 
@@ -272,6 +284,12 @@ class Grid:
         inherit(out.df, self.df, 2**self.d, inherit_cols)
         return out
 
+    def repeat(self, n_reps):
+        theta = np.repeat(self.get_theta(), n_reps, axis=0)
+        radii = np.repeat(self.get_radii(), n_reps, axis=0)
+        parents = np.repeat(self.df["id"].values, n_reps)
+        return init_grid(theta, radii, self.worker_id, parents=parents)
+
     def concat(self, *others):
         return Grid(
             pd.concat((self.df, *[o.df for o in others]), axis=0, ignore_index=True),
@@ -290,7 +308,7 @@ def inherit(child_df, parent_df, repeat, inherit_cols):
     # use pandas merge.
     # pd.merge(
     #     child_df,
-    #     parent_df,
+    #     parent_df[['id'] + inherit_cols],
     #     left_on="parent_id",
     #     right_on="id",
     #     how='left',

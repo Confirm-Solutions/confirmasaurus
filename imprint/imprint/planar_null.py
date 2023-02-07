@@ -50,13 +50,24 @@ class HyperPlane(grid.NullHypothesis):
         else:
             return self.n
 
-    def curve(self, theta):
-        return self._pad_n(theta.shape[1]).dot(theta.T) - self.c
+    def dist(self, theta):
+        n = self._pad_n(theta.shape[-1])
+        return theta.dot(n) - self.c
 
-    def split(self, theta, radii, vertices, vertex_dist):
+    def side(self, g):
+        _, vertices = g.get_theta_and_vertices()
         eps = 1e-15
-        d = theta.shape[1]
-        n = self._pad_n(d)
+        vertex_dist = self.dist(vertices)
+        side = np.zeros(vertices.shape[0], dtype=np.int8)
+        side[(vertex_dist >= -eps).all(axis=-1)] = 1
+        side[(vertex_dist <= eps).all(axis=-1)] = -1
+        return side, vertex_dist[side == 0]
+
+    def split(self, g, vertex_dist):
+        eps = 1e-15
+        n = self._pad_n(g.d)
+        theta, vertices = g.get_theta_and_vertices()
+        radii = g.get_radii()
 
         ########################################
         # Step 1. Intersect tile edges with the hyperplane.
@@ -65,8 +76,8 @@ class HyperPlane(grid.NullHypothesis):
         split_edges = grid.get_edges(theta, radii)
         # The first n_params columns of split_edges are the vertices from which
         # the edge originates and the second n_params are the edge vector.
-        split_vs = split_edges[..., :d]
-        split_dir = split_edges[..., d:]
+        split_vs = split_edges[..., : g.d]
+        split_dir = split_edges[..., g.d :]
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -105,7 +116,7 @@ class HyperPlane(grid.NullHypothesis):
             (
                 split_vertices,
                 np.full(
-                    (split_vertices.shape[0], split_edges.shape[1], d),
+                    (split_vertices.shape[0], split_edges.shape[1], g.d),
                     np.nan,
                 ),
             ),
@@ -162,7 +173,11 @@ class HyperPlane(grid.NullHypothesis):
         max_val = np.nanmax(split_vertices, axis=1)
         new_theta = (min_val + max_val) / 2
         new_radii = (max_val - min_val) / 2
-        return new_theta, new_radii
+
+        parent_id = np.repeat(g.df["id"], 2)
+        g_split = grid.init_grid(new_theta, new_radii, g.worker_id, parents=parent_id)
+
+        return g_split
 
 
 def hypo(str_expr):

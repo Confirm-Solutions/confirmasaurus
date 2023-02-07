@@ -42,26 +42,16 @@ def test_hypo():
     assert hypo("2.1*x < 0.2") == HyperPlane([-1], -0.2 / 2.1)
 
 
-def test_split1d():
-    new_theta, new_radii = HyperPlane(np.array([-1]), 0).split(
-        np.array([[1.0]]),
-        np.array([[1.1]]),
-        np.array([[[-0.1], [2.1]]]),
-        np.array([[0.1, -2.1]]),
-    )
-    np.testing.assert_allclose(new_theta, [[-0.05], [1.05]])
-    np.testing.assert_allclose(new_radii, [[0.05], [1.05]])
-
-
 def test_split2d():
-    new_theta, new_radii = HyperPlane(np.array([-1, 0]), -0.1).split(
+    g = grid.init_grid(
         np.array([[1.0, 1.0]]),
         np.array([[1.1, 1.1]]),
-        np.array([[[-0.1, -0.1], [-0.1, 2.1], [2.1, -0.1], [2.1, 2.1]]]),
-        np.array([[0.2, 0.2, -1.9, -1.9]]),
+        0,
     )
-    np.testing.assert_allclose(new_theta, [[-0.0, 1.0], [1.1, 1.0]])
-    np.testing.assert_allclose(new_radii, [[0.1, 1.1], [1.0, 1.1]])
+    vertex_dist = np.array([[0.2, 0.2, -1.9, -1.9]])
+    g = HyperPlane(np.array([-1, 0]), -0.1).split(g, vertex_dist)
+    np.testing.assert_allclose(g.get_theta(), [[-0.0, 1.0], [1.1, 1.0]], atol=1e-6)
+    np.testing.assert_allclose(g.get_radii(), [[0.1, 1.1], [1.0, 1.1]], atol=1e-6)
 
 
 @pytest.fixture
