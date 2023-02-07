@@ -134,7 +134,7 @@ iter, reports, ada = ip.ada_calibrate(
 ```
 
 ```python
-g_ada = ip.Grid(ada.db.get_all()).active()
+g_ada = ip.Grid(ada.db.get_all()).prune_inactive()
 K = 2**14
 df = g_ada.df
 lamss = df["lams"].min()

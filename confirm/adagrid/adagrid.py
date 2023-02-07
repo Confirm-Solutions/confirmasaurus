@@ -518,7 +518,7 @@ def step_iter_assignments(df, packet_size):
 
 def refine_and_deepen(g, null_hypos, max_K, worker_id):
     g_deepen_in = imprint.grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)], worker_id)
-    g_deepen = imprint.grid.init_grid(
+    g_deepen = imprint.grid._raw_init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
         worker_id=worker_id,
@@ -540,7 +540,11 @@ def refine_and_deepen(g, null_hypos, max_K, worker_id):
     ########################################
     # Step 7: Simulate the new tiles and write to the DB.
     ########################################
-    return g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols).prune()
+    return (
+        g_refine.concat(g_deepen)
+        .add_null_hypos(null_hypos, inherit_cols)
+        .prune_alternative()
+    )
 
 
 # TODO: move towards NullHypo class

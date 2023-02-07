@@ -11,7 +11,7 @@ def example_grid(x1, x2):
     N = 10
     theta, radii = ip.grid._cartesian_gridpts([x1], [x2], [N])
     H = ip.planar_null.HyperPlane(np.array([-1]), 0)
-    g = ip.grid.init_grid(theta, radii, 1).add_null_hypos([H]).prune()
+    g = ip.create_grid(theta, radii=radii, null_hypos=[H])
     # Typically this field would be set by the adagrid code.
     g.df["step_id"] = 17
     g.df["step_iter"] = np.arange(g.df.shape[0])
