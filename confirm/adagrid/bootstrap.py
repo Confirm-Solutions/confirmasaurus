@@ -92,6 +92,7 @@ class BootstrapCalibrate:
             # order to calibrate. So, the likely fastest solution is to have multiple
             # layers of batching. This is not currently implemented.
             stats = self.model.sim_batch(0, K, theta, null_truth)
+            driver._check_stats(stats, K, theta)
             sorted_stats = jnp.sort(stats, axis=-1)
             alpha0 = self.backward_boundv(
                 np.full(theta.shape[0], alpha), theta, vertices
@@ -144,6 +145,7 @@ class BootstrapCalibrate:
             # NOTE: no batching implemented here. Currently, this function is only
             # called with a single tile so it's not necessary.
             stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
+            driver._check_stats(stats, K, theta)
             tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
             return pd.DataFrame(
                 tie_sum,
