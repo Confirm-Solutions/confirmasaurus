@@ -187,6 +187,8 @@ def run_notebook(filepath, cell_indices=None):
     with mock.patch("matplotlib.pyplot"):
         ipy = IPython.terminal.embed.InteractiveShellEmbed()
         start = time.time()
-        safe_execfile_ipy(ipy, filepath, cell_indices=cell_indices)
+        safe_execfile_ipy(
+            ipy, filepath, cell_indices=cell_indices, raise_exceptions=True
+        )
         end = time.time()
         return ipy.user_ns, end - start
