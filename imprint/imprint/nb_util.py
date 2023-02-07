@@ -7,7 +7,6 @@ Tools for working with Jupyter notebooks.
 """
 import time
 from pathlib import Path
-from unittest import mock
 
 import IPython
 import matplotlib
@@ -184,11 +183,8 @@ def run_notebook(filepath, cell_indices=None):
     matplotlib.use("Agg")
     # mock pyplot so that we don't spend runtime on figures that are going to
     # be thrown out.
-    with mock.patch("matplotlib.pyplot"):
-        ipy = IPython.terminal.embed.InteractiveShellEmbed()
-        start = time.time()
-        safe_execfile_ipy(
-            ipy, filepath, cell_indices=cell_indices, raise_exceptions=True
-        )
-        end = time.time()
-        return ipy.user_ns, end - start
+    ipy = IPython.terminal.embed.InteractiveShellEmbed()
+    start = time.time()
+    safe_execfile_ipy(ipy, filepath, cell_indices=cell_indices, raise_exceptions=True)
+    end = time.time()
+    return ipy.user_ns, end - start
