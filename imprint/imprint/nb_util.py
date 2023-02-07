@@ -6,6 +6,7 @@ Tools for working with Jupyter notebooks.
 
 """
 import time
+import warnings
 from pathlib import Path
 
 import IPython
@@ -185,6 +186,10 @@ def run_notebook(filepath, cell_indices=None):
     # be thrown out.
     ipy = IPython.terminal.embed.InteractiveShellEmbed()
     start = time.time()
-    safe_execfile_ipy(ipy, filepath, cell_indices=cell_indices, raise_exceptions=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        safe_execfile_ipy(
+            ipy, filepath, cell_indices=cell_indices, raise_exceptions=True
+        )
     end = time.time()
     return ipy.user_ns, end - start
