@@ -16,6 +16,7 @@ from .timer import unique_timer
 logger = imprint.log.getLogger(__name__)
 
 
+@dataclass
 class NullHypothesis(ABC):
     def split(self, g: "Grid", curve_data: Any):
         """
@@ -31,18 +32,11 @@ class NullHypothesis(ABC):
         """
         return g.repeat(2)
 
+    @abstractmethod
     def dist(self, theta: np.ndarray):
         """
         Curve describes the signed distance of a point from the null hypothesis
         curve.
-
-        Practically, this is used as a first pass to determine which tiles are
-        within a single `radii` distance to the curve before using `side` to
-        determine precisely which tiles intersect.
-
-        NOTE: If such a first pass doesn't make sense for your curve
-        implementation, you should return 0 so that all tiles are passed to
-        `side`.
 
         For example, if the null hypothesis is a plane, curve should return
         `x.dot(n) - c`, where n is the normal vector and c is the offset.
@@ -54,7 +48,26 @@ class NullHypothesis(ABC):
         Returns:
             distance: The signed distance of each point from the curve.
         """
-        return np.zeros(theta.shape[0])
+        pass
+
+    def use_fast_path(self):
+        """
+        Should we use the fast path or slow path?
+
+        Fast path: The `dist` method is used as a first pass to determine which
+        tile centers are within a single `radii` distance to the curve before
+        using `side` to determine precisely which tiles intersect. This is much
+        faster because it avoids expensive intersection tests in `side`. On the
+        other hand, it can lead to incorrect results if the `dist` method does
+        not accurately lower bound the true distance to the nearest point on
+        the curve.
+
+        Slow path: All tiles are passed to `side` to determine which tiles intersect.
+
+        Returns:
+            _description_
+        """
+        return False
 
     @abstractmethod
     def side(self, g: "Grid"):
@@ -134,7 +147,10 @@ class Grid:
 
         # For each tile that is close to the plane, we ask the curve to
         # find which side of the plane the vertex lies on.
-        close = np.abs(gridpt_dist) <= np.sqrt(np.sum(radii**2, axis=-1))
+        if H.use_fast_path():
+            close = np.ones(g_active.n_tiles, dtype=bool)
+        else:
+            close = np.abs(gridpt_dist) <= np.sqrt(np.sum(radii**2, axis=-1))
         side_close, curve_data = H.side(g_active.subset(close))
         side = np.zeros(g_active.n_tiles, dtype=np.int8)
         side[close] = side_close

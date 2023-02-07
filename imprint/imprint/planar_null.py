@@ -50,6 +50,9 @@ class HyperPlane(grid.NullHypothesis):
         else:
             return self.n
 
+    def use_fast_path(self):
+        return True
+
     def dist(self, theta):
         n = self._pad_n(theta.shape[-1])
         return theta.dot(n) - self.c
