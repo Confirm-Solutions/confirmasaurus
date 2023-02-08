@@ -3,6 +3,8 @@ import json
 import numpy as np
 
 
+# See https://stackoverflow.com/a/61903895/3817027
+# https://github.com/hmallen/numpyencoder
 class NumpyEncoder(json.JSONEncoder):
     """Custom encoder for numpy data types"""
 

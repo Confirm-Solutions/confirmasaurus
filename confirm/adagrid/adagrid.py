@@ -265,7 +265,7 @@ class AdagridRunner:
         for worker_iter in range(self.cfg["n_iter"]):
             try:
                 report = dict(worker_iter=worker_iter, worker_id=self.cfg["worker_id"])
-                start = time.time()
+                iter_start = time.time()
                 status, work_df, report = self.run_iter(report)
                 if work_df is not None and work_df.shape[0] > 0:
                     logger.debug("Processing %s tiles.", work_df.shape[0])
@@ -275,7 +275,7 @@ class AdagridRunner:
                     # TODO: insert results in secondary thread so that we don't block?
                     self.db.insert_results(results, self.algo.get_orderer())
                 report["status"] = status.name
-                report["runtime_full_iter"] = time.time() - start
+                report["runtime_full_iter"] = time.time() - iter_start
 
                 if self.callback is not None:
                     self.callback(worker_iter, report, self.db)
@@ -321,15 +321,13 @@ class AdagridRunner:
         max_loops = 25
         i = 0
         status = WorkerStatus.WORK
-        report["runtime_wait_for_lock"] = 0
-        report["runtime_wait_for_work"] = 0
         while i < max_loops:
             logger.debug("Starting loop %s.", i)
             report["waitings"] = i
+            start = time.time()
             with self.db.lock:
                 logger.debug("Claimed DB lock.")
-                report["runtime_wait_for_lock"] += time.time() - start
-                start = time.time()
+                report["runtime_wait_for_lock"] = time.time() - start
 
                 step_id, step_iter, step_n_iter, step_n_tiles = self.db.get_step_info()
                 report["step_id"] = step_id
@@ -343,15 +341,17 @@ class AdagridRunner:
                     logger.debug(
                         "get_work(step_id=%s, step_iter=%s)", step_id, step_iter
                     )
+                    start = time.time()
                     work_df = self.db.get_work(step_id, step_iter)
                     report["runtime_get_work"] = time.time() - start
-                    start = time.time()
+
                     report["work_extraction_time"] = time.time()
                     report["n_processed"] = work_df.shape[0]
                     logger.debug("get_work(...) returned %s tiles.", work_df.shape[0])
 
                     if work_df.shape[0] > 0:
                         # If there's work, update the step info and return the work!
+                        start = time.time()
                         self.db.set_step_info(
                             step_id=step_id,
                             step_iter=step_iter + 1,
@@ -379,6 +379,7 @@ class AdagridRunner:
                     report["n_finished_tiles"] = n_processed_tiles
                     if n_processed_tiles == step_n_tiles:
                         # If a packet has just been completed, we check for convergence.
+                        start = time.time()
                         status, convergence_data = self.algo.convergence_criterion(
                             report=report
                         )
@@ -394,8 +395,10 @@ class AdagridRunner:
                             return WorkerStatus.REACHED_N_STEPS, None, report
 
                         # If we haven't converged, we create a new step.
+                        start = time.time()
                         new_step_id = step_id + 1
                         tiles_df = self.algo.select_tiles(report, convergence_data)
+                        report["runtime_select_tiles"] = time.time() - start
 
                         if tiles_df is None:
                             # New step is empty so we have terminated but
@@ -406,9 +409,9 @@ class AdagridRunner:
                             )
                             return WorkerStatus.FAILED, None, report
                         else:
+                            start = time.time()
                             self.new_step(tiles_df, new_step_id, report)
                             report["runtime_new_step"] = time.time() - start
-                            start = time.time()
                             # Successful new packet. We should check for work again
                             # immediately.
                             status = WorkerStatus.NEW_STEP
@@ -436,7 +439,6 @@ class AdagridRunner:
                     " %s iterations. This might indicate a bug.",
                     i,
                 )
-            report["runtime_wait_for_work"] += time.time() - start
             i += 1
 
         return WorkerStatus.STUCK, None, report
