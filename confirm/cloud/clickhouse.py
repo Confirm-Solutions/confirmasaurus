@@ -19,6 +19,7 @@ import pandas as pd
 import pyarrow
 import redis
 
+import confirm.adagrid.json as json
 import imprint.log
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
@@ -272,6 +273,13 @@ class Clickhouse:
         out["eligible"] = out["eligible"].astype(bool)
         return out
 
+    def get_reports(self):
+        json_strs = self.client.query("select * from reports").result_set
+        return pd.DataFrame([json.loads(s[0]) for s in json_strs])
+
+    def insert_report(self, report):
+        self.client.command(f"insert into reports values ('{json.dumps(report)}')")
+
     def get_step_info(self):
         out = literal_eval(self.redis_con.get(f"{self.job_id}:step_info").decode())
         logger.debug("get step info: %s", out)
@@ -418,6 +426,10 @@ class Clickhouse:
                     deepen Bool,
                     split Bool)
                 engine = MergeTree() order by id
+            """,
+            """
+            create table reports (json String)
+                engine = MergeTree() order by ()
             """,
             """
             create materialized view inactive

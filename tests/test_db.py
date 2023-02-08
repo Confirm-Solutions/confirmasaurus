@@ -57,6 +57,12 @@ class DBTester:
         pd.testing.assert_frame_equal(pd_tiles.get_tiles(), g.df.reset_index(drop=True))
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
+    def test_insert_report(self):
+        g, pd_tiles, db_tiles = self.prepped_dbs()
+        pd_tiles.insert_report(dict(testA="testB"))
+        db_tiles.insert_report(dict(testA="testB"))
+        pd.testing.assert_frame_equal(pd_tiles.get_reports(), db_tiles.get_reports())
+
     def test_write_tiles(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
 
