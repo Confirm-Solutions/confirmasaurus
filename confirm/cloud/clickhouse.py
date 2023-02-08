@@ -7,6 +7,7 @@ Speeding up clickhouse stuff by using threading and specifying column_types:
 Fast min/max with clickhouse:
     https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
 """
+import os
 import uuid
 from ast import literal_eval
 from dataclasses import dataclass
@@ -14,7 +15,6 @@ from typing import Dict
 from typing import List
 
 import clickhouse_connect
-import dotenv
 import pandas as pd
 import pyarrow
 import redis
@@ -301,6 +301,7 @@ class Clickhouse:
             select count(*) from tiles
                 where
                     step_id = {step_id}
+                    and active = true
                     and id in (select id from results)
                     and parent_id in (select id from done)
             """
@@ -410,12 +411,12 @@ class Clickhouse:
             create table done (
                     id {id_type},
                     step_id UInt32,
-                    step_iter UInt32,
+                    step_iter Int32,
                     active Bool,
-                    query_time Float64,
                     finisher_id UInt32,
                     refine Bool,
-                    deepen Bool)
+                    deepen Bool,
+                    split Bool)
                 engine = MergeTree() order by id
             """,
             """
@@ -426,7 +427,25 @@ class Clickhouse:
         ]
         for c in commands:
             self.client.command(c)
-        self.client.command("insert into done values (0, 0, 0, 0, 0, 0, 0, 0)")
+
+        # these tiles have no parents. poor sad tiles :(
+        # we need to put these absent parents into the done table so that
+        # n_processed_tiles returns correct results.
+        absent_parents = pd.DataFrame(
+            tiles_df["parent_id"].unique()[:, None], columns=["id"]
+        )
+        for c in [
+            "step_id",
+            "step_iter",
+            "active",
+            "finisher_id",
+            "refine",
+            "deepen",
+            "split",
+        ]:
+            absent_parents[c] = 0
+        _insert_df(self.client, "done", absent_parents)
+
         self.insert_tiles(tiles_df)
         self.set_step_info(step_id=-1, step_iter=0, n_iter=0, n_tiles=0)
 
@@ -483,7 +502,7 @@ class Clickhouse:
         """
         config = get_ch_config(host, port, username, password)
         if job_id is None:
-            test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
+            test_host = os.environ["CLICKHOUSE_TEST_HOST"]
             if not (
                 (test_host is not None and test_host in config["host"])
                 or "localhost" in config["host"]
@@ -525,16 +544,15 @@ def get_redis_client(host=None, port=None, password=None):
 
 
 def get_redis_config(host=None, port=None, password=None):
-    env = dotenv.dotenv_values()
     if host is None:
-        host = env["REDIS_HOST"]
+        host = os.environ["REDIS_HOST"]
     if port is None:
-        if "REDIS_PORT" in env:
-            port = env["REDIS_PORT"]
+        if "REDIS_PORT" in os.environ:
+            port = os.environ["REDIS_PORT"]
         else:
             port = 37085
     if password is None:
-        password = env["REDIS_PASSWORD"]
+        password = os.environ["REDIS_PASSWORD"]
     return dict(host=host, port=port, password=password)
 
 
@@ -544,24 +562,23 @@ def get_ch_client(host=None, port=None, username=None, password=None, job_id=Non
 
 
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
-    env = dotenv.dotenv_values()
     if host is None:
-        if "CLICKHOUSE_HOST" in env:
-            host = env["CLICKHOUSE_HOST"]
+        if "CLICKHOUSE_HOST" in os.environ:
+            host = os.environ["CLICKHOUSE_HOST"]
         else:
-            host = env["CLICKHOUSE_TEST_HOST"]
+            host = os.environ["CLICKHOUSE_TEST_HOST"]
     if port is None:
-        if "CLICKHOUSE_PORT" in env:
-            port = env["CLICKHOUSE_PORT"]
+        if "CLICKHOUSE_PORT" in os.environ:
+            port = os.environ["CLICKHOUSE_PORT"]
         else:
             port = 8443
     if username is None:
-        if "CLICKHOUSE_USERNAME" in env:
-            username = env["CLICKHOUSE_USERNAME"]
+        if "CLICKHOUSE_USERNAME" in os.environ:
+            username = os.environ["CLICKHOUSE_USERNAME"]
         else:
             username = "default"
     if password is None:
-        password = env["CLICKHOUSE_PASSWORD"]
+        password = os.environ["CLICKHOUSE_PASSWORD"]
     logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
         host=host, port=port, username=username, password=password, database=database
@@ -587,7 +604,7 @@ def clear_dbs(
         yes: bool, if True, don't ask for confirmation before dropping.
         drop_all_redis_keys: bool, if True, drop all Redis keys.
     """
-    test_host = dotenv.dotenv_values()["CLICKHOUSE_TEST_HOST"]
+    test_host = os.environ["CLICKHOUSE_TEST_HOST"]
     if not (
         (test_host is not None and test_host in ch_client.url)
         or "localhost" in ch_client.url

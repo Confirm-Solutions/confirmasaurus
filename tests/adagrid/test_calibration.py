@@ -25,7 +25,7 @@ def test_bootstrap_calibrate():
 
 def test_calibration_cheap(snapshot):
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    iter, reports, db = ada.ada_calibrate(
+    reports, db = ada.ada_calibrate(
         ZTest1D,
         g=g,
         init_K=1024,
@@ -45,7 +45,7 @@ def test_calibration(snapshot):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, db = ada.ada_calibrate(
+        reports, db = ada.ada_calibrate(
             ZTest1D, g=g, nB=5, prod=False, tile_batch_size=1
         )
     ip.testing.check_imprint_results(
@@ -58,7 +58,7 @@ def test_calibration(snapshot):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        _, _, db2 = ada.ada_calibrate(
+        _, db2 = ada.ada_calibrate(
             ZTest1D, g=g, db=pd_db, nB=5, prod=False, tile_batch_size=1
         )
 
@@ -73,7 +73,7 @@ def test_calibration(snapshot):
 def test_calibration_packetsize1(snapshot):
     snapshot.set_test_name("test_calibration")
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    iter, reports, db = ada.ada_calibrate(
+    reports, db = ada.ada_calibrate(
         ZTest1D, g=g, nB=5, tile_batch_size=1, packet_size=1
     )
     ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
@@ -86,9 +86,7 @@ def test_calibration_clickhouse(snapshot, ch_db):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, db = ada.ada_calibrate(
-            ZTest1D, g=g, db=ch_db, nB=5, tile_batch_size=1
-        )
+        reports, db = ada.ada_calibrate(ZTest1D, g=g, db=ch_db, nB=5, tile_batch_size=1)
 
     ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
 
@@ -100,7 +98,7 @@ def test_calibration_clickhouse_distributed(snapshot, ch_db):
     import modal
 
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    iter, reports, _ = ada.ada_calibrate(
+    reports, _ = ada.ada_calibrate(
         ZTest1D,
         g=g,
         db=ch_db,
@@ -124,11 +122,9 @@ def test_calibration_clickhouse_distributed(snapshot, ch_db):
         import confirm.cloud.clickhouse as ch
         import confirm.adagrid as ada
         from imprint.models.ztest import ZTest1D
-        from jax.config import config
 
-        modal_util.decrypt_secrets()
+        modal_util.setup_env()
 
-        config.update("jax_enable_x64", True)
         db = ch.Clickhouse.connect(job_id=job_id)
         ada.ada_calibrate(ZTest1D, db=db, overrides=dict(n_iter=100))
 
@@ -145,11 +141,11 @@ def test_calibration_checkpointing():
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
         db = ada.db.DuckDBTiles.connect()
-        iter_two1, reports_two1, db_two1 = ada.ada_calibrate(
+        reports_two1, db_two1 = ada.ada_calibrate(
             ZTest1D, g=g, db=db, nB=3, init_K=4, n_iter=2
         )
 
-        iter_two2, reports_two2, db_two2 = ada.ada_calibrate(
+        reports_two2, db_two2 = ada.ada_calibrate(
             ZTest1D, db=db, overrides=dict(n_iter=1)
         )
 
@@ -157,11 +153,9 @@ def test_calibration_checkpointing():
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, db_once = ada.ada_calibrate(
-            ZTest1D, g=g, nB=3, init_K=4, n_iter=3
-        )
+        reports, db_once = ada.ada_calibrate(ZTest1D, g=g, nB=3, init_K=4, n_iter=3)
 
-    assert iter_two1 + iter_two2 == iter
+    assert len(reports_two1) + len(reports_two2) == len(reports)
     df_reports_one = pd.DataFrame(reports)
     drop_cols = ["worker_id", "worker_iter"] + [
         c for c in df_reports_one.columns if c.startswith("runtime")
@@ -179,7 +173,7 @@ def test_calibration_checkpointing():
 def test_calibration_nonadagrid_using_adagrid():
     g = ip.cartesian_grid([-1], [1], n=[10], null_hypos=[ip.hypo("x < 0")])
     K = 2**13
-    iter, reports, db = ada.ada_calibrate(
+    reports, db = ada.ada_calibrate(
         ZTest1D,
         g=g,
         init_K=K,
@@ -210,13 +204,13 @@ def main():
     # db = ch.Clickhouse.connect()
     # # db = ch.Clickhouse.connect(
     # #     host='localhost', port='8123', username='default', password='')
-    # iter, reports, db = ada.ada_calibrate(
+    # reports, db = ada.ada_calibrate(
     #     ZTest1D, db=db, g=g, nB=5, tile_batch_size=1, n_iter=8
     # )
     # g = ip.cartesian_grid(
     #     theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
     # )
-    # iter, reports, db = ada.ada_calibrate(ZTest1D, g=g, nB=2, prod=False,
+    # reports, db = ada.ada_calibrate(ZTest1D, g=g, nB=2, prod=False,
     # tile_batch_size=1)
 
 

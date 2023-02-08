@@ -110,8 +110,6 @@ class AdaValidate:
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
         tiles_df = raw_tiles[include].copy()
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
-        tiles_df["finisher_id"] = self.c["worker_id"]
-        tiles_df["query_time"] = imprint.timer.simple_timer()
         if tiles_df.shape[0] == 0:
             return None
 
@@ -134,7 +132,6 @@ class AdaValidate:
         tiles_df["refine"] |= ((~tiles_df["refine"]) & (~tiles_df["deepen"])) & (
             tiles_df["grid_cost"] > (tiles_df["sim_cost"] / 5)
         )
-        tiles_df["active"] = ~(tiles_df["refine"] | tiles_df["deepen"])
         return tiles_df
 
 
@@ -211,7 +208,7 @@ def ada_validate(
             preset configuration settings. All other arguments will be ignored.
             If this calls represents a new adagrid job, this argument is
             ignored.
-        callback: A function accepting three arguments (iter, report, db)
+        callback: A function accepting three arguments (report, db)
             that can perform some reporting or printing at each iteration.
             Defaults to print_report.
 

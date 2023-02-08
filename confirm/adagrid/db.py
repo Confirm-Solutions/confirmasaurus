@@ -276,12 +276,12 @@ class DuckDBTiles:
             create table done (
                     id UBIGINT,
                     step_id UINTEGER,
-                    step_iter UINTEGER,
+                    step_iter INTEGER,
                     active BOOL,
-                    query_time DOUBLE,
                     finisher_id UINTEGER,
                     refine BOOL,
-                    deepen BOOL)
+                    deepen BOOL,
+                    split BOOL)
             """
         )
         self.con.execute(

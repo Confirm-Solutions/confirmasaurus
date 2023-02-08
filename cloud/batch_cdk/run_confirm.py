@@ -19,7 +19,7 @@ def f():
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     print("Created grid in {:.2f} seconds".format(time.time() - start))
     start = time.time()
-    iter, reports, ada = ip.ada_calibrate(ZTest1D, g=g, nB=5)
+    reports, ada = ip.ada_calibrate(ZTest1D, g=g, nB=5)
     print("Ran ada in {:.2f} seconds".format(time.time() - start))
     print(pd.DataFrame(reports))
 
