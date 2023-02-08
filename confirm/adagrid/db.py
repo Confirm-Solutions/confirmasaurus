@@ -9,6 +9,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+import confirm.adagrid.json as json
 import imprint.log
 from confirm.adagrid.store import DuckDBStore
 from confirm.adagrid.store import PandasStore
@@ -30,6 +31,7 @@ class PandasTiles:
     tiles_df: pd.DataFrame = None
     results_df: pd.DataFrame = None
     done_df: pd.DataFrame = None
+    reports: List[Dict] = field(default_factory=list)
     _next_worker_id: int = 2
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
     step_info = None
@@ -55,6 +57,12 @@ class PandasTiles:
 
     def get_results(self) -> pd.DataFrame:
         return self.results_df.reset_index(drop=True)
+
+    def insert_report(self, report):
+        self.reports.append(report)
+
+    def get_reports(self):
+        return pd.DataFrame(self.reports)
 
     def get_step_info(self) -> Tuple[int, int, int, int]:
         return self.step_info
@@ -173,6 +181,13 @@ class DuckDBTiles:
 
     def get_results(self):
         return self.con.execute("select * from results").df()
+
+    def get_reports(self):
+        json_strs = self.con.execute("select * from reports").fetchall()
+        return pd.DataFrame([json.loads(s[0]) for s in json_strs])
+
+    def insert_report(self, report):
+        self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
 
     def get_step_info(self):
         s = self.con.execute("select * from step_info").df().iloc[0]
@@ -294,6 +309,11 @@ class DuckDBTiles:
             """
         )
         self.con.execute("insert into done values (0, 0, 0, 0, 0, 0, 0, 0)")
+        self.con.execute(
+            """
+            create table reports (json TEXT)
+            """
+        )
 
     def new_worker(self):
         self.con.execute(

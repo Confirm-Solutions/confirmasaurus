@@ -260,9 +260,8 @@ class AdagridRunner:
         # STEP 6: Actually run adagrid steps!
         ########################################
         if self.cfg["n_iter"] == 0:
-            return [], self.db
+            return self.db
 
-        reports = []
         for worker_iter in range(self.cfg["n_iter"]):
             try:
                 report = dict(worker_iter=worker_iter, worker_id=self.cfg["worker_id"])
@@ -273,13 +272,15 @@ class AdagridRunner:
                     start = time.time()
                     results = self.algo.process_tiles(tiles_df=work_df, report=report)
                     report["runtime_processing"] = time.time() - start
+                    # TODO: insert results in secondary thread so that we don't block?
                     self.db.insert_results(results, self.algo.get_orderer())
                 report["status"] = status.name
                 report["runtime_full_iter"] = time.time() - start
 
                 if self.callback is not None:
                     self.callback(worker_iter, report, self.db)
-                reports.append(report)
+                # TODO: insert report in secondary thread so that we don't block
+                self.db.insert_report(report)
 
                 if status.done():
                     # We just stop this worker. The other workers will continue to run
@@ -292,9 +293,9 @@ class AdagridRunner:
                 # It might be good to notify the database that we will not complete
                 # assigned tiles?
                 print("KeyboardInterrupt")
-                return reports, self.db
+                return self.db
 
-        return reports, self.db
+        return self.db
 
     def run_iter(self, report):
         """
@@ -457,6 +458,7 @@ class AdagridRunner:
             "deepen",
             "split",
         ]
+        # TODO: call finish in separate thread to avoid blocking
         self.db.finish(tiles_df[done_cols])
 
         n_refine = tiles_df["refine"].sum()
@@ -483,6 +485,8 @@ class AdagridRunner:
 
         # there might be new inactive tiles that resulted from splitting with
         # the null hypotheses. we need to mark these tiles as finished.
+        # TODO: inactive insert_tiles and finish can be done in separate thread
+        # to avoid blocking
         inactive_df = g.df[~g.df["active"]].copy()
         inactive_df["step_iter"] = np.int32(-1)
         self.db.insert_tiles(inactive_df)
@@ -498,6 +502,8 @@ class AdagridRunner:
         g_active.df["step_iter"], n_packets = step_iter_assignments(
             g_active.df, self.cfg["packet_size"]
         )
+        # TODO: i think insert_tiles can be done in separate thread to avoid
+        # blocking
         self.db.insert_tiles(g_active.df)
         self.db.set_step_info(
             step_id=new_step_id, step_iter=0, n_iter=n_packets, n_tiles=g_active.n_tiles
