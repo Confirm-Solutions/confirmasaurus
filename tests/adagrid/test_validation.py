@@ -49,10 +49,22 @@ def test_validation(snapshot):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, db = ada.ada_validate(
+        reports, db = ada.ada_validate(
             ZTest1D, g=g, lam=-1.96, prod=False, tile_batch_size=1
         )
     check(db, snapshot)
+
+
+def test_validation2d(snapshot):
+    g = ip.cartesian_grid(
+        theta_min=[-1, -1], theta_max=[0, 0], null_hypos=[ip.hypo("theta0 > theta1")]
+    )
+    reports, db = ada.ada_validate(
+        ZTest1D, g=g, lam=-1.96, prod=False, tile_batch_size=1
+    )
+    g = ip.Grid(db.get_results(), None).prune_inactive()
+    assert g.df["tie_bound"].max() <= 0.0265
+    assert g.n_tiles == 355
 
 
 @pytest.mark.slow
@@ -61,7 +73,7 @@ def test_validation_clickhouse(snapshot, ch_db):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, db = ada.ada_validate(
+        reports, db = ada.ada_validate(
             ZTest1D, g=g, db=ch_db, lam=-1.96, packet_size=1, tile_batch_size=1
         )
 
@@ -74,7 +86,7 @@ def test_validation_nonadagrid_using_adagrid():
     # comparison.
     lam = -1.96
     K = 2**13
-    iter, reports, db = ada.ada_validate(
+    reports, db = ada.ada_validate(
         ZTest1D,
         lam=lam,
         g=g,

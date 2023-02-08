@@ -45,7 +45,7 @@ jobs:
           poetry env use ${{ matrix.python-version }} && poetry install --with=test,cloud,cloud_dev
           
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v1-node16
         with:
           role-to-assume: arn:aws:iam::644171722153:role/GitHubActionsRole
           aws-region: us-east-1

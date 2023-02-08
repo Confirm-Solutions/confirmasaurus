@@ -167,8 +167,6 @@ class AdaCalibration:
     def select_tiles(self, report, convergence_data):
         tiles_df = self.db.next(self.c["step_size"], "orderer")
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
-        tiles_df["finisher_id"] = self.c["worker_id"]
-        tiles_df["query_time"] = imprint.timer.simple_timer()
         if tiles_df.shape[0] == 0:
             return None
 
@@ -217,7 +215,6 @@ class AdaCalibration:
             (~deepen_likely_to_work) | at_max_K
         )
         tiles_df["deepen"] = (~tiles_df["refine"]) & (~at_max_K)
-        tiles_df["active"] = ~(tiles_df["refine"] | tiles_df["deepen"])
 
         report["n_impossible"] = tiles_df["impossible"].sum()
         return tiles_df
@@ -298,7 +295,7 @@ def ada_calibrate(
             preset configuration settings. All other arguments will be ignored.
             If this calls represents a new adagrid job, this argument is
             ignored.
-        callback: A function accepting three arguments (iter, report, db)
+        callback: A function accepting three arguments (report, db)
             that can perform some reporting or printing at each iteration.
             Defaults to print_report.
 

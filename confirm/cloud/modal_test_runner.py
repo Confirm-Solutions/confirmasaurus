@@ -10,7 +10,6 @@ import pytest
 import confirm.cloud.modal_util as modal_util
 
 # Load environment variables from .env file to get Modal tokens.
-
 dotenv.load_dotenv()
 
 stub = modal.Stub("test_runner")
@@ -50,7 +49,7 @@ def run_tests(argv=None):
     secrets=[modal.Secret.from_name("kms-sops")],
 )
 def run_cloud_tests(argv=None):
-    modal_util.decrypt_secrets()
+    modal_util.setup_env()
     return run_tests(argv=argv)
 
 

@@ -260,7 +260,7 @@ class AdagridRunner:
         # STEP 6: Actually run adagrid steps!
         ########################################
         if self.cfg["n_iter"] == 0:
-            return 0, [], self.db
+            return [], self.db
 
         reports = []
         for worker_iter in range(self.cfg["n_iter"]):
@@ -292,9 +292,9 @@ class AdagridRunner:
                 # It might be good to notify the database that we will not complete
                 # assigned tiles?
                 print("KeyboardInterrupt")
-                return worker_iter, reports, self.db
+                return reports, self.db
 
-        return worker_iter + 1, reports, self.db
+        return reports, self.db
 
     def run_iter(self, report):
         """
@@ -441,21 +441,23 @@ class AdagridRunner:
         return WorkerStatus.STUCK, None, report
 
     def new_step(self, tiles_df, new_step_id, report):
+        tiles_df["finisher_id"] = self.cfg["worker_id"]
+        tiles_df["active"] = ~(tiles_df["refine"] | tiles_df["deepen"])
+
         # Record what we decided to do.
-        self.db.finish(
-            tiles_df[
-                [
-                    "id",
-                    "step_id",
-                    "step_iter",
-                    "active",
-                    "query_time",
-                    "finisher_id",
-                    "refine",
-                    "deepen",
-                ]
-            ]
-        )
+        if "split" not in tiles_df.columns:
+            tiles_df["split"] = False
+        done_cols = [
+            "id",
+            "step_id",
+            "step_iter",
+            "active",
+            "finisher_id",
+            "refine",
+            "deepen",
+            "split",
+        ]
+        self.db.finish(tiles_df[done_cols])
 
         n_refine = tiles_df["refine"].sum()
         n_deepen = tiles_df["deepen"].sum()
@@ -472,27 +474,44 @@ class AdagridRunner:
             return "empty"
 
         # Actually deepen and refine!
-        df = refine_and_deepen(
+        g = refine_and_deepen(
             tiles_df, self.null_hypos, self.cfg["max_K"], self.cfg["worker_id"]
-        ).df
-        df["step_id"] = new_step_id
-        df["step_iter"], n_packets = step_iter_assignments(df, self.cfg["packet_size"])
-        df["creator_id"] = self.cfg["worker_id"]
-        df["creation_time"] = imprint.timer.simple_timer()
+        )
+        g.df["step_id"] = new_step_id
+        g.df["creator_id"] = self.cfg["worker_id"]
+        g.df["creation_time"] = imprint.timer.simple_timer()
 
-        n_tiles = df.shape[0]
-        logger.debug(
-            f"new step {(new_step_id, 0, n_packets, n_tiles)} "
-            f"n_tiles={n_tiles} packet_size={self.cfg['packet_size']}"
+        # there might be new inactive tiles that resulted from splitting with
+        # the null hypotheses. we need to mark these tiles as finished.
+        inactive_df = g.df[~g.df["active"]].copy()
+        inactive_df["step_iter"] = np.int32(-1)
+        self.db.insert_tiles(inactive_df)
+        inactive_df["refine"] = False
+        inactive_df["deepen"] = False
+        inactive_df["split"] = True
+        inactive_df["finisher_id"] = self.cfg["worker_id"]
+        self.db.finish(inactive_df[done_cols])
+
+        # Assign tiles to packets and then insert them into the database for
+        # processing.
+        g_active = g.prune_inactive()
+        g_active.df["step_iter"], n_packets = step_iter_assignments(
+            g_active.df, self.cfg["packet_size"]
+        )
+        self.db.insert_tiles(g_active.df)
+        self.db.set_step_info(
+            step_id=new_step_id, step_iter=0, n_iter=n_packets, n_tiles=g_active.n_tiles
         )
 
-        self.db.insert_tiles(df)
-        self.db.set_step_info(
-            step_id=new_step_id, step_iter=0, n_iter=n_packets, n_tiles=n_tiles
+        logger.debug(
+            f"new step {(new_step_id, 0, n_packets, g.n_tiles)}\n"
+            f"n_tiles={g_active.n_tiles} packet_size={self.cfg['packet_size']}\n"
+            f"n_inactive_tiles={inactive_df.shape[0]}"
         )
         report.update(
             dict(
-                n_new_tiles=n_tiles, new_K_distribution=df["K"].value_counts().to_dict()
+                n_new_tiles=g.n_tiles,
+                new_K_distribution=g.df["K"].value_counts().to_dict(),
             )
         )
         return new_step_id
@@ -516,8 +535,8 @@ def step_iter_assignments(df, packet_size):
     return assignment, n_packets
 
 
-def refine_and_deepen(g, null_hypos, max_K, worker_id):
-    g_deepen_in = imprint.grid.Grid(g.loc[g["deepen"] & (g["K"] < max_K)], worker_id)
+def refine_and_deepen(df, null_hypos, max_K, worker_id):
+    g_deepen_in = imprint.grid.Grid(df.loc[df["deepen"] & (df["K"] < max_K)], worker_id)
     g_deepen = imprint.grid._raw_init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
@@ -531,20 +550,18 @@ def refine_and_deepen(g, null_hypos, max_K, worker_id):
     # determine this?
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
 
-    g_refine_in = imprint.grid.Grid(g.loc[g["refine"]], worker_id)
+    g_refine_in = imprint.grid.Grid(df.loc[df["refine"]], worker_id)
     inherit_cols = ["K"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.
     g_refine = g_refine_in.refine(inherit_cols)
 
-    ########################################
-    # Step 7: Simulate the new tiles and write to the DB.
-    ########################################
-    return (
-        g_refine.concat(g_deepen)
-        .add_null_hypos(null_hypos, inherit_cols)
-        .prune_alternative()
-    )
+    # NOTE: Instead of prune_alternative here, we mark alternative tiles as
+    # inactive. This means that we will have a full history of grid
+    # construction.
+    out = g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols)
+    out.df.loc[out._which_alternative(), "active"] = False
+    return out
 
 
 # TODO: move towards NullHypo class

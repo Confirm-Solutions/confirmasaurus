@@ -14,7 +14,7 @@ import numpy as np
 
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-iter, reports, db = ada.ada_calibrate(
+reports, db = ada.ada_calibrate(
     ZTest1D,
     g=g,
     nB=5,
@@ -28,7 +28,7 @@ iter, reports, db = ada.ada_calibrate(
 
 ```python
 db_ch = ch.Clickhouse.connect()
-iter, reports, _ = ada.ada_calibrate(
+reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
     db=db_ch,
@@ -43,7 +43,7 @@ iter, reports, _ = ada.ada_calibrate(
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
 db_dist = ch.Clickhouse.connect()
-iter, reports, _ = ada.ada_calibrate(
+reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
     db=db_dist,
@@ -55,7 +55,7 @@ iter, reports, _ = ada.ada_calibrate(
     bias_target=0.0003,
 )
 db_w = ch.Clickhouse.connect(job_id=db_dist.job_id)
-iter, reports, _ = ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)
+reports, _ = ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)
 ```
 
 ## Run two threaded workers
@@ -63,7 +63,7 @@ iter, reports, _ = ada.ada_calibrate(ZTest1D, db=db_w, n_iter=100)
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
 db_dist = ch.Clickhouse.connect(job_id="threaded")
-iter, reports, _ = ada.ada_calibrate(
+reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
     db=db_dist,
@@ -96,7 +96,7 @@ with ThreadPoolExecutor(max_workers=2) as executor:
 ```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
 db_dist = ch.Clickhouse.connect()
-iter, reports, _ = ada.ada_calibrate(
+reports, _ = ada.ada_calibrate(
     ZTest1D,
     g=g,
     db=db_dist,

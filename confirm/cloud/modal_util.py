@@ -1,7 +1,11 @@
+import logging
 import subprocess
 from pathlib import Path
 
+import dotenv
 import modal
+
+logger = logging.getLogger(__name__)
 
 
 def get_image(dependency_groups=["cloud"]):
@@ -67,5 +71,20 @@ def run_on_modal(f, **kwargs):
         return wrapper.call()
 
 
-def decrypt_secrets(sops_binary="/go/bin/sops"):
-    subprocess.run([sops_binary, "-d", "--output", ".env", "test_secrets.enc.env"])
+def setup_env(sops_binary="/go/bin/sops"):
+    p = subprocess.run(
+        [sops_binary, "-d", "--output", "/root/.env", "/root/test_secrets.enc.env"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+    logger.debug("stdout from sops:\n %s", p.stdout)
+    env_file = "/root/.env"
+    env = dotenv.dotenv_values(env_file)
+    logger.debug("Environment variables loaded from %s: %s", env_file, list(env.keys()))
+    dotenv.load_dotenv(env_file)
+
+    logger.debug("Enabling 64-bit floats in JAX.")
+    from jax.config import config
+
+    config.update("jax_enable_x64", True)

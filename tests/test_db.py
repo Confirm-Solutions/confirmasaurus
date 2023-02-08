@@ -124,10 +124,10 @@ class DBTester:
                 "step_id",
                 "step_iter",
                 "active",
-                "query_time",
                 "finisher_id",
                 "refine",
                 "deepen",
+                "split",
             ]
             for df in [pd_work, db_work]:
                 for i, col in enumerate(cols):
