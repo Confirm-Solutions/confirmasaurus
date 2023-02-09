@@ -90,44 +90,17 @@ def test_calibration_clickhouse(snapshot, ch_db):
 @pytest.mark.slow
 def test_calibration_clickhouse_distributed(snapshot, ch_db):
     snapshot.set_test_name("test_calibration")
-    import confirm.cloud.modal_util as modal_util
-    import modal
-
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    _ = ada.ada_calibrate(
+    db = ada.ada_calibrate(
         ZTest1D,
         g=g,
         db=ch_db,
         nB=5,
         packet_size=1,
-        n_iter=0,
         tile_batch_size=1,
+        backend=ada.ModalBackend(n_workers=4, gpu=False),
     )
-
-    job_id = ch_db.job_id
-    stub = modal.Stub("test_adagrid_clickhouse_distributed")
-
-    @stub.function(
-        image=modal_util.get_image(dependency_groups=["test", "cloud"]),
-        retries=0,
-        mounts=modal.create_package_mounts(["confirm", "imprint"]),
-        secret=modal.Secret.from_name("kms-sops"),
-        serialized=True,
-    )
-    def worker(i):
-        import confirm.cloud.clickhouse as ch
-        import confirm.adagrid as ada
-        from imprint.models.ztest import ZTest1D
-
-        modal_util.setup_env()
-
-        db = ch.Clickhouse.connect(job_id=job_id)
-        ada.ada_calibrate(ZTest1D, db=db, overrides=dict(n_iter=100))
-
-    with stub.run():
-        list(worker.map(range(4)))
-
-    ip.testing.check_imprint_results(ip.Grid(ch_db.get_results(), None), snapshot)
+    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
 
 
 @pytest.mark.slow

@@ -57,7 +57,7 @@ from . import bootstrap
 logger = imprint.log.getLogger(__name__)
 
 
-class AdaCalibration:
+class AdaCalibrate:
     def __init__(self, db, model, null_hypos, c):
         self.db = db
         self.model = model
@@ -221,7 +221,7 @@ class AdaCalibration:
 
 
 def ada_calibrate(
-    modeltype,
+    model_type,
     *,
     g=None,
     db=None,
@@ -244,12 +244,13 @@ def ada_calibrate(
     prod: bool = True,
     overrides: dict = None,
     callback=adagrid.print_report,
+    backend=adagrid.LocalBackend(),
 ):
     """
     The main entrypoint for the adaptive calibration algorithm.
 
     Args:
-        modeltype: The model class to use.
+        model_type: The model class to use.
         g: The initial grid.
         db: The database backend to use. Defaults to `db.DuckDB.connect()`.
         model_seed: The random seed for the model. Defaults to 0.
@@ -305,6 +306,7 @@ def ada_calibrate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    return adagrid.AdagridRunner(
-        modeltype, g, db, locals(), AdaCalibration, callback
-    ).run()
+    ada = adagrid.Adagrid(
+        model_type, g, db, AdaCalibrate, callback, overrides, locals()
+    )
+    return backend.run(ada)

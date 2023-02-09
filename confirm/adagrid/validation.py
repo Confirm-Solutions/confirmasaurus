@@ -136,7 +136,7 @@ class AdaValidate:
 
 
 def ada_validate(
-    modeltype,
+    model_type,
     *,
     lam,
     g=None,
@@ -156,12 +156,13 @@ def ada_validate(
     prod: bool = True,
     overrides: dict = None,
     callback=adagrid.print_report,
+    backend=adagrid.LocalBackend(),
 ):
     """
     The entrypoint for the adaptive validation algorithm.
 
     Args:
-        modeltype: The model class to use.
+        model_type: The model class to use.
         lam: The test statistic threshold to use for deciding to reject the
             null hypothesis.
         g: The initial grid. If not provided, the grid is assumed to be stored
@@ -218,6 +219,5 @@ def ada_validate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    return adagrid.AdagridRunner(
-        modeltype, g, db, locals(), AdaValidate, callback
-    ).run()
+    ada = adagrid.Adagrid(model_type, g, db, AdaValidate, callback, overrides, locals())
+    return backend.run(ada)

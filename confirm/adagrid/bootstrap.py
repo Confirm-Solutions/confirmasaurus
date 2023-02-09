@@ -157,7 +157,7 @@ class BootstrapCalibrate:
 
 
 def bootstrap_calibrate(
-    modeltype,
+    model_type,
     *,
     g: grid.Grid,
     alpha: float = 0.025,
@@ -184,7 +184,7 @@ def bootstrap_calibrate(
     to add more simulations to a tile.
 
     Args:
-        modeltype: The model class.
+        model_type: The model class.
         g: The grid.
         alpha: The Type I Error control level. Defaults to 0.025.
         model_seed: The random seed. Defaults to 0.
@@ -212,7 +212,7 @@ def bootstrap_calibrate(
         - twb_max_lams: The maximum of the twb_lams{i} columns.
         - alpha0: The alpha0 value used to calibrate the lambda*.
     """
-    model, g = driver._setup(modeltype, g, model_seed, K, model_kwargs)
+    model, g = driver._setup(model_type, g, model_seed, K, model_kwargs)
     Ks = np.sort(g.df["K"].unique())
     cal_df = BootstrapCalibrate(
         model, bootstrap_seed, nB, Ks, tile_batch_size

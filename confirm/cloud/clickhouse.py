@@ -206,7 +206,7 @@ class Clickhouse:
 
     def __post_init__(self):
         self.lock = redis.lock.Lock(
-            self.redis_con, f"{self.job_id}:next_lock", timeout=60
+            self.redis_con, f"{self.job_id}:next_lock", timeout=60, blocking_timeout=3
         )
 
     @property
