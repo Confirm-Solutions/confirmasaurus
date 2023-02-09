@@ -160,16 +160,11 @@ plt.show()
 ```
 
 ```python
-import confirm.adagrid as ada
-db = ada.ada_validate(
-    LogRank,
-    g=g,
-    lam=-1.96,
-    model_kwargs=dict(n=10, censoring_time=12)
-)
+g = ip.cartesian_grid([-10, -10], [-0.05, -0.05], n=[100, 100], null_hypos=[ip.hypo("theta0 > theta1")])
 ```
 
 ```python
+import confirm.adagrid as ada
 import confirm.cloud.clickhouse as ch
 db = ch.Clickhouse.connect()
 ada.ada_validate(
@@ -177,14 +172,24 @@ ada.ada_validate(
     g=g,
     db=db,
     lam=-1.96,
+    step_size=2**15,
+    packet_size=2**10,
     model_kwargs=dict(n=10, censoring_time=12),
-    backend=ada.ModalBackend(n_workers=1, gpu="T4")
+    backend=ada.ModalBackend(n_workers=4, gpu="T4")
 )
 ```
 
 ```python
 reports = db.get_reports()
 reports
+```
+
+```python
+total_runtime = (
+    reports["work_extraction_time"].max() - reports["work_extraction_time"].min()
+)
+total_processing = reports["runtime_processing"].sum()
+total_processing, total_runtime, total_processing / total_runtime
 ```
 
 ```python

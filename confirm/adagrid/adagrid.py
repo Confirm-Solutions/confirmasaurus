@@ -80,6 +80,7 @@ and correctness. We effectively put these steps inside a "critical" code region
 using a distributed lock. The simulation step is parallelized across all
 workers.
 """
+import codecs
 import copy
 import json
 import logging
@@ -89,6 +90,7 @@ import time
 import warnings
 from pprint import pformat
 
+import cloudpickle
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -627,25 +629,27 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     return out
 
 
-# TODO: move towards NullHypo class
-def _load_null_hypos(db):
-    null_hypos_df = db.store.get("null_hypos")
-    d = max([int(c[1:]) for c in null_hypos_df.columns if c.startswith("n")]) + 1
-    null_hypos = []
-    for i in range(null_hypos_df.shape[0]):
-        n = np.array([null_hypos_df[f"n{j}"].iloc[i] for j in range(d)])
-        c = null_hypos_df["c"].iloc[i]
-        null_hypos.append(imprint.planar_null.HyperPlane(n, c))
-    return null_hypos
-
-
 def _store_null_hypos(db, null_hypos):
-    d = db.dimension()
-    n_hypos = len(null_hypos)
-    cols = {f"n{i}": [null_hypos[j].n[i] for j in range(n_hypos)] for i in range(d)}
-    cols["c"] = [null_hypos[j].c for j in range(n_hypos)]
-    null_hypos_df = pd.DataFrame(cols)
-    db.store.set("null_hypos", null_hypos_df)
+    # we need to convert the pickled object to a valid string so that it can be
+    # inserted into a database. converting to a from base64 achieves this goal:
+    # https://stackoverflow.com/a/30469744/3817027
+    serialized = [
+        codecs.encode(cloudpickle.dumps(h), "base64").decode() for h in null_hypos
+    ]
+    desc = [h.description() for h in null_hypos]
+    df = pd.DataFrame({"serialized": serialized, "description": desc})
+    db.store.set("null_hypos", df)
+
+
+def _load_null_hypos(db):
+    df = db.store.get("null_hypos")
+    null_hypos = []
+    for i in range(df.shape[0]):
+        row = df.iloc[i]
+        null_hypos.append(
+            cloudpickle.loads(codecs.decode(row["serialized"].encode(), "base64"))
+        )
+    return null_hypos
 
 
 def verify_adagrid(df):
