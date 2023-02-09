@@ -39,6 +39,16 @@ Adagrid depends heavily on a database backend.
 - the different database backends use other tables when needed. Planar null
   hypotheses are stored in the database.
 
+### Worker ID
+
+Every worker that joins an adagrid job receives a sequential worker ID. 
+- worker_id=0 is reserved and should not be used
+- worker_id=1 is the default used for non-adagrid, non-distributed jobs
+  (e.g. ip.validate, ip.calibrate)
+- worker_id=2 is the worker that creates the initial grid and launches the
+  adagrid job.
+- worker_id>=3 are workers that join the adagrid job.
+
 ### DuckDB
 
 DuckDB is an embedded database used as the default single process backend for
@@ -91,15 +101,60 @@ from .db import DuckDBTiles
 logger = logging.getLogger(__name__)
 
 
-class AdagridRunner:
+class LocalBackend:
+    def run(self, ada):
+        return ada._run_local()
+
+
+class ModalBackend:
+    def __init__(
+        self, n_workers=1, gpu="A100", job_name_prefix="adagrid", modal_kwargs=None
+    ):
+        self.n_workers = n_workers
+        self.gpu = gpu
+        self.job_name_prefix = job_name_prefix
+        self.modal_kwargs = dict() if modal_kwargs is None else modal_kwargs
+
+    def run(self, ada):
+        import modal
+        import confirm.cloud.clickhouse as ch
+        import confirm.cloud.modal_util as modal_util
+
+        model_type = ada.model_type
+        algo_type = ada.algo_type
+        callback = ada.callback
+        job_id = ada.db.job_id
+
+        stub = modal.Stub(f"{self.job_name_prefix}_{job_id}")
+
+        p = modal_util.get_defaults()
+        p.update(dict(gpu=self.gpu, serialized=True))
+
+        @stub.function(**p)
+        def _modal_adagrid_worker(_):
+            modal_util.setup_env()
+            db = ch.Clickhouse.connect(job_id=job_id)
+            runner = Adagrid(model_type, None, db, algo_type, callback, dict(), dict())
+            runner._run_local()
+
+        logger.info(f"Launching Modal job with {self.n_workers} workers")
+        with stub.run(show_progress=False):
+            _ = list(_modal_adagrid_worker.map(range(self.n_workers)))
+        return ada.db
+
+
+class Adagrid:
     """
     Generic entrypoint for running adagrid regardless of whether it is
     calibration or validation. The arguments here will be self-explanatory if
     you understand ada_validate or ada_calibrate.
     """
 
-    def __init__(self, modeltype, g, db, locals_, algo_type, callback):
+    def __init__(self, model_type, g, db, algo_type, callback, overrides, locals_):
         self.callback = callback
+        self.model_type = model_type
+        self.algo_type = algo_type
+
         ########################################
         # STEP 1: Prepare the grid and database
         ########################################
@@ -119,9 +174,6 @@ class AdagridRunner:
 
         # locals() is a handy way to pass all the arguments to prepare_config, but
         # it has the downside of being too magic.
-        g = locals_["g"]
-        overrides = locals_["overrides"]
-
         if g is None:
             # If we are resuming a job, we need to load the config from the database.
             load_cfg_df = db.store.get("config")
@@ -158,19 +210,20 @@ class AdagridRunner:
                 for k, v in locals_.items()
                 if k
                 not in [
-                    "modeltype",
+                    "model_type",
                     "g",
                     "db",
                     "overrides",
                     "callback",
                     "model_kwargs",
                     "transformation",
+                    "backend",
                 ]
             }
 
-            # Storing the modeltype is infeasible because it's a class, so we store
+            # Storing the model_type is infeasible because it's a class, so we store
             # the model type name instead.
-            cfg["model_name"] = locals_["modeltype"].__name__
+            cfg["model_name"] = locals_["model_type"].__name__
 
             model_kwargs = locals_["model_kwargs"]
             if model_kwargs is None:
@@ -183,10 +236,10 @@ class AdagridRunner:
         # Very important not to share worker_id between workers so we overwrite!
         cfg["worker_id"] = worker_id
 
-        cfg["jax_backend"] = jax.lib.xla_bridge.get_backend().platform
+        cfg["jax_platform"] = jax.lib.xla_bridge.get_backend().platform
         default_tile_batch_size = dict(gpu=64, cpu=4)
         cfg["tile_batch_size"] = cfg["tile_batch_size"] or (
-            default_tile_batch_size[cfg["jax_backend"]]
+            default_tile_batch_size[cfg["jax_platform"]]
         )
 
         if cfg["packet_size"] is None:
@@ -204,7 +257,7 @@ class AdagridRunner:
                 nvidia_smi=_run(["nvidia-smi"]),
             )
         )
-        if locals_["prod"]:
+        if cfg["prod"]:
             cfg["pip_freeze"] = _run(["pip", "freeze"])
             cfg["conda_list"] = _run(["conda", "list"])
         else:
@@ -223,7 +276,7 @@ class AdagridRunner:
         # job or resuming an old one.
         ########################################
 
-        self.model = modeltype(
+        self.model = model_type(
             seed=cfg["model_seed"],
             max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
             **model_kwargs,
@@ -255,10 +308,7 @@ class AdagridRunner:
             )
             db.set_step_info(step_id=0, step_iter=0, n_iter=n_packets, n_tiles=n_tiles)
 
-    def run(self):
-        ########################################
-        # STEP 6: Actually run adagrid steps!
-        ########################################
+    def _run_local(self):
         if self.cfg["n_iter"] == 0:
             return self.db
 
@@ -302,7 +352,7 @@ class AdagridRunner:
         One iteration of the distributed adagrid algorithm.
 
         Args:
-            algo: AdaValidation or AdaCalibration
+            algo: AdaValidate or AdaCalibrate
             db: Database
             report: A dictionary of information about the iteration. This will be
                 modified in place.
@@ -325,7 +375,9 @@ class AdagridRunner:
             logger.debug("Starting loop %s.", i)
             report["waitings"] = i
             start = time.time()
+            wait = 0
             with self.db.lock:
+                claimed = True
                 logger.debug("Claimed DB lock.")
                 report["runtime_wait_for_lock"] = time.time() - start
 
@@ -430,13 +482,16 @@ class AdagridRunner:
                             n_processed_tiles,
                             step_n_tiles,
                         )
+            if not claimed:
+                logger.debug("Failed to claim database lock.")
             if wait > 0:
                 logger.debug("Waiting %s seconds and checking for work again.", wait)
                 time.sleep(wait)
             if i > 3:
                 logger.warning(
-                    "Worker s has been waiting for work for"
-                    " %s iterations. This might indicate a bug.",
+                    "This worker has been waiting for work for"
+                    " %s iterations. This either indicates a bug or it could"
+                    " mean that there fewer packets than workers in this step.",
                     i,
                 )
             i += 1
@@ -574,11 +629,11 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
 
 # TODO: move towards NullHypo class
 def _load_null_hypos(db):
-    d = db.dimension()
     null_hypos_df = db.store.get("null_hypos")
+    d = max([int(c[1:]) for c in null_hypos_df.columns if c.startswith("n")]) + 1
     null_hypos = []
     for i in range(null_hypos_df.shape[0]):
-        n = np.array([null_hypos_df[f"n{i}"].iloc[i] for i in range(d)])
+        n = np.array([null_hypos_df[f"n{j}"].iloc[i] for j in range(d)])
         c = null_hypos_df["c"].iloc[i]
         null_hypos.append(imprint.planar_null.HyperPlane(n, c))
     return null_hypos

@@ -160,63 +160,42 @@ plt.show()
 ```
 
 ```python
-db = ch.Clickhouse.connect()
-reports, db = ada.ada_validate(
+import confirm.adagrid as ada
+db = ada.ada_validate(
     LogRank,
     g=g,
-    db=db,
-    n_steps=2,
     lam=-1.96,
     model_kwargs=dict(n=10, censoring_time=12)
 )
 ```
 
 ```python
-import modal
-import confirm.adagrid as ada
 import confirm.cloud.clickhouse as ch
-import confirm.cloud.modal_util as modal_util
-
-
-def f():
-    modal_util.setup_env()
-    db = ch.Clickhouse.connect()
-    reports, db = ada.ada_validate(
-        LogRank,
-        g=g,
-        db=db,
-        lam=-1.96,
-        model_kwargs=dict(n=10, censoring_time=12)
-    )
-    return reports, db.job_id
-
-reports, job_id = modal_util.run_on_modal(f, gpu=modal.gpu.A100())
-db = ch.Clickhouse.connect(job_id=job_id)
+db = ch.Clickhouse.connect()
+ada.ada_validate(
+    LogRank,
+    g=g,
+    db=db,
+    lam=-1.96,
+    model_kwargs=dict(n=10, censoring_time=12),
+    backend=ada.ModalBackend(n_workers=1, gpu="T4")
+)
 ```
 
 ```python
-import modal
-import confirm.adagrid as ada
-import confirm.cloud.clickhouse as ch
-import confirm.cloud.modal_util as modal_util
-
-
-def f():
-    modal_util.setup_env()
-    reports, db = ada.ada_validate(
-        LogRank,
-        g=g,
-        lam=-1.96,
-        model_kwargs=dict(n=10, censoring_time=12)
-    )
-    return db.get_results()
-
-results_df = modal_util.run_on_modal(f, gpu=modal.gpu.A100())
-results_df.shape
+reports = db.get_reports()
+reports
 ```
 
 ```python
-# results_df = db.get_results()
+(reports['runtime_processing'].sum() / reports['runtime_full_iter'].sum(),
+reports['runtime_get_work'].sum() / reports['runtime_full_iter'].sum(),
+reports['runtime_convergence_criterion'].sum() / reports['runtime_full_iter'].sum(),
+reports['runtime_new_step'].sum() / reports['runtime_full_iter'].sum())
+```
+
+```python
+results_df = db.get_results()
 df = ip.Grid(results_df, None).prune_inactive().df
 ```
 

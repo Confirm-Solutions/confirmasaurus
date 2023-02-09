@@ -49,16 +49,23 @@ def get_image(dependency_groups=["cloud"]):
     ).dockerfile_commands(dockerfile_commands, context_files=context_files)
 
 
+def get_defaults():
+    return dict(
+        image=get_image(dependency_groups=["test", "cloud"]),
+        retries=0,
+        mounts=(modal.create_package_mounts(["confirm", "imprint"])),
+        secret=modal.Secret.from_name("kms-sops"),
+    )
+
+
 def modalize(stub, **kwargs):
     def decorator(f):
+        p = get_defaults()
+        p.update(kwargs)
         return stub.function(
             raw_f=f,
-            image=get_image(dependency_groups=["test", "cloud"]),
-            retries=0,
-            mounts=(modal.create_package_mounts(["confirm", "imprint"])),
-            secret=modal.Secret.from_name("kms-sops"),
             name=f.__qualname__,
-            **kwargs,
+            **p,
         )()
 
     return decorator
@@ -78,7 +85,7 @@ def setup_env(sops_binary="/go/bin/sops"):
         stderr=subprocess.STDOUT,
         check=True,
     )
-    logger.debug("stdout from sops:\n %s", p.stdout)
+    logger.debug("Decrypting secrets. stdout from sops:\n %s", p.stdout.decode("utf-8"))
     env_file = "/root/.env"
     env = dotenv.dotenv_values(env_file)
     logger.debug("Environment variables loaded from %s: %s", env_file, list(env.keys()))
