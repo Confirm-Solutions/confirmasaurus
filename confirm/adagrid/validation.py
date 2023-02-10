@@ -212,6 +212,8 @@ def ada_validate(
         callback: A function accepting three arguments (report, db)
             that can perform some reporting or printing at each iteration.
             Defaults to print_report.
+        backend: The backend to use for running the job. Defaults to running
+            locally.
 
     Returns:
         ada_iter: The final iteration number.
