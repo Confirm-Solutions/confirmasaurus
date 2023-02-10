@@ -1,11 +1,12 @@
-import logging
 import subprocess
 from pathlib import Path
 
 import dotenv
 import modal
 
-logger = logging.getLogger(__name__)
+import imprint.log
+
+logger = imprint.log.getLogger(__name__)
 
 
 def get_image(dependency_groups=["cloud"]):

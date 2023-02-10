@@ -1,12 +1,10 @@
-import logging
-
 import numpy as np
 import pandas as pd
 
 import imprint
 from . import adagrid
 
-logger = logging.getLogger(__name__)
+logger = imprint.log.getLogger(__name__)
 
 
 class AdaValidate:
@@ -78,8 +76,12 @@ class AdaValidate:
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
     def convergence_criterion(self, report):
-        max_tie_est = self.db.worst_tile("tie_est desc")["tie_est"].iloc[0]
-        next_tile = self.db.worst_tile("total_cost_order, tie_bound_order").iloc[0]
+        max_tie_est = self.db.worst_tile(self.c["worker_id"], "tie_est desc")[
+            "tie_est"
+        ].iloc[0]
+        next_tile = self.db.worst_tile(
+            self.c["worker_id"], "total_cost_order, tie_bound_order"
+        ).iloc[0]
         report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
         report.update(
             dict(

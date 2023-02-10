@@ -44,10 +44,9 @@ Adagrid depends heavily on a database backend.
 Every worker that joins an adagrid job receives a sequential worker ID. 
 - worker_id=0 is reserved and should not be used
 - worker_id=1 is the default used for non-adagrid, non-distributed jobs
-  (e.g. ip.validate, ip.calibrate)
-- worker_id=2 is the worker that creates the initial grid and launches the
-  adagrid job.
-- worker_id>=3 are workers that join the adagrid job.
+  (e.g. ip.validate, ip.calibrate). It is also used for the initializing worker
+  in distributed adagrid jobs.
+- worker_id>=2 are workers that join the adagrid job.
 
 ### DuckDB
 
@@ -83,7 +82,6 @@ workers.
 import codecs
 import copy
 import json
-import logging
 import platform
 import subprocess
 import time
@@ -100,7 +98,7 @@ import imprint
 from .convergence import WorkerStatus
 from .db import DuckDBTiles
 
-logger = logging.getLogger(__name__)
+logger = imprint.log.getLogger(__name__)
 
 
 class LocalBackend:
@@ -152,7 +150,9 @@ class Adagrid:
     you understand ada_validate or ada_calibrate.
     """
 
-    def __init__(self, model_type, g, db, algo_type, callback, overrides, locals_):
+    def __init__(
+        self, model_type, g, db, algo_type, callback, overrides, locals_, worker_id=None
+    ):
         self.callback = callback
         self.model_type = model_type
         self.algo_type = algo_type
@@ -167,7 +167,8 @@ class Adagrid:
             db = DuckDBTiles.connect()
         self.db = db
 
-        worker_id = db.new_worker()
+        if worker_id is None:
+            worker_id = db.new_worker()
         imprint.log.worker_id.set(worker_id)
 
         ########################################
@@ -225,7 +226,7 @@ class Adagrid:
 
             # Storing the model_type is infeasible because it's a class, so we store
             # the model type name instead.
-            cfg["model_name"] = locals_["model_type"].__name__
+            cfg["model_name"] = model_type.__name__
 
             model_kwargs = locals_["model_kwargs"]
             if model_kwargs is None:
@@ -311,194 +312,198 @@ class Adagrid:
             db.set_step_info(step_id=0, step_iter=0, n_iter=n_packets, n_tiles=n_tiles)
 
     def _run_local(self):
-        if self.cfg["n_iter"] == 0:
-            return self.db
+        for n_coords in range(4):
+            pass
 
-        for worker_iter in range(self.cfg["n_iter"]):
-            try:
-                report = dict(worker_iter=worker_iter, worker_id=self.cfg["worker_id"])
-                iter_start = time.time()
-                status, work_df, report = self.run_iter(report)
-                if work_df is not None and work_df.shape[0] > 0:
-                    logger.debug("Processing %s tiles.", work_df.shape[0])
-                    start = time.time()
-                    results = self.algo.process_tiles(tiles_df=work_df, report=report)
-                    report["runtime_processing"] = time.time() - start
-                    # TODO: insert results in secondary thread so that we don't block?
-                    self.db.insert_results(results, self.algo.get_orderer())
-                report["status"] = status.name
-                report["runtime_full_iter"] = time.time() - iter_start
+    # def _run_local(self):
+    #     if self.cfg["n_iter"] == 0:
+    #         return self.db
 
-                if self.callback is not None:
-                    self.callback(worker_iter, report, self.db)
-                # TODO: insert report in secondary thread so that we don't block
-                self.db.insert_report(report)
+    #     for worker_iter in range(self.cfg["n_iter"]):
+    #         try:
+    #             report = dict(worker_iter=worker_iter, worker_id=self.cfg["worker_id"])
+    #             iter_start = time.time()
+    #             status, work_df, report = self.run_iter(report)
+    #             if work_df is not None and work_df.shape[0] > 0:
+    #                 logger.debug("Processing %s tiles.", work_df.shape[0])
+    #                 start = time.time()
+    #                 results = self.algo.process_tiles(tiles_df=work_df, report=report)
+    #                 report["runtime_processing"] = time.time() - start
+    #                 # TODO: insert results in secondary thread so that we don't block?
+    #                 self.db.insert_results(results, self.algo.get_orderer())
+    #             report["status"] = status.name
+    #             report["runtime_full_iter"] = time.time() - iter_start
 
-                if status.done():
-                    # We just stop this worker. The other workers will continue to run
-                    # but will stop once they reached the convergence criterion check.
-                    # It might be faster to stop all the workers immediately, but that
-                    # would be more engineering effort.
-                    break
-            except KeyboardInterrupt:
-                # TODO: we want to die robustly when there's a keyboard interrupt.
-                # It might be good to notify the database that we will not complete
-                # assigned tiles?
-                print("KeyboardInterrupt")
-                return self.db
+    #             if self.callback is not None:
+    #                 self.callback(worker_iter, report, self.db)
+    #             # TODO: insert report in secondary thread so that we don't block
+    #             self.db.insert_report(report)
 
-        return self.db
+    #             if status.done():
+    #                 # We just stop this worker. The other workers will continue to run
+    #                 # but will stop once they reached the convergence criterion check.
+    #                 # It might be faster to stop all the workers immediately, but that
+    #                 # would be more engineering effort.
+    #                 break
+    #         except KeyboardInterrupt:
+    #             # TODO: we want to die robustly when there's a keyboard interrupt.
+    #             # It might be good to notify the database that we will not complete
+    #             # assigned tiles?
+    #             print("KeyboardInterrupt")
+    #             return self.db
 
-    def run_iter(self, report):
-        """
-        One iteration of the distributed adagrid algorithm.
+    #     return self.db
 
-        Args:
-            algo: AdaValidate or AdaCalibrate
-            db: Database
-            report: A dictionary of information about the iteration. This will be
-                modified in place.
-            n_steps: The maximum number of steps to run.
+    # def run_iter(self, report):
+    #     """
+    #     One iteration of the distributed adagrid algorithm.
 
-        Returns:
-            status: A value from the Enum WorkerStatus
-                (e.g. WorkerStatus.WORK, WorkerStatus.CONVERGED).
-            work: A DataFrame of tiles for which we need to simulate and
-                  validate/calibrate.
-            report: A dictionary of information about the iteration.
-        """
+    #     Args:
+    #         algo: AdaValidate or AdaCalibrate
+    #         db: Database
+    #         report: A dictionary of information about the iteration. This will be
+    #             modified in place.
+    #         n_steps: The maximum number of steps to run.
 
-        start = time.time()
+    #     Returns:
+    #         status: A value from the Enum WorkerStatus
+    #             (e.g. WorkerStatus.WORK, WorkerStatus.CONVERGED).
+    #         work: A DataFrame of tiles for which we need to simulate and
+    #               validate/calibrate.
+    #         report: A dictionary of information about the iteration.
+    #     """
 
-        max_loops = 25
-        i = 0
-        status = WorkerStatus.WORK
-        while i < max_loops:
-            logger.debug("Starting loop %s.", i)
-            report["waitings"] = i
-            start = time.time()
-            wait = 0
-            with self.db.lock:
-                claimed = True
-                logger.debug("Claimed DB lock.")
-                report["runtime_wait_for_lock"] = time.time() - start
+    #     start = time.time()
 
-                step_id, step_iter, step_n_iter, step_n_tiles = self.db.get_step_info()
-                report["step_id"] = step_id
-                report["step_iter"] = step_iter
-                report["step_n_iter"] = step_n_iter
-                report["step_n_tiles"] = step_n_tiles
+    #     max_loops = 25
+    #     i = 0
+    #     status = WorkerStatus.WORK
+    #     while i < max_loops:
+    #         logger.debug("Starting loop %s.", i)
+    #         report["waitings"] = i
+    #         start = time.time()
+    #         wait = 0
+    #         with self.db.lock:
+    #             claimed = True
+    #             logger.debug("Claimed DB lock.")
+    #             report["runtime_wait_for_lock"] = time.time() - start
 
-                # Check if there are iterations left in this step.
-                # If there are, get the next batch of tiles to process.
-                if step_iter < step_n_iter:
-                    logger.debug(
-                        "get_work(step_id=%s, step_iter=%s)", step_id, step_iter
-                    )
-                    start = time.time()
-                    work_df = self.db.get_work(step_id, step_iter)
-                    report["runtime_get_work"] = time.time() - start
+    #             step_id, step_iter, step_n_iter, step_n_tiles = self.db.get_step_info()
+    #             report["step_id"] = step_id
+    #             report["step_iter"] = step_iter
+    #             report["step_n_iter"] = step_n_iter
+    #             report["step_n_tiles"] = step_n_tiles
 
-                    report["work_extraction_time"] = time.time()
-                    report["n_processed"] = work_df.shape[0]
-                    logger.debug("get_work(...) returned %s tiles.", work_df.shape[0])
+    #             # Check if there are iterations left in this step.
+    #             # If there are, get the next batch of tiles to process.
+    #             if step_iter < step_n_iter:
+    #                 logger.debug(
+    #                     "get_work(step_id=%s, step_iter=%s)", step_id, step_iter
+    #                 )
+    #                 start = time.time()
+    #                 work_df = self.db.get_work(step_id, step_iter)
+    #                 report["runtime_get_work"] = time.time() - start
 
-                    if work_df.shape[0] > 0:
-                        # If there's work, update the step info and return the work!
-                        start = time.time()
-                        self.db.set_step_info(
-                            step_id=step_id,
-                            step_iter=step_iter + 1,
-                            n_iter=step_n_iter,
-                            n_tiles=step_n_tiles,
-                        )
-                        report["runtime_update_step_info"] = time.time() - start
-                        # Why do we return the work instead of just processing it here?
-                        # Because the database is currently locked and we would
-                        # like to release the lock while we process tiles!
-                        return status, work_df, report
-                    else:
-                        # If step_iter < step_n_iter but there's no work, then
-                        # The INSERT into tiles that was supposed to populate
-                        # the work is probably incomplete. We should wait a
-                        # very short time and try again.
-                        logger.debug("No work despite step_iter < step_n_iter.")
-                        wait = 0.1
+    #                 report["work_extraction_time"] = time.time()
+    #                 report["n_processed"] = work_df.shape[0]
+    #                 logger.debug("get_work(...) returned %s tiles.", work_df.shape[0])
 
-                # If there are no iterations left in the step, we check if the
-                # step is complete. For a step to be complete means that all
-                # tiles have results.
-                else:
-                    n_processed_tiles = self.db.n_processed_tiles(step_id)
-                    report["n_finished_tiles"] = n_processed_tiles
-                    if n_processed_tiles == step_n_tiles:
-                        # If a packet has just been completed, we check for convergence.
-                        start = time.time()
-                        status, convergence_data = self.algo.convergence_criterion(
-                            report=report
-                        )
-                        report["runtime_convergence_criterion"] = time.time() - start
-                        start = time.time()
-                        if status:
-                            logger.debug("Convergence!!")
-                            return WorkerStatus.CONVERGED, None, report
+    #                 if work_df.shape[0] > 0:
+    #                     # If there's work, update the step info and return the work!
+    #                     start = time.time()
+    #                     self.db.set_step_info(
+    #                         step_id=step_id,
+    #                         step_iter=step_iter + 1,
+    #                         n_iter=step_n_iter,
+    #                         n_tiles=step_n_tiles,
+    #                     )
+    #                     report["runtime_update_step_info"] = time.time() - start
+    #                     # Why do we return the work instead of just processing it here?
+    #                     # Because the database is currently locked and we would
+    #                     # like to release the lock while we process tiles!
+    #                     return status, work_df, report
+    #                 else:
+    #                     # If step_iter < step_n_iter but there's no work, then
+    #                     # The INSERT into tiles that was supposed to populate
+    #                     # the work is probably incomplete. We should wait a
+    #                     # very short time and try again.
+    #                     logger.debug("No work despite step_iter < step_n_iter.")
+    #                     wait = 0.1
 
-                        if step_id >= self.cfg["n_steps"] - 1:
-                            # We've completed all the steps, so we're done.
-                            logger.debug("Reached max number of steps. Terminating.")
-                            return WorkerStatus.REACHED_N_STEPS, None, report
+    #             # If there are no iterations left in the step, we check if the
+    #             # step is complete. For a step to be complete means that all
+    #             # tiles have results.
+    #             else:
+    #                 n_processed_tiles = self.db.n_processed_tiles(step_id)
+    #                 report["n_finished_tiles"] = n_processed_tiles
+    #                 if n_processed_tiles == step_n_tiles:
+    #                     # If a packet has just been completed, we check for convergence.
+    #                     start = time.time()
+    #                     status, convergence_data = self.algo.convergence_criterion(
+    #                         report=report
+    #                     )
+    #                     report["runtime_convergence_criterion"] = time.time() - start
+    #                     start = time.time()
+    #                     if status:
+    #                         logger.debug("Convergence!!")
+    #                         return WorkerStatus.CONVERGED, None, report
 
-                        # If we haven't converged, we create a new step.
-                        start = time.time()
-                        new_step_id = step_id + 1
-                        tiles_df = self.algo.select_tiles(report, convergence_data)
-                        report["runtime_select_tiles"] = time.time() - start
+    #                     if step_id >= self.cfg["n_steps"] - 1:
+    #                         # We've completed all the steps, so we're done.
+    #                         logger.debug("Reached max number of steps. Terminating.")
+    #                         return WorkerStatus.REACHED_N_STEPS, None, report
 
-                        if tiles_df is None:
-                            # New step is empty so we have terminated but
-                            # failed to converge.
-                            logger.debug(
-                                "New packet is empty. Terminating despite "
-                                "failure to converge."
-                            )
-                            return WorkerStatus.FAILED, None, report
-                        else:
-                            start = time.time()
-                            self.new_step(tiles_df, new_step_id, report)
-                            report["runtime_new_step"] = time.time() - start
-                            # Successful new packet. We should check for work again
-                            # immediately.
-                            status = WorkerStatus.NEW_STEP
-                            wait = 0
-                            logger.debug("Successfully created new packet.")
-                    else:
-                        # No work available, but the packet is incomplete. This is
-                        # because other workers have claimed all the work but have not
-                        # processsed yet.
-                        # In this situation, we should release the lock and wait for
-                        # other workers to finish.
-                        wait = 1
-                        logger.debug(
-                            "No work available, but packet is incomplete"
-                            " with %s/%s tiles complete.",
-                            n_processed_tiles,
-                            step_n_tiles,
-                        )
-            if not claimed:
-                logger.debug("Failed to claim database lock.")
-            if wait > 0:
-                logger.debug("Waiting %s seconds and checking for work again.", wait)
-                time.sleep(wait)
-            if i > 3:
-                logger.warning(
-                    "This worker has been waiting for work for"
-                    " %s iterations. This either indicates a bug or it could"
-                    " mean that there fewer packets than workers in this step.",
-                    i,
-                )
-            i += 1
+    #                     # If we haven't converged, we create a new step.
+    #                     start = time.time()
+    #                     new_step_id = step_id + 1
+    #                     tiles_df = self.algo.select_tiles(report, convergence_data)
+    #                     report["runtime_select_tiles"] = time.time() - start
 
-        return WorkerStatus.STUCK, None, report
+    #                     if tiles_df is None:
+    #                         # New step is empty so we have terminated but
+    #                         # failed to converge.
+    #                         logger.debug(
+    #                             "New packet is empty. Terminating despite "
+    #                             "failure to converge."
+    #                         )
+    #                         return WorkerStatus.FAILED, None, report
+    #                     else:
+    #                         start = time.time()
+    #                         self.new_step(tiles_df, new_step_id, report)
+    #                         report["runtime_new_step"] = time.time() - start
+    #                         # Successful new packet. We should check for work again
+    #                         # immediately.
+    #                         status = WorkerStatus.NEW_STEP
+    #                         wait = 0
+    #                         logger.debug("Successfully created new packet.")
+    #                 else:
+    #                     # No work available, but the packet is incomplete. This is
+    #                     # because other workers have claimed all the work but have not
+    #                     # processsed yet.
+    #                     # In this situation, we should release the lock and wait for
+    #                     # other workers to finish.
+    #                     wait = 1
+    #                     logger.debug(
+    #                         "No work available, but packet is incomplete"
+    #                         " with %s/%s tiles complete.",
+    #                         n_processed_tiles,
+    #                         step_n_tiles,
+    #                     )
+    #         if not claimed:
+    #             logger.debug("Failed to claim database lock.")
+    #         if wait > 0:
+    #             logger.debug("Waiting %s seconds and checking for work again.", wait)
+    #             time.sleep(wait)
+    #         if i > 3:
+    #             logger.warning(
+    #                 "This worker has been waiting for work for"
+    #                 " %s iterations. This either indicates a bug or it could"
+    #                 " mean that there fewer packets than workers in this step.",
+    #                 i,
+    #             )
+    #         i += 1
+
+    #     return WorkerStatus.STUCK, None, report
 
     def new_step(self, tiles_df, new_step_id, report):
         tiles_df["finisher_id"] = self.cfg["worker_id"]

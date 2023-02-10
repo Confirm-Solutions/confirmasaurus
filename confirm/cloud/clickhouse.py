@@ -325,7 +325,7 @@ class Clickhouse:
         logger.debug(f"writing {df.shape[0]} results")
         _insert_df(self.client, "results", df)
 
-    def worst_tile(self, order_col):
+    def worst_tile(self, worker_id, order_col):
         return _query_df(
             self.client,
             f"""
@@ -333,6 +333,7 @@ class Clickhouse:
                 where
                     active=true
                     and id not in (select id from inactive)
+                    and worker_assignment = {worker_id}
             order by {order_col} limit 1
         """,
         )
@@ -393,7 +394,6 @@ class Clickhouse:
             engine = MergeTree() order by ({orderer})
         """
         self.client.command(cmd)
-        self.insert_results(results_df, orderer)
 
     def close(self):
         self.client.close()
