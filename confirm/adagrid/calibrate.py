@@ -308,7 +308,4 @@ def ada_calibrate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    ada = adagrid.Adagrid(
-        model_type, g, db, AdaCalibrate, callback, overrides, locals()
-    )
-    return backend.run(ada)
+    return adagrid.run(AdaCalibrate, locals())

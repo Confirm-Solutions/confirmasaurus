@@ -107,7 +107,9 @@ class AdaValidate:
         # TODO: output how many tiles are left according to the criterion?
         # TODO: lots of new_step is duplicated with calibration.
         raw_tiles = self.db.next(
-            self.c["step_size"], "total_cost_order, tie_bound_order"
+            self.c["worker_id"],
+            self.c["step_size"],
+            "total_cost_order, tie_bound_order",
         )
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
         tiles_df = raw_tiles[include].copy()
@@ -223,5 +225,4 @@ def ada_validate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    ada = adagrid.Adagrid(model_type, g, db, AdaValidate, callback, overrides, locals())
-    return backend.run(ada)
+    return adagrid.run(AdaValidate, locals())

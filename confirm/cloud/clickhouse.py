@@ -7,9 +7,9 @@ Speeding up clickhouse stuff by using threading and specifying column_types:
 Fast min/max with clickhouse:
     https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
 """
+import asyncio
 import os
 import uuid
-from ast import literal_eval
 from dataclasses import dataclass
 from typing import Dict
 from typing import List
@@ -280,16 +280,6 @@ class Clickhouse:
     def insert_report(self, report):
         self.client.command(f"insert into reports values ('{json.dumps(report)}')")
 
-    def get_step_info(self):
-        out = literal_eval(self.redis_con.get(f"{self.job_id}:step_info").decode())
-        logger.debug("get step info: %s", out)
-        return out
-
-    def set_step_info(self, *, step_id: int, step_iter: int, n_iter: int, n_tiles: int):
-        step_info = (step_id, step_iter, n_iter, n_tiles)
-        logger.debug("set step info: %s", step_info)
-        self.redis_con.set(f"{self.job_id}:step_info", str(step_info))
-
     def n_processed_tiles(self, step_id: int) -> int:
         # This checks the number of tiles for which both:
         # - there are results
@@ -324,8 +314,18 @@ class Clickhouse:
         self._create_results_table(df, orderer)
         logger.debug(f"writing {df.shape[0]} results")
         _insert_df(self.client, "results", df)
+        self._results_table_exists = True
+
+    def finish(self, which):
+        logger.debug(f"finish: {which.head()}")
+        _insert_df(self.client, "done", which)
 
     def worst_tile(self, worker_id, order_col):
+        if worker_id is None:
+            worker_id_clause = ""
+        else:
+            worker_id_clause = f"and worker_id = {worker_id}"
+
         return _query_df(
             self.client,
             f"""
@@ -333,39 +333,37 @@ class Clickhouse:
                 where
                     active=true
                     and id not in (select id from inactive)
-                    and worker_assignment = {worker_id}
+                    {worker_id_clause}
             order by {order_col} limit 1
         """,
         )
 
-    def get_work(self, step_id, step_iter):
+    def get_work(self, worker_id, step_id, packet_id):
         return _query_df(
             self.client,
             f"""
             select * from tiles
                 where
-                    step_id = {step_id}
-                    and step_iter = {step_iter}
+                    worker_id = {worker_id}
+                    and step_id = {step_id}
+                    and packet_id = {packet_id}
             """,
         )
 
-    def next(self, n, order_col):
+    def next(self, worker_id, n, order_col):
         return _query_df(
             self.client,
             f"""
             select * from results
                 where
-                    eligible=true
+                    worker_id = {worker_id}
+                    and eligible=true
                     and id not in (select id from done)
             order by {order_col} asc limit {n}
         """,
         )
 
-    def finish(self, which):
-        logger.debug(f"finish: {which.head()}")
-        _insert_df(self.client, "done", which)
-
-    def bootstrap_lamss(self):
+    def bootstrap_lamss(self, worker_id):
         # Get the number of bootstrap lambda* columns
         nB = (
             max([int(c[6:]) for c in self.results_columns() if c.startswith("B_lams")])
@@ -374,10 +372,15 @@ class Clickhouse:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        if worker_id is None:
+            worker_id_clause = ""
+        else:
+            worker_id_clause = f"and worker_id = {worker_id}"
         lamss = self.client.query(
             f"""
             select {cols} from results where
                 active=true
+                {worker_id_clause}
                 and id not in (select id from inactive)
         """
         ).result_set[0]
@@ -387,7 +390,6 @@ class Clickhouse:
     def _create_results_table(self, results_df, orderer):
         if self._results_table_exists:
             return
-        self._results_table_exists = True
         results_cols = get_create_table_cols(results_df)
         cmd = f"""
         create table if not exists results ({",".join(results_cols)})
@@ -399,7 +401,7 @@ class Clickhouse:
         self.client.close()
         self.redis_con.close()
 
-    def init_tiles(self, tiles_df):
+    async def init_tiles(self, tiles_df):
         # tables:
         # - tiles: id, lots of other stuff...
         # - packet: id
@@ -409,36 +411,45 @@ class Clickhouse:
         tiles_cols = get_create_table_cols(tiles_df)
 
         id_type = type_map[tiles_df["id"].dtype.name]
-        commands = [
-            f"""
+
+        create_done = asyncio.create_task(
+            asyncio.to_thread(
+                self.client.command,
+                f"""
+                create table done (
+                        worker_id UInt32,
+                        id {id_type},
+                        step_id UInt32,
+                        packet_id Int32,
+                        active Bool,
+                        finisher_id UInt32,
+                        refine Bool,
+                        deepen Bool,
+                        split Bool)
+                    engine = MergeTree() order by (worker_id, step_id, packet_id, id)
+                """,
+            )
+        )
+
+        create_tiles = asyncio.create_task(
+            asyncio.to_thread(
+                self.client.command,
+                f"""
             create table tiles ({",".join(tiles_cols)})
-                engine = MergeTree() order by (step_id, step_iter, id)
+                engine = MergeTree() order by (worker_id, step_id, packet_id, id)
             """,
-            # TODO: could leave this uncreated until we need it
-            f"""
-            create table done (
-                    id {id_type},
-                    step_id UInt32,
-                    step_iter Int32,
-                    active Bool,
-                    finisher_id UInt32,
-                    refine Bool,
-                    deepen Bool,
-                    split Bool)
-                engine = MergeTree() order by id
-            """,
-            """
+            )
+        )
+
+        create_reports = asyncio.create_task(
+            asyncio.to_thread(
+                self.client.command,
+                """
             create table reports (json String)
                 engine = MergeTree() order by ()
             """,
-            """
-            create materialized view inactive
-                engine = MergeTree() order by id
-                as select id from done where active=false
-            """,
-        ]
-        for c in commands:
-            self.client.command(c)
+            )
+        )
 
         # these tiles have no parents. poor sad tiles :(
         # we need to put these absent parents into the done table so that
@@ -447,8 +458,9 @@ class Clickhouse:
             tiles_df["parent_id"].unique()[:, None], columns=["id"]
         )
         for c in [
+            "worker_id",
             "step_id",
-            "step_iter",
+            "packet_id",
             "active",
             "finisher_id",
             "refine",
@@ -456,14 +468,44 @@ class Clickhouse:
             "split",
         ]:
             absent_parents[c] = 0
-        _insert_df(self.client, "done", absent_parents)
 
-        self.insert_tiles(tiles_df)
-        self.set_step_info(step_id=-1, step_iter=0, n_iter=0, n_tiles=0)
+        async def _create_inactive():
+            await create_done
+            await asyncio.to_thread(
+                self.client.command,
+                """
+            create materialized view inactive
+                engine = MergeTree() order by (worker_id, id)
+                as select worker_id, id from done where active=false
+            """,
+            )
 
-    def new_worker(self):
+        create_inactive = asyncio.create_task(_create_inactive())
+
+        async def _insert_tiles():
+            await create_tiles
+            await asyncio.to_thread(self.insert_tiles, tiles_df)
+
+        # Store a reference to the task so that it doesn't get garbage collected.
+        self._insert_tiles_task = asyncio.create_task(_insert_tiles())
+
+        async def _insert_done():
+            await create_done
+            await asyncio.to_thread(_insert_df, self.client, "done", absent_parents)
+
+        self._insert_done_task = asyncio.create_task(_insert_done())
+
+        # I think the only things that we *need* to wait for are the create
+        # table statements. The inserts are not urgent.
+        print("waiting")
+        print("waiting")
+        print("waiting", flush=True)
+        await asyncio.gather(create_reports, create_tiles, create_done, create_inactive)
+
+    def new_workers(self, n):
         with self.lock:
-            return self.redis_con.incr(f"{self.job_id}:worker_id") + 1
+            cur_id = self.redis_con.incrby(f"{self.job_id}:worker_id", n) - n + 1
+        return [cur_id + i for i in range(n)]
 
     def connect(
         job_id: int = None,
