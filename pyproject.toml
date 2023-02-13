@@ -66,7 +66,7 @@ optional = true
 [tool.poetry.group.cloud_dev.dependencies]
 aws-cdk-lib = "^2.61.1"
 aws-cdk-aws-batch-alpha = "^2"
-modal-client = "^0.45.890"
+modal-client = "^0.46.0"
 
 [[tool.poetry.source]]
 name = "jax"

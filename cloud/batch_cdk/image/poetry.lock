@@ -2548,13 +2548,13 @@ files = [
 
 [[package]]
 name = "modal-client"
-version = "0.41.482"
+version = "0.46.1185"
 description = "Python client library for Modal"
 category = "dev"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "modal_client-0.41.482-py3-none-any.whl", hash = "sha256:c124985e4619d4d4ef2a08964beb31ba3eb0d6573bd492229b7cee33aa9addda"},
+    {file = "modal_client-0.46.1185-py3-none-any.whl", hash = "sha256:002e144dd93633acca38b86d022840d23f9363a57f6448712693840d01597b8d"},
 ]
 
 [package.dependencies]
@@ -2562,13 +2562,13 @@ aiohttp = "*"
 aiostream = "*"
 asgiref = "*"
 certifi = "*"
+click = ">=8.1.0"
 cloudpickle = {version = ">=2.0.0,<2.1.0", markers = "python_version < \"3.11\""}
 fastapi = "*"
 grpclib = "0.4.3"
 importlib-metadata = "*"
 protobuf = ">=3.19,<5.0"
 rich = ">=12.0.0"
-sentry-sdk = "*"
 synchronicity = ">=0.2.13"
 tblib = ">=1.7.0"
 toml = "*"
@@ -4073,46 +4073,6 @@ objc = ["pyobjc-framework-Cocoa"]
 win32 = ["pywin32"]
 
 [[package]]
-name = "sentry-sdk"
-version = "1.15.0"
-description = "Python client for Sentry (https://sentry.io)"
-category = "dev"
-optional = false
-python-versions = "*"
-files = [
-    {file = "sentry-sdk-1.15.0.tar.gz", hash = "sha256:69ecbb2e1ff4db02a06c4f20f6f69cb5dfe3ebfbc06d023e40d77cf78e9c37e7"},
-    {file = "sentry_sdk-1.15.0-py2.py3-none-any.whl", hash = "sha256:7ad4d37dd093f4a7cb5ad804c6efe9e8fab8873f7ffc06042dc3f3fd700a93ec"},
-]
-
-[package.dependencies]
-certifi = "*"
-urllib3 = {version = ">=1.26.11", markers = "python_version >= \"3.6\""}
-
-[package.extras]
-aiohttp = ["aiohttp (>=3.5)"]
-beam = ["apache-beam (>=2.12)"]
-bottle = ["bottle (>=0.12.13)"]
-celery = ["celery (>=3)"]
-chalice = ["chalice (>=1.16.0)"]
-django = ["django (>=1.8)"]
-falcon = ["falcon (>=1.4)"]
-fastapi = ["fastapi (>=0.79.0)"]
-flask = ["blinker (>=1.1)", "flask (>=0.11)"]
-httpx = ["httpx (>=0.16.0)"]
-huey = ["huey (>=2)"]
-opentelemetry = ["opentelemetry-distro (>=0.35b0)"]
-pure-eval = ["asttokens", "executing", "pure-eval"]
-pymongo = ["pymongo (>=3.1)"]
-pyspark = ["pyspark (>=2.4.4)"]
-quart = ["blinker (>=1.1)", "quart (>=0.16.1)"]
-rq = ["rq (>=0.6)"]
-sanic = ["sanic (>=0.8)"]
-sqlalchemy = ["sqlalchemy (>=1.2)"]
-starlette = ["starlette (>=0.19.1)"]
-starlite = ["starlite (>=1.48)"]
-tornado = ["tornado (>=5)"]
-
-[[package]]
 name = "setuptools"
 version = "67.2.0"
 description = "Easily download, build, install, upgrade, and uninstall Python packages"
@@ -4771,4 +4731,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "~3.10"
-content-hash = "0dc0956d509c6375cc928bacd247ea4cce9fa1470563e5477b707732ad7be714"
+content-hash = "04022c1c2ab091a3f4706406cff70f1f4b60f13aa78e6c7df274d58c0d118851"
