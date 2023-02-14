@@ -21,8 +21,11 @@ import redis
 
 import confirm.adagrid.json as json
 import imprint.log
+from .redis_heartbeat import HeartbeatThread
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
+
+clickhouse_connect.common.set_setting("autogenerate_session_id", False)
 
 logger = imprint.log.getLogger(__name__)
 
@@ -199,10 +202,11 @@ class Clickhouse:
     client: clickhouse_connect.driver.httpclient.HttpClient
     redis_con: redis.Redis
     job_id: str
-    _tiles_columns: List[str] = None
-    _results_columns: List[str] = None
+    _tiles_columns_cache: List[str] = None
+    _results_columns_cache: List[str] = None
     _d: int = None
     _results_table_exists: bool = False
+    is_distributed: bool = True
 
     def __post_init__(self):
         self.lock = redis.lock.Lock(
@@ -217,29 +221,32 @@ class Clickhouse:
     def store(self):
         return ClickhouseStore(self.client, self.job_id)
 
+    def heartbeat(self, worker_id):
+        return HeartbeatThread(self.redis_con, self.job_id, worker_id)
+
     def dimension(self):
         if self._d is None:
-            cols = self.tiles_columns()
+            cols = self._tiles_columns()
             self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
         return self._d
 
-    def tiles_columns(self):
-        if self._tiles_columns is None:
-            self._tiles_columns = _query_df(
+    def _tiles_columns(self):
+        if self._tiles_columns_cache is None:
+            self._tiles_columns_cache = _query_df(
                 self.client, "select * from tiles limit 1"
             ).columns
-        return self._tiles_columns
+        return self._tiles_columns_cache
 
-    def results_columns(self):
-        if self._results_columns is None:
-            self._results_columns = _query_df(
+    def _results_columns(self):
+        if self._results_columns_cache is None:
+            self._results_columns_cache = _query_df(
                 self.client, "select * from results limit 1"
             ).columns
-        return self._results_columns
+        return self._results_columns_cache
 
     def get_tiles(self):
         cols = ",".join(
-            [c for c in self.tiles_columns() if c not in ["active", "eligible"]]
+            [c for c in self._tiles_columns() if c not in ["active", "eligible"]]
         )
         return _query_df(
             self.client,
@@ -254,7 +261,7 @@ class Clickhouse:
 
     def get_results(self):
         cols = ",".join(
-            [c for c in self.results_columns() if c not in ["active", "eligible"]]
+            [c for c in self._results_columns() if c not in ["active", "eligible"]]
         )
         out = _query_df(
             self.client,
@@ -275,12 +282,14 @@ class Clickhouse:
 
     def get_reports(self):
         json_strs = self.client.query("select * from reports").result_set
-        return pd.DataFrame([json.loads(s[0]) for s in json_strs])
+        return pd.DataFrame([json.loads(s[0]) for s in json_strs]).sort_values(
+            by=["worker_id", "step_id", "packet_id"]
+        )
 
     def insert_report(self, report):
         self.client.command(f"insert into reports values ('{json.dumps(report)}')")
 
-    def n_processed_tiles(self, step_id: int) -> int:
+    def n_processed_tiles(self, worker_id: int, step_id: int) -> int:
         # This checks the number of tiles for which both:
         # - there are results
         # - the parent tile is done
@@ -298,7 +307,8 @@ class Clickhouse:
             f"""
             select count(*) from tiles
                 where
-                    step_id = {step_id}
+                    worker_id = {worker_id}
+                    and step_id = {step_id}
                     and active = true
                     and id in (select id from results)
                     and parent_id in (select id from done)
@@ -320,7 +330,7 @@ class Clickhouse:
         logger.debug(f"finish: {which.head()}")
         _insert_df(self.client, "done", which)
 
-    def worst_tile(self, worker_id, order_col):
+    def worst_tile(self, worker_id, orderer):
         if worker_id is None:
             worker_id_clause = ""
         else:
@@ -329,44 +339,53 @@ class Clickhouse:
         return _query_df(
             self.client,
             f"""
-            select * from results r
+            select * from results
                 where
                     active=true
                     and id not in (select id from inactive)
                     {worker_id_clause}
-            order by {order_col} limit 1
+            order by {orderer} limit 1
         """,
         )
 
-    def get_work(self, worker_id, step_id, packet_id):
+    def get_work(self, coordination_id, worker_id, step_id, packet_id):
+        """
+        `get_work` is used to select tiles for processing/simulation.
+        """
         return _query_df(
             self.client,
             f"""
             select * from tiles
                 where
-                    worker_id = {worker_id}
+                    coordination_id = {coordination_id}
+                    and worker_id = {worker_id}
                     and step_id = {step_id}
                     and packet_id = {packet_id}
             """,
         )
 
-    def next(self, worker_id, n, order_col):
+    def next(self, coordination_id, worker_id, n, orderer):
+        """
+        `next` is used in select_tiles to get the next batch of tiles to
+        refine/deepen
+        """
         return _query_df(
             self.client,
             f"""
             select * from results
                 where
-                    worker_id = {worker_id}
+                    coordination_id = {coordination_id}
+                    and worker_id = {worker_id}
                     and eligible=true
                     and id not in (select id from done)
-            order by {order_col} asc limit {n}
+            order by {orderer} asc limit {n}
         """,
         )
 
     def bootstrap_lamss(self, worker_id):
         # Get the number of bootstrap lambda* columns
         nB = (
-            max([int(c[6:]) for c in self.results_columns() if c.startswith("B_lams")])
+            max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
             + 1
         )
 
@@ -380,8 +399,8 @@ class Clickhouse:
             f"""
             select {cols} from results where
                 active=true
-                {worker_id_clause}
                 and id not in (select id from inactive)
+                {worker_id_clause}
         """
         ).result_set[0]
 
@@ -393,13 +412,21 @@ class Clickhouse:
         results_cols = get_create_table_cols(results_df)
         cmd = f"""
         create table if not exists results ({",".join(results_cols)})
-            engine = MergeTree() order by ({orderer})
+            engine = MergeTree() order by (coordination_id, {orderer})
         """
         self.client.command(cmd)
 
     def close(self):
         self.client.close()
         self.redis_con.close()
+
+    def new_workers(self, n):
+        with self.lock:
+            p = self.redis_con.pipeline()
+            p.setnx(f"{self.job_id}:next_worker_id", 2)
+            p.incrby(f"{self.job_id}:next_worker_id", n)
+            _, cur_id = p.execute()
+        return [cur_id - n + i for i in range(n)]
 
     async def init_tiles(self, tiles_df):
         # tables:
@@ -417,16 +444,18 @@ class Clickhouse:
                 self.client.command,
                 f"""
                 create table done (
+                        coordination_id UInt32,
                         worker_id UInt32,
-                        id {id_type},
                         step_id UInt32,
                         packet_id Int32,
+                        id {id_type},
                         active Bool,
                         finisher_id UInt32,
                         refine Bool,
                         deepen Bool,
                         split Bool)
-                    engine = MergeTree() order by (worker_id, step_id, packet_id, id)
+                    engine = MergeTree() 
+                    order by (coordination_id, worker_id, step_id, packet_id, id)
                 """,
             )
         )
@@ -436,7 +465,8 @@ class Clickhouse:
                 self.client.command,
                 f"""
             create table tiles ({",".join(tiles_cols)})
-                engine = MergeTree() order by (worker_id, step_id, packet_id, id)
+                engine = MergeTree() 
+                order by (coordination_id, worker_id, step_id, packet_id, id)
             """,
             )
         )
@@ -475,8 +505,10 @@ class Clickhouse:
                 self.client.command,
                 """
             create materialized view inactive
-                engine = MergeTree() order by (worker_id, id)
-                as select worker_id, id from done where active=false
+                engine = MergeTree()
+                order by (coordination_id, worker_id, step_id, id)
+                as select coordination_id, worker_id, step_id, id from done 
+                where active=false
             """,
             )
 
@@ -494,18 +526,32 @@ class Clickhouse:
             await asyncio.to_thread(_insert_df, self.client, "done", absent_parents)
 
         self._insert_done_task = asyncio.create_task(_insert_done())
+        set_coordination_id = asyncio.create_task(
+            asyncio.to_thread(self.redis_con.set, f"{self.job_id}:coordination_id", 0)
+        )
+
+        def _setup_first_step():
+            p = self.redis_con.pipeline()
+            for w, w_n_tiles in tiles_df.groupby("worker_id").size().items():
+                p.set(f"{self.job_id}:worker_{w}:step_0:n_tiles", w_n_tiles)
+            for w, max_packet_id in (
+                tiles_df.groupby("worker_id")["packet_id"].max().items()
+            ):
+                p.set(f"{self.job_id}:worker_{w}:step_0:n_packets", max_packet_id + 1)
+            p.execute()
+
+        setup_first_step = asyncio.create_task(asyncio.to_thread(_setup_first_step))
 
         # I think the only things that we *need* to wait for are the create
         # table statements. The inserts are not urgent.
-        print("waiting")
-        print("waiting")
-        print("waiting", flush=True)
-        await asyncio.gather(create_reports, create_tiles, create_done, create_inactive)
-
-    def new_workers(self, n):
-        with self.lock:
-            cur_id = self.redis_con.incrby(f"{self.job_id}:worker_id", n) - n + 1
-        return [cur_id + i for i in range(n)]
+        await asyncio.gather(
+            create_reports,
+            create_tiles,
+            create_done,
+            create_inactive,
+            set_coordination_id,
+            setup_first_step,
+        )
 
     def connect(
         job_id: int = None,
@@ -640,7 +686,7 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
 
 
 def clear_dbs(
-    ch_client, redis_client, names=None, yes=False, drop_all_redis_keys=False
+    ch_client=None, redis_client=None, names=None, yes=False, drop_all_redis_keys=False
 ):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
@@ -658,6 +704,11 @@ def clear_dbs(
         yes: bool, if True, don't ask for confirmation before dropping.
         drop_all_redis_keys: bool, if True, drop all Redis keys.
     """
+    if ch_client is None:
+        ch_client = get_ch_client()
+    if redis_client is None:
+        redis_client = get_redis_client()
+
     test_host = os.environ["CLICKHOUSE_TEST_HOST"]
     if not (
         (test_host is not None and test_host in ch_client.url)
@@ -684,7 +735,7 @@ def clear_dbs(
         print("Dropping the following databases:")
         print(to_drop)
         if not yes:
-            print("Are you sure? [yN]")
+            print("Are you sure? [yN]", flush=True)
             yes = input() == "y"
 
         if yes:
@@ -693,8 +744,8 @@ def clear_dbs(
                 print(cmd)
                 ch_client.command(cmd)
                 if redis_client is not None:
-                    keys = list(redis_client.scan_iter("*{db}*")) + list(
-                        redis_client.scan_iter("{db}*")
+                    keys = list(redis_client.scan_iter(f"*{db}*")) + list(
+                        redis_client.scan_iter(f"{db}*")
                     )
                     print("deleting redis keys", keys)
                     redis_client.delete(*keys)
@@ -705,6 +756,6 @@ def clear_dbs(
         keys = list(redis_client.scan_iter("*"))
         print("drop_all_redis_keys=True, deleting redis keys", keys)
         if not yes:
-            print("Are you sure? [yN]")
+            print("Are you sure? [yN]", flush=True)
             yes = input() == "y"
         redis_client.delete(*keys)

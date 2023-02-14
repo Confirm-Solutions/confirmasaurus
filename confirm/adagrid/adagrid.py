@@ -107,8 +107,8 @@ logger = imprint.log.getLogger(__name__)
 class LocalBackend:
     n_workers: int = 1
 
-    def run(self, ada):
-        return ada._run_local()
+    async def run(self, ada):
+        return await ada._run_local()
 
 
 class ModalBackend:
@@ -120,7 +120,7 @@ class ModalBackend:
         self.job_name_prefix = job_name_prefix
         self.modal_kwargs = dict() if modal_kwargs is None else modal_kwargs
 
-    def run(self, ada):
+    async def run(self, ada):
         import modal
         import confirm.cloud.clickhouse as ch
         import confirm.cloud.modal_util as modal_util
@@ -149,18 +149,24 @@ class ModalBackend:
 
 
 def run(algo_type, locals_):
-    ada = Adagrid()
-    ada.init(
-        locals_["model_type"],
-        locals_["g"],
-        locals_["db"],
-        algo_type,
-        locals_["callback"],
-        locals_["overrides"],
-        locals_["backend"].n_workers,
-        locals_,
-    )
-    return locals_["backend"].run(ada)
+    async def _run():
+        ada = Adagrid()
+        await ada.init(
+            locals_["model_type"],
+            locals_["g"],
+            locals_["db"],
+            algo_type,
+            locals_["callback"],
+            locals_["overrides"],
+            locals_["backend"].n_workers,
+            locals_,
+        )
+        async with ada.db.heartbeat(ada.worker_id):
+            await locals_["backend"].run(ada)
+        return ada.db
+
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(_run())
 
 
 class Adagrid:
@@ -186,7 +192,6 @@ class Adagrid:
         __init__ is not allowed to be aysnc. This is a workaround. Since we're
         only calling init from two places, it's not a big deal.
         """
-        start = time.time()
         self.first_step = True
         self.callback = callback
         self.model_type = model_type
@@ -203,10 +208,9 @@ class Adagrid:
         self.db = db
 
         if worker_id is None:
-            worker_id = db.new_worker()
+            worker_id = db.new_workers(1)[0]
         self.worker_id = worker_id
-        imprint.log.worker_id.set(self.worker_id)
-        print("11", time.time() - start)
+        imprint.log.worker_id.set(worker_id)
 
         ########################################
         # STEP 2: Prepare the configuration
@@ -272,7 +276,6 @@ class Adagrid:
 
             if overrides is not None:
                 warnings.warn("Overrides are ignored when starting a new job.")
-        print("12", time.time() - start)
 
         # Very important not to share worker_id between workers so we overwrite!
         cfg["worker_id"] = self.worker_id
@@ -290,7 +293,6 @@ class Adagrid:
         # STEP 3: Collect a bunch of system information for later debugging and
         # reproducibility.
         ########################################
-        print("13", time.time() - start)
         cfg.update(
             dict(
                 git_hash=_run(["git", "rev-parse", "HEAD"]),
@@ -305,34 +307,24 @@ class Adagrid:
         else:
             cfg["pip_freeze"] = "skipped because prod=False"
             cfg["conda_list"] = "skipped because prod=False"
-        print("14", time.time() - start)
 
         cfg["max_K"] = cfg["init_K"] * 2 ** cfg["n_K_double"]
 
         self.cfg = cfg
         cfg_df = pd.DataFrame([cfg])
-        print("14.5", time.time() - start)
 
-        from threading import Thread
-
-        helper_loop = asyncio.new_event_loop()
-
-        def f(loop):
-            asyncio.set_event_loop(loop)
-            loop.run_forever()
-
-        t = Thread(target=f, args=(helper_loop,))
-        t.start()
+        ########################################
+        # STEP 4: Set up a temporary helper thread to run database operations.
+        ########################################
 
         # we wrap set_or_append in a lambda so that the db.store access can be
         # run in a separate thread in case the Store __init__ method does any
         # substantial work (e.g. in ClickhouseStore, we create a table)
         wait_for = [
-            asyncio.create_task(
-                asyncio.to_thread(lambda: db.store.set_or_append("config", cfg_df))
+            await self._launch_task(
+                lambda df: db.store.set_or_append("config", df), cfg_df
             )
         ]
-        print("15", time.time() - start)
 
         ########################################
         # STEP 5: If we are starting a new job, we need to fill the database
@@ -342,52 +334,32 @@ class Adagrid:
             # Copy the input grid so that the caller is not surprised by any changes.
             df = copy.deepcopy(g.df)
             df["K"] = cfg["init_K"]
-            df["step_id"] = 0
-            df["creator_id"] = self.worker_id
-            df["creation_time"] = imprint.timer.simple_timer()
-            print("16", time.time() - start)
 
             initial_worker_ids = [self.worker_id] + self.db.new_workers(n_workers - 1)
-            print("17", time.time() - start)
-            # TODO: configurable assignment seed
-            assignment_seed = 0
-            df["worker_id"] = random_assignments(
-                assignment_seed, g.n_tiles, n_workers, initial_worker_ids
-            )
+            df["coordination_id"] = 0
+            df["step_id"] = 0
+            df["worker_id"] = assign_tiles(g.n_tiles, n_workers, initial_worker_ids)
+            df["packet_id"] = assign_packets(df, self.cfg["packet_size"])
+            df["creator_id"] = self.worker_id
+            df["creation_time"] = imprint.timer.simple_timer()
 
-            def assign_packets(df):
-                return pd.Series(
-                    np.floor(np.arange(df.shape[0]) / self.cfg["packet_size"]).astype(
-                        int
-                    ),
-                    df.index,
-                )
-
-            df["packet_id"] = df.groupby("worker_id")["worker_id"].transform(
-                assign_packets
-            )
-            print("18", time.time() - start)
-
-            wait_for.append(asyncio.create_task(db.init_tiles(df)))
+            wait_for.append(await self._launch_task(db.init_tiles, df, in_thread=False))
             # sleeping immediately means that the init_tiles task will be
             # scheduled to run now.
             self.null_hypos = g.null_hypos
             wait_for.append(
-                asyncio.create_task(
-                    asyncio.to_thread(_store_null_hypos, db, self.null_hypos)
-                )
+                await self._launch_task(_store_null_hypos, db, self.null_hypos)
             )
 
-            n_tiles = df.shape[0]
             logger.debug(
                 "Initialized database with %d tiles and %d null hypos."
                 " The tiles are split between %d workers with packet_size=%s.",
-                n_tiles,
+                df.shape[0],
                 len(self.null_hypos),
                 n_workers,
                 cfg["packet_size"],
             )
-            print("19", time.time() - start)
+            logger.debug("Initial worker ids: %s", initial_worker_ids)
         else:
             self.null_hypos = _load_null_hypos(self.db)
 
@@ -405,45 +377,355 @@ class Adagrid:
             **model_kwargs,
         )
         self.algo = algo_type(db, self.model, self.null_hypos, self.cfg)
-        print("20", time.time() - start)
 
+        # Wait for stuff in the helper thread to complete.
         await asyncio.gather(*wait_for)
 
     async def _run_local(self):
-        insert_reports = []
-        for step_id in range(self.cfg["n_steps"]):
-            await self.simulate_step(step_id)
-            new_step_id = step_id + 1
-            status, report = await self.new_step(new_step_id)
-            insert_reports.append(
-                asyncio.create_task(asyncio.to_thread(self.db.insert_report, report))
+        self.insert_reports = []
+        try:
+            # TODO: configurable
+            coordinate_every = 5
+            next_coordinate = coordinate_every
+            coordination_id = int(
+                self.db.redis_con.get(f"{self.db.job_id}:coordination_id").decode(
+                    "ascii"
+                )
             )
-            # If we reached the maximum number of steps, we are completely
-            # done.
-            if status == WorkerStatus.REACHED_N_STEPS:
-                break
-            # If we converged or took an empty step, we need to coordinate with
-            # the other workers.
-            if (status == WorkerStatus.CONVERGED) or (
-                status == WorkerStatus.EMPTY_STEP
-            ):
-                await self.coordinate()
+            prefix = f"{self.db.job_id}:worker_{self.worker_id}:step_"
+            suffix = ":n_tiles"
+            started_steps = list(
+                [
+                    int(k[len(prefix) : -len(suffix)])
+                    for k in self.db.redis_con.scan_iter(f"{prefix}*{suffix}")
+                ]
+            )
+            starting_step_id = max(started_steps)
+            for step_id in range(starting_step_id, self.cfg["n_steps"]):
+                await self.process_step(coordination_id, step_id)
 
-        await asyncio.gather(*insert_reports)
+                new_step_id = step_id + 1
+                status = await self.new_step(coordination_id, new_step_id)
+
+                # If we reached the maximum number of steps, we are completely
+                # done.
+                if status == WorkerStatus.REACHED_N_STEPS:
+                    break
+
+                # If a single worker converges or takes an empty step, we need to
+                # coordinate with other workers. Also, we coordinate every
+                # `coordinate_every` steps regardless. Note that this coordination
+                # rules is fully deterministic.
+                nothing_to_do = status in [
+                    WorkerStatus.CONVERGED,
+                    WorkerStatus.EMPTY_STEP,
+                ]
+                if (
+                    nothing_to_do or (next_coordinate == step_id)
+                ) and self.db.is_distributed:
+                    status, report = await self.coordinate()
+                    report["status"] = status.name
+                    coordination_id = report["coordination_id"]
+                    self.callback(report, self.db)
+                    self.insert_reports.append(
+                        await self._launch_task(self.db.insert_report, report)
+                    )
+
+                    # Convergence across all workers means we are totally done.
+                    if (
+                        status == WorkerStatus.CONVERGED
+                        or status == WorkerStatus.EMPTY_STEP
+                    ):
+                        break
+
+                    next_coordinate = step_id + coordinate_every
+                    # Plan a new step so that process_step can run.
+                    await self.new_step(coordination_id, new_step_id)
+
+                elif nothing_to_do:
+                    # If we are not distributed, we can just stop if there's
+                    # nothing left to do.
+                    break
+        finally:
+            await asyncio.gather(*self.insert_reports)
 
     async def coordinate(self):
-        # Goals of coordinate:
-        # - update the active and eligible flags.
-        # - assign every active and eligible tile to a worker.
-        # - need to wait until the DB has actually processed these updates
-        # before going back to simulating.
-        pass
+        # This function should only ever run for the clickhouse database. So,
+        # rather than abstracting the various database calls, we just write
+        # them in here directly.
+        import redis
+        import confirm.cloud.clickhouse as ch
 
-    async def simulate_step(self, step_id):
+        report = dict()
+
+        redis_con = self.db.redis_con
+
+        old_coordination_id = int(redis_con.get(f"{self.db.job_id}:coordination_id"))
+        new_coordination_id = old_coordination_id + 1
+        report["coordination_id"] = new_coordination_id
+        report["worker_id"] = self.worker_id
+
+        # Add ourselves to the set of waiting workers.
+        redis_con.sadd(
+            f"{self.db.job_id}:coordination_{new_coordination_id}:waiting",
+            self.worker_id,
+        )
+
+        self.db.client.command(
+            f"""
+            ALTER TABLE results
+            UPDATE
+                eligible = (eligible and not (id in (select * from done))),
+                active = (active and not (id in (select * from inactive)))
+            WHERE
+                coordination_id = {old_coordination_id}
+            """,
+            settings={"allow_nondeterministic_mutations": "1"},
+        )
+        logger.debug(f"Waiting for coordination {new_coordination_id}")
+
+        # only one worker can execute the coordination.
+        lock = redis.lock.Lock(redis_con, f"{self.db.job_id}:coordinate_lock")
+        with lock:
+            check = int(redis_con.get(f"{self.db.job_id}:coordination_id"))
+            if check > old_coordination_id:
+                # another worker already did the coordination.
+                logger.debug("Coordination completed by another worker.")
+                report["coordination_leader"] = False
+                status_str = redis_con.get(
+                    f"{self.db.job_id}:coordination_{new_coordination_id}:result"
+                )
+                return WorkerStatus[status_str.decode("ascii")], report
+            logger.debug("Leading the coordination")
+            report["coordination_leader"] = True
+
+            while True:
+                # - wait until all workers have joined the coordination
+                n_waiting = redis_con.scard(
+                    f"{self.db.job_id}:coordination_{new_coordination_id}:waiting"
+                )
+                n_workers = redis_con.scard(f"{self.db.job_id}:workers")
+                if n_waiting < n_workers:
+                    await asyncio.sleep(0.1)
+                    continue
+                elif n_waiting > n_workers:
+                    raise RuntimeError(
+                        "More workers are waiting than there are registered workers. "
+                    )
+                break
+
+            waiting_workers = list(
+                [
+                    int(w.decode("ascii"))
+                    for w in redis_con.smembers(
+                        f"{self.db.job_id}:coordination_{new_coordination_id}:waiting"
+                    )
+                ]
+            )
+            registered_workers = list(
+                [
+                    int(w.decode("ascii"))
+                    for w in redis_con.smembers(f"{self.db.job_id}:workers")
+                ]
+            )
+            report["waiting_workers"] = str(waiting_workers)
+            report["registered_workers"] = str(registered_workers)
+            logger.debug(f"Waiting workers: {waiting_workers}")
+            logger.debug(f"Registered workers: {registered_workers}")
+            for w in registered_workers:
+                if w not in waiting_workers:
+                    raise RuntimeError(f"Worker {w} is registered but not waiting.")
+            for w in waiting_workers:
+                if w not in registered_workers:
+                    raise RuntimeError(f"Worker {w} is waiting but not registered.")
+
+            pipeline = redis_con.pipeline()
+            for w in waiting_workers:
+                pipeline.get(f"{self.db.job_id}:heartbeat:{w}")
+            workers_locked = zip(waiting_workers, pipeline.execute())
+
+            for w, locked in workers_locked:
+                if not locked:
+                    raise RuntimeError(
+                        f"Worker {w} is registered but not heartbeating."
+                    )
+
+            converged, _ = self.algo.convergence_criterion(None, report)
+            if converged:
+                redis_con.set(
+                    f"{self.db.job_id}:coordination_{new_coordination_id}:result",
+                    "CONVERGED",
+                )
+                return WorkerStatus.CONVERGED, report
+
+            df = ch._query_df(
+                self.db.client,
+                f"""
+                SELECT * FROM results
+                WHERE coordination_id = {old_coordination_id}
+                    and eligible = 1
+                    and id not in (select id from done)
+                    and active = 1
+                    and id not in (select id from inactive)
+                """,
+            )
+            if df.shape[0] == 0:
+                redis_con.set(
+                    f"{self.db.job_id}:coordination_{new_coordination_id}:result",
+                    "EMPTY_STEP",
+                )
+                return WorkerStatus.EMPTY_STEP, report
+
+            redis_con.set(
+                f"{self.db.job_id}:coordination_{new_coordination_id}:result",
+                "COORDINATED",
+            )
+            redis_con.set(f"{self.db.job_id}:coordination_id", new_coordination_id)
+            df["coordination_id"] = new_coordination_id
+            df["worker_id"] = assign_tiles(df.shape[0], n_workers, registered_workers)
+            df["packet_id"] = assign_packets(df, self.cfg["packet_size"])
+            logger.debug(
+                f"Creating coordiation_id {new_coordination_id}"
+                f" with {df.shape[0]} tiles."
+            )
+            report["n_tiles"] = df.shape[0]
+            ch._insert_df(self.db.client, "results", df)
+        return WorkerStatus.COORDINATED, report
+
+    async def new_step(self, coordination_id, new_step_id):
+        status, report = await self._new_step(coordination_id, new_step_id)
+        report["status"] = status.name
+        self.callback(report, self.db)
+        self.insert_reports.append(
+            await self._launch_task(self.db.insert_report, report)
+        )
+        return status
+
+    async def _new_step(self, coordination_id, new_step_id):
+        report = dict()
+        start = time.time()
+        converged, convergence_data = self.algo.convergence_criterion(
+            self.worker_id, report
+        )
+        report["runtime_convergence_criterion"] = time.time() - start
+
+        if converged:
+            logger.debug("Convergence!!")
+            return WorkerStatus.CONVERGED, report
+        elif new_step_id >= self.cfg["n_steps"]:
+            logger.debug("Reached maximum number of steps. Terminating.")
+            # NOTE: no need to coordinate with other workers. They will reach
+            # n_steps on their own time.
+            return WorkerStatus.REACHED_N_STEPS, report
+
+        # If we haven't converged, we create a new step.
+        start = time.time()
+        tiles_df = self.algo.select_tiles(coordination_id, report, convergence_data)
+        report["runtime_select_tiles"] = time.time() - start
+
+        if tiles_df is None:
+            # New step is empty so we have terminated but
+            # failed to converge.
+            logger.debug(
+                "New step is empty. Waiting for the next "
+                "coordination despite failure to converge."
+            )
+            return WorkerStatus.EMPTY_STEP, report
+
+        tiles_df["finisher_id"] = self.worker_id
+        tiles_df["active"] = ~(tiles_df["refine"] | tiles_df["deepen"])
+        if "split" not in tiles_df.columns:
+            tiles_df["split"] = False
+        done_cols = [
+            "id",
+            "step_id",
+            "packet_id",
+            "active",
+            "finisher_id",
+            "refine",
+            "deepen",
+            "split",
+        ]
+
+        done_task = await self._launch_task(self.db.finish, tiles_df[done_cols])
+
+        n_refine = tiles_df["refine"].sum()
+        n_deepen = tiles_df["deepen"].sum()
+        report.update(
+            dict(
+                n_refine=n_refine,
+                n_deepen=n_deepen,
+                n_complete=tiles_df["active"].sum(),
+            )
+        )
+
+        nothing_to_do = n_refine == 0 and n_deepen == 0
+        if nothing_to_do:
+            logger.debug(
+                "No tiles are refined or deepened in this step."
+                " Marking these parent tiles as finished and trying again."
+            )
+            return WorkerStatus.NO_NEW_TILES, report
+
+        # Actually deepen and refine!
+        g = refine_and_deepen(
+            tiles_df, self.null_hypos, self.cfg["max_K"], self.cfg["worker_id"]
+        )
+        g.df["coordination_id"] = coordination_id
+        g.df["worker_id"] = self.worker_id
+        g.df["step_id"] = new_step_id
+        g.df["creator_id"] = self.cfg["worker_id"]
+        g.df["creation_time"] = imprint.timer.simple_timer()
+
+        # there might be new inactive tiles that resulted from splitting with
+        # the null hypotheses. we need to mark these tiles as finished.
+        def insert_inactive(inactive_df):
+            inactive_df["packet_id"] = np.int32(-1)
+            self.db.insert_tiles(inactive_df)
+            inactive_df["refine"] = False
+            inactive_df["deepen"] = False
+            inactive_df["split"] = True
+            inactive_df["finisher_id"] = self.cfg["worker_id"]
+            self.db.finish(inactive_df[done_cols])
+
+        inactive_df = g.df[~g.df["active"]].copy()
+        inactive_task = await self._launch_task(insert_inactive, inactive_df)
+
+        # Assign tiles to packets and then insert them into the database for
+        # processing.
+        g_active = g.prune_inactive()
+
+        def assign_packets(df):
+            return pd.Series(
+                np.floor(np.arange(df.shape[0]) / self.cfg["packet_size"]).astype(int),
+                df.index,
+            )
+
+        g_active.df["packet_id"] = assign_packets(g_active.df)
+        insert_task = await self._launch_task(self.db.insert_tiles, g_active.df)
+        logger.debug(
+            f"Starting step {new_step_id} with {g_active.n_tiles} tiles to simulate."
+        )
+        self.db.redis_con.set(
+            f"{self.db.job_id}:worker_{self.worker_id}:step_{new_step_id}:n_tiles",
+            g_active.n_tiles,
+        )
+        self.db.redis_con.set(
+            f"{self.db.job_id}:worker_{self.worker_id}:step_{new_step_id}:n_packets",
+            str(g_active.df["packet_id"].max() + 1),
+        )
+        await asyncio.gather(done_task, inactive_task, insert_task)
+        return WorkerStatus.NEW_STEP, report
+
+    async def process_step(self, coordination_id, step_id):
         next_work = None
         insert_threads = []
         packet_id = 0
         while True:
+            # relinquish control briefly so that the event loop keep operating
+            # nicely
+            await asyncio.sleep(0)
+
             report = dict()
             report["worker_id"] = self.worker_id
             report["step_id"] = step_id
@@ -455,34 +737,67 @@ class Adagrid:
             start = time.time()
             # On the first loop, we won't have queued any work queries yet.
             if next_work is None:
-                next_work = asyncio.create_task(
-                    asyncio.to_thread(
-                        self.db.get_work, self.worker_id, step_id, packet_id
-                    )
+                next_work = await self._launch_task(
+                    self.db.get_work,
+                    coordination_id,
+                    self.worker_id,
+                    step_id,
+                    packet_id=packet_id,
                 )
+            logger.debug(
+                "waiting for work: (coordination_id=%s, step_id=%s, packet_id=%s)",
+                coordination_id,
+                step_id,
+                packet_id,
+            )
             work = await next_work
             report["n_tiles"] = work.shape[0]
 
             # Empty packet is an indication that we are done with this step.
             if work.shape[0] == 0:
-                logger.debug("No more work for this step.")
-                report["runtime_get_work"] = time.time() - start
-                report["status"] = WorkerStatus.WORK_DONE.name
-                insert_threads.append(
-                    asyncio.create_task(
-                        asyncio.to_thread(self.db.insert_report, report)
-                    )
+                logger.debug(
+                    "Empty packet indicates that we might be done with "
+                    "work for this step."
                 )
-                await asyncio.gather(*insert_threads)
-                return
+                n_processed_tiles = self.db.n_processed_tiles(self.worker_id, step_id)
+                step_n_tiles = int(
+                    self.db.redis_con.get(
+                        f"{self.db.job_id}:worker_{self.worker_id}:step_{step_id}:n_tiles"  # noqa
+                    ).decode("ascii")
+                )
+                if n_processed_tiles == step_n_tiles:
+                    logger.debug("Done with work for this step.")
+                    report["runtime_get_work"] = time.time() - start
+                    report["status"] = WorkerStatus.WORK_DONE.name
+                    self.callback(report, self.db)
+                    self.insert_reports.append(
+                        await self._launch_task(self.db.insert_report, report)
+                    )
+                    await asyncio.gather(*insert_threads)
+                    return
+                elif n_processed_tiles < step_n_tiles:
+                    logger.debug(
+                        "No work available, but packet is incomplete"
+                        " with %s/%s tiles complete.",
+                        n_processed_tiles,
+                        step_n_tiles,
+                    )
+                    await asyncio.sleep(0.05)
+                    continue
+                else:  # n_processed_tiles > step_n_tiles
+                    raise RuntimeError("More tiles processed than expected.")
 
             # Queue a query for the next packet.
-            next_work = asyncio.create_task(
-                asyncio.to_thread(self.db.get_work, self.worker_id, step_id, packet_id)
+            next_work = await self._launch_task(
+                self.db.get_work,
+                coordination_id,
+                self.worker_id,
+                step_id,
+                packet_id + 1,
             )
 
             # Check if some other worker has already inserted this packet.
-            packet_flag = f"{self.db.job_id}:worker_{self.worker_id}_step_{step_id}_packet_{packet_id}_insert"  # noqa
+            packet_flag = f"{self.db.job_id}:worker_{self.worker_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
             flag = self.db.redis_con.get(packet_flag)
             if flag is not None:
                 logger.debug(
@@ -492,10 +807,9 @@ class Adagrid:
                 packet_id += 1
                 report["runtime_skip_packet"] = time.time() - start
                 report["status"] = WorkerStatus.SKIPPED.name
-                insert_threads.append(
-                    asyncio.create_task(
-                        asyncio.to_thread(self.db.insert_report, report)
-                    )
+                self.callback(report, self.db)
+                self.insert_reports.append(
+                    await self._launch_task(self.db.insert_report, report)
                 )
                 continue
             report["runtime_get_work"] = time.time() - start
@@ -524,150 +838,52 @@ class Adagrid:
                     )
                     report["status"] = WorkerStatus.DISCARDED.name
                 else:
-                    self.db.insert_results(
-                        results_df, "total_cost_order, tie_bound_order"
-                    )
+                    self.db.insert_results(results_df, self.algo.get_orderer())
                     logger.debug(
                         "inserted packet results for "
                         f"(step_id = {step_id}, packet_id={packet_id})"
                         f" with {results_df.shape[0]} results"
                     )
                     report["status"] = WorkerStatus.WORKING.name
+                self.callback(report, self.db)
                 self.db.insert_report(report)
 
             start = time.time()
             insert_threads.append(
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        insert_results, packet_id, packet_flag, report, results_df
-                    )
+                await self._launch_task(
+                    insert_results, packet_id, packet_flag, report, results_df
                 )
             )
             report["runtime_insert_results"] = time.time() - start
             packet_id += 1
 
-    async def new_step(self, new_step_id, report):
-        report = dict()
-        start = time.time()
-        converged, convergence_data = self.algo.convergence_criterion(report)
-        report["runtime_convergence_criterion"] = time.time() - start
-
-        if converged:
-            logger.debug("Convergence!!")
-            return WorkerStatus.CONVERGED, report
-        elif new_step_id >= self.cfg["n_steps"]:
-            logger.debug("Reached maximum number of steps. Terminating.")
-            # NOTE: no need to coordinate with other workers. They will reach
-            # n_steps on their own time.
-            return WorkerStatus.REACHED_N_STEPS, report
-
-        # If we haven't converged, we create a new step.
-        start = time.time()
-        tiles_df = self.algo.select_tiles(report, convergence_data)
-        report["runtime_select_tiles"] = time.time() - start
-
-        if tiles_df is None:
-            # New step is empty so we have terminated but
-            # failed to converge.
-            logger.debug(
-                "New step is empty. Waiting for the next "
-                "coordination despite failure to converge."
-            )
-            return WorkerStatus.EMPTY_STEP, report
-
-        tiles_df["finisher_id"] = self.worker_id
-        tiles_df["active"] = ~(tiles_df["refine"] | tiles_df["deepen"])
-        if "split" not in tiles_df.columns:
-            tiles_df["split"] = False
-        done_cols = [
-            "id",
-            "step_id",
-            "packet_id",
-            "active",
-            "finisher_id",
-            "refine",
-            "deepen",
-            "split",
-        ]
-
-        done_task = asyncio.create_task(
-            asyncio.to_thread(self.db.finish, tiles_df[done_cols])
-        )
-
-        n_refine = tiles_df["refine"].sum()
-        n_deepen = tiles_df["deepen"].sum()
-        report.update(
-            dict(
-                n_refine=n_refine,
-                n_deepen=n_deepen,
-                n_complete=tiles_df["active"].sum(),
-            )
-        )
-
-        nothing_to_do = n_refine == 0 and n_deepen == 0
-        if nothing_to_do:
-            logger.debug(
-                "No tiles are refined or deepened in this step."
-                " Marking these parent tiles as finished and trying again."
-            )
-            return WorkerStatus.NO_NEW_TILES, report
-
-        # Actually deepen and refine!
-        g = refine_and_deepen(
-            tiles_df, self.null_hypos, self.cfg["max_K"], self.cfg["worker_id"]
-        )
-        g.df["step_id"] = new_step_id
-        g.df["creator_id"] = self.cfg["worker_id"]
-        g.df["creation_time"] = imprint.timer.simple_timer()
-
-        # there might be new inactive tiles that resulted from splitting with
-        # the null hypotheses. we need to mark these tiles as finished.
-        def insert_inactive(inactive_df):
-            inactive_df["packet_id"] = np.int32(-1)
-            self.db.insert_tiles(inactive_df)
-            inactive_df["refine"] = False
-            inactive_df["deepen"] = False
-            inactive_df["split"] = True
-            inactive_df["finisher_id"] = self.cfg["worker_id"]
-            self.db.finish(inactive_df[done_cols])
-
-        inactive_df = g.df[~g.df["active"]].copy()
-        inactive_task = asyncio.create_task(
-            asyncio.to_thread(insert_inactive, inactive_df)
-        )
-
-        # Assign tiles to packets and then insert them into the database for
-        # processing.
-        g_active = g.prune_inactive()
-
-        def assign_packets(df):
-            return pd.Series(
-                np.floor(np.arange(df.shape[0]) / self.cfg["packet_size"]).astype(int),
-                df.index,
-            )
-
-        g_active.df["packet_id"] = assign_packets(g_active.df)
-        g_active.df["worker_id"] = self.worker_id
-        insert_task = asyncio.create_task(
-            asyncio.to_thread(self.db.insert_tiles, g_active.df)
-        )
-        logger.debug(
-            f"Starting step {new_step_id} with {g_active.n_tiles} tiles to simulate."
-        )
-        await asyncio.gather(done_task, inactive_task, insert_task)
-        return WorkerStatus.NEW_STEP, report
+    async def _launch_task(self, f, *args, in_thread=True, **kwargs):
+        if in_thread:
+            coro = asyncio.to_thread(f, *args, **kwargs)
+        else:
+            coro = f(*args, **kwargs)
+        task = asyncio.create_task(coro)
+        # Sleep immediately to allow the task to start.
+        await asyncio.sleep(0)
+        return task
 
 
-def random_assignments(seed, n_tiles, n_workers, names):
-    # Randomly assign tiles to packets.
-    np.random.seed(seed)
+def assign_tiles(n_tiles, n_workers, names):
     splits = np.array_split(np.arange(n_tiles), n_workers)
     assignment = np.empty(n_tiles, dtype=np.int32)
     for i in range(n_workers):
         assignment[splits[i]] = names[i]
-    rng = np.random.default_rng()
-    rng.shuffle(assignment)
     return assignment
+
+
+def assign_packets(df, packet_size):
+    def f(df):
+        return pd.Series(
+            np.floor(np.arange(df.shape[0]) / packet_size).astype(int),
+            df.index,
+        )
+
+    return df.groupby("worker_id")["worker_id"].transform(f)
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):
@@ -748,7 +964,7 @@ def _run(cmd):
         return f"ERROR: {exc.returncode} {exc.output}"
 
 
-def print_report(_iter, report, _db):
+def print_report(report, _db):
     ready = report.copy()
     for k in ready:
         if (

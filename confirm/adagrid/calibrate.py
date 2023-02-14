@@ -111,7 +111,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), lams_df), axis=1)
 
-    def convergence_criterion(self, report):
+    def convergence_criterion(self, worker_id, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -120,11 +120,13 @@ class AdaCalibrate:
         #
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
-        any_impossible = self.db.worst_tile("impossible")["impossible"].iloc[0]
+        any_impossible = self.db.worst_tile(worker_id, "impossible")["impossible"].iloc[
+            0
+        ]
         if any_impossible:
             return False, None
 
-        worst_tile = self.db.worst_tile("lams")
+        worst_tile = self.db.worst_tile(worker_id, "lams")
         lamss = worst_tile["lams"].iloc[0]
 
         # We determine the bias by comparing the Type I error at the worst

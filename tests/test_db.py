@@ -214,11 +214,11 @@ class DBTester:
             pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()
         )
 
-    def test_new_worker(self):
+    def test_new_workers(self):
         db = self.connect()
-        assert db.new_worker() == 2
-        assert db.new_worker() == 3
-        assert db.new_worker() == 4
+        assert db.new_workers(3) == [2, 3, 4]
+        assert db.new_workers(2) == [5, 6]
+        assert db.new_workers(1) == [7]
 
 
 class TestDuckDB(DBTester):

@@ -1,7 +1,7 @@
 import asyncio
 
-from confirm.adagrid.redis_heartbeat import HeartbeatThread
 from confirm.cloud.clickhouse import get_redis_client
+from confirm.cloud.redis_heartbeat import HeartbeatThread
 
 
 def test_heartbeat():

@@ -20,7 +20,7 @@ def check(db, snapshot):
     # plt.plot(results.df["theta0"], results.df["tie_bound"], 'ro')
     # plt.show()
 
-    max_tie = db.worst_tile("tie_bound")["tie_bound"].iloc[0]
+    max_tie = db.worst_tile(None, "tie_bound")["tie_bound"].iloc[0]
     np.testing.assert_allclose(max_tie, snapshot(max_tie))
 
     all_tiles_df = db.get_results().set_index("id")

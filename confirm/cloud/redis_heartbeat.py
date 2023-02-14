@@ -5,7 +5,7 @@ import redis
 
 import imprint.log
 
-logger = imprint.log.getLogger("confirm.adagrid")
+logger = imprint.log.getLogger(__name__)
 
 
 class HeartbeatThread:
@@ -46,7 +46,7 @@ class HeartbeatThread:
             logger.debug(f"Successfully released lock {self.lock_name}.")
 
     async def __aenter__(self):
-        self.lock_name = f"{self.job_id}:heartbeat_lock_{self.worker_id}"
+        self.lock_name = f"{self.job_id}:heartbeat:{self.worker_id}"
         self.worker_heartbeat_lock = redis.lock.Lock(
             self.redis_con,
             self.lock_name,

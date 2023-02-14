@@ -14,6 +14,8 @@ class WorkerStatus(Enum):
     WORKING = 6
     WORK_DONE = 7
     SKIPPED = 8  # The packet had already been processed by another worker.
+    # Coordination
+    COORDINATED = 9
 
     def done(self):
         return (

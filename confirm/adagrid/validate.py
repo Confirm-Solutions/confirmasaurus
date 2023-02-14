@@ -75,12 +75,15 @@ class AdaValidate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    def convergence_criterion(self, report):
-        max_tie_est = self.db.worst_tile(self.c["worker_id"], "tie_est desc")[
-            "tie_est"
-        ].iloc[0]
+    def convergence_criterion(self, worker_id, report):
+        print(worker_id)
+        print(worker_id)
+        print(worker_id)
+        print(worker_id)
+        print(self.db.get_results())
+        max_tie_est = self.db.worst_tile(worker_id, "tie_est desc")["tie_est"].iloc[0]
         next_tile = self.db.worst_tile(
-            self.c["worker_id"], "total_cost_order, tie_bound_order"
+            worker_id, "total_cost_order, tie_bound_order"
         ).iloc[0]
         report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
         report.update(
@@ -103,10 +106,10 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    def select_tiles(self, report, max_tie_est):
+    def select_tiles(self, coordination_id, report, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
-        # TODO: lots of new_step is duplicated with calibration.
         raw_tiles = self.db.next(
+            coordination_id,
             self.c["worker_id"],
             self.c["step_size"],
             "total_cost_order, tie_bound_order",

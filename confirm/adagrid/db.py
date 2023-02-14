@@ -36,6 +36,7 @@ class PandasTiles:
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
     step_info = None
     lock = contextlib.suppress()
+    is_distributed: bool = False
 
     @property
     def store(self) -> Store:
@@ -43,13 +44,14 @@ class PandasTiles:
 
     def dimension(self) -> int:
         return (
-            max([int(c[5:]) for c in self.tiles_columns() if c.startswith("theta")]) + 1
+            max([int(c[5:]) for c in self._tiles_columns() if c.startswith("theta")])
+            + 1
         )
 
-    def tiles_columns(self) -> List[str]:
+    def _tiles_columns(self) -> List[str]:
         return self.tiles_df.columns
 
-    def results_columns(self) -> List[str]:
+    def _results_columns(self) -> List[str]:
         return self.results_df.columns
 
     def get_tiles(self) -> pd.DataFrame:
@@ -127,7 +129,10 @@ class PandasTiles:
         df.insert(0, "id", df.index)
         self.tiles_df = df
 
-    def new_worker(self) -> int:
+    def new_workers(self, n) -> List[int]:
+        return [self._new_worker() for _ in range(n)]
+
+    def _new_worker(self) -> int:
         out = self._next_worker_id
         self._next_worker_id += 1
         return out
@@ -146,10 +151,11 @@ class DuckDBTiles:
     con: duckdb.DuckDBPyConnection
     store: DuckDBStore = None
     lock = contextlib.suppress()
-    _tiles_columns: List[str] = None
-    _results_columns: List[str] = None
+    _tiles_columns_cache: List[str] = None
+    _results_columns_cache: List[str] = None
     _d: int = None
     _results_table_exists: bool = False
+    is_distributed: bool = False
 
     def __post_init__(self):
         self.store = DuckDBStore(self.con)
@@ -162,19 +168,19 @@ class DuckDBTiles:
             self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
         return self._d
 
-    def tiles_columns(self):
-        if self._tiles_columns is None:
-            self._tiles_columns = (
+    def _tiles_columns(self):
+        if self._tiles_columns_cache is None:
+            self._tiles_columns_cache = (
                 self.con.execute("select * from tiles limit 0").df().columns
             )
-        return self._tiles_columns
+        return self._tiles_columns_cache
 
-    def results_columns(self):
-        if self._results_columns is None:
-            self._results_columns = (
+    def _results_columns(self):
+        if self._results_columns_cache is None:
+            self._results_columns_cache = (
                 self.con.execute("select * from results limit 0").df().columns
             )
-        return self._results_columns
+        return self._results_columns_cache
 
     def get_tiles(self):
         return self.con.execute("select * from tiles").df()
@@ -211,7 +217,7 @@ class DuckDBTiles:
         ).fetchone()[0]
 
     def insert_tiles(self, df: pd.DataFrame):
-        column_order = ",".join(self.tiles_columns())
+        column_order = ",".join(self._tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
     def insert_results(self, df: pd.DataFrame, orderer: str):
@@ -219,7 +225,7 @@ class DuckDBTiles:
             self.con.execute("create table if not exists results as select * from df")
             self._results_table_exists = True
             return
-        column_order = ",".join(self.results_columns())
+        column_order = ",".join(self._results_columns())
         self.con.execute(f"insert into results select {column_order} from df")
 
     def worst_tile(self, order_col):
@@ -269,7 +275,7 @@ class DuckDBTiles:
         # Get the number of bootstrap lambda* columns
         # Get the number of bootstrap lambda* columns
         nB = (
-            max([int(c[6:]) for c in self.results_columns() if c.startswith("B_lams")])
+            max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
             + 1
         )
 
@@ -315,7 +321,10 @@ class DuckDBTiles:
             """
         )
 
-    def new_worker(self):
+    def new_workers(self, n) -> List[int]:
+        return [self._new_worker() for _ in range(n)]
+
+    def _new_worker(self) -> int:
         self.con.execute(
             "create sequence if not exists worker_id start with 1 increment by 1"
         )
