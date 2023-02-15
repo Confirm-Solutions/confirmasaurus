@@ -223,4 +223,4 @@ def ada_validate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    return adagrid.run(AdaValidate, locals())
+    return adagrid.run(AdaValidate, **locals())

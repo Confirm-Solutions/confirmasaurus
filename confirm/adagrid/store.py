@@ -115,7 +115,8 @@ class DuckDBStore(Store):
         if exists:
             self.con.execute(f"drop table {table_name}")
         else:
-            idx = self.con.execute("select count(*) from store_tables").fetchone()[0]
+            q = self.con.execute("select count(*) from store_tables").fetchone()
+            idx = 0 if q is None else q[0]
             if is_table_name(key):
                 table_name = key
             else:

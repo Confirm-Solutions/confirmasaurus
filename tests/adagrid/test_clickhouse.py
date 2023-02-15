@@ -1,8 +1,8 @@
 import pytest
-from test_db import DBTester
-from test_store import StoreTester
 
 import confirm.cloud.clickhouse as ch
+from ..test_db import DBTester
+from ..test_store import StoreTester
 
 
 class ClickhouseCleanup:

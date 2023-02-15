@@ -214,7 +214,7 @@ def check_imprint_results(g, snapshot, ignore_story=True):
         g: The grid to compare.
         snapshot: The imprint.testing.snapshot object.
         ignore_story: Should we only test the grid + outputs and ignore
-            storyline outputs like id, step_iter, event time, etc. Defaults to
+            storyline outputs like id, packet_id, event time, etc. Defaults to
             True.
     """
     if "lams" in g.df.columns:

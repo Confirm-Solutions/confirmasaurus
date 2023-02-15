@@ -23,7 +23,7 @@ jaxlib = [
     { version = "0.3.22", platform = "darwin", source = "pypi" },
     { version = "0.3.24+cuda11.cudnn82", platform = "linux" },
 ]
-duckdb = "^0.6.1"
+duckdb = "^0.7"
 
 [tool.poetry.group.test]
 optional = true

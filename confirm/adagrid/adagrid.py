@@ -167,28 +167,22 @@ class ModalBackend:
         return ada.db
 
 
-def run(algo_type, locals_):
+def run(algo_type, **kwargs):
     async def _run():
         ada = Adagrid()
-        await ada.init(
-            locals_["model_type"],
-            locals_["g"],
-            locals_["db"],
-            algo_type,
-            locals_["callback"],
-            locals_["overrides"],
-            locals_["backend"].n_workers,
-            locals_,
-        )
+        await ada.init(algo_type, **kwargs)
         async with ada.db.heartbeat(ada.worker_id):
-            await locals_["backend"].run(ada)
+            await kwargs["backend"].run(ada)
         return ada.db
 
     try:
         loop = asyncio.get_running_loop()
         return asyncio.run_coroutine_threadsafe(_run(), loop).result()
     except RuntimeError:
-        return asyncio.run(_run())
+        pass
+    # We run instead of under the except statement so that exceptions are not
+    # prefixed with "During handling of the above exception..." messages.
+    return asyncio.run(_run())
 
 
 class Adagrid:
@@ -198,30 +192,25 @@ class Adagrid:
     you understand ada_validate or ada_calibrate.
     """
 
-    async def init(
-        self,
-        model_type,
-        g,
-        db,
-        algo_type,
-        callback,
-        overrides,
-        n_workers,
-        locals_,
-        worker_id=None,
-    ):
+    async def init(self, algo_type, wait_for_db=False, **kwargs):
         """
         __init__ is not allowed to be aysnc. This is a workaround. Since we're
         only calling init from two places, it's not a big deal.
         """
         self.first_step = True
-        self.callback = callback
-        self.model_type = model_type
+        self.callback = kwargs["callback"]
+        self.model_type = kwargs["model_type"]
         self.algo_type = algo_type
 
+        model_type = kwargs["model_type"]
+        g = kwargs["g"]
+        db = kwargs["db"]
+        overrides = kwargs["overrides"]
+        n_workers = kwargs["backend"].n_workers
         ########################################
         # STEP 1: Prepare the grid and database
         ########################################
+
         if g is None and db is None:
             raise ValueError("Must provide either an initial grid or a database!")
 
@@ -229,10 +218,10 @@ class Adagrid:
             db = DuckDBTiles.connect()
         self.db = db
 
-        if worker_id is None:
-            worker_id = db.new_workers(1)[0]
-        self.worker_id = worker_id
-        imprint.log.worker_id.set(worker_id)
+        self.worker_id = kwargs.get("worker_id", None)
+        if self.worker_id is None:
+            self.worker_id = db.new_workers(1)[0]
+        imprint.log.worker_id.set(self.worker_id)
 
         ########################################
         # STEP 2: Prepare the configuration
@@ -273,7 +262,7 @@ class Adagrid:
             # of the "config".
             cfg = {
                 k: v
-                for k, v in locals_.items()
+                for k, v in kwargs.items()
                 if k
                 not in [
                     "model_type",
@@ -291,7 +280,7 @@ class Adagrid:
             # the model type name instead.
             cfg["model_name"] = model_type.__name__
 
-            model_kwargs = locals_["model_kwargs"]
+            model_kwargs = kwargs["model_kwargs"]
             if model_kwargs is None:
                 model_kwargs = {}
             cfg["model_kwargs_json"] = json.dumps(model_kwargs)
@@ -365,7 +354,11 @@ class Adagrid:
             df["creator_id"] = self.worker_id
             df["creation_time"] = imprint.timer.simple_timer()
 
-            wait_for.append(await self._launch_task(db.init_tiles, df, in_thread=False))
+            wait_for.append(
+                await self._launch_task(
+                    db.init_tiles, df, wait=wait_for_db, in_thread=False
+                )
+            )
             # sleeping immediately means that the init_tiles task will be
             # scheduled to run now.
             self.null_hypos = g.null_hypos
@@ -403,26 +396,15 @@ class Adagrid:
         # Wait for stuff in the helper thread to complete.
         await asyncio.gather(*wait_for)
 
-    async def _run_local(self):
         self.insert_reports = []
+
+    async def _run_local(self):
         try:
             # TODO: configurable
             coordinate_every = 5
             next_coordinate = coordinate_every
-            coordination_id = int(
-                self.db.redis_con.get(f"{self.db.job_id}:coordination_id").decode(
-                    "ascii"
-                )
-            )
-            prefix = f"{self.db.job_id}:worker_{self.worker_id}:step_"
-            suffix = ":n_tiles"
-            started_steps = list(
-                [
-                    int(k[len(prefix) : -len(suffix)])
-                    for k in self.db.redis_con.scan_iter(f"{prefix}*{suffix}")
-                ]
-            )
-            starting_step_id = max(started_steps)
+            coordination_id = self.db.get_coordination_id()
+            starting_step_id = self.db.get_starting_step_id(self.worker_id)
             for step_id in range(starting_step_id, self.cfg["n_steps"]):
                 await self.process_step(coordination_id, step_id)
 
@@ -470,6 +452,7 @@ class Adagrid:
                     break
         finally:
             await asyncio.gather(*self.insert_reports)
+            self.insert_reports = []
 
     async def coordinate(self):
         # This function should only ever run for the clickhouse database. So,
@@ -493,17 +476,18 @@ class Adagrid:
             self.worker_id,
         )
 
-        self.db.client.command(
-            f"""
-            ALTER TABLE results
-            UPDATE
-                eligible = (eligible and not (id in (select * from done))),
-                active = (active and not (id in (select * from inactive)))
-            WHERE
-                coordination_id = {old_coordination_id}
-            """,
-            settings={"allow_nondeterministic_mutations": "1"},
-        )
+        # TODO: re-enable this.
+        # self.db.client.command(
+        #     f"""
+        #     ALTER TABLE results
+        #     UPDATE
+        #         eligible = (eligible and not (id in (select * from done))),
+        #         active = (active and not (id in (select * from inactive)))
+        #     WHERE
+        #         coordination_id = {old_coordination_id}
+        #     """,
+        #     settings={"allow_nondeterministic_mutations": "1"},
+        # )
         logger.debug(f"Waiting for coordination {new_coordination_id}")
 
         # only one worker can execute the coordination.
@@ -612,7 +596,7 @@ class Adagrid:
                 n_inserted = self.db.client.query(
                     f"""
                     select count(*) from results
-                        where coordination_id = {new_coordination_id}"
+                        where coordination_id = {new_coordination_id}
                     """
                 ).result_set[0][0]
                 if n_inserted == df.shape[0]:
@@ -675,9 +659,11 @@ class Adagrid:
         if "split" not in tiles_df.columns:
             tiles_df["split"] = False
         done_cols = [
-            "id",
+            "coordination_id",
+            "worker_id",
             "step_id",
             "packet_id",
+            "id",
             "active",
             "finisher_id",
             "refine",
@@ -744,14 +730,8 @@ class Adagrid:
         logger.debug(
             f"Starting step {new_step_id} with {g_active.n_tiles} tiles to simulate."
         )
-        self.db.redis_con.set(
-            f"{self.db.job_id}:worker_{self.worker_id}:step_{new_step_id}:n_tiles",
-            g_active.n_tiles,
-        )
-        self.db.redis_con.set(
-            f"{self.db.job_id}:worker_{self.worker_id}:step_{new_step_id}:n_packets",
-            str(g_active.df["packet_id"].max() + 1),
-        )
+        n_packets = str(g_active.df["packet_id"].max() + 1)
+        self.db.set_step_info(self.worker_id, new_step_id, g_active.n_tiles, n_packets)
         await asyncio.gather(done_task, inactive_task, insert_task)
         return WorkerStatus.NEW_STEP, report
 
@@ -776,7 +756,7 @@ class Adagrid:
             # On the first loop, we won't have queued any work queries yet.
             if next_work is None:
                 next_work = await self._launch_task(
-                    self.db.get_work,
+                    self.db.get_packet,
                     coordination_id,
                     self.worker_id,
                     step_id,
@@ -799,15 +779,13 @@ class Adagrid:
                     "work for this step."
                 )
                 n_processed_tiles = self.db.n_processed_tiles(self.worker_id, step_id)
-                step_n_tiles = int(
-                    self.db.redis_con.get(
-                        f"{self.db.job_id}:worker_{self.worker_id}:step_{step_id}:n_tiles"  # noqa
-                    ).decode("ascii")
+                step_n_tiles, step_n_packets = self.db.get_step_info(
+                    self.worker_id, step_id
                 )
                 logger.info("%s/%s tiles processed.", n_processed_tiles, step_n_tiles)
                 if n_processed_tiles == step_n_tiles:
                     logger.debug("Done with work for this step.")
-                    report["runtime_get_work"] = time.time() - start
+                    report["runtime_get_packet"] = time.time() - start
                     report["status"] = WorkerStatus.WORK_DONE.name
                     self.callback(report, self.db)
                     self.insert_reports.append(
@@ -824,7 +802,7 @@ class Adagrid:
 
             # Queue a query for the next packet.
             next_work = await self._launch_task(
-                self.db.get_work,
+                self.db.get_packet,
                 coordination_id,
                 self.worker_id,
                 step_id,
@@ -832,13 +810,9 @@ class Adagrid:
             )
 
             # Check if some other worker has already inserted this packet.
-            packet_flag = f"{self.db.job_id}:worker_{self.worker_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
-            flag = self.db.redis_con.get(packet_flag)
+            flag = self.db.check_packet_flag(self.worker_id, step_id, packet_id)
             if flag is not None:
-                logger.debug(
-                    "Skipping packet. Flag "
-                    f"{packet_flag} is set by worker_id={flag.decode('ascii')}."
-                )
+                logger.debug(f"Skipping packet. Flag is set by worker_id={flag}.")
                 packet_id += 1
                 report["runtime_skip_packet"] = time.time() - start
                 report["status"] = WorkerStatus.SKIPPED.name
@@ -847,7 +821,7 @@ class Adagrid:
                     await self._launch_task(self.db.insert_report, report)
                 )
                 continue
-            report["runtime_get_work"] = time.time() - start
+            report["runtime_get_packet"] = time.time() - start
 
             ########################################
             # Process tiles
@@ -864,15 +838,11 @@ class Adagrid:
             ########################################
             # Insert results in a separate thread to avoid blocking the main thread.
             ########################################
-            def insert_results(packet_id, packet_flag, report, results_df):
-                was_flag_set = self.db.redis_con.setnx(packet_flag, self.worker_id)
-                if was_flag_set == 0:
-                    logger.warning(
-                        f"(step_id={step_id}, packet_id={packet_id})"
-                        " already inserted, discarding results."
-                    )
-                    report["status"] = WorkerStatus.DISCARDED.name
-                else:
+            def insert_results(packet_id, report, results_df):
+                was_flag_set = self.db.set_packet_flag(
+                    self.worker_id, step_id, packet_id
+                )
+                if was_flag_set:
                     self.db.insert_results(results_df, self.algo.get_orderer())
                     logger.debug(
                         "inserted packet results for "
@@ -880,21 +850,32 @@ class Adagrid:
                         f" with {results_df.shape[0]} results"
                     )
                     report["status"] = WorkerStatus.WORKING.name
+                else:
+                    logger.warning(
+                        f"(step_id={step_id}, packet_id={packet_id})"
+                        " already inserted, discarding results."
+                    )
+                    report["status"] = WorkerStatus.DISCARDED.name
                 self.callback(report, self.db)
                 self.db.insert_report(report)
 
             start = time.time()
             insert_threads.append(
-                await self._launch_task(
-                    insert_results, packet_id, packet_flag, report, results_df
-                )
+                await self._launch_task(insert_results, packet_id, report, results_df)
             )
             report["runtime_insert_results"] = time.time() - start
             packet_id += 1
 
     async def _launch_task(self, f, *args, in_thread=True, **kwargs):
-        if in_thread:
+        if in_thread and self.db.supports_threads:
             coro = asyncio.to_thread(f, *args, **kwargs)
+        elif in_thread and not self.db.supports_threads:
+            out = f(*args, **kwargs)
+
+            async def _coro():
+                return out
+
+            coro = _coro()
         else:
             coro = f(*args, **kwargs)
         task = asyncio.create_task(coro)

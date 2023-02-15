@@ -207,6 +207,7 @@ class Clickhouse:
     _d: int = None
     _results_table_exists: bool = False
     is_distributed: bool = True
+    supports_threads: bool = True
 
     def __post_init__(self):
         self.lock = redis.lock.Lock(
@@ -316,6 +317,40 @@ class Clickhouse:
         )
         return R.result_set[0][0]
 
+    def get_coordination_id(self):
+        return int(
+            self.db.redis_con.get(f"{self.db.job_id}:coordination_id").decode("ascii")
+        )
+
+    def get_starting_step_id(self, worker_id):
+        prefix = f"{self.job_id}:worker_{worker_id}:step_"
+        suffix = ":n_tiles"
+        started_steps = list(
+            [
+                int(k[len(prefix) : -len(suffix)])
+                for k in self.redis_con.scan_iter(f"{prefix}*{suffix}")
+            ]
+        )
+        return max(started_steps)
+
+    def set_step_info(self, worker_id, new_step_id, n_tiles, n_packets):
+        p = self.redis_con.pipeline()
+        p.set(
+            f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_tiles",
+            n_tiles,
+        )
+        p.set(
+            f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_packets", n_packets
+        )
+        p.execute()
+
+    def get_step_info(self, worker_id, step_id):
+        p = self.redis_con.pipeline()
+        p.get(f"{self.job_id}:worker_{worker_id}:step_{step_id}:n_tiles")
+        p.get(f"{self.job_id}:worker_{worker_id}:step_{step_id}:n_packets")
+        n_tiles, n_packets = p.execute()
+        return int(n_tiles), int(n_packets)
+
     def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")
         _insert_df(self.client, "tiles", df)
@@ -348,9 +383,9 @@ class Clickhouse:
         """,
         )
 
-    def get_work(self, coordination_id, worker_id, step_id, packet_id):
+    def get_packet(self, coordination_id, worker_id, step_id, packet_id):
         """
-        `get_work` is used to select tiles for processing/simulation.
+        `get_packet` is used to select tiles for processing/simulation.
         """
         return _query_df(
             self.client,
@@ -363,6 +398,18 @@ class Clickhouse:
                     and packet_id = {packet_id}
             """,
         )
+
+    def check_packet_flag(self, worker_id, step_id, packet_id):
+        flag_name = f"{self.job_id}:worker_{worker_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
+        flag_val = self.redis_con.get(flag_name)
+        if flag_val is None:
+            return None
+        else:
+            return int(flag_val.decode("ascii"))
+
+    def set_packet_flag(self, worker_id, step_id, packet_id):
+        flag_name = f"{self.job_id}:worker_{worker_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
+        return self.redis_con.setnx(flag_name, worker_id) == 1
 
     def next(self, coordination_id, worker_id, n, orderer):
         """
@@ -378,7 +425,7 @@ class Clickhouse:
                     and worker_id = {worker_id}
                     and eligible=true
                     and id not in (select id from done)
-            order by {orderer} asc limit {n}
+            order by {orderer} limit {n}
         """,
         )
 
@@ -428,7 +475,7 @@ class Clickhouse:
             _, cur_id = p.execute()
         return [cur_id - n + i for i in range(n)]
 
-    async def init_tiles(self, tiles_df):
+    async def init_tiles(self, tiles_df, wait=False):
         # tables:
         # - tiles: id, lots of other stuff...
         # - packet: id
@@ -544,14 +591,17 @@ class Clickhouse:
 
         # I think the only things that we *need* to wait for are the create
         # table statements. The inserts are not urgent.
-        await asyncio.gather(
+        wait_for = [
             create_reports,
             create_tiles,
             create_done,
             create_inactive,
             set_coordination_id,
             setup_first_step,
-        )
+        ]
+        if wait:
+            wait_for.extend([self._insert_tiles_task, self._insert_done_task])
+        await asyncio.gather(*wait_for)
 
     def connect(
         job_id: int = None,

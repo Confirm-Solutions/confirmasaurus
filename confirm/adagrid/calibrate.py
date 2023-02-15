@@ -166,7 +166,7 @@ class AdaCalibrate:
         )
         return report["converged"], None
 
-    def select_tiles(self, report, convergence_data):
+    def select_tiles(self, coordination_id, report, convergence_data):
         tiles_df = self.db.next(self.c["step_size"], "orderer")
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
@@ -310,4 +310,4 @@ def ada_calibrate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    return adagrid.run(AdaCalibrate, locals())
+    return adagrid.run(AdaCalibrate, **locals())

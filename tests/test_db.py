@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import numpy as np
@@ -12,9 +13,11 @@ def example_grid(x1, x2):
     theta, radii = ip.grid._cartesian_gridpts([x1], [x2], [N])
     H = ip.planar_null.HyperPlane(np.array([-1]), 0)
     g = ip.create_grid(theta, radii=radii, null_hypos=[H])
-    # Typically this field would be set by the adagrid code.
+    # Typically these fields would be set by the adagrid code.
+    g.df["coordination_id"] = 0
+    g.df["worker_id"] = 0
     g.df["step_id"] = 17
-    g.df["step_iter"] = np.arange(g.df.shape[0])
+    g.df["packet_id"] = np.arange(g.df.shape[0])
     return g
 
 
@@ -38,9 +41,9 @@ class DBTester:
         g = example_grid(-1, 1)
         g.df.index = g.df.index.astype(np.uint64)
         pd_tiles = db.PandasTiles()
-        pd_tiles.init_tiles(g.df)
+        asyncio.run(pd_tiles.init_tiles(g.df, wait=True))
         db_tiles = self.connect()
-        db_tiles.init_tiles(g.df)
+        asyncio.run(db_tiles.init_tiles(g.df, wait=True))
         return g, pd_tiles, db_tiles
 
     def insert_fake_results(self, db):
@@ -59,8 +62,9 @@ class DBTester:
 
     def test_insert_report(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
-        pd_tiles.insert_report(dict(testA="testB"))
-        db_tiles.insert_report(dict(testA="testB"))
+        R = dict(worker_id=1, step_id=2, packet_id=3, testA="testB")
+        pd_tiles.insert_report(R)
+        db_tiles.insert_report(R)
         pd.testing.assert_frame_equal(pd_tiles.get_reports(), db_tiles.get_reports())
 
     def test_write_tiles(self):
@@ -93,25 +97,19 @@ class DBTester:
 
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-    def test_set_get_step_info(self):
-        g, pd_tiles, db_tiles = self.prepped_dbs()
-        for D in [pd_tiles, db_tiles]:
-            D.set_step_info(step_id=0, step_iter=1, n_iter=2, n_tiles=3)
-            assert D.get_step_info() == (0, 1, 2, 3)
-
     def test_worst_tile(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
 
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
         np.testing.assert_allclose(
-            pd_tiles.worst_tile("orderer").iloc[0]["theta0"], -0.9
+            pd_tiles.worst_tile(None, "orderer").iloc[0]["theta0"], -0.9
         )
         np.testing.assert_allclose(
-            db_tiles.worst_tile("orderer").iloc[0]["theta0"], -0.9
+            db_tiles.worst_tile(None, "orderer").iloc[0]["theta0"], -0.9
         )
         assert_frame_equal_special(
-            pd_tiles.worst_tile("orderer"), db_tiles.worst_tile("orderer")
+            pd_tiles.worst_tile(None, "orderer"), db_tiles.worst_tile(None, "orderer")
         )
 
     def test_next(self):
@@ -119,16 +117,18 @@ class DBTester:
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
 
-        pd_work = pd_tiles.next(3, "theta0")
-        db_work = db_tiles.next(3, "theta0")
+        pd_work = pd_tiles.next(0, 0, 3, "theta0")
+        db_work = db_tiles.next(0, 0, 3, "theta0")
         assert_frame_equal_special(pd_work, db_work)
         assert_frame_equal_special(pd_tiles.get_results(), db_tiles.get_results())
 
         def finish(db_work, pd_work):
             cols = [
-                "id",
+                "coordination_id",
+                "worker_id",
                 "step_id",
-                "step_iter",
+                "packet_id",
+                "id",
                 "active",
                 "finisher_id",
                 "refine",
@@ -147,8 +147,8 @@ class DBTester:
         finish(db_work, pd_work)
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-        pd_work = pd_tiles.next(7, "theta0")
-        db_work = db_tiles.next(7, "theta0")
+        pd_work = pd_tiles.next(0, 0, 7, "theta0")
+        db_work = db_tiles.next(0, 0, 7, "theta0")
         assert pd_work.shape[0] == 2
         assert db_work.shape[0] == 2
         assert_frame_equal_special(pd_work, db_work)
@@ -160,39 +160,12 @@ class DBTester:
         assert not pd_tiles.get_tiles()["active"].any()
         assert not db_tiles.get_tiles()["active"].any()
 
-    def test_get_work(self):
+    def test_get_packet(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
 
-        pd_work = pd_tiles.get_work(17, 5)
-        db_work = db_tiles.get_work(17, 5)
+        pd_work = pd_tiles.get_packet(0, 0, 17, 5)
+        db_work = db_tiles.get_packet(0, 0, 17, 5)
         assert_frame_equal_special(pd_work, db_work)
-
-        # pd_work = pd_tiles.next(3, "theta0", 0)
-        # db_work = db_tiles.next(3, "theta0", 0)
-        # assert_frame_equal_special(pd_work, db_work)
-
-        # assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
-
-        # pd_work2 = pd_tiles.next(3, "theta0", 0)
-        # db_work2 = db_tiles.next(3, "theta0", 0)
-        # assert pd_work2.shape[0] == 2
-        # assert_frame_equal_special(pd_work2, db_work2)
-
-        # assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
-
-        # db_work["active"] = False
-        # pd_work["active"] = False
-        # db_tiles.finish(db_work)
-        # pd_tiles.finish(pd_work)
-        # assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
-
-        # db_work2["active"] = False
-        # pd_work2["active"] = False
-        # db_tiles.finish(db_work2)
-        # pd_tiles.finish(pd_work2)
-        # assert_frame_equal_special(pd_tiles.get_all(), db_tiles.get_all())
-        # assert not pd_tiles.get_all()["active"].any()
-        # assert not db_tiles.get_all()["active"].any()
 
     def test_bootstrap_lamss(self):
         g = example_grid(-1, 1)
@@ -204,14 +177,14 @@ class DBTester:
         g.df["orderer"] = np.linspace(-1, 1, g.n_tiles)
 
         pd_tiles = db.PandasTiles()
-        pd_tiles.init_tiles(g.df)
+        asyncio.run(pd_tiles.init_tiles(g.df))
         pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
-        db_tiles.init_tiles(g.df)
+        asyncio.run(db_tiles.init_tiles(g.df))
         db_tiles.insert_results(g.df, "orderer")
 
         np.testing.assert_allclose(
-            pd_tiles.bootstrap_lamss(), db_tiles.bootstrap_lamss()
+            pd_tiles.bootstrap_lamss(None), db_tiles.bootstrap_lamss(None)
         )
 
     def test_new_workers(self):
@@ -230,7 +203,7 @@ class TestDuckDB(DBTester):
         p = Path("test.db")
         p.unlink(missing_ok=True)
         db_tiles = db.DuckDBTiles.connect(path=str(p))
-        db_tiles.init_tiles(g.df)
+        asyncio.run(db_tiles.init_tiles(g.df))
         db_tiles.close()
 
         db_tiles2 = db.DuckDBTiles.connect(path=str(p))
