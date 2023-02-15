@@ -36,7 +36,9 @@ def test_calibration_cheap(snapshot):
         prod=False,
         tile_batch_size=1,
     )
-    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
+    ip.testing.check_imprint_results(
+        ip.Grid(db.get_results(), None).prune_inactive(), snapshot
+    )
 
 
 @pytest.mark.slow
@@ -47,7 +49,7 @@ def test_calibration(snapshot):
         )
         db = ada.ada_calibrate(ZTest1D, g=g, nB=5, prod=False, tile_batch_size=1)
     ip.testing.check_imprint_results(
-        ip.Grid(db.get_results(), None), snapshot, ignore_story=False
+        ip.Grid(db.get_results(), None).prune_inactive(), snapshot, ignore_story=False
     )
 
     # Compare DuckDB against pandas
@@ -72,7 +74,9 @@ def test_calibration_packetsize1(snapshot):
     snapshot.set_test_name("test_calibration")
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     db = ada.ada_calibrate(ZTest1D, g=g, nB=5, tile_batch_size=1, packet_size=1)
-    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
+    ip.testing.check_imprint_results(
+        ip.Grid(db.get_results(), None).prune_inactive(), snapshot
+    )
 
 
 @pytest.mark.slow
@@ -84,7 +88,9 @@ def test_calibration_clickhouse(snapshot, ch_db):
         )
         db = ada.ada_calibrate(ZTest1D, g=g, db=ch_db, nB=5, tile_batch_size=1)
 
-    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
+    ip.testing.check_imprint_results(
+        ip.Grid(db.get_results(), None).prune_inactive(), snapshot
+    )
 
 
 @pytest.mark.slow
@@ -100,7 +106,9 @@ def test_calibration_clickhouse_distributed(snapshot, ch_db):
         tile_batch_size=1,
         backend=ada.ModalBackend(n_workers=4, gpu=False),
     )
-    ip.testing.check_imprint_results(ip.Grid(db.get_results(), None), snapshot)
+    ip.testing.check_imprint_results(
+        ip.Grid(db.get_results(), None).prune_inactive(), snapshot
+    )
 
 
 @pytest.mark.slow

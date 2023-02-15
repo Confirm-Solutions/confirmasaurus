@@ -23,7 +23,8 @@ def check(db, snapshot):
     max_tie = db.worst_tile(None, "tie_bound")["tie_bound"].iloc[0]
     np.testing.assert_allclose(max_tie, snapshot(max_tie))
 
-    all_tiles_df = db.get_results().set_index("id")
+    all_tiles_df = db.get_results()
+    active_df = all_tiles_df[all_tiles_df["active"]]
     check_cols = [
         "step_id",
         "theta0",
@@ -35,7 +36,7 @@ def check(db, snapshot):
         "tie_bound",
     ]
     check_subset = (
-        all_tiles_df[check_cols]
+        active_df[check_cols]
         .sort_values(by=["step_id", "theta0"])
         .reset_index(drop=True)
     )
