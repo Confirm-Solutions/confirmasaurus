@@ -15,9 +15,6 @@ from confirm.cloud.redis_heartbeat import HeartbeatThread
 import confirm.adagrid.adagrid as adagrid
 import imprint as ip
 from imprint.models.ztest import ZTest1D
-
-import clickhouse_connect
-clickhouse_connect.common.set_setting('autogenerate_session_id', False)
 ```
 
 ### Glossary
@@ -28,65 +25,31 @@ clickhouse_connect.common.set_setting('autogenerate_session_id', False)
 - **batch**: The unit of simulation work that is passed to a Model.
 
 ```python
+get_ipython().__class__.__name__
+```
+
+```python
+get_ipython().config
+```
+
+```python
+asyncio.get_running_loop()
+```
+
+```python
 ch.clear_dbs(drop_all_redis_keys=True)
 ```
 
 ```python
-db = ch.Clickhouse.connect(job_id="8603b7cfab1445bc9a3ebfcfcd956255")
-```
-
-```python
-tiles = db.get_tiles()
-```
-
-```python
-tiles
-```
-
-```python
-db.get_work(0, 2, 2, 3)
-```
-
-```python
-import time
-start = time.time()
 db = ch.Clickhouse.connect()
-print('1', time.time() - start)
 g = ip.cartesian_grid(
-    theta_min=[-1], theta_max=[1], n=[50000], null_hypos=[ip.hypo("x0 < 0")]
+    theta_min=[-1], theta_max=[1], n=[50], null_hypos=[ip.hypo("x0 < 0")]
 )
-print('2', time.time() - start)
-
-import inspect
-sig = inspect.signature(ada_validate)
-kwargs={k: v.default for k,v in sig.parameters.items()}
-kwargs.update(dict(lam=-1.96, prod=False))
-n_workers=2
-ada = adagrid.Adagrid()
-print('3', time.time() - start)
-await ada.init(ZTest1D, g, db, AdaValidate, print, None, n_workers, kwargs, worker_id = 1)
-print('4', time.time() - start)
+ada_validate(ZTest1D, lam=-1.96, g=g, db=db, prod=False)
 ```
 
 ```python
 ada.db.get_tiles()
-```
-
-```python
-ada.db.get_results()
-```
-
-```python
-ada.db.get_work(0, 1, 3, 0)
-```
-
-```python
-df = ada.db.get_results()
-np.sum(df['step_id'] == 3)
-```
-
-```python
-ada.db.n_processed_tiles(1, 3)
 ```
 
 ```python

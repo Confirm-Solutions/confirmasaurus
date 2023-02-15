@@ -111,6 +111,25 @@ class LocalBackend:
         return await ada._run_local()
 
 
+# class MultiprocessingBackend:
+#     def __init__(self, n_workers=1):
+#         self.n_workers = n_workers
+
+#     async def run(self, ada):
+#         import confirm.cloud.clickhouse as ch
+
+#         model_type = ada.model_type
+#         algo_type = ada.algo_type
+#         callback = ada.callback
+#         job_id = ada.db.job_id
+
+#         def _worker():
+#             db = ch.Clickhouse.connect(job_id=job_id)
+#             runner = Adagrid(model_type, None, db, algo_type, callback,
+#                dict(), dict())
+#             runner._run_local()
+
+
 class ModalBackend:
     def __init__(
         self, n_workers=1, gpu="A100", job_name_prefix="adagrid", modal_kwargs=None
@@ -165,8 +184,11 @@ def run(algo_type, locals_):
             await locals_["backend"].run(ada)
         return ada.db
 
-    loop = asyncio.new_event_loop()
-    return loop.run_until_complete(_run())
+    try:
+        loop = asyncio.get_running_loop()
+        return asyncio.run_coroutine_threadsafe(_run(), loop).result()
+    except RuntimeError:
+        return asyncio.run(_run())
 
 
 class Adagrid:
@@ -584,12 +606,28 @@ class Adagrid:
             df["coordination_id"] = new_coordination_id
             df["worker_id"] = assign_tiles(df.shape[0], n_workers, registered_workers)
             df["packet_id"] = assign_packets(df, self.cfg["packet_size"])
-            logger.debug(
-                f"Creating coordiation_id {new_coordination_id}"
-                f" with {df.shape[0]} tiles."
-            )
             report["n_tiles"] = df.shape[0]
             ch._insert_df(self.db.client, "results", df)
+            while True:
+                n_inserted = self.db.client.query(
+                    f"""
+                    select count(*) from results
+                        where coordination_id = {new_coordination_id}"
+                    """
+                ).result_set[0][0]
+                if n_inserted == df.shape[0]:
+                    logger.debug(
+                        f"Created coordiation_id {new_coordination_id}"
+                        f" with {df.shape[0]} tiles."
+                    )
+                    break
+                elif n_inserted > df.shape[0]:
+                    raise RuntimeError(
+                        f"Inserted more tiles than expected for coordination"
+                        f" {new_coordination_id}."
+                    )
+                await asyncio.sleep(0.01)
+
         return WorkerStatus.COORDINATED, report
 
     async def new_step(self, coordination_id, new_step_id):
@@ -751,6 +789,7 @@ class Adagrid:
                 packet_id,
             )
             work = await next_work
+            next_work = None
             report["n_tiles"] = work.shape[0]
 
             # Empty packet is an indication that we are done with this step.
@@ -765,6 +804,7 @@ class Adagrid:
                         f"{self.db.job_id}:worker_{self.worker_id}:step_{step_id}:n_tiles"  # noqa
                     ).decode("ascii")
                 )
+                logger.info("%s/%s tiles processed.", n_processed_tiles, step_n_tiles)
                 if n_processed_tiles == step_n_tiles:
                     logger.debug("Done with work for this step.")
                     report["runtime_get_work"] = time.time() - start
@@ -776,12 +816,7 @@ class Adagrid:
                     await asyncio.gather(*insert_threads)
                     return
                 elif n_processed_tiles < step_n_tiles:
-                    logger.debug(
-                        "No work available, but packet is incomplete"
-                        " with %s/%s tiles complete.",
-                        n_processed_tiles,
-                        step_n_tiles,
-                    )
+                    logger.debug("No work available, but packet is incomplete.")
                     await asyncio.sleep(0.05)
                     continue
                 else:  # n_processed_tiles > step_n_tiles

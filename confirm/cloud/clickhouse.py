@@ -747,14 +747,14 @@ def clear_dbs(
                     keys = list(redis_client.scan_iter(f"*{db}*")) + list(
                         redis_client.scan_iter(f"{db}*")
                     )
-                    print("deleting redis keys", keys)
+                    print(f"deleting redis keys containing '{db}'")
                     redis_client.delete(*keys)
                 else:
                     print("no redis client, skipping redis keys")
 
     if drop_all_redis_keys:
         keys = list(redis_client.scan_iter("*"))
-        print("drop_all_redis_keys=True, deleting redis keys", keys)
+        print("drop_all_redis_keys=True, deleting ALL redis keys!")
         if not yes:
             print("Are you sure? [yN]", flush=True)
             yes = input() == "y"

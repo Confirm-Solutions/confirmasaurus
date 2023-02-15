@@ -76,11 +76,6 @@ class AdaValidate:
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
     def convergence_criterion(self, worker_id, report):
-        print(worker_id)
-        print(worker_id)
-        print(worker_id)
-        print(worker_id)
-        print(self.db.get_results())
         max_tie_est = self.db.worst_tile(worker_id, "tie_est desc")["tie_est"].iloc[0]
         next_tile = self.db.worst_tile(
             worker_id, "total_cost_order, tie_bound_order"
