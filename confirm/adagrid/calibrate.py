@@ -120,9 +120,8 @@ class AdaCalibrate:
         #
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
-        any_impossible = self.db.worst_tile(worker_id, "impossible")["impossible"].iloc[
-            0
-        ]
+        worst_tile_impossible = self.db.worst_tile(worker_id, "impossible")
+        any_impossible = worst_tile_impossible["impossible"].iloc[0]
         if any_impossible:
             return False, None
 
@@ -131,7 +130,7 @@ class AdaCalibrate:
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
-        B_lamss = self.db.bootstrap_lamss()
+        B_lamss = self.db.bootstrap_lamss(worker_id)
         worst_tile_tie_sum = self.driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0]
@@ -167,7 +166,9 @@ class AdaCalibrate:
         return report["converged"], None
 
     def select_tiles(self, coordination_id, report, convergence_data):
-        tiles_df = self.db.next(self.c["step_size"], "orderer")
+        tiles_df = self.db.next(
+            coordination_id, self.c["worker_id"], self.c["step_size"], "orderer"
+        )
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
             return None
@@ -195,7 +196,7 @@ class AdaCalibrate:
         # If the tile's mean lambda* is less the mean lambda* of this modified
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
-        twb_worst_tile = self.db.worst_tile("twb_mean_lams")
+        twb_worst_tile = self.db.worst_tile(self.c["worker_id"], "twb_mean_lams")
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
@@ -243,6 +244,7 @@ def ada_calibrate(
     step_size: int = 2**10,
     n_iter: int = 100,
     packet_size: int = None,
+    coordinate_every: int = 5,
     prod: bool = True,
     overrides: dict = None,
     callback=adagrid.print_report,
@@ -290,6 +292,8 @@ def ada_calibrate(
             work.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        coordinate_every: The number of steps between each distributed coordination.
+            This is ignored for local runs. Defaults to 5.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. Defaults to True.

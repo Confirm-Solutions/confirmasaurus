@@ -254,11 +254,12 @@ def check_imprint_results(g, snapshot, ignore_story=True):
 
     df_idx = df.set_index("id")
     compare_all_cols = snapshot(df_idx)
+    shared_cols = set(df_idx.columns).intersection(compare_all_cols.columns)
     # Compare the shared columns. This is helpful for ensuring that existing
     # columns are identical in a situation where we add a new column.
     pd.testing.assert_frame_equal(
-        df_idx[compare_all_cols.columns.tolist()],
-        compare_all_cols,
+        df_idx[shared_cols],
+        compare_all_cols[shared_cols],
         check_like=True,
         check_index_type=False,
         check_dtype=False,

@@ -65,8 +65,12 @@ def _query_df(client, query):
 
 
 def _insert_df(client, table, df):
-    # Save as _query_df, inserting through arrow is faster!
-    client.insert_arrow(table, pyarrow.Table.from_pandas(df, preserve_index=False))
+    # Same as _query_df, inserting through arrow is faster!
+    client.insert_arrow(
+        table,
+        pyarrow.Table.from_pandas(df, preserve_index=False),
+        settings={"insert_distributed_sync": 1},
+    )
 
 
 @dataclass
@@ -306,21 +310,19 @@ class Clickhouse:
 
         R = self.client.query(
             f"""
-            select count(*) from tiles
+            select count(*) from results
                 where
                     worker_id = {worker_id}
                     and step_id = {step_id}
                     and active = true
-                    and id in (select id from results)
+                    and id in (select id from tiles)
                     and parent_id in (select id from done)
             """
         )
         return R.result_set[0][0]
 
     def get_coordination_id(self):
-        return int(
-            self.db.redis_con.get(f"{self.db.job_id}:coordination_id").decode("ascii")
-        )
+        return int(self.redis_con.get(f"{self.job_id}:coordination_id").decode("ascii"))
 
     def get_starting_step_id(self, worker_id):
         prefix = f"{self.job_id}:worker_{worker_id}:step_"
@@ -337,10 +339,11 @@ class Clickhouse:
         p = self.redis_con.pipeline()
         p.set(
             f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_tiles",
-            n_tiles,
+            str(n_tiles),
         )
         p.set(
-            f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_packets", n_packets
+            f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_packets",
+            str(n_packets),
         )
         p.execute()
 

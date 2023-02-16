@@ -49,11 +49,23 @@ class PandasTiles:
             + 1
         )
 
+    def heartbeat(self, worker_id: int):
+        return contextlib.AsyncExitStack()
+
     def _tiles_columns(self) -> List[str]:
         return self.tiles_df.columns
 
     def _results_columns(self) -> List[str]:
         return self.results_df.columns
+
+    def get_coordination_id(self):
+        return 0
+
+    def get_starting_step_id(self, worker_id: int):
+        if self.results_df is None:
+            return 0
+        else:
+            return self.results_df["step_id"].max()
 
     def get_tiles(self) -> pd.DataFrame:
         return self.tiles_df.reset_index(drop=True)
@@ -73,7 +85,7 @@ class PandasTiles:
     def get_step_info(self, worker_id, step_id):
         return self.step_info[step_id]
 
-    def n_processed_tiles(self, step_id: int) -> int:
+    def n_processed_tiles(self, worker_id: int, step_id: int) -> int:
         ids = self.tiles_df.loc[self.tiles_df["step_id"] == step_id, "id"]
         return np.in1d(self.results_df["id"], ids).sum()
 
@@ -97,6 +109,12 @@ class PandasTiles:
             self.tiles_df["packet_id"] == packet_id
         )
         return self.tiles_df.loc[where]
+
+    def check_packet_flag(self, worker_id, step_id, packet_id):
+        return None
+
+    def set_packet_flag(self, worker_id, step_id, packet_id):
+        return True
 
     def next(
         self, coordination_id: int, worker_id: int, n: int, order_col: str
@@ -309,7 +327,10 @@ class DuckDBTiles:
         if len(rows) == 0:
             return None
         else:
-            return rows[0]["worker_id"]
+            flag_tuple = rows[0]
+            assert flag_tuple[1] == step_id
+            assert flag_tuple[2] == packet_id
+            return flag_tuple[0]
 
     def set_packet_flag(self, worker_id, step_id, packet_id):
         if self.check_packet_flag(worker_id, step_id, packet_id) is None:

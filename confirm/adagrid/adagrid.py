@@ -359,6 +359,7 @@ class Adagrid:
                     db.init_tiles, df, wait=wait_for_db, in_thread=False
                 )
             )
+            db.set_step_info(self.worker_id, 0, df.shape[0], df["packet_id"].max() + 1)
             # sleeping immediately means that the init_tiles task will be
             # scheduled to run now.
             self.null_hypos = g.null_hypos
@@ -400,61 +401,62 @@ class Adagrid:
 
     async def _run_local(self):
         try:
-            # TODO: configurable
-            coordinate_every = 5
-            next_coordinate = coordinate_every
             coordination_id = self.db.get_coordination_id()
             starting_step_id = self.db.get_starting_step_id(self.worker_id)
             for step_id in range(starting_step_id, self.cfg["n_steps"]):
-                await self.process_step(coordination_id, step_id)
+                if step_id != starting_step_id:
+                    status = await self.new_step(coordination_id, step_id)
 
-                new_step_id = step_id + 1
-                status = await self.new_step(coordination_id, new_step_id)
+                    # If we reached the maximum number of steps, we are completely
+                    # done.
+                    if status == WorkerStatus.REACHED_N_STEPS:
+                        break
 
-                # If we reached the maximum number of steps, we are completely
-                # done.
-                if status == WorkerStatus.REACHED_N_STEPS:
-                    break
+                    nothing_to_do = status in [
+                        WorkerStatus.CONVERGED,
+                        WorkerStatus.EMPTY_STEP,
+                    ]
+                else:
+                    nothing_to_do = False
+
+                if not nothing_to_do:
+                    await self.process_step(coordination_id, step_id)
 
                 # If a single worker converges or takes an empty step, we need to
                 # coordinate with other workers. Also, we coordinate every
-                # `coordinate_every` steps regardless. Note that this coordination
-                # rules is fully deterministic.
-                nothing_to_do = status in [
-                    WorkerStatus.CONVERGED,
-                    WorkerStatus.EMPTY_STEP,
-                ]
+                # `coordinate_every` steps regardless. This coordination
+                # rule is fully deterministic.
                 if (
-                    nothing_to_do or (next_coordinate == step_id)
+                    nothing_to_do or (step_id % self.cfg["coordinate_every"] == 0)
                 ) and self.db.is_distributed:
-                    status, report = await self.coordinate()
-                    report["status"] = status.name
-                    coordination_id = report["coordination_id"]
-                    self.callback(report, self.db)
-                    self.insert_reports.append(
-                        await self._launch_task(self.db.insert_report, report)
-                    )
+                    status, coordination_id = await self.coordinate()
 
-                    # Convergence across all workers means we are totally done.
+                    # A coordination convergence means we are totally done.
                     if (
                         status == WorkerStatus.CONVERGED
                         or status == WorkerStatus.EMPTY_STEP
                     ):
                         break
 
-                    next_coordinate = step_id + coordinate_every
-                    # Plan a new step so that process_step can run.
-                    await self.new_step(coordination_id, new_step_id)
-
+                # If there's nothing to do and we're not using a distributed
+                # backend, then we're done!
                 elif nothing_to_do:
-                    # If we are not distributed, we can just stop if there's
-                    # nothing left to do.
                     break
         finally:
             await asyncio.gather(*self.insert_reports)
             self.insert_reports = []
 
     async def coordinate(self):
+        status, report = await self._coordinate()
+        report["status"] = status.name
+        coordination_id = report["coordination_id"]
+        self.callback(report, self.db)
+        self.insert_reports.append(
+            await self._launch_task(self.db.insert_report, report)
+        )
+        return status, coordination_id
+
+    async def _coordinate(self):
         # This function should only ever run for the clickhouse database. So,
         # rather than abstracting the various database calls, we just write
         # them in here directly.
@@ -475,19 +477,21 @@ class Adagrid:
             f"{self.db.job_id}:coordination_{new_coordination_id}:waiting",
             self.worker_id,
         )
-
-        # TODO: re-enable this.
-        # self.db.client.command(
-        #     f"""
-        #     ALTER TABLE results
-        #     UPDATE
-        #         eligible = (eligible and not (id in (select * from done))),
-        #         active = (active and not (id in (select * from inactive)))
-        #     WHERE
-        #         coordination_id = {old_coordination_id}
-        #     """,
-        #     settings={"allow_nondeterministic_mutations": "1"},
-        # )
+        self.db.client.command(
+            f"""
+            ALTER TABLE results
+            UPDATE
+                eligible = and(eligible=true, id not in (select id from done)),
+                active = and(active=true, id not in (select id from inactive))
+            WHERE
+                coordination_id = {old_coordination_id}
+                and worker_id = {self.worker_id}
+            """,
+            settings={
+                "allow_nondeterministic_mutations": "1",
+                "mutations_sync": 2,
+            },
+        )
         logger.debug(f"Waiting for coordination {new_coordination_id}")
 
         # only one worker can execute the coordination.
@@ -587,36 +591,30 @@ class Adagrid:
                 "COORDINATED",
             )
             redis_con.set(f"{self.db.job_id}:coordination_id", new_coordination_id)
+            df["eligible"] = True
+            df["active"] = True
             df["coordination_id"] = new_coordination_id
             df["worker_id"] = assign_tiles(df.shape[0], n_workers, registered_workers)
-            df["packet_id"] = assign_packets(df, self.cfg["packet_size"])
             report["n_tiles"] = df.shape[0]
             ch._insert_df(self.db.client, "results", df)
-            while True:
-                n_inserted = self.db.client.query(
-                    f"""
-                    select count(*) from results
-                        where coordination_id = {new_coordination_id}
-                    """
-                ).result_set[0][0]
-                if n_inserted == df.shape[0]:
-                    logger.debug(
-                        f"Created coordiation_id {new_coordination_id}"
-                        f" with {df.shape[0]} tiles."
-                    )
-                    break
-                elif n_inserted > df.shape[0]:
-                    raise RuntimeError(
-                        f"Inserted more tiles than expected for coordination"
-                        f" {new_coordination_id}."
-                    )
-                await asyncio.sleep(0.01)
-
-        return WorkerStatus.COORDINATED, report
+            self.db.client.command(
+                f"""
+            ALTER TABLE results
+            DELETE WHERE coordination_id = {old_coordination_id}
+                    and eligible = 1
+                    and id not in (select id from done)
+                    and active = 1
+                    and id not in (select id from inactive)
+            """,
+                settings={"mutations_sync": 2, "allow_nondeterministic_mutations": "1"},
+            )
+            return WorkerStatus.COORDINATED, report
 
     async def new_step(self, coordination_id, new_step_id):
         status, report = await self._new_step(coordination_id, new_step_id)
         report["status"] = status.name
+        report["coordination_id"] = coordination_id
+        report["step_id"] = new_step_id
         self.callback(report, self.db)
         self.insert_reports.append(
             await self._launch_task(self.db.insert_report, report)
@@ -642,6 +640,9 @@ class Adagrid:
 
         # If we haven't converged, we create a new step.
         start = time.time()
+        logger.debug(
+            f"Selecting tiles for coordination {coordination_id}, step {new_step_id}."
+        )
         tiles_df = self.algo.select_tiles(coordination_id, report, convergence_data)
         report["runtime_select_tiles"] = time.time() - start
 
@@ -696,7 +697,7 @@ class Adagrid:
             tiles_df, self.null_hypos, self.cfg["max_K"], self.cfg["worker_id"]
         )
         g.df["coordination_id"] = coordination_id
-        g.df["worker_id"] = self.worker_id
+        g.df["worker_id"] = np.uint32(self.worker_id)
         g.df["step_id"] = new_step_id
         g.df["creator_id"] = self.cfg["worker_id"]
         g.df["creation_time"] = imprint.timer.simple_timer()
@@ -730,7 +731,7 @@ class Adagrid:
         logger.debug(
             f"Starting step {new_step_id} with {g_active.n_tiles} tiles to simulate."
         )
-        n_packets = str(g_active.df["packet_id"].max() + 1)
+        n_packets = g_active.df["packet_id"].max() + 1
         self.db.set_step_info(self.worker_id, new_step_id, g_active.n_tiles, n_packets)
         await asyncio.gather(done_task, inactive_task, insert_task)
         return WorkerStatus.NEW_STEP, report
@@ -778,6 +779,8 @@ class Adagrid:
                     "Empty packet indicates that we might be done with "
                     "work for this step."
                 )
+                await asyncio.gather(*insert_threads)
+                insert_threads = []
                 n_processed_tiles = self.db.n_processed_tiles(self.worker_id, step_id)
                 step_n_tiles, step_n_packets = self.db.get_step_info(
                     self.worker_id, step_id
@@ -791,11 +794,9 @@ class Adagrid:
                     self.insert_reports.append(
                         await self._launch_task(self.db.insert_report, report)
                     )
-                    await asyncio.gather(*insert_threads)
                     return
                 elif n_processed_tiles < step_n_tiles:
                     logger.debug("No work available, but packet is incomplete.")
-                    await asyncio.sleep(0.05)
                     continue
                 else:  # n_processed_tiles > step_n_tiles
                     raise RuntimeError("More tiles processed than expected.")
@@ -886,7 +887,7 @@ class Adagrid:
 
 def assign_tiles(n_tiles, n_workers, names):
     splits = np.array_split(np.arange(n_tiles), n_workers)
-    assignment = np.empty(n_tiles, dtype=np.int32)
+    assignment = np.empty(n_tiles, dtype=np.uint32)
     for i in range(n_workers):
         assignment[splits[i]] = names[i]
     return assignment

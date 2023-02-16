@@ -86,7 +86,25 @@ def test_calibration_clickhouse(snapshot, ch_db):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db = ada.ada_calibrate(ZTest1D, g=g, db=ch_db, nB=5, tile_batch_size=1)
+        db = ada.ada_calibrate(
+            ZTest1D, g=g, db=ch_db, nB=5, coordinate_every=100, tile_batch_size=1
+        )
+
+    ip.testing.check_imprint_results(
+        ip.Grid(db.get_results(), None).prune_inactive(), snapshot
+    )
+
+
+@pytest.mark.slow
+def test_solo_coordinations(snapshot, ch_db):
+    snapshot.set_test_name("test_calibration")
+    with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
+        g = ip.cartesian_grid(
+            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
+        )
+        db = ada.ada_calibrate(
+            ZTest1D, g=g, db=ch_db, nB=5, coordinate_every=1, tile_batch_size=1
+        )
 
     ip.testing.check_imprint_results(
         ip.Grid(db.get_results(), None).prune_inactive(), snapshot
@@ -103,6 +121,7 @@ def test_calibration_clickhouse_distributed(snapshot, ch_db):
         db=ch_db,
         nB=5,
         packet_size=1,
+        coordinate_every=2,
         tile_batch_size=1,
         backend=ada.ModalBackend(n_workers=4, gpu=False),
     )

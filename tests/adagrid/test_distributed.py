@@ -82,6 +82,10 @@ def test_process_step():
         results_df = ada.db.get_results()
         assert results_df.shape[0] == 5
 
+        await ada.process_step(0, 1)
+        report = ada.db.get_reports().iloc[-1]
+        assert report["status"] == "WORK_DONE"
+
     asyncio.run(_test())
 
 
