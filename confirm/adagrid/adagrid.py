@@ -107,27 +107,62 @@ logger = imprint.log.getLogger(__name__)
 class LocalBackend:
     n_workers: int = 1
 
-    async def run(self, ada):
+    async def run(self, ada, initial_worker_ids):
         return await ada._run_local()
 
 
-# class MultiprocessingBackend:
-#     def __init__(self, n_workers=1):
-#         self.n_workers = n_workers
+class MultiprocessingBackend:
+    def __init__(self, n_workers=1):
+        self.n_workers = n_workers
 
-#     async def run(self, ada):
-#         import confirm.cloud.clickhouse as ch
+    #     async def run(self, ada):
+    #         import confirm.cloud.clickhouse as ch
 
-#         model_type = ada.model_type
-#         algo_type = ada.algo_type
-#         callback = ada.callback
-#         job_id = ada.db.job_id
+    #         model_type = ada.model_type
+    #         algo_type = ada.algo_type
+    #         callback = ada.callback
+    #         job_id = ada.db.job_id
 
-#         def _worker():
-#             db = ch.Clickhouse.connect(job_id=job_id)
-#             runner = Adagrid(model_type, None, db, algo_type, callback,
-#                dict(), dict())
-#             runner._run_local()
+    #         def _worker():
+    #             db = ch.Clickhouse.connect(job_id=job_id)
+    #             runner = Adagrid(model_type, None, db, algo_type, callback,
+    #                dict(), dict())
+    #             runner._run_local()
+
+    async def run(self, ada, initial_worker_ids):
+        import modal
+        import confirm.cloud.clickhouse as ch
+        import confirm.cloud.modal_util as modal_util
+
+        assert len(initial_worker_ids) == self.n_workers
+
+        job_id = ada.db.job_id
+        algo_type = ada.algo_type
+        pass_params = dict(
+            callback=ada.callback,
+            model_type=ada.model_type,
+            overrides=dict(),
+            backend=LocalBackend(),
+            g=None,
+        )
+
+        stub = modal.Stub(f"{self.job_name_prefix}_{job_id}")
+
+        p = modal_util.get_defaults()
+        p.update(dict(gpu=self.gpu, serialized=True))
+
+        @stub.function(**p)
+        def _modal_adagrid_worker(i):
+            modal_util.setup_env()
+            kwargs = copy.deepcopy(pass_params)
+            kwargs["db"] = ch.Clickhouse.connect(job_id=job_id)
+            kwargs["worker_id"] = initial_worker_ids[i]
+            asyncio.run(init_and_run(algo_type, **kwargs))
+
+        logger.info(f"Launching Modal job with {self.n_workers} workers")
+        with stub.run(show_progress=False):
+            _ = list(_modal_adagrid_worker.map(range(self.n_workers)))
+        return ada.db
 
 
 class ModalBackend:
@@ -139,15 +174,22 @@ class ModalBackend:
         self.job_name_prefix = job_name_prefix
         self.modal_kwargs = dict() if modal_kwargs is None else modal_kwargs
 
-    async def run(self, ada):
+    async def run(self, ada, initial_worker_ids):
         import modal
         import confirm.cloud.clickhouse as ch
         import confirm.cloud.modal_util as modal_util
 
-        model_type = ada.model_type
-        algo_type = ada.algo_type
-        callback = ada.callback
+        assert len(initial_worker_ids) == self.n_workers
+
         job_id = ada.db.job_id
+        algo_type = ada.algo_type
+        pass_params = dict(
+            callback=ada.callback,
+            model_type=ada.model_type,
+            overrides=dict(),
+            backend=LocalBackend(),
+            g=None,
+        )
 
         stub = modal.Stub(f"{self.job_name_prefix}_{job_id}")
 
@@ -155,11 +197,12 @@ class ModalBackend:
         p.update(dict(gpu=self.gpu, serialized=True))
 
         @stub.function(**p)
-        def _modal_adagrid_worker(_):
+        def _modal_adagrid_worker(i):
             modal_util.setup_env()
-            db = ch.Clickhouse.connect(job_id=job_id)
-            runner = Adagrid(model_type, None, db, algo_type, callback, dict(), dict())
-            runner._run_local()
+            kwargs = copy.deepcopy(pass_params)
+            kwargs["db"] = ch.Clickhouse.connect(job_id=job_id)
+            kwargs["worker_id"] = initial_worker_ids[i]
+            asyncio.run(init_and_run(algo_type, **kwargs))
 
         logger.info(f"Launching Modal job with {self.n_workers} workers")
         with stub.run(show_progress=False):
@@ -168,21 +211,30 @@ class ModalBackend:
 
 
 def run(algo_type, **kwargs):
-    async def _run():
-        ada = Adagrid()
-        await ada.init(algo_type, **kwargs)
-        async with ada.db.heartbeat(ada.worker_id):
-            await kwargs["backend"].run(ada)
-        return ada.db
-
+    # Check if an event loop is already running. If we're running through
+    # Jupyter, then an event loop will already be running and it's not allowed
+    # to start a new event loop inside of the existing one.
     try:
         loop = asyncio.get_running_loop()
-        return asyncio.run_coroutine_threadsafe(_run(), loop).result()
+        existing_loop = True
     except RuntimeError:
-        pass
-    # We run instead of under the except statement so that exceptions are not
-    # prefixed with "During handling of the above exception..." messages.
-    return asyncio.run(_run())
+        existing_loop = False
+
+    # We run here instead of under the except statement so that exceptions are
+    # not prefixed with "During handling of the above exception..." messages.
+    if existing_loop:
+        return asyncio.run_coroutine_threadsafe(
+            init_and_run(algo_type, **kwargs), loop
+        ).result()
+    else:
+        return asyncio.run(init_and_run(algo_type, **kwargs))
+
+
+async def init_and_run(algo_type, **kwargs):
+    ada = Adagrid()
+    initial_worker_ids = await ada.init(algo_type, **kwargs)
+    await kwargs["backend"].run(ada, initial_worker_ids)
+    return ada.db
 
 
 class Adagrid:
@@ -378,6 +430,7 @@ class Adagrid:
             logger.debug("Initial worker ids: %s", initial_worker_ids)
         else:
             self.null_hypos = _load_null_hypos(self.db)
+            initial_worker_ids = None
 
         ########################################
         # STEP 4: Prepare the model and algorithm
@@ -398,53 +451,57 @@ class Adagrid:
         await asyncio.gather(*wait_for)
 
         self.insert_reports = []
+        return initial_worker_ids
 
     async def _run_local(self):
-        try:
-            coordination_id = self.db.get_coordination_id()
-            starting_step_id = self.db.get_starting_step_id(self.worker_id)
-            for step_id in range(starting_step_id, self.cfg["n_steps"]):
-                if step_id != starting_step_id:
-                    status = await self.new_step(coordination_id, step_id)
+        self.insert_reports = []
+        async with self.db.heartbeat(self.worker_id):
+            try:
+                coordination_id = self.db.get_coordination_id()
+                # TODO: starting_step_id might need some kind of coordination?
+                starting_step_id = self.db.get_starting_step_id(self.worker_id)
+                for step_id in range(starting_step_id, self.cfg["n_steps"]):
+                    if step_id != starting_step_id:
+                        status = await self.new_step(coordination_id, step_id)
 
-                    # If we reached the maximum number of steps, we are completely
-                    # done.
-                    if status == WorkerStatus.REACHED_N_STEPS:
-                        break
+                        # If we reached the maximum number of steps, we are completely
+                        # done.
+                        if status == WorkerStatus.REACHED_N_STEPS:
+                            break
 
-                    nothing_to_do = status in [
-                        WorkerStatus.CONVERGED,
-                        WorkerStatus.EMPTY_STEP,
-                    ]
-                else:
-                    nothing_to_do = False
+                        nothing_to_do = status in [
+                            WorkerStatus.CONVERGED,
+                            WorkerStatus.EMPTY_STEP,
+                        ]
+                    else:
+                        nothing_to_do = False
 
-                if not nothing_to_do:
-                    await self.process_step(coordination_id, step_id)
+                    if not nothing_to_do:
+                        await self.process_step(coordination_id, step_id)
 
-                # If a single worker converges or takes an empty step, we need to
-                # coordinate with other workers. Also, we coordinate every
-                # `coordinate_every` steps regardless. This coordination
-                # rule is fully deterministic.
-                if (
-                    nothing_to_do or (step_id % self.cfg["coordinate_every"] == 0)
-                ) and self.db.is_distributed:
-                    status, coordination_id = await self.coordinate()
-
-                    # A coordination convergence means we are totally done.
+                    # If a single worker converges or takes an empty step, we need to
+                    # coordinate with other workers. Also, we coordinate every
+                    # `coordinate_every` steps regardless. This coordination
+                    # rule is fully deterministic.
                     if (
-                        status == WorkerStatus.CONVERGED
-                        or status == WorkerStatus.EMPTY_STEP
-                    ):
-                        break
+                        nothing_to_do or (step_id % self.cfg["coordinate_every"] == 0)
+                    ) and self.db.is_distributed:
+                        status, coordination_id = await self.coordinate()
 
-                # If there's nothing to do and we're not using a distributed
-                # backend, then we're done!
-                elif nothing_to_do:
-                    break
-        finally:
-            await asyncio.gather(*self.insert_reports)
-            self.insert_reports = []
+                        # A coordination convergence means we are totally done.
+                        if (
+                            status == WorkerStatus.CONVERGED
+                            or status == WorkerStatus.EMPTY_STEP
+                        ):
+                            break
+
+                    # If there's nothing to do and we're not using a distributed
+                    # backend, then we're done!
+                    elif nothing_to_do:
+                        break
+            finally:
+                await asyncio.gather(*self.insert_reports)
+                self.insert_reports = []
 
     async def coordinate(self):
         status, report = await self._coordinate()
@@ -467,14 +524,14 @@ class Adagrid:
 
         redis_con = self.db.redis_con
 
-        old_coordination_id = int(redis_con.get(f"{self.db.job_id}:coordination_id"))
-        new_coordination_id = old_coordination_id + 1
-        report["coordination_id"] = new_coordination_id
+        old_coord_id = int(redis_con.get(f"{self.db.job_id}:coordination_id"))
+        new_coord_id = old_coord_id + 1
+        report["coordination_id"] = new_coord_id
         report["worker_id"] = self.worker_id
 
         # Add ourselves to the set of waiting workers.
         redis_con.sadd(
-            f"{self.db.job_id}:coordination_{new_coordination_id}:waiting",
+            f"{self.db.job_id}:coordination_{new_coord_id}:waiting",
             self.worker_id,
         )
         self.db.client.command(
@@ -484,7 +541,7 @@ class Adagrid:
                 eligible = and(eligible=true, id not in (select id from done)),
                 active = and(active=true, id not in (select id from inactive))
             WHERE
-                coordination_id = {old_coordination_id}
+                coordination_id = {old_coord_id}
                 and worker_id = {self.worker_id}
             """,
             settings={
@@ -492,33 +549,55 @@ class Adagrid:
                 "mutations_sync": 2,
             },
         )
-        logger.debug(f"Waiting for coordination {new_coordination_id}")
+        logger.debug(f"Waiting for coordination {new_coord_id}")
 
         # only one worker can execute the coordination.
         lock = redis.lock.Lock(redis_con, f"{self.db.job_id}:coordinate_lock")
         with lock:
             check = int(redis_con.get(f"{self.db.job_id}:coordination_id"))
-            if check > old_coordination_id:
+            if check > old_coord_id:
                 # another worker already did the coordination.
                 logger.debug("Coordination completed by another worker.")
                 report["coordination_leader"] = False
                 status_str = redis_con.get(
-                    f"{self.db.job_id}:coordination_{new_coordination_id}:result"
+                    f"{self.db.job_id}:coordination_{new_coord_id}:result"
                 )
                 return WorkerStatus[status_str.decode("ascii")], report
             logger.debug("Leading the coordination")
             report["coordination_leader"] = True
 
+            def get_workers():
+                waiting_workers = list(
+                    [
+                        int(w.decode("ascii"))
+                        for w in redis_con.smembers(
+                            f"{self.db.job_id}:coordination_{new_coord_id}:waiting"
+                        )
+                    ]
+                )
+                registered_workers = list(
+                    [
+                        int(w.decode("ascii"))
+                        for w in redis_con.smembers(f"{self.db.job_id}:workers")
+                    ]
+                )
+                return waiting_workers, registered_workers
+
             while True:
                 # - wait until all workers have joined the coordination
                 n_waiting = redis_con.scard(
-                    f"{self.db.job_id}:coordination_{new_coordination_id}:waiting"
+                    f"{self.db.job_id}:coordination_{new_coord_id}:waiting"
                 )
                 n_workers = redis_con.scard(f"{self.db.job_id}:workers")
                 if n_waiting < n_workers:
                     await asyncio.sleep(0.1)
                     continue
                 elif n_waiting > n_workers:
+                    waiting, registered = get_workers()
+                    logger.error(
+                        f"More workers are waiting than there are registered workers."
+                        f"\nWaiting: {waiting}\n Registered: {registered}"
+                    )
                     raise RuntimeError(
                         "More workers are waiting than there are registered workers. "
                     )
@@ -528,7 +607,7 @@ class Adagrid:
                 [
                     int(w.decode("ascii"))
                     for w in redis_con.smembers(
-                        f"{self.db.job_id}:coordination_{new_coordination_id}:waiting"
+                        f"{self.db.job_id}:coordination_{new_coord_id}:waiting"
                     )
                 ]
             )
@@ -560,19 +639,23 @@ class Adagrid:
                         f"Worker {w} is registered but not heartbeating."
                     )
 
+            def complete_coordination(status):
+                redis_con.set(
+                    f"{self.db.job_id}:coordination_{new_coord_id}:result",
+                    status.name,
+                )
+                redis_con.set(f"{self.db.job_id}:coordination_id", new_coord_id)
+                return status, report
+
             converged, _ = self.algo.convergence_criterion(None, report)
             if converged:
-                redis_con.set(
-                    f"{self.db.job_id}:coordination_{new_coordination_id}:result",
-                    "CONVERGED",
-                )
-                return WorkerStatus.CONVERGED, report
+                return complete_coordination(WorkerStatus.CONVERGED)
 
             df = ch._query_df(
                 self.db.client,
                 f"""
                 SELECT * FROM results
-                WHERE coordination_id = {old_coordination_id}
+                WHERE coordination_id = {old_coord_id}
                     and eligible = 1
                     and id not in (select id from done)
                     and active = 1
@@ -580,35 +663,26 @@ class Adagrid:
                 """,
             )
             if df.shape[0] == 0:
-                redis_con.set(
-                    f"{self.db.job_id}:coordination_{new_coordination_id}:result",
-                    "EMPTY_STEP",
-                )
-                return WorkerStatus.EMPTY_STEP, report
+                return complete_coordination(WorkerStatus.EMPTY_STEP)
 
-            redis_con.set(
-                f"{self.db.job_id}:coordination_{new_coordination_id}:result",
-                "COORDINATED",
-            )
-            redis_con.set(f"{self.db.job_id}:coordination_id", new_coordination_id)
             df["eligible"] = True
             df["active"] = True
-            df["coordination_id"] = new_coordination_id
+            df["coordination_id"] = new_coord_id
             df["worker_id"] = assign_tiles(df.shape[0], n_workers, registered_workers)
             report["n_tiles"] = df.shape[0]
             ch._insert_df(self.db.client, "results", df)
             self.db.client.command(
                 f"""
-            ALTER TABLE results
-            DELETE WHERE coordination_id = {old_coordination_id}
-                    and eligible = 1
-                    and id not in (select id from done)
-                    and active = 1
-                    and id not in (select id from inactive)
-            """,
+                ALTER TABLE results
+                DELETE WHERE coordination_id = {old_coord_id}
+                        and eligible = 1
+                        and id not in (select id from done)
+                        and active = 1
+                        and id not in (select id from inactive)
+                """,
                 settings={"mutations_sync": 2, "allow_nondeterministic_mutations": "1"},
             )
-            return WorkerStatus.COORDINATED, report
+            return complete_coordination(WorkerStatus.COORDINATED)
 
     async def new_step(self, coordination_id, new_step_id):
         status, report = await self._new_step(coordination_id, new_step_id)

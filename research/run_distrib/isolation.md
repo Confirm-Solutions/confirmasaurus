@@ -25,15 +25,15 @@ from imprint.models.ztest import ZTest1D
 - **batch**: The unit of simulation work that is passed to a Model.
 
 ```python
-db = ch.Clickhouse.connect(job_id = "ab7fd2cf834a4c6795a388201a8715d8")
-```
-
-```python
-df = db.get_results()
+db = ch.Clickhouse.connect(job_id = "996bfed0c4154557ae6df71b9931dfa0")
 ```
 
 ```python
 ch._query_df(db.client, "select * from results")
+```
+
+```python
+ch._query_df(db.client, "select * from results where active=true")
 ```
 
 ```python
@@ -42,22 +42,6 @@ ch._query_df(db.client, "select * from done")
 
 ```python
 ch._query_df(db.client, "select * from tiles")
-```
-
-```python
-df
-```
-
-```python
-get_ipython().__class__.__name__
-```
-
-```python
-get_ipython().config
-```
-
-```python
-asyncio.get_running_loop()
 ```
 
 ```python

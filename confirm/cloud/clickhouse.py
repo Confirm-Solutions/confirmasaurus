@@ -333,6 +333,8 @@ class Clickhouse:
                 for k in self.redis_con.scan_iter(f"{prefix}*{suffix}")
             ]
         )
+        if len(started_steps) == 0:
+            return 0
         return max(started_steps)
 
     def set_step_info(self, worker_id, new_step_id, n_tiles, n_packets):
@@ -352,6 +354,11 @@ class Clickhouse:
         p.get(f"{self.job_id}:worker_{worker_id}:step_{step_id}:n_tiles")
         p.get(f"{self.job_id}:worker_{worker_id}:step_{step_id}:n_packets")
         n_tiles, n_packets = p.execute()
+        if n_tiles is None or n_packets is None:
+            logger.warning(
+                "No step info found for worker %d, step %d.", worker_id, step_id
+            )
+            return 0, 0
         return int(n_tiles), int(n_packets)
 
     def insert_tiles(self, df: pd.DataFrame):

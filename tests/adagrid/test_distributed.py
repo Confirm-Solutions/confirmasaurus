@@ -25,14 +25,6 @@ def test_heartbeat():
     asyncio.run(_test())
 
 
-def test_process():
-    pass
-
-
-def test_steal():
-    pass
-
-
 def get_test_defaults(f):
     import inspect
 
@@ -104,7 +96,3 @@ def test_new_step():
         assert new_step_rpt["status"] == "NEW_STEP"
 
     asyncio.run(_test())
-
-
-def test_coordination():
-    pass

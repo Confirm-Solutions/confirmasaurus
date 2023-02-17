@@ -121,6 +121,11 @@ class AdaCalibrate:
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
         worst_tile_impossible = self.db.worst_tile(worker_id, "impossible")
+
+        # If there are no tiles, we are done.
+        if worst_tile_impossible.shape[0] == 0:
+            return True, None
+
         any_impossible = worst_tile_impossible["impossible"].iloc[0]
         if any_impossible:
             return False, None

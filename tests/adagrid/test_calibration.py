@@ -121,7 +121,7 @@ def test_calibration_clickhouse_distributed(snapshot, ch_db):
         db=ch_db,
         nB=5,
         packet_size=1,
-        coordinate_every=2,
+        coordinate_every=1,
         tile_batch_size=1,
         backend=ada.ModalBackend(n_workers=4, gpu=False),
     )
