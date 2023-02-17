@@ -25,7 +25,46 @@ from imprint.models.ztest import ZTest1D
 - **batch**: The unit of simulation work that is passed to a Model.
 
 ```python
-db = ch.Clickhouse.connect(job_id = "996bfed0c4154557ae6df71b9931dfa0")
+db = ch.Clickhouse.connect(job_id = "2fb4a168c2aa4a13aff4635f6576d0b3")
+```
+
+```python
+ch._query_df(db.client,
+    f"""
+    select worker_id, step_id, count(*) from results
+        group by (worker_id, step_id)
+        order by (worker_id, step_id)
+    """
+)
+```
+
+```python
+ch._query_df(db.client,
+    f"""
+    select worker_id, step_id, count(*) from tiles
+        group by (worker_id, step_id)
+        order by (worker_id, step_id)
+    """
+)
+```
+
+```python
+ch._query_df(db.client, """
+select * from results 
+    where worker_id = 5
+""")
+```
+
+```python
+df = db.get_results()
+df[df['coordination_id'] == 5]['worker_id'].unique()
+```
+
+```python
+ch._query_df(db.client, """
+    select distinct(worker_id) from results
+    where coordination_id = 5
+""")['worker_id'].values
 ```
 
 ```python
