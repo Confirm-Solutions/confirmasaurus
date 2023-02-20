@@ -6,22 +6,10 @@ import numpy as np
 import pandas as pd
 
 import imprint.timer
-from confirm.adagrid.adagrid import _launch_task
-from confirm.adagrid.adagrid import refine_and_deepen
 from confirm.adagrid.convergence import WorkerStatus
+from confirm.adagrid.init import _launch_task
 
 logger = logging.getLogger(__name__)
-
-
-async def process_zone(algo, zone_id, step_id, n_packets):
-    coros = [
-        process_packet(algo, zone_id, step_id, packet_id)
-        for packet_id in range(n_packets)
-    ]
-    tasks = await asyncio.gather(*coros)
-    insert_tasks, report_tasks = zip(*tasks)
-    await asyncio.gather(*insert_tasks)
-    return report_tasks
 
 
 async def process_packet(algo, zone_id, step_id, packet_id):
@@ -190,3 +178,50 @@ async def _new_step(algo, zone_id, new_step_id):
         f" with {g_active.n_tiles} tiles to simulate."
     )
     return WorkerStatus.NEW_STEP, report, n_packets
+
+
+def refine_and_deepen(df, null_hypos, max_K, worker_id):
+    g_deepen_in = imprint.grid.Grid(df.loc[df["deepen"] & (df["K"] < max_K)], worker_id)
+    g_deepen = imprint.grid._raw_init_grid(
+        g_deepen_in.get_theta(),
+        g_deepen_in.get_radii(),
+        worker_id=worker_id,
+        parents=g_deepen_in.df["id"],
+    )
+
+    # We just multiply K by 2 to deepen.
+    # TODO: it's possible to do better by multiplying by 4 or 8
+    # sometimes when a tile clearly needs *way* more sims. how to
+    # determine this?
+    g_deepen.df["K"] = g_deepen_in.df["K"] * 2
+
+    g_refine_in = imprint.grid.Grid(df.loc[df["refine"]], worker_id)
+    inherit_cols = ["K"]
+    # TODO: it's possible to do better by refining by more than just a
+    # factor of 2.
+    g_refine = g_refine_in.refine(inherit_cols)
+
+    # NOTE: Instead of prune_alternative here, we mark alternative tiles as
+    # inactive. This means that we will have a full history of grid
+    # construction.
+    out = g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols)
+    out.df.loc[out._which_alternative(), "active"] = False
+    return out
+
+
+def verify_adagrid(db):
+    _ = db.get_tiles()
+    results_df = db.get_results()
+
+    duplicate_ids = results_df["id"].value_counts()
+    assert duplicate_ids.max() == 1
+
+    inactive_ids = results_df.loc[~results_df["active"], "id"]
+    assert inactive_ids.unique().shape == inactive_ids.shape
+
+    parents = results_df["parent_id"].unique()
+    parents_that_dont_exist = np.setdiff1d(parents, inactive_ids)
+    inactive_tiles_with_no_children = np.setdiff1d(inactive_ids, parents)
+    assert parents_that_dont_exist.shape[0] == 1
+    assert parents_that_dont_exist[0] == 0
+    assert inactive_tiles_with_no_children.shape[0] == 0

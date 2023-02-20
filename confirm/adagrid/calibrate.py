@@ -51,9 +51,9 @@ import numpy as np
 import pandas as pd
 
 import imprint.log
-from . import adagrid
 from . import bootstrap
 from .backend import LocalBackend
+from .backend import print_report
 
 logger = imprint.log.getLogger(__name__)
 
@@ -251,7 +251,7 @@ def ada_calibrate(
     coordinate_every: int = 5,
     prod: bool = True,
     overrides: dict = None,
-    callback=adagrid.print_report,
+    callback=print_report,
     backend=LocalBackend(),
 ):
     """

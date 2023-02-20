@@ -17,11 +17,9 @@ from typing import List
 import clickhouse_connect
 import pandas as pd
 import pyarrow
-import redis
 
 import confirm.adagrid.json as json
 import imprint.log
-from .redis_heartbeat import HeartbeatThread
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
 
@@ -166,11 +164,6 @@ class Clickhouse:
     See the DuckDBTiles or PandasTiles implementations for details on the
     Adagrid tile database interface.
 
-    Internally, this also uses a Redis server for distributed locks and for
-    robustly incrementing the worker_id. We don't use Clickhouse for these
-    tasks because Clickhouse does not have any strong consistency tools or
-    tools for locking a table.
-
     The active and eligible tile columns are stored across two places in order
     to construct an append-only table structure.
 
@@ -210,7 +203,6 @@ class Clickhouse:
 
     connection_details: Dict[str, str]
     client: clickhouse_connect.driver.httpclient.HttpClient
-    redis_con: redis.Redis
     job_id: str
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
@@ -219,11 +211,6 @@ class Clickhouse:
     is_distributed: bool = True
     supports_threads: bool = True
 
-    def __post_init__(self):
-        self.lock = redis.lock.Lock(
-            self.redis_con, f"{self.job_id}:next_lock", timeout=60, blocking_timeout=3
-        )
-
     @property
     def _host(self):
         return self.connection_details["host"]
@@ -231,9 +218,6 @@ class Clickhouse:
     @property
     def store(self):
         return ClickhouseStore(self.client, self.job_id)
-
-    def heartbeat(self, worker_id):
-        return HeartbeatThread(self.redis_con, self.job_id, worker_id)
 
     def dimension(self):
         if self._d is None:
@@ -330,39 +314,12 @@ class Clickhouse:
         return R.result_set[0][0]
 
     def get_starting_step_id(self, zone_id):
-        prefix = f"{self.job_id}:zone_{zone_id}:step_"
-        suffix = ":n_tiles"
-        started_steps = list(
-            [
-                int(k[len(prefix) : -len(suffix)])
-                for k in self.redis_con.scan_iter(f"{prefix}*{suffix}")
-            ]
-        )
-        if len(started_steps) == 0:
-            return 0
-        return max(started_steps)
-
-    def set_step_info(self, zone_id, new_step_id, n_tiles, n_packets):
-        p = self.redis_con.pipeline()
-        p.set(
-            f"{self.job_id}:zone_{zone_id}:step_{new_step_id}:n_tiles",
-            str(n_tiles),
-        )
-        p.set(
-            f"{self.job_id}:zone_{zone_id}:step_{new_step_id}:n_packets",
-            str(n_packets),
-        )
-        p.execute()
-
-    def get_step_info(self, zone_id, step_id):
-        p = self.redis_con.pipeline()
-        p.get(f"{self.job_id}:zone_{zone_id}:step_{step_id}:n_tiles")
-        p.get(f"{self.job_id}:zone_{zone_id}:step_{step_id}:n_packets")
-        n_tiles, n_packets = p.execute()
-        if n_tiles is None or n_packets is None:
-            logger.warning("No step info found for zone %d, step %d.", zone_id, step_id)
-            return 0, 0
-        return int(n_tiles), int(n_packets)
+        return self.client.query(
+            f"""
+            select max(step_id) from tiles
+                where zone_id = {zone_id}
+        """
+        ).result_set[0][0]
 
     def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")
@@ -425,18 +382,6 @@ class Clickhouse:
             """,
         )
 
-    def check_packet_flag(self, zone_id, step_id, packet_id):
-        flag_name = f"{self.job_id}:zone_{zone_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
-        flag_val = self.redis_con.get(flag_name)
-        if flag_val is None:
-            return None
-        else:
-            return int(flag_val.decode("ascii"))
-
-    def set_packet_flag(self, zone_id, step_id, packet_id, worker_id):
-        flag_name = f"{self.job_id}:zone_{zone_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
-        return self.redis_con.setnx(flag_name, worker_id) == 1
-
     def next(self, zone_id, new_step_id, n, orderer):
         """
         `next` is used in select_tiles to get the next batch of tiles to
@@ -491,15 +436,13 @@ class Clickhouse:
 
     def close(self):
         self.client.close()
-        self.redis_con.close()
 
-    def new_workers(self, n):
-        with self.lock:
-            p = self.redis_con.pipeline()
-            p.setnx(f"{self.job_id}:next_worker_id", 2)
-            p.incrby(f"{self.job_id}:next_worker_id", n)
-            _, cur_id = p.execute()
-        return [cur_id - n + i for i in range(n)]
+    # def new_workers(self, n):
+    #     p = self.redis_con.pipeline()
+    #     p.setnx(f"{self.job_id}:next_worker_id", 2)
+    #     p.incrby(f"{self.job_id}:next_worker_id", n)
+    #     _, cur_id = p.execute()
+    #     return [cur_id - n + i for i in range(n)]
 
     async def init_tiles(self, tiles_df):
         # tables:
@@ -599,46 +542,17 @@ class Clickhouse:
 
         self._insert_done_task = asyncio.create_task(_insert_done())
 
-        def _setup_first_step():
-            p = self.redis_con.pipeline()
-            for zone_id, n_tiles in tiles_df.groupby("zone_id").size().items():
-                p.set(f"{self.job_id}:zone_{zone_id}:step_0:n_tiles", n_tiles)
-            for zone_id, max_packet_id in (
-                tiles_df.groupby("zone_id")["packet_id"].max().items()
-            ):
-                p.set(
-                    f"{self.job_id}:zone_{zone_id}:step_0:n_packets", max_packet_id + 1
-                )
-            p.execute()
-
-        setup_first_step = asyncio.create_task(asyncio.to_thread(_setup_first_step))
-
         # I think the only things that we *need* to wait for are the create
         # table statements. The inserts are not urgent.
-        wait_for = [
-            create_reports,
-            create_tiles,
-            create_done,
-            create_inactive,
-            setup_first_step,
-        ]
+        wait_for = [create_reports, create_tiles, create_done, create_inactive]
         await asyncio.gather(*wait_for)
 
     async def wait_for_init_inserts(self):
         await asyncio.gather(self._insert_tiles_task, self._insert_done_task)
 
-    def connect(
-        job_id: int = None,
-        host=None,
-        port=None,
-        username=None,
-        password=None,
-        redis_host=None,
-        redis_port=None,
-        redis_password=None,
-    ):
+    def connect(job_id: int = None, host=None, port=None, username=None, password=None):
         """
-        Connect to a Clickhouse server and to our Redis server.
+        Connect to a Clickhouse server
 
         Each job_id corresponds to a Clickhouse database on the Clickhouse
         cluster. If job_id is None, we will find
@@ -653,11 +567,6 @@ class Clickhouse:
             port: 8443
             username: "default"
 
-        For Redis, we will use the following environment variables:
-            REDIS_HOST: The hostname for the Redis server.
-            REDIS_PORT: The Redis server port.
-            REDIS_PASSWORD: The Redis password.
-
         If the environment variables are not set, the defaults will be:
             port: 37085
 
@@ -667,9 +576,6 @@ class Clickhouse:
             port: The Clickhouse server port. Defaults to None.
             username: The Clickhouse username. Defaults to None.
             password: The Clickhouse password. Defaults to None.
-            redis_host: The Redis hostname. Defaults to None.
-            redis_port: The Redis port. Defaults to None.
-            redis_password: The Redis password. Defaults to None.
 
         Returns:
             A Clickhouse tile database object.
@@ -693,9 +599,8 @@ class Clickhouse:
         connection_details = get_ch_config(host, port, username, password, job_id)
         client = clickhouse_connect.get_client(**connection_details)
 
-        redis_con = get_redis_client(redis_host, redis_port, redis_password)
         logger.info(f"Connected to job {job_id}")
-        return Clickhouse(connection_details, client, redis_con, job_id)
+        return Clickhouse(connection_details, client, job_id)
 
 
 def does_table_exist(client, job_id: str, table_name: str) -> bool:
@@ -711,23 +616,6 @@ def does_table_exist(client, job_id: str, table_name: str) -> bool:
         )
         > 0
     )
-
-
-def get_redis_client(host=None, port=None, password=None):
-    return redis.Redis(**get_redis_config(host, port, password))
-
-
-def get_redis_config(host=None, port=None, password=None):
-    if host is None:
-        host = os.environ["REDIS_HOST"]
-    if port is None:
-        if "REDIS_PORT" in os.environ:
-            port = os.environ["REDIS_PORT"]
-        else:
-            port = 37085
-    if password is None:
-        password = os.environ["REDIS_PASSWORD"]
-    return dict(host=host, port=port, password=password)
 
 
 def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):
@@ -759,29 +647,23 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
     )
 
 
-def clear_dbs(
-    ch_client=None, redis_client=None, names=None, yes=False, drop_all_redis_keys=False
-):
+def clear_dbs(ch_client=None, names=None, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
         would be bad. There's a built-in safeguard to prevent this, but it's
         not foolproof.
 
-    Clear all databases (and database tables) from the Clickhouse and Redis
-    servers. This should only work for our test database or for localhost.
+    Clear all databases (and database tables) from the Clickhouse. This should
+    only work for our test database or for localhost.
 
     Args:
         ch_client: Clickhouse client
-        redis_client: Redis client
         names: default None, list of database names to drop. If None, drop all.
         yes: bool, if True, don't ask for confirmation before dropping.
-        drop_all_redis_keys: bool, if True, drop all Redis keys.
     """
     if ch_client is None:
         ch_client = get_ch_client()
-    if redis_client is None:
-        redis_client = get_redis_client()
 
     test_host = os.environ["CLICKHOUSE_TEST_HOST"]
     if not (
@@ -817,19 +699,3 @@ def clear_dbs(
                 cmd = f"drop database {db}"
                 print(cmd)
                 ch_client.command(cmd)
-                if redis_client is not None:
-                    keys = list(redis_client.scan_iter(f"*{db}*")) + list(
-                        redis_client.scan_iter(f"{db}*")
-                    )
-                    print(f"deleting redis keys containing '{db}'")
-                    redis_client.delete(*keys)
-                else:
-                    print("no redis client, skipping redis keys")
-
-    if drop_all_redis_keys:
-        keys = list(redis_client.scan_iter("*"))
-        print("drop_all_redis_keys=True, deleting ALL redis keys!")
-        if not yes:
-            print("Are you sure? [yN]", flush=True)
-            yes = input() == "y"
-        redis_client.delete(*keys)

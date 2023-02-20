@@ -59,10 +59,7 @@ class PandasTiles:
         return self.results_df.columns
 
     def get_starting_step_id(self, zone_id: int):
-        if self.results_df is None:
-            return 0
-        else:
-            return self.results_df["step_id"].max()
+        return self.tiles_df["step_id"].max()
 
     def get_tiles(self) -> pd.DataFrame:
         return self.tiles_df.reset_index(drop=True)
@@ -249,11 +246,7 @@ class DuckDBTiles:
         ).fetchone()[0]
 
     def get_starting_step_id(self, zone_id):
-        if not self._results_table_exists():
-            return 0
-        return self.con.query(
-            "select coalesce(max(step_id), 0) from results"
-        ).fetchone()[0]
+        return self.con.query("select max(step_id) from tiles")
 
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())

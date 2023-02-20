@@ -1,20 +1,18 @@
 import asyncio
+import codecs
 import copy
 import json
 import logging
 import platform
+import subprocess
 import warnings
 
+import cloudpickle
 import jax
+import numpy as np
 import pandas as pd
 
 import imprint.timer
-from confirm.adagrid.adagrid import _launch_task
-from confirm.adagrid.adagrid import _load_null_hypos
-from confirm.adagrid.adagrid import _run
-from confirm.adagrid.adagrid import _store_null_hypos
-from confirm.adagrid.adagrid import assign_packets
-from confirm.adagrid.adagrid import assign_tiles
 from confirm.adagrid.db import DuckDBTiles
 
 logger = logging.getLogger(__name__)
@@ -168,7 +166,7 @@ async def init_grid(g, db, cfg, n_zones):
     df["K"] = cfg["init_K"]
 
     df["step_id"] = 0
-    df["zone_id"] = assign_tiles(g.n_tiles, n_zones, range(n_zones))
+    df["zone_id"] = assign_tiles(g.n_tiles, n_zones)
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df["creator_id"] = 1
     df["creation_time"] = imprint.timer.simple_timer()
@@ -191,3 +189,73 @@ async def init_grid(g, db, cfg, n_zones):
     for zone_id, zone in df.groupby("zone_id"):
         zone_info[zone_id] = zone["packet_id"].max() + 1
     return wait_for, zone_info
+
+
+def assign_tiles(n_tiles, n_zones):
+    splits = np.array_split(np.arange(n_tiles), n_zones)
+    assignment = np.empty(n_tiles, dtype=np.uint32)
+    for i in range(n_zones):
+        assignment[splits[i]] = i
+    return assignment
+
+
+def assign_packets(df, packet_size):
+    def f(df):
+        return pd.Series(
+            np.floor(np.arange(df.shape[0]) / packet_size).astype(int),
+            df.index,
+        )
+
+    return df.groupby("zone_id")["zone_id"].transform(f)
+
+
+def _store_null_hypos(db, null_hypos):
+    # we need to convert the pickled object to a valid string so that it can be
+    # inserted into a database. converting to a from base64 achieves this goal:
+    # https://stackoverflow.com/a/30469744/3817027
+    serialized = [
+        codecs.encode(cloudpickle.dumps(h), "base64").decode() for h in null_hypos
+    ]
+    desc = [h.description() for h in null_hypos]
+    df = pd.DataFrame({"serialized": serialized, "description": desc})
+    db.store.set("null_hypos", df)
+
+
+def _load_null_hypos(db):
+    df = db.store.get("null_hypos")
+    null_hypos = []
+    for i in range(df.shape[0]):
+        row = df.iloc[i]
+        null_hypos.append(
+            cloudpickle.loads(codecs.decode(row["serialized"].encode(), "base64"))
+        )
+    return null_hypos
+
+
+def _run(cmd):
+    try:
+        return (
+            subprocess.check_output(" ".join(cmd), stderr=subprocess.STDOUT, shell=True)
+            .decode("utf-8")
+            .strip()
+        )
+    except subprocess.CalledProcessError as exc:
+        return f"ERROR: {exc.returncode} {exc.output}"
+
+
+async def _launch_task(db, f, *args, in_thread=True, **kwargs):
+    if in_thread and db.supports_threads:
+        coro = asyncio.to_thread(f, *args, **kwargs)
+    elif in_thread and not db.supports_threads:
+        out = f(*args, **kwargs)
+
+        async def _coro():
+            return out
+
+        coro = _coro()
+    else:
+        coro = f(*args, **kwargs)
+    task = asyncio.create_task(coro)
+    # Sleep immediately to allow the task to start.
+    await asyncio.sleep(0)
+    return task
