@@ -58,10 +58,7 @@ class PandasTiles:
     def _results_columns(self) -> List[str]:
         return self.results_df.columns
 
-    def get_coordination_id(self):
-        return 0
-
-    def get_starting_step_id(self, worker_id: int):
+    def get_starting_step_id(self, zone_id: int):
         if self.results_df is None:
             return 0
         else:
@@ -73,19 +70,22 @@ class PandasTiles:
     def get_results(self) -> pd.DataFrame:
         return self.results_df.reset_index(drop=True)
 
+    def get_done(self):
+        return self.done_df.reset_index(drop=True)
+
     def insert_report(self, report):
         self.reports.append(report)
 
     def get_reports(self):
         return pd.DataFrame(self.reports)
 
-    def set_step_info(self, worker_id, step_id, n_tiles, n_packets):
+    def set_step_info(self, zone_id, step_id, n_tiles, n_packets):
         self.step_info[step_id] = (n_tiles, n_packets)
 
-    def get_step_info(self, worker_id, step_id):
+    def get_step_info(self, zone_id, step_id):
         return self.step_info[step_id]
 
-    def n_processed_tiles(self, worker_id: int, step_id: int) -> int:
+    def n_processed_tiles(self, zone_id: int, step_id: int) -> int:
         ids = self.tiles_df.loc[self.tiles_df["step_id"] == step_id, "id"]
         return np.in1d(self.results_df["id"], ids).sum()
 
@@ -102,22 +102,20 @@ class PandasTiles:
         else:
             self.results_df = pd.concat((self.results_df, df), axis=0)
 
-    def get_packet(
-        self, coordination_id: int, worker_id: int, step_id: int, packet_id: int
-    ) -> pd.DataFrame:
+    def get_packet(self, zone_id: int, step_id: int, packet_id: int) -> pd.DataFrame:
         where = (self.tiles_df["step_id"] == step_id) & (
             self.tiles_df["packet_id"] == packet_id
         )
         return self.tiles_df.loc[where]
 
-    def check_packet_flag(self, worker_id, step_id, packet_id):
+    def check_packet_flag(self, zone_id, step_id, packet_id):
         return None
 
-    def set_packet_flag(self, worker_id, step_id, packet_id):
+    def set_packet_flag(self, zone_id, step_id, packet_id):
         return True
 
     def next(
-        self, coordination_id: int, worker_id: int, n: int, order_col: str
+        self, zone_id: int, new_step_id: int, n: int, order_col: str
     ) -> pd.DataFrame:
         out = self.results_df.loc[self.results_df["eligible"]].nsmallest(n, order_col)
         return out
@@ -133,7 +131,7 @@ class PandasTiles:
         self.results_df.loc[df["id"], "eligible"] = False
         self.results_df.loc[df["id"], "active"] = df["active"]
 
-    def bootstrap_lamss(self, worker_id: int) -> pd.Series:
+    def bootstrap_lamss(self, zone_id: int) -> pd.Series:
         nB = (
             max([int(c[6:]) for c in self.results_df.columns if c.startswith("B_lams")])
             + 1
@@ -141,7 +139,7 @@ class PandasTiles:
         active_tiles = self.results_df.loc[self.results_df["active"]]
         return active_tiles[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0)
 
-    def worst_tile(self, worker_id: int, orderer: str) -> pd.DataFrame:
+    def worst_tile(self, zone_id: int, orderer: str) -> pd.DataFrame:
         active_tiles = self.results_df.loc[self.results_df["active"]]
         return active_tiles.loc[[active_tiles[orderer].idxmin()]]
 
@@ -183,7 +181,7 @@ class DuckDBTiles:
         self.con.execute(
             """
             create table if not exists packet_flags
-                (worker_id int, step_id int, packet_id int)
+                (zone_id int, step_id int, packet_id int)
             """
         )
 
@@ -217,14 +215,17 @@ class DuckDBTiles:
     def get_results(self):
         return self.con.execute("select * from results").df()
 
+    def get_done(self):
+        return self.con.execute("select * from done").df()
+
     def get_reports(self):
         json_strs = self.con.execute("select * from reports").fetchall()
         return pd.DataFrame([json.loads(s[0]) for s in json_strs])
 
-    def set_step_info(self, worker_id, step_id, n_tiles, n_packets):
+    def set_step_info(self, zone_id, step_id, n_tiles, n_packets):
         pass
 
-    def get_step_info(self, worker_id, step_id):
+    def get_step_info(self, zone_id, step_id):
         n_tiles = self.con.query(
             f"select count(*) from tiles where step_id = {step_id}"
         ).fetchone()[0]
@@ -236,8 +237,8 @@ class DuckDBTiles:
     def insert_report(self, report):
         self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
 
-    def n_processed_tiles(self, worker_id: int, step_id: int) -> int:
-        # worker_id is ignored because DuckDB only supports one worker.
+    def n_processed_tiles(self, zone_id: int, step_id: int) -> int:
+        # zone_id is ignored because DuckDB only supports one zone.
         return self.con.execute(
             f"""
             select count(*) from tiles
@@ -247,10 +248,7 @@ class DuckDBTiles:
         """
         ).fetchone()[0]
 
-    def get_coordination_id(self):
-        return 0
-
-    def get_starting_step_id(self, worker_id):
+    def get_starting_step_id(self, zone_id):
         if not self._results_table_exists():
             return 0
         return self.con.query(
@@ -295,31 +293,33 @@ class DuckDBTiles:
             """
         )
 
-    def worst_tile(self, worker_id, order_col):
-        # worker_id is ignored because DuckDB only supports one worker.
+    def worst_tile(self, zone_id, order_col):
+        # zone_id is ignored because DuckDB only supports one zone.
         return self.con.execute(
             f"select * from results where active=true order by {order_col} limit 1"
         ).df()
 
-    def get_packet(
-        self, coordination_id: int, worker_id: int, step_id: int, packet_id: int
-    ):
-        # coordination_id and worker_id are ignored because DuckDB only
-        # supports one worker.
+    def get_packet(self, zone_id: int, step_id: int, packet_id: int):
+        # zone_id is ignored because DuckDB only supports one zone.
+        if self._results_table_exists():
+            restrict_results = "and id not in (select id from results)"
+        else:
+            restrict_results = ""
         return self.con.execute(
             f"""
             select * from tiles
                 where
                     step_id = {step_id}
                     and packet_id = {packet_id}
+                    {restrict_results}
             """,
         ).df()
 
-    def check_packet_flag(self, worker_id, step_id, packet_id):
+    def check_packet_flag(self, zone_id, step_id, packet_id):
         rows = self.con.query(
             f"""
             select * from packet_flags 
-                where worker_id = {worker_id}
+                where zone_id = {zone_id}
                 and step_id = {step_id}
                 and packet_id = {packet_id}
             """
@@ -332,12 +332,12 @@ class DuckDBTiles:
             assert flag_tuple[2] == packet_id
             return flag_tuple[0]
 
-    def set_packet_flag(self, worker_id, step_id, packet_id):
-        if self.check_packet_flag(worker_id, step_id, packet_id) is None:
+    def set_packet_flag(self, zone_id, step_id, packet_id):
+        if self.check_packet_flag(zone_id, step_id, packet_id) is None:
             self.con.execute(
                 f"""
                 insert into packet_flags values (
-                    {worker_id}, {step_id}, {packet_id}
+                    {zone_id}, {step_id}, {packet_id}
                 )
             """
             )
@@ -346,10 +346,9 @@ class DuckDBTiles:
             return False
 
     def next(
-        self, coordination_id: int, worker_id: int, n: int, orderer: str
+        self, zone_id: int, new_step_id: int, n: int, orderer: str
     ) -> pd.DataFrame:
-        # coordination_id and worker_id are ignored because DuckDB only
-        # supports one worker.
+        # zone_id is ignored because DuckDB only supports one zone.
         #
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
@@ -363,8 +362,8 @@ class DuckDBTiles:
         t.commit()
         return out
 
-    def bootstrap_lamss(self, worker_id: int) -> List[float]:
-        # worker_id is ignored because DuckDB only supports one worker.
+    def bootstrap_lamss(self, zone_id: int) -> List[float]:
+        # zone_id is ignored because DuckDB only supports one zone.
         # Get the number of bootstrap lambda* columns
         nB = (
             max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
@@ -399,8 +398,7 @@ class DuckDBTiles:
         self.con.execute(
             """
             create table done (
-                    coordination_id UINTEGER,
-                    worker_id UINTEGER,
+                    zone_id UINTEGER,
                     step_id UINTEGER,
                     packet_id INTEGER,
                     id UBIGINT,
@@ -411,12 +409,17 @@ class DuckDBTiles:
                     split BOOL)
             """
         )
-        self.con.execute("insert into done values (0, 0, 0, 0, 0, 0, 0, 0, 0, 0)")
+        # TODO: should we copy the clickhouse code to put pre-existing parents
+        # in done?
+        self.con.execute("insert into done values (0, 0, 0, 0, 0, 0, 0, 0, 0)")
         self.con.execute(
             """
             create table reports (json TEXT)
             """
         )
+
+    async def wait_for_init_inserts(self):
+        pass
 
     @staticmethod
     def connect(path=":memory:"):

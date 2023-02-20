@@ -64,12 +64,17 @@ def _query_df(client, query):
     return client.query_arrow(query).to_pandas()
 
 
+insert_settings = dict(
+    insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
+)
+
+
 def _insert_df(client, table, df):
     # Same as _query_df, inserting through arrow is faster!
     client.insert_arrow(
         table,
         pyarrow.Table.from_pandas(df, preserve_index=False),
-        settings={"insert_distributed_sync": 1},
+        settings=insert_settings,
     )
 
 
@@ -116,6 +121,7 @@ class ClickhouseStore(Store):
             self.client.command(
                 "insert into store_tables values (%s, %s)",
                 (key, table_name),
+                settings=insert_settings,
             )
         logger.debug(f"set({key}) -> {exists} {table_name}")
         cols = get_create_table_cols(df)
@@ -285,34 +291,36 @@ class Clickhouse:
         out["eligible"] = out["eligible"].astype(bool)
         return out
 
+    def get_done(self):
+        return _query_df(self.client, "select * from done")
+
     def get_reports(self):
         json_strs = self.client.query("select * from reports").result_set
         return pd.DataFrame([json.loads(s[0]) for s in json_strs]).sort_values(
-            by=["worker_id", "step_id", "packet_id"]
+            by=["zone_id", "step_id", "packet_id"]
         )
 
     def insert_report(self, report):
-        self.client.command(f"insert into reports values ('{json.dumps(report)}')")
+        self.client.command(
+            f"insert into reports values ('{json.dumps(report)}')",
+            settings=insert_settings,
+        )
 
-    def n_processed_tiles(self, worker_id: int, step_id: int) -> int:
+    def n_processed_tiles(self, zone_id: int, step_id: int) -> int:
         # This checks the number of tiles for which both:
         # - there are results
         # - the parent tile is done
         # This is a good way to check if a step is done because it ensures that
         # all relevant inserts are done.
         #
-        if not self._results_table_exists:
-            self._results_table_exists = does_table_exist(
-                self.client, self.job_id, "results"
-            )
-            if not self._results_table_exists:
-                return -1
+        if not self.results_table_exists():
+            return -1
 
         R = self.client.query(
             f"""
             select count(*) from results
                 where
-                    worker_id = {worker_id}
+                    zone_id = {zone_id}
                     and step_id = {step_id}
                     and active = true
                     and id in (select id from tiles)
@@ -321,11 +329,8 @@ class Clickhouse:
         )
         return R.result_set[0][0]
 
-    def get_coordination_id(self):
-        return int(self.redis_con.get(f"{self.job_id}:coordination_id").decode("ascii"))
-
-    def get_starting_step_id(self, worker_id):
-        prefix = f"{self.job_id}:worker_{worker_id}:step_"
+    def get_starting_step_id(self, zone_id):
+        prefix = f"{self.job_id}:zone_{zone_id}:step_"
         suffix = ":n_tiles"
         started_steps = list(
             [
@@ -337,27 +342,25 @@ class Clickhouse:
             return 0
         return max(started_steps)
 
-    def set_step_info(self, worker_id, new_step_id, n_tiles, n_packets):
+    def set_step_info(self, zone_id, new_step_id, n_tiles, n_packets):
         p = self.redis_con.pipeline()
         p.set(
-            f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_tiles",
+            f"{self.job_id}:zone_{zone_id}:step_{new_step_id}:n_tiles",
             str(n_tiles),
         )
         p.set(
-            f"{self.job_id}:worker_{worker_id}:step_{new_step_id}:n_packets",
+            f"{self.job_id}:zone_{zone_id}:step_{new_step_id}:n_packets",
             str(n_packets),
         )
         p.execute()
 
-    def get_step_info(self, worker_id, step_id):
+    def get_step_info(self, zone_id, step_id):
         p = self.redis_con.pipeline()
-        p.get(f"{self.job_id}:worker_{worker_id}:step_{step_id}:n_tiles")
-        p.get(f"{self.job_id}:worker_{worker_id}:step_{step_id}:n_packets")
+        p.get(f"{self.job_id}:zone_{zone_id}:step_{step_id}:n_tiles")
+        p.get(f"{self.job_id}:zone_{zone_id}:step_{step_id}:n_packets")
         n_tiles, n_packets = p.execute()
         if n_tiles is None or n_packets is None:
-            logger.warning(
-                "No step info found for worker %d, step %d.", worker_id, step_id
-            )
+            logger.warning("No step info found for zone %d, step %d.", zone_id, step_id)
             return 0, 0
         return int(n_tiles), int(n_packets)
 
@@ -371,15 +374,24 @@ class Clickhouse:
         _insert_df(self.client, "results", df)
         self._results_table_exists = True
 
+    def results_table_exists(self):
+        if not self._results_table_exists:
+            self._results_table_exists = does_table_exist(
+                self.client, self.job_id, "results"
+            )
+            if not self._results_table_exists:
+                return False
+        return True
+
     def finish(self, which):
         logger.debug(f"finish: {which.head()}")
         _insert_df(self.client, "done", which)
 
-    def worst_tile(self, worker_id, orderer):
-        if worker_id is None:
-            worker_id_clause = ""
+    def worst_tile(self, zone_id, orderer):
+        if zone_id is None:
+            zone_id_clause = ""
         else:
-            worker_id_clause = f"and worker_id = {worker_id}"
+            zone_id_clause = f"and zone_id = {zone_id}"
 
         return _query_df(
             self.client,
@@ -388,40 +400,44 @@ class Clickhouse:
                 where
                     active=true
                     and id not in (select id from inactive)
-                    {worker_id_clause}
+                    {zone_id_clause}
             order by {orderer} limit 1
         """,
         )
 
-    def get_packet(self, coordination_id, worker_id, step_id, packet_id):
+    def get_packet(self, zone_id, step_id, packet_id):
         """
         `get_packet` is used to select tiles for processing/simulation.
         """
+        if self.results_table_exists():
+            restrict_clause = "and id not in (select id from results)"
+        else:
+            restrict_clause = ""
         return _query_df(
             self.client,
             f"""
             select * from tiles
                 where
-                    coordination_id = {coordination_id}
-                    and worker_id = {worker_id}
+                    zone_id = {zone_id}
                     and step_id = {step_id}
                     and packet_id = {packet_id}
+                    {restrict_clause}
             """,
         )
 
-    def check_packet_flag(self, worker_id, step_id, packet_id):
-        flag_name = f"{self.job_id}:worker_{worker_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
+    def check_packet_flag(self, zone_id, step_id, packet_id):
+        flag_name = f"{self.job_id}:zone_{zone_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
         flag_val = self.redis_con.get(flag_name)
         if flag_val is None:
             return None
         else:
             return int(flag_val.decode("ascii"))
 
-    def set_packet_flag(self, worker_id, step_id, packet_id):
-        flag_name = f"{self.job_id}:worker_{worker_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
+    def set_packet_flag(self, zone_id, step_id, packet_id, worker_id):
+        flag_name = f"{self.job_id}:zone_{zone_id}:step_{step_id}:packet_{packet_id}:insert"  # noqa
         return self.redis_con.setnx(flag_name, worker_id) == 1
 
-    def next(self, coordination_id, worker_id, n, orderer):
+    def next(self, zone_id, new_step_id, n, orderer):
         """
         `next` is used in select_tiles to get the next batch of tiles to
         refine/deepen
@@ -431,15 +447,15 @@ class Clickhouse:
             f"""
             select * from results
                 where
-                    coordination_id = {coordination_id}
-                    and worker_id = {worker_id}
+                    zone_id = {zone_id}
+                    and step_id < {new_step_id}
                     and eligible=true
                     and id not in (select id from done)
             order by {orderer} limit {n}
         """,
         )
 
-    def bootstrap_lamss(self, worker_id):
+    def bootstrap_lamss(self, zone_id):
         # Get the number of bootstrap lambda* columns
         nB = (
             max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
@@ -448,16 +464,16 @@ class Clickhouse:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        if worker_id is None:
-            worker_id_clause = ""
+        if zone_id is None:
+            zone_id_clause = ""
         else:
-            worker_id_clause = f"and worker_id = {worker_id}"
+            zone_id_clause = f"and zone_id = {zone_id}"
         lamss = self.client.query(
             f"""
             select {cols} from results where
                 active=true
                 and id not in (select id from inactive)
-                {worker_id_clause}
+                {zone_id_clause}
         """
         ).result_set[0]
 
@@ -469,7 +485,7 @@ class Clickhouse:
         results_cols = get_create_table_cols(results_df)
         cmd = f"""
         create table if not exists results ({",".join(results_cols)})
-            engine = MergeTree() order by (coordination_id, {orderer})
+            engine = MergeTree() order by ({orderer})
         """
         self.client.command(cmd)
 
@@ -485,7 +501,7 @@ class Clickhouse:
             _, cur_id = p.execute()
         return [cur_id - n + i for i in range(n)]
 
-    async def init_tiles(self, tiles_df, wait=False):
+    async def init_tiles(self, tiles_df):
         # tables:
         # - tiles: id, lots of other stuff...
         # - packet: id
@@ -501,8 +517,7 @@ class Clickhouse:
                 self.client.command,
                 f"""
                 create table done (
-                        coordination_id UInt32,
-                        worker_id UInt32,
+                        zone_id UInt32,
                         step_id UInt32,
                         packet_id Int32,
                         id {id_type},
@@ -512,7 +527,7 @@ class Clickhouse:
                         deepen Bool,
                         split Bool)
                     engine = MergeTree() 
-                    order by (coordination_id, worker_id, step_id, packet_id, id)
+                    order by (zone_id, step_id, packet_id, id)
                 """,
             )
         )
@@ -523,7 +538,7 @@ class Clickhouse:
                 f"""
             create table tiles ({",".join(tiles_cols)})
                 engine = MergeTree() 
-                order by (coordination_id, worker_id, step_id, packet_id, id)
+                order by (zone_id, step_id, packet_id, id)
             """,
             )
         )
@@ -545,7 +560,7 @@ class Clickhouse:
             tiles_df["parent_id"].unique()[:, None], columns=["id"]
         )
         for c in [
-            "worker_id",
+            "zone_id",
             "step_id",
             "packet_id",
             "active",
@@ -563,8 +578,8 @@ class Clickhouse:
                 """
             create materialized view inactive
                 engine = MergeTree()
-                order by (coordination_id, worker_id, step_id, id)
-                as select coordination_id, worker_id, step_id, id from done 
+                order by (zone_id, step_id, id)
+                as select zone_id, step_id, id from done 
                 where active=false
             """,
             )
@@ -583,18 +598,17 @@ class Clickhouse:
             await asyncio.to_thread(_insert_df, self.client, "done", absent_parents)
 
         self._insert_done_task = asyncio.create_task(_insert_done())
-        set_coordination_id = asyncio.create_task(
-            asyncio.to_thread(self.redis_con.set, f"{self.job_id}:coordination_id", 0)
-        )
 
         def _setup_first_step():
             p = self.redis_con.pipeline()
-            for w, w_n_tiles in tiles_df.groupby("worker_id").size().items():
-                p.set(f"{self.job_id}:worker_{w}:step_0:n_tiles", w_n_tiles)
-            for w, max_packet_id in (
-                tiles_df.groupby("worker_id")["packet_id"].max().items()
+            for zone_id, n_tiles in tiles_df.groupby("zone_id").size().items():
+                p.set(f"{self.job_id}:zone_{zone_id}:step_0:n_tiles", n_tiles)
+            for zone_id, max_packet_id in (
+                tiles_df.groupby("zone_id")["packet_id"].max().items()
             ):
-                p.set(f"{self.job_id}:worker_{w}:step_0:n_packets", max_packet_id + 1)
+                p.set(
+                    f"{self.job_id}:zone_{zone_id}:step_0:n_packets", max_packet_id + 1
+                )
             p.execute()
 
         setup_first_step = asyncio.create_task(asyncio.to_thread(_setup_first_step))
@@ -606,12 +620,12 @@ class Clickhouse:
             create_tiles,
             create_done,
             create_inactive,
-            set_coordination_id,
             setup_first_step,
         ]
-        if wait:
-            wait_for.extend([self._insert_tiles_task, self._insert_done_task])
         await asyncio.gather(*wait_for)
+
+    async def wait_for_init_inserts(self):
+        await asyncio.gather(self._insert_tiles_task, self._insert_done_task)
 
     def connect(
         job_id: int = None,

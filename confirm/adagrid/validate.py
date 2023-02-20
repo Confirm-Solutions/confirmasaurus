@@ -3,21 +3,22 @@ import pandas as pd
 
 import imprint
 from . import adagrid
+from .backend import LocalBackend
 
 logger = imprint.log.getLogger(__name__)
 
 
 class AdaValidate:
-    def __init__(self, db, model, null_hypos, c):
-        self.db = db
-        self.model = model
+    def __init__(self, model, null_hypos, db, cfg, callback):
         self.null_hypos = null_hypos
-        self.c = c
+        self.db = db
+        self.cfg = cfg
+        self.callback = callback
 
-        self.Ks = self.c["init_K"] * 2 ** np.arange(self.c["n_K_double"] + 1)
+        self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
         self.driver = imprint.driver.Driver(
-            self.model, tile_batch_size=self.c["tile_batch_size"]
+            model, tile_batch_size=self.cfg["tile_batch_size"]
         )
 
     def get_orderer(self):
@@ -42,8 +43,10 @@ class AdaValidate:
         #         indict[f"null_truth{j}"] = null_truth[:, j]
         #     computational_df = pd.DataFrame(indict)
 
-        rej_df = self.driver.validate(tiles_df, self.c["lam"], delta=self.c["delta"])
-        rej_df.insert(0, "processor_id", self.c["worker_id"])
+        rej_df = self.driver.validate(
+            tiles_df, self.cfg["lam"], delta=self.cfg["delta"]
+        )
+        rej_df.insert(0, "processor_id", self.cfg["worker_id"])
         rej_df.insert(1, "processing_time", imprint.timer.simple_timer())
         rej_df.insert(2, "eligible", True)
         rej_df.insert(3, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
@@ -66,19 +69,19 @@ class AdaValidate:
         rej_df.insert(
             6,
             "total_cost_order",
-            -rej_df["total_cost"] * (rej_df["total_cost"] > self.c["global_target"]),
+            -rej_df["total_cost"] * (rej_df["total_cost"] > self.cfg["global_target"]),
         )
         rej_df.insert(
             7,
             "tie_bound_order",
-            -rej_df["tie_bound"] * (rej_df["total_cost"] > self.c["max_target"]),
+            -rej_df["tie_bound"] * (rej_df["total_cost"] > self.cfg["max_target"]),
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    def convergence_criterion(self, worker_id, report):
-        max_tie_est = self.db.worst_tile(worker_id, "tie_est desc")["tie_est"].iloc[0]
+    def convergence_criterion(self, zone_id, report):
+        max_tie_est = self.db.worst_tile(zone_id, "tie_est desc")["tie_est"].iloc[0]
         next_tile = self.db.worst_tile(
-            worker_id, "total_cost_order, tie_bound_order"
+            zone_id, "total_cost_order, tie_bound_order"
         ).iloc[0]
         report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
         report.update(
@@ -101,12 +104,12 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    def select_tiles(self, coordination_id, report, max_tie_est):
+    def select_tiles(self, zone_id, new_step_id, report, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
-            coordination_id,
-            self.c["worker_id"],
-            self.c["step_size"],
+            zone_id,
+            new_step_id,
+            self.cfg["step_size"],
             "total_cost_order, tie_bound_order",
         )
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
@@ -125,8 +128,8 @@ class AdaValidate:
         )
 
         deepen_cheaper = tiles_df["sim_cost"] > tiles_df["grid_cost"]
-        needs_refine = (tiles_df["grid_cost"] > self.c["global_target"]) | (
-            (tiles_df["grid_cost"] > self.c["max_target"])
+        needs_refine = (tiles_df["grid_cost"] > self.cfg["global_target"]) | (
+            (tiles_df["grid_cost"] > self.cfg["max_target"])
             & (tiles_df["tie_bound"] > max_tie_est)
         )
         tiles_df["deepen"] = deepen_cheaper & (tiles_df["K"] < self.max_K)
@@ -159,7 +162,7 @@ def ada_validate(
     prod: bool = True,
     overrides: dict = None,
     callback=adagrid.print_report,
-    backend=adagrid.LocalBackend(),
+    backend=LocalBackend(),
 ):
     """
     The entrypoint for the adaptive validation algorithm.
@@ -226,4 +229,4 @@ def ada_validate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    return adagrid.run(AdaValidate, **locals())
+    return backend.run(AdaValidate, locals())

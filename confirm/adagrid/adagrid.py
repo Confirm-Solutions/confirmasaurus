@@ -259,10 +259,10 @@ class Adagrid:
         db = kwargs["db"]
         overrides = kwargs["overrides"]
         n_workers = kwargs["backend"].n_workers
+
         ########################################
         # STEP 1: Prepare the grid and database
         ########################################
-
         if g is None and db is None:
             raise ValueError("Must provide either an initial grid or a database!")
 
@@ -309,9 +309,9 @@ class Adagrid:
                 cfg[k] = overrides[k]
 
         else:
-            # Using locals() is a simple way to get all the config vars in the
-            # function definition. But, we need to erase fields that are not part
-            # of the "config".
+            # Using locals() as kwargs is a simple way to get all the config
+            # vars in the function definition. But, we need to erase fields
+            # that are not part of the "config".
             cfg = {
                 k: v
                 for k, v in kwargs.items()
@@ -384,8 +384,8 @@ class Adagrid:
         # run in a separate thread in case the Store __init__ method does any
         # substantial work (e.g. in ClickhouseStore, we create a table)
         wait_for = [
-            await self._launch_task(
-                lambda df: db.store.set_or_append("config", df), cfg_df
+            await _launch_task(
+                db, lambda df: db.store.set_or_append("config", df), cfg_df
             )
         ]
 
@@ -402,13 +402,13 @@ class Adagrid:
             df["coordination_id"] = 0
             df["step_id"] = 0
             df["worker_id"] = assign_tiles(g.n_tiles, n_workers, initial_worker_ids)
-            df["packet_id"] = assign_packets(df, self.cfg["packet_size"])
+            df["packet_id"] = assign_packets(df, slf.cfg["packet_size"])
             df["creator_id"] = self.worker_id
             df["creation_time"] = imprint.timer.simple_timer()
 
             wait_for.append(
-                await self._launch_task(
-                    db.init_tiles, df, wait=wait_for_db, in_thread=False
+                await _launch_task(
+                    db, db.init_tiles, df, wait=wait_for_db, in_thread=False
                 )
             )
             db.set_step_info(self.worker_id, 0, df.shape[0], df["packet_id"].max() + 1)
@@ -416,7 +416,7 @@ class Adagrid:
             # scheduled to run now.
             self.null_hypos = g.null_hypos
             wait_for.append(
-                await self._launch_task(_store_null_hypos, db, self.null_hypos)
+                await _launch_task(db, _store_null_hypos, db, self.null_hypos)
             )
 
             logger.debug(
@@ -509,7 +509,7 @@ class Adagrid:
         coordination_id = report["coordination_id"]
         self.callback(report, self.db)
         self.insert_reports.append(
-            await self._launch_task(self.db.insert_report, report)
+            await _launch_task(db, self.db.insert_report, report)
         )
         return status, coordination_id
 
@@ -691,7 +691,7 @@ class Adagrid:
         report["step_id"] = new_step_id
         self.callback(report, self.db)
         self.insert_reports.append(
-            await self._launch_task(self.db.insert_report, report)
+            await _launch_task(db, self.db.insert_report, report)
         )
         return status
 
@@ -746,7 +746,7 @@ class Adagrid:
             "split",
         ]
 
-        done_task = await self._launch_task(self.db.finish, tiles_df[done_cols])
+        done_task = await _launch_task(db, self.db.finish, tiles_df[done_cols])
 
         n_refine = tiles_df["refine"].sum()
         n_deepen = tiles_df["deepen"].sum()
@@ -788,7 +788,7 @@ class Adagrid:
             self.db.finish(inactive_df[done_cols])
 
         inactive_df = g.df[~g.df["active"]].copy()
-        inactive_task = await self._launch_task(insert_inactive, inactive_df)
+        inactive_task = await _launch_task(db, insert_inactive, inactive_df)
 
         # Assign tiles to packets and then insert them into the database for
         # processing.
@@ -801,7 +801,7 @@ class Adagrid:
             )
 
         g_active.df["packet_id"] = assign_packets(g_active.df)
-        insert_task = await self._launch_task(self.db.insert_tiles, g_active.df)
+        insert_task = await _launch_task(db, self.db.insert_tiles, g_active.df)
         logger.debug(
             f"Starting step {new_step_id} with {g_active.n_tiles} tiles to simulate."
         )
@@ -830,7 +830,8 @@ class Adagrid:
             start = time.time()
             # On the first loop, we won't have queued any work queries yet.
             if next_work is None:
-                next_work = await self._launch_task(
+                next_work = await _launch_task(
+                    db,
                     self.db.get_packet,
                     coordination_id,
                     self.worker_id,
@@ -866,7 +867,7 @@ class Adagrid:
                     report["status"] = WorkerStatus.WORK_DONE.name
                     self.callback(report, self.db)
                     self.insert_reports.append(
-                        await self._launch_task(self.db.insert_report, report)
+                        await _launch_task(db, self.db.insert_report, report)
                     )
                     return
                 elif n_processed_tiles < step_n_tiles:
@@ -876,7 +877,8 @@ class Adagrid:
                     raise RuntimeError("More tiles processed than expected.")
 
             # Queue a query for the next packet.
-            next_work = await self._launch_task(
+            next_work = await _launch_task(
+                db,
                 self.db.get_packet,
                 coordination_id,
                 self.worker_id,
@@ -893,7 +895,7 @@ class Adagrid:
                 report["status"] = WorkerStatus.SKIPPED.name
                 self.callback(report, self.db)
                 self.insert_reports.append(
-                    await self._launch_task(self.db.insert_report, report)
+                    await _launch_task(db, self.db.insert_report, report)
                 )
                 continue
             report["runtime_get_packet"] = time.time() - start
@@ -936,27 +938,28 @@ class Adagrid:
 
             start = time.time()
             insert_threads.append(
-                await self._launch_task(insert_results, packet_id, report, results_df)
+                await _launch_task(db, insert_results, packet_id, report, results_df)
             )
             report["runtime_insert_results"] = time.time() - start
             packet_id += 1
 
-    async def _launch_task(self, f, *args, in_thread=True, **kwargs):
-        if in_thread and self.db.supports_threads:
-            coro = asyncio.to_thread(f, *args, **kwargs)
-        elif in_thread and not self.db.supports_threads:
-            out = f(*args, **kwargs)
 
-            async def _coro():
-                return out
+async def _launch_task(db, f, *args, in_thread=True, **kwargs):
+    if in_thread and db.supports_threads:
+        coro = asyncio.to_thread(f, *args, **kwargs)
+    elif in_thread and not db.supports_threads:
+        out = f(*args, **kwargs)
 
-            coro = _coro()
-        else:
-            coro = f(*args, **kwargs)
-        task = asyncio.create_task(coro)
-        # Sleep immediately to allow the task to start.
-        await asyncio.sleep(0)
-        return task
+        async def _coro():
+            return out
+
+        coro = _coro()
+    else:
+        coro = f(*args, **kwargs)
+    task = asyncio.create_task(coro)
+    # Sleep immediately to allow the task to start.
+    await asyncio.sleep(0)
+    return task
 
 
 def assign_tiles(n_tiles, n_workers, names):
@@ -974,7 +977,7 @@ def assign_packets(df, packet_size):
             df.index,
         )
 
-    return df.groupby("worker_id")["worker_id"].transform(f)
+    return df.groupby("zone_id")["zone_id"].transform(f)
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):
@@ -1029,7 +1032,10 @@ def _load_null_hypos(db):
     return null_hypos
 
 
-def verify_adagrid(df):
+def verify_adagrid(db):
+    tiles_df = db.get_tiles()
+    results_df = db.get_results()
+
     duplicate_ids = df["id"].value_counts()
     assert duplicate_ids.max() == 1
 

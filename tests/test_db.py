@@ -15,7 +15,7 @@ def example_grid(x1, x2):
     g = ip.create_grid(theta, radii=radii, null_hypos=[H])
     # Typically these fields would be set by the adagrid code.
     g.df["coordination_id"] = 0
-    g.df["worker_id"] = 0
+    g.df["zone_id"] = 0
     g.df["step_id"] = 17
     g.df["packet_id"] = np.arange(g.df.shape[0])
     return g
@@ -62,7 +62,7 @@ class DBTester:
 
     def test_insert_report(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
-        R = dict(worker_id=1, step_id=2, packet_id=3, testA="testB")
+        R = dict(zone_id=1, step_id=2, packet_id=3, testA="testB")
         pd_tiles.insert_report(R)
         db_tiles.insert_report(R)
         pd.testing.assert_frame_equal(pd_tiles.get_reports(), db_tiles.get_reports())
@@ -125,7 +125,7 @@ class DBTester:
         def finish(db_work, pd_work):
             cols = [
                 "coordination_id",
-                "worker_id",
+                "zone_id",
                 "step_id",
                 "packet_id",
                 "id",
