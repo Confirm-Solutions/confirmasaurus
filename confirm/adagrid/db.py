@@ -145,6 +145,9 @@ class PandasTiles:
         df.insert(0, "id", df.index)
         self.tiles_df = df
 
+    async def wait_for_init_inserts(self):
+        pass
+
     def new_workers(self, n) -> List[int]:
         return [self._new_worker() for _ in range(n)]
 
@@ -246,7 +249,7 @@ class DuckDBTiles:
         ).fetchone()[0]
 
     def get_starting_step_id(self, zone_id):
-        return self.con.query("select max(step_id) from tiles")
+        return self.con.query("select max(step_id) from tiles").fetchone()[0]
 
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())

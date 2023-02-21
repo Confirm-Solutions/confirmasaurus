@@ -14,7 +14,7 @@ class ClickhouseCleanup:
         job_ids = [db.job_id for db in self.dbs]
         for db in self.dbs:
             db.close()
-        ch.clear_dbs(client, None, names=job_ids, yes=True)
+        ch.clear_dbs(client, names=job_ids, yes=True)
 
     def _connect(self):
         self.dbs.append(ch.Clickhouse.connect())

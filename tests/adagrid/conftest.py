@@ -12,7 +12,7 @@ def ch_db(request):
     print(f"Cleaning up Clickhouse database {db.job_id}")
     db.close()
     if not request.config.option.keep_clickhouse:
-        ch.clear_dbs(ch.get_ch_client(), None, names=[db.job_id], yes=True)
+        ch.clear_dbs(ch.get_ch_client(), names=[db.job_id], yes=True)
 
 
 @pytest.fixture

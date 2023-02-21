@@ -41,9 +41,15 @@ class DBTester:
         g = example_grid(-1, 1)
         g.df.index = g.df.index.astype(np.uint64)
         pd_tiles = db.PandasTiles()
-        asyncio.run(pd_tiles.init_tiles(g.df, wait=True))
+
+        async def init(db, df):
+            await db.init_tiles(df)
+            await db.wait_for_init_inserts()
+
+        asyncio.run(init(pd_tiles, g.df))
+
         db_tiles = self.connect()
-        asyncio.run(db_tiles.init_tiles(g.df, wait=True))
+        asyncio.run(init(db_tiles, g.df))
         return g, pd_tiles, db_tiles
 
     def insert_fake_results(self, db):
@@ -75,6 +81,18 @@ class DBTester:
         db_tiles.insert_tiles(g2.df)
 
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
+
+    def test_starting_step_id(self):
+        g, pd_tiles, db_tiles = self.prepped_dbs()
+        assert pd_tiles.get_starting_step_id(0) == 17
+        assert db_tiles.get_starting_step_id(0) == 17
+
+        g.df["step_id"] = 20
+        pd_tiles.insert_tiles(g.df)
+        db_tiles.insert_tiles(g.df)
+
+        assert pd_tiles.get_starting_step_id(0) == 20
+        assert db_tiles.get_starting_step_id(0) == 20
 
     def test_write_results(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()

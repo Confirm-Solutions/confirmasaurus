@@ -1,7 +1,6 @@
 import asyncio
 import copy
 
-import confirm.cloud.clickhouse as ch
 import imprint as ip
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import init
@@ -9,24 +8,7 @@ from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet
 from confirm.adagrid.validate import ada_validate
 from confirm.adagrid.validate import AdaValidate
-from confirm.cloud.redis_heartbeat import HeartbeatThread
 from imprint.models.ztest import ZTest1D
-
-
-def test_heartbeat():
-    async def _test():
-        redis_con = ch.get_redis_client()
-        async with HeartbeatThread(
-            redis_con, "test_heartbeat", 2, heartbeat_sleep=0.01
-        ) as h:
-            assert h.extend_count == 0
-            await asyncio.sleep(0)
-            assert redis_con.get("test_heartbeat:heartbeat:2") is not None
-            assert redis_con.sismember("test_heartbeat:workers", 2)
-        assert not redis_con.sismember("test_heartbeat:workers", 2)
-        assert h.extend_count > 0
-
-    asyncio.run(_test())
 
 
 def get_test_defaults(f):

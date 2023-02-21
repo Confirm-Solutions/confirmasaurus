@@ -43,7 +43,6 @@ pyarrow = "^10.0.1"
 boto3 = "^1.26.56"
 cloudpickle = "<2.1"
 clickhouse-connect = "^0.5.7"
-redis = "^4.4.2"
 python-dotenv = "^0.21.1"
 
 [tool.poetry.group.dev]

@@ -1,8 +1,8 @@
 import numpy as np
 
 import imprint as ip
-from confirm.adagrid.adagrid import _load_null_hypos
-from confirm.adagrid.adagrid import _store_null_hypos
+from confirm.adagrid.init import _load_null_hypos
+from confirm.adagrid.init import _store_null_hypos
 
 
 def test_planar_null(both_dbs):

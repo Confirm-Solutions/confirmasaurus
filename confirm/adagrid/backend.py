@@ -98,20 +98,26 @@ logger = logging.getLogger(__name__)
 
 class LocalBackend:
     def __init__(self):
-        self.insert_reports = []
+        self.lazy_inserts = []
 
     def run(self, algo_type, kwargs):
         return maybe_start_event_loop(self._run_async(algo_type, kwargs))
 
     async def _run_async(self, algo_type, kwargs):
         algo, zone_info = await init(algo_type, 1, kwargs)
-        _ = await asyncio.gather(
-            *[
-                self._run_zone(algo, zone_id, zone_info[zone_id])
-                for zone_id in zone_info
-            ]
-        )
-        await asyncio.gather(*self.insert_reports)
+        step_ids = {
+            zone_id: algo.db.get_starting_step_ids(zone_id) for zone_id in zone_info
+        }
+        while True:
+            raw_step_ids = await asyncio.gather(
+                *[
+                    self._run_zone(algo, zone_id, step_ids[zone_id], zone_info[zone_id])
+                    for zone_id in zone_info
+                ]
+            )
+            step_ids = dict(zip(zone_info.keys(), raw_step_ids))
+
+        await asyncio.gather(*self.lazy_inserts)
         return algo.db
 
     async def _run_zone(self, algo, zone_id, start_step_id, n_packets):
@@ -131,18 +137,18 @@ class LocalBackend:
             ]
             tasks = await asyncio.gather(*coros)
             insert_tasks, report_tasks = zip(*tasks)
-            self.insert_reports.extend(report_tasks)
+            self.lazy_inserts.extend(report_tasks)
             await asyncio.gather(*insert_tasks)
 
             status, n_packets, report_task = await new_step(algo, zone_id, step_id + 1)
-            self.insert_reports.append(report_task)
+            self.lazy_inserts.append(report_task)
             if (
                 status == WorkerStatus.CONVERGED
                 or status == WorkerStatus.EMPTY_STEP
                 or status == WorkerStatus.REACHED_N_STEPS
             ):
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
-                break
+                return end_step_id
         return step_id
 
 
