@@ -42,14 +42,10 @@ class DBTester:
         g.df.index = g.df.index.astype(np.uint64)
         pd_tiles = db.PandasTiles()
 
-        async def init(db, df):
-            await db.init_tiles(df)
-            await db.wait_for_init_inserts()
-
-        asyncio.run(init(pd_tiles, g.df))
+        asyncio.run(pd_tiles.init_tiles(g.df))
 
         db_tiles = self.connect()
-        asyncio.run(init(db_tiles, g.df))
+        asyncio.run(db_tiles.init_tiles(g.df))
         return g, pd_tiles, db_tiles
 
     def insert_fake_results(self, db):
@@ -82,17 +78,25 @@ class DBTester:
 
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-    def test_starting_step_id(self):
+    def test_get_zone_info(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
-        assert pd_tiles.get_starting_step_id(0) == 17
-        assert db_tiles.get_starting_step_id(0) == 17
+        zone_info = [(17, i) for i in range(5)]
+        assert pd_tiles.get_zone_info(0) == zone_info
+        assert db_tiles.get_zone_info(0) == zone_info
 
+        self.insert_fake_results(pd_tiles)
+        self.insert_fake_results(db_tiles)
+        assert pd_tiles.get_zone_info(0) == []
+        assert db_tiles.get_zone_info(0) == []
+
+        g.df["id"] = ip.grid._gen_short_uuids(g.df.shape[0], g.worker_id)
         g.df["step_id"] = 20
+        g.df["packet_id"] = 0
         pd_tiles.insert_tiles(g.df)
         db_tiles.insert_tiles(g.df)
 
-        assert pd_tiles.get_starting_step_id(0) == 20
-        assert db_tiles.get_starting_step_id(0) == 20
+        assert pd_tiles.get_zone_info(0) == [(20, 0)]
+        assert db_tiles.get_zone_info(0) == [(20, 0)]
 
     def test_write_results(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()

@@ -91,7 +91,7 @@ import numpy as np
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
-from confirm.adagrid.step import process_packet
+from confirm.adagrid.step import process_packet_set
 
 logger = logging.getLogger(__name__)
 
@@ -105,41 +105,39 @@ class LocalBackend:
 
     async def _run_async(self, algo_type, kwargs):
         algo, zone_info = await init(algo_type, 1, kwargs)
-        step_ids = {
-            zone_id: algo.db.get_starting_step_ids(zone_id) for zone_id in zone_info
-        }
+        step_ids = {zone_id: zone_info[zone_id]["step_id"] for zone_id in zone_info}
+        min_step = np.min(step_ids.values())
+        max_step = np.max(step_ids.values())
+        next_coord = get_next_coord(min_step, algo.cfg["coordinate_every"])
+        assert next_coord == get_next_coord(max_step, algo.cfg["coordinate_every"])
         while True:
-            raw_step_ids = await asyncio.gather(
+            new_raw_zone_info = await asyncio.gather(
                 *[
-                    self._run_zone(algo, zone_id, step_ids[zone_id], zone_info[zone_id])
+                    self._run_zone(
+                        algo,
+                        zone_id,
+                        step_ids[zone_id],
+                        min(next_coord, algo.cfg["n_steps"]),
+                        zone_info[zone_id],
+                    )
                     for zone_id in zone_info
                 ]
             )
-            step_ids = dict(zip(zone_info.keys(), raw_step_ids))
+            # TODO: zone_info for the next step.
+            step_ids = {zone_id: next_coord for zone_id in zone_info}
+            next_coord += algo.cfg["coordinate_every"]
 
         await asyncio.gather(*self.lazy_inserts)
         return algo.db
 
-    async def _run_zone(self, algo, zone_id, start_step_id, n_packets):
-        # TODO: get initial step id and zone info
-        coord_every = algo.cfg["coordinate_every"]
-        end_step_id = min(
-            (start_step_id // coord_every) * coord_every + coord_every,
-            algo.cfg["n_steps"],
-        )
+    async def _run_zone(self, algo, zone_id, start_step_id, end_step_id, n_packets):
         logger.debug(
             f"Zone {zone_id} running from step {start_step_id} to step {end_step_id}."
         )
         for step_id in range(start_step_id, end_step_id):
-            coros = [
-                process_packet(algo, zone_id, step_id, packet_id)
-                for packet_id in range(n_packets)
-            ]
-            tasks = await asyncio.gather(*coros)
-            insert_tasks, report_tasks = zip(*tasks)
-            self.lazy_inserts.extend(report_tasks)
-            await asyncio.gather(*insert_tasks)
-
+            self.lazy_inserts.extend(
+                await process_packet_set(algo, zone_id, step_id, n_packets)
+            )
             status, n_packets, report_task = await new_step(algo, zone_id, step_id + 1)
             self.lazy_inserts.append(report_task)
             if (
@@ -148,8 +146,11 @@ class LocalBackend:
                 or status == WorkerStatus.REACHED_N_STEPS
             ):
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
-                return end_step_id
-        return step_id
+        return step_id + 1, n_packets
+
+
+def get_next_coord(step_id, every):
+    return step_id + every - (step_id % every)
 
 
 def maybe_start_event_loop(coro):
@@ -180,7 +181,7 @@ class ModalBackend:
 
     #         model_type = ada.model_type
     #         algo_type = ada.algo_type
-    #         callback = ada.callback
+    #         callback = ada.callbackk
     #         job_id = ada.db.job_id
 
     #         def _worker():

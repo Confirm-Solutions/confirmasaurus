@@ -290,36 +290,21 @@ class Clickhouse:
             settings=insert_settings,
         )
 
-    def n_processed_tiles(self, zone_id: int, step_id: int) -> int:
-        # This checks the number of tiles for which both:
-        # - there are results
-        # - the parent tile is done
-        # This is a good way to check if a step is done because it ensures that
-        # all relevant inserts are done.
-        #
-        if not self.results_table_exists():
-            return -1
-
-        R = self.client.query(
+    def get_zone_info(self, zone_id):
+        raw = self.client.query(
             f"""
-            select count(*) from results
-                where
-                    zone_id = {zone_id}
-                    and step_id = {step_id}
-                    and active = true
-                    and id in (select id from tiles)
-                    and parent_id in (select id from done)
-            """
-        )
-        return R.result_set[0][0]
-
-    def get_starting_step_id(self, zone_id):
-        return self.client.query(
-            f"""
-            select max(step_id) from tiles
+            WITH (
+                select max(step_id) 
+                from tiles
                 where zone_id = {zone_id}
+            ) as max_step_id
+            select max_step_id, max(packet_id) + 1
+                from tiles
+                where zone_id = {zone_id}
+                    and step_id = max_step_id
         """
-        ).result_set[0][0]
+        ).result_set[0]
+        return dict(step_id=raw[0], n_packets=raw[1])
 
     def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")
@@ -437,7 +422,9 @@ class Clickhouse:
     def close(self):
         self.client.close()
 
-    # def new_workers(self, n):
+    def new_workers(self, n):
+        return [2 + i for i in range(n)]
+
     #     p = self.redis_con.pipeline()
     #     p.setnx(f"{self.job_id}:next_worker_id", 2)
     #     p.incrby(f"{self.job_id}:next_worker_id", n)
@@ -497,8 +484,7 @@ class Clickhouse:
         )
 
         # these tiles have no parents. poor sad tiles :(
-        # we need to put these absent parents into the done table so that
-        # n_processed_tiles returns correct results.
+        # we need to put these absent parents into the done table
         absent_parents = pd.DataFrame(
             tiles_df["parent_id"].unique()[:, None], columns=["id"]
         )
@@ -534,21 +520,22 @@ class Clickhouse:
             await asyncio.to_thread(self.insert_tiles, tiles_df)
 
         # Store a reference to the task so that it doesn't get garbage collected.
-        self._insert_tiles_task = asyncio.create_task(_insert_tiles())
+        insert_tiles_task = asyncio.create_task(_insert_tiles())
 
         async def _insert_done():
             await create_done
             await asyncio.to_thread(_insert_df, self.client, "done", absent_parents)
 
-        self._insert_done_task = asyncio.create_task(_insert_done())
+        insert_done_task = asyncio.create_task(_insert_done())
 
-        # I think the only things that we *need* to wait for are the create
-        # table statements. The inserts are not urgent.
-        wait_for = [create_reports, create_tiles, create_done, create_inactive]
-        await asyncio.gather(*wait_for)
-
-    async def wait_for_init_inserts(self):
-        await asyncio.gather(self._insert_tiles_task, self._insert_done_task)
+        await asyncio.gather(
+            create_reports,
+            create_tiles,
+            create_done,
+            create_inactive,
+            insert_tiles_task,
+            insert_done_task,
+        )
 
     def connect(job_id: int = None, host=None, port=None, username=None, password=None):
         """

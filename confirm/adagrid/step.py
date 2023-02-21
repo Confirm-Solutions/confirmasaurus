@@ -12,6 +12,17 @@ from confirm.adagrid.init import _launch_task
 logger = logging.getLogger(__name__)
 
 
+async def process_packet_set(algo, zone_id, packets):
+    coros = [
+        process_packet(algo, zone_id, step_id, packet_id)
+        for step_id, packet_id in packets
+    ]
+    tasks = await asyncio.gather(*coros)
+    insert_tasks, report_tasks = zip(*tasks)
+    await asyncio.gather(*insert_tasks)
+    return report_tasks
+
+
 async def process_packet(algo, zone_id, step_id, packet_id):
     report = dict()
     status, insert_results = await _process(algo, zone_id, step_id, packet_id, report)
@@ -196,7 +207,7 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
 
     g_refine_in = imprint.grid.Grid(df.loc[df["refine"]], worker_id)
-    inherit_cols = ["K"]
+    inherit_cols = ["K", "coordination_id"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.
     g_refine = g_refine_in.refine(inherit_cols)

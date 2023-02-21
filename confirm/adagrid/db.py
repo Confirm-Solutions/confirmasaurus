@@ -6,7 +6,6 @@ from typing import List
 from typing import Tuple
 
 import duckdb
-import numpy as np
 import pandas as pd
 
 import confirm.adagrid.json as json
@@ -58,8 +57,27 @@ class PandasTiles:
     def _results_columns(self) -> List[str]:
         return self.results_df.columns
 
-    def get_starting_step_id(self, zone_id: int):
-        return self.tiles_df["step_id"].max()
+    def get_zone_info(self, zone_id: int):
+        if self.results_df is None:
+            not_yet_simulated_df = self.tiles_df
+        else:
+            joined_df = self.tiles_df.set_index("id").merge(
+                self.results_df[["id"]].set_index("id"),
+                on="id",
+                how="left",
+                indicator=True,
+            )
+            not_yet_simulated_df = self.tiles_df[joined_df["_merge"] == "left_only"]
+
+        return list(
+            map(
+                tuple,
+                not_yet_simulated_df[["step_id", "packet_id"]]
+                .drop_duplicates()
+                .sort_values(by=["step_id", "packet_id"])
+                .values,
+            )
+        )
 
     def get_tiles(self) -> pd.DataFrame:
         return self.tiles_df.reset_index(drop=True)
@@ -75,16 +93,6 @@ class PandasTiles:
 
     def get_reports(self):
         return pd.DataFrame(self.reports)
-
-    def set_step_info(self, zone_id, step_id, n_tiles, n_packets):
-        self.step_info[step_id] = (n_tiles, n_packets)
-
-    def get_step_info(self, zone_id, step_id):
-        return self.step_info[step_id]
-
-    def n_processed_tiles(self, zone_id: int, step_id: int) -> int:
-        ids = self.tiles_df.loc[self.tiles_df["step_id"] == step_id, "id"]
-        return np.in1d(self.results_df["id"], ids).sum()
 
     def insert_tiles(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
@@ -104,12 +112,6 @@ class PandasTiles:
             self.tiles_df["packet_id"] == packet_id
         )
         return self.tiles_df.loc[where]
-
-    def check_packet_flag(self, zone_id, step_id, packet_id):
-        return None
-
-    def set_packet_flag(self, zone_id, step_id, packet_id):
-        return True
 
     def next(
         self, zone_id: int, new_step_id: int, n: int, order_col: str
@@ -144,9 +146,6 @@ class PandasTiles:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         self.tiles_df = df
-
-    async def wait_for_init_inserts(self):
-        pass
 
     def new_workers(self, n) -> List[int]:
         return [self._new_worker() for _ in range(n)]
@@ -222,34 +221,41 @@ class DuckDBTiles:
         json_strs = self.con.execute("select * from reports").fetchall()
         return pd.DataFrame([json.loads(s[0]) for s in json_strs])
 
-    def set_step_info(self, zone_id, step_id, n_tiles, n_packets):
-        pass
-
-    def get_step_info(self, zone_id, step_id):
-        n_tiles = self.con.query(
-            f"select count(*) from tiles where step_id = {step_id}"
-        ).fetchone()[0]
-        n_packets = self.con.query(
-            f"select count(distinct packet_id) from tiles where step_id = {step_id}"
-        ).fetchone()[0]
-        return n_tiles, n_packets
-
     def insert_report(self, report):
         self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
 
-    def n_processed_tiles(self, zone_id: int, step_id: int) -> int:
-        # zone_id is ignored because DuckDB only supports one zone.
-        return self.con.execute(
+    def get_zone_info(self, zone_id):
+        if self._results_table_exists():
+            restrict = "and id not in (select id from results)"
+        else:
+            restrict = ""
+        return self.con.query(
             f"""
-            select count(*) from tiles
-                where
-                    step_id = {step_id}
-                    and id in (select id from results where step_id = {step_id})
-        """
-        ).fetchone()[0]
-
-    def get_starting_step_id(self, zone_id):
-        return self.con.query("select max(step_id) from tiles").fetchone()[0]
+            select step_id, packet_id
+                from tiles 
+                where 
+                    zone_id = {zone_id}
+                    {restrict}
+                group by step_id, packet_id
+            """
+        ).fetchall()
+        # raw = self.con.query(
+        #     f"""
+        #     WITH max_step_id AS (
+        #         select max(step_id) as max
+        #         from tiles
+        #         where zone_id = {zone_id}
+        #     )
+        #     select (select max from max_step_id), max(packet_id) + 1
+        #         from tiles
+        #         where zone_id = {zone_id}
+        #             and step_id = (select max from max_step_id)
+        # """
+        # ).fetchone()
+        # return dict(
+        #     step_id = raw[0],
+        #     n_packets = raw[1]
+        # )
 
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())
@@ -310,36 +316,6 @@ class DuckDBTiles:
                     {restrict_results}
             """,
         ).df()
-
-    def check_packet_flag(self, zone_id, step_id, packet_id):
-        rows = self.con.query(
-            f"""
-            select * from packet_flags 
-                where zone_id = {zone_id}
-                and step_id = {step_id}
-                and packet_id = {packet_id}
-            """
-        ).fetchall()
-        if len(rows) == 0:
-            return None
-        else:
-            flag_tuple = rows[0]
-            assert flag_tuple[1] == step_id
-            assert flag_tuple[2] == packet_id
-            return flag_tuple[0]
-
-    def set_packet_flag(self, zone_id, step_id, packet_id):
-        if self.check_packet_flag(zone_id, step_id, packet_id) is None:
-            self.con.execute(
-                f"""
-                insert into packet_flags values (
-                    {zone_id}, {step_id}, {packet_id}
-                )
-            """
-            )
-            return True
-        else:
-            return False
 
     def next(
         self, zone_id: int, new_step_id: int, n: int, orderer: str
@@ -413,9 +389,6 @@ class DuckDBTiles:
             create table reports (json TEXT)
             """
         )
-
-    async def wait_for_init_inserts(self):
-        pass
 
     @staticmethod
     def connect(path=":memory:"):

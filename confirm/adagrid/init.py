@@ -53,8 +53,7 @@ async def init(algo_type, n_zones, kwargs):
         wait_for_grid, zone_info = await init_grid(g, db, cfg, n_zones)
         wait_for.extend(wait_for_grid)
     else:
-        # TODO: not sure about this situation...
-        zone_info = None
+        zone_info = {zone_id: db.get_zone_info(zone_id) for zone_id in zone_info}
 
     model_kwargs = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](
@@ -110,6 +109,9 @@ def join(db, kwargs):
 
     # IMPORTANT: Except for overrides, entries in kwargs will be ignored!
     overrides = kwargs["overrides"]
+    if overrides is None:
+        overrides = {}
+
     for k in overrides:
         # Some parameters cannot be overridden because the job just wouldn't
         # make sense anymore.
@@ -165,6 +167,7 @@ async def init_grid(g, db, cfg, n_zones):
     df = copy.deepcopy(g.df)
     df["K"] = cfg["init_K"]
 
+    df["coordination_id"] = 0
     df["step_id"] = 0
     df["zone_id"] = assign_tiles(g.n_tiles, n_zones)
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
@@ -187,7 +190,7 @@ async def init_grid(g, db, cfg, n_zones):
 
     zone_info = dict()
     for zone_id, zone in df.groupby("zone_id"):
-        zone_info[zone_id] = zone["packet_id"].max() + 1
+        zone_info[zone_id] = [(0, p) for p in range(zone["packet_id"].max() + 1)]
     return wait_for, zone_info
 
 

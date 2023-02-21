@@ -1,11 +1,16 @@
 import asyncio
 import copy
 
+import numpy as np
+
+import confirm.cloud.clickhouse as ch
 import imprint as ip
 from confirm.adagrid.convergence import WorkerStatus
+from confirm.adagrid.coordinate import coordinate
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet
+from confirm.adagrid.step import process_packet_set
 from confirm.adagrid.validate import ada_validate
 from confirm.adagrid.validate import AdaValidate
 from imprint.models.ztest import ZTest1D
@@ -40,10 +45,9 @@ def test_init_first(both_dbs):
     async def _test():
         algo, zone_info = await init(AdaValidate, 1, kwargs)
         assert len(zone_info) == 1
-        assert zone_info[0] == 3
+        assert zone_info[0] == [(0, 0), (0, 1), (0, 2)]
 
         assert algo.db is kwargs["db"]
-        await algo.db.wait_for_init_inserts()
 
         for k in kwargs:
             if k in algo.cfg:
@@ -65,7 +69,6 @@ def test_init_join(ch_db):
 
     async def _test():
         algo1, zone_info1 = await init(AdaValidate, 1, kwargs)
-        await algo1.db.wait_for_init_inserts()
 
         kwargs2 = copy.copy(kwargs)
         kwargs2["g"] = None
@@ -90,7 +93,6 @@ def test_process():
 
     async def _test():
         algo, zone_info = await init(AdaValidate, 1, kwargs)
-        await algo.db.wait_for_init_inserts()
         await asyncio.gather(*await process_packet(algo, 0, 0, 0))
         results_df = algo.db.get_results()
         assert results_df.shape[0] == 2
@@ -118,9 +120,7 @@ def test_new_step():
 
     async def _test():
         algo, _ = await init(AdaValidate, 1, kwargs)
-        await algo.db.wait_for_init_inserts()
-        for i in range(3):
-            await process_packet(algo, 0, 0, i)
+        await process_packet_set(algo, 0, [(0, i) for i in range(3)])
 
         status, n_packets, report_task = await new_step(algo, 0, 1)
         assert status == WorkerStatus.NEW_STEP
@@ -147,6 +147,54 @@ def test_new_step():
         report = algo.db.get_reports().iloc[-1]
         assert report["status"] == "NEW_STEP"
         assert report["n_refine"] == 3
+
+    asyncio.run(_test())
+
+
+def test_reload_zone_info():
+    kwargs = get_test_defaults(ada_validate)
+
+    async def _test():
+        algo, _ = await init(AdaValidate, 1, kwargs)
+        await process_packet_set(algo, 0, [(0, i) for i in range(3)])
+        _, n_packets, _ = await new_step(algo, 0, 1)
+
+        kwargs2 = kwargs.copy()
+        kwargs2["db"] = algo.db
+        kwargs2["g"] = None
+        algo, zone_info = await init(AdaValidate, 1, kwargs2)
+        assert zone_info[0] == dict(step_id=1, n_packet=n_packets)
+
+    asyncio.run(_test())
+
+
+def test_coordinate(ch_db):
+    kwargs = get_test_defaults(ada_validate)
+    kwargs["db"] = ch_db
+
+    async def _test():
+        algo, _ = await init(AdaValidate, 1, kwargs)
+        await process_packet_set(algo, 0, [(0, i) for i in range(3)])
+        pre_df = ch_db.get_results()
+        assert pre_df["zone_id"].unique() == [0]
+        assert (pre_df["coordination_id"] == 0).all()
+
+        status, lazy_tasks = await coordinate(algo, 0, 2)
+        assert status == WorkerStatus.COORDINATED
+        post_df = ch_db.get_results()
+        assert (np.sort(post_df["zone_id"].unique()) == [0, 1]).all()
+        assert (post_df["coordination_id"] == 1).all()
+        assert post_df.shape[0] == pre_df.shape[0]
+
+        await asyncio.gather(*lazy_tasks)
+        zone_map_df = ch._query_df(ch_db.client, "select * from zone_mapping")
+        assert (zone_map_df["old_zone_id"] == 0).all()
+        assert (zone_map_df["id"].isin(pre_df["id"])).all()
+        assert (zone_map_df["id"].isin(post_df["id"])).all()
+        assert (
+            zone_map_df.set_index("id").loc[post_df["id"], "new_zone_id"].values
+            == post_df["zone_id"]
+        ).all()
 
     asyncio.run(_test())
 
