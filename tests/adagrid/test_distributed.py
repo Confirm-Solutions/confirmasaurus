@@ -43,9 +43,10 @@ def test_init_first(both_dbs):
     kwargs["db"] = both_dbs
 
     async def _test():
-        algo, zone_info = await init(AdaValidate, 1, kwargs)
+        algo, incomplete_packets, zone_info = await init(AdaValidate, 1, kwargs)
+        assert incomplete_packets == [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
         assert len(zone_info) == 1
-        assert zone_info[0] == [(0, 0), (0, 1), (0, 2)]
+        assert zone_info[0] == 0
 
         assert algo.db is kwargs["db"]
 
@@ -68,14 +69,17 @@ def test_init_join(ch_db):
     kwargs["db"] = ch_db
 
     async def _test():
-        algo1, zone_info1 = await init(AdaValidate, 1, kwargs)
+        algo1, _, _ = await init(AdaValidate, 1, kwargs)
 
         kwargs2 = copy.copy(kwargs)
         kwargs2["g"] = None
         kwargs2["lam"] = -4
         kwargs2["overrides"] = dict(packet_size=3)
-        algo, zone_info2 = await init(AdaValidate, 1, kwargs2)
-        assert zone_info2 is None
+        algo, incomplete2, zone_info2 = await init(AdaValidate, 1, kwargs2)
+        assert incomplete2 == [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
+        assert len(zone_info2) == 1
+        assert zone_info2[0] == 0
+
         assert algo.db is kwargs["db"]
         assert algo.cfg["packet_size"] == 3
         for k in algo1.cfg:
@@ -92,7 +96,7 @@ def test_process():
     kwargs = get_test_defaults(ada_validate)
 
     async def _test():
-        algo, zone_info = await init(AdaValidate, 1, kwargs)
+        algo, incomplete, zone_info = await init(AdaValidate, 1, kwargs)
         await asyncio.gather(*await process_packet(algo, 0, 0, 0))
         results_df = algo.db.get_results()
         assert results_df.shape[0] == 2
@@ -119,8 +123,8 @@ def test_new_step():
     kwargs = get_test_defaults(ada_validate)
 
     async def _test():
-        algo, _ = await init(AdaValidate, 1, kwargs)
-        await process_packet_set(algo, 0, [(0, i) for i in range(3)])
+        algo, _, _ = await init(AdaValidate, 1, kwargs)
+        await process_packet_set(algo, [(0, 0, i) for i in range(3)])
 
         status, n_packets, report_task = await new_step(algo, 0, 1)
         assert status == WorkerStatus.NEW_STEP
@@ -155,15 +159,16 @@ def test_reload_zone_info():
     kwargs = get_test_defaults(ada_validate)
 
     async def _test():
-        algo, _ = await init(AdaValidate, 1, kwargs)
-        await process_packet_set(algo, 0, [(0, i) for i in range(3)])
+        algo, incomplete, _ = await init(AdaValidate, 1, kwargs)
+        await process_packet_set(algo, incomplete)
         _, n_packets, _ = await new_step(algo, 0, 1)
 
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
         kwargs2["g"] = None
-        algo, zone_info = await init(AdaValidate, 1, kwargs2)
-        assert zone_info[0] == dict(step_id=1, n_packet=n_packets)
+        algo, incomplete, zone_info = await init(AdaValidate, 1, kwargs2)
+        assert incomplete == [(0, 1, 0), (0, 1, 1), (0, 1, 2)]
+        assert zone_info[0] == 1
 
     asyncio.run(_test())
 
@@ -173,8 +178,8 @@ def test_coordinate(ch_db):
     kwargs["db"] = ch_db
 
     async def _test():
-        algo, _ = await init(AdaValidate, 1, kwargs)
-        await process_packet_set(algo, 0, [(0, i) for i in range(3)])
+        algo, incomplete, _ = await init(AdaValidate, 1, kwargs)
+        await process_packet_set(algo, incomplete)
         pre_df = ch_db.get_results()
         assert pre_df["zone_id"].unique() == [0]
         assert (pre_df["coordination_id"] == 0).all()
@@ -188,29 +193,13 @@ def test_coordinate(ch_db):
 
         await asyncio.gather(*lazy_tasks)
         zone_map_df = ch._query_df(ch_db.client, "select * from zone_mapping")
+        assert (zone_map_df["coordination_id"] == 1).all()
         assert (zone_map_df["old_zone_id"] == 0).all()
         assert (zone_map_df["id"].isin(pre_df["id"])).all()
         assert (zone_map_df["id"].isin(post_df["id"])).all()
         assert (
-            zone_map_df.set_index("id").loc[post_df["id"], "new_zone_id"].values
+            zone_map_df.set_index("id").loc[post_df["id"], "zone_id"].values
             == post_df["zone_id"]
         ).all()
 
     asyncio.run(_test())
-
-
-# def test_new_step():
-#     kwargs = get_test_defaults(ada_validate)
-#     ada = adagrid.Adagrid()
-
-#     async def _test():
-#         await ada.init(AdaValidate, wait_for_db=True, **kwargs)
-#         await ada.process_step(0, 0)
-#         await ada.new_step(0, 1)
-#         reports = ada.db.get_reports()
-#         assert reports.shape[0] == 5
-#         new_step_rpt = reports.iloc[-1]
-#         assert new_step_rpt["n_refine"] == 3
-#         assert new_step_rpt["status"] == "NEW_STEP"
-
-#     asyncio.run(_test())

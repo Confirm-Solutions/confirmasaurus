@@ -1,8 +1,6 @@
 import asyncio
 import logging
 
-import pandas as pd
-
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import _launch_task
 from confirm.adagrid.init import assign_tiles
@@ -55,10 +53,11 @@ async def _coordinate(algo, step_id, n_zones, report):
         """,
         settings=alter_settings,
     )
+    lazy_tasks = [update_active_eligible_task]
 
     converged, _ = algo.convergence_criterion(None, report)
     if converged:
-        return WorkerStatus.CONVERGED
+        return WorkerStatus.CONVERGED, lazy_tasks
 
     df = ch._query_df(
         algo.db.client,
@@ -72,7 +71,7 @@ async def _coordinate(algo, step_id, n_zones, report):
     )
     report["n_tiles"] = df.shape[0]
     if df.shape[0] == 0:
-        return WorkerStatus.EMPTY_STEP, [update_active_eligible_task]
+        return WorkerStatus.EMPTY_STEP, lazy_tasks
 
     df["eligible"] = True
     df["active"] = True
@@ -108,19 +107,20 @@ async def _coordinate(algo, step_id, n_zones, report):
                 CREATE TABLE zone_mapping
                 (
                     id {id_type},
+                    coordination_id UInt32,
                     old_zone_id Int32,
-                    new_zone_id Int32
+                    zone_id Int32
                 )
                 ENGINE = MergeTree()
-                ORDER BY (old_zone_id, new_zone_id)
+                ORDER BY (coordination_id, zone_id)
                 """
             )
-        mapping_df = pd.DataFrame(
-            {"id": df["id"], "old_zone_id": old_zone_id, "new_zone_id": df["zone_id"]}
-        )
+        mapping_df = df[["id", "coordination_id", "zone_id"]]
+        mapping_df["old_zone_id"] = old_zone_id
         ch._insert_df(algo.db.client, "zone_mapping", mapping_df)
 
     insert_mapping_task = await _launch_task(algo.db, insert_mapping, old_zone_id, df)
     await asyncio.gather(insert_task, delete_task)
 
-    return WorkerStatus.COORDINATED, [insert_mapping_task, update_active_eligible_task]
+    lazy_tasks.append(insert_mapping_task)
+    return WorkerStatus.COORDINATED, lazy_tasks

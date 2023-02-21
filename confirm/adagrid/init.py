@@ -50,10 +50,13 @@ async def init(algo_type, n_zones, kwargs):
     ]
 
     if g is not None:
-        wait_for_grid, zone_info = await init_grid(g, db, cfg, n_zones)
+        wait_for_grid, incomplete_packets, zone_steps = await init_grid(
+            g, db, cfg, n_zones
+        )
         wait_for.extend(wait_for_grid)
     else:
-        zone_info = {zone_id: db.get_zone_info(zone_id) for zone_id in zone_info}
+        incomplete_packets = db.get_incomplete_packets()
+        zone_steps = db.get_zone_steps()
 
     model_kwargs = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](
@@ -65,7 +68,7 @@ async def init(algo_type, n_zones, kwargs):
 
     await asyncio.gather(*wait_for)
 
-    return algo, zone_info
+    return algo, incomplete_packets, zone_steps
 
 
 def first(kwargs):
@@ -188,10 +191,13 @@ async def init_grid(g, db, cfg, n_zones):
         cfg["packet_size"],
     )
 
-    zone_info = dict()
+    incomplete_packets = []
     for zone_id, zone in df.groupby("zone_id"):
-        zone_info[zone_id] = [(0, p) for p in range(zone["packet_id"].max() + 1)]
-    return wait_for, zone_info
+        incomplete_packets.extend(
+            [(zone_id, 0, p) for p in range(zone["packet_id"].max() + 1)]
+        )
+    zone_steps = {i: 0 for i, zone in df.groupby("zone_id")}
+    return wait_for, incomplete_packets, zone_steps
 
 
 def assign_tiles(n_tiles, n_zones):

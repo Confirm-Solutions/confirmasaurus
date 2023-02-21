@@ -290,21 +290,41 @@ class Clickhouse:
             settings=insert_settings,
         )
 
-    def get_zone_info(self, zone_id):
+    def get_incomplete_packets(self):
+        if self.results_table_exists():
+            restrict = "where id not in (select id from results)"
+        else:
+            restrict = ""
+        return self.client.query(
+            f"""
+            select zone_id, step_id, packet_id
+                from tiles {restrict}
+                group by zone_id, step_id, packet_id
+                order by zone_id, step_id, packet_id
+            """
+        ).result_set
+
+    def get_zone_steps(self):
+        if does_table_exist(self.client, self.job_id, "zone_mapping"):
+            cte = """
+            with (select max(coordination_id) from zone_mapping) 
+                as max_coordination_id
+            """
+            restrict = "where coordination_id = max_coordination_id"
+        else:
+            cte, restrict = "", ""
+
         raw = self.client.query(
             f"""
-            WITH (
-                select max(step_id) 
+            {cte}
+            select zone_id, max(step_id)
                 from tiles
-                where zone_id = {zone_id}
-            ) as max_step_id
-            select max_step_id, max(packet_id) + 1
-                from tiles
-                where zone_id = {zone_id}
-                    and step_id = max_step_id
-        """
-        ).result_set[0]
-        return dict(step_id=raw[0], n_packets=raw[1])
+                {restrict}
+                group by zone_id
+                order by zone_id
+            """
+        ).result_set
+        return dict(raw)
 
     def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")

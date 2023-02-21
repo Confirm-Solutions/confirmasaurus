@@ -57,7 +57,7 @@ class PandasTiles:
     def _results_columns(self) -> List[str]:
         return self.results_df.columns
 
-    def get_zone_info(self, zone_id: int):
+    def get_incomplete_packets(self):
         if self.results_df is None:
             not_yet_simulated_df = self.tiles_df
         else:
@@ -72,12 +72,15 @@ class PandasTiles:
         return list(
             map(
                 tuple,
-                not_yet_simulated_df[["step_id", "packet_id"]]
+                not_yet_simulated_df[["zone_id", "step_id", "packet_id"]]
                 .drop_duplicates()
-                .sort_values(by=["step_id", "packet_id"])
+                .sort_values(by=["zone_id", "step_id", "packet_id"])
                 .values,
             )
         )
+
+    def get_zone_steps(self):
+        return self.tiles_df.groupby("zone_id")["step_id"].max().to_dict()
 
     def get_tiles(self) -> pd.DataFrame:
         return self.tiles_df.reset_index(drop=True)
@@ -224,38 +227,31 @@ class DuckDBTiles:
     def insert_report(self, report):
         self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
 
-    def get_zone_info(self, zone_id):
+    def get_incomplete_packets(self):
         if self._results_table_exists():
-            restrict = "and id not in (select id from results)"
+            restrict = "where id not in (select id from results)"
         else:
             restrict = ""
         return self.con.query(
             f"""
-            select step_id, packet_id
-                from tiles 
-                where 
-                    zone_id = {zone_id}
-                    {restrict}
-                group by step_id, packet_id
+            select zone_id, step_id, packet_id
+                from tiles {restrict}
+                group by zone_id, step_id, packet_id
+                order by zone_id, step_id, packet_id
             """
         ).fetchall()
-        # raw = self.con.query(
-        #     f"""
-        #     WITH max_step_id AS (
-        #         select max(step_id) as max
-        #         from tiles
-        #         where zone_id = {zone_id}
-        #     )
-        #     select (select max from max_step_id), max(packet_id) + 1
-        #         from tiles
-        #         where zone_id = {zone_id}
-        #             and step_id = (select max from max_step_id)
-        # """
-        # ).fetchone()
-        # return dict(
-        #     step_id = raw[0],
-        #     n_packets = raw[1]
-        # )
+
+    def get_zone_steps(self):
+        return dict(
+            self.con.query(
+                """
+            select zone_id, max(step_id)
+                from tiles
+                group by zone_id
+                order by zone_id
+            """
+            ).fetchall()
+        )
 
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())

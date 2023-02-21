@@ -78,25 +78,31 @@ class DBTester:
 
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-    def test_get_zone_info(self):
+    def test_get_incomplete_packets(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
-        zone_info = [(17, i) for i in range(5)]
-        assert pd_tiles.get_zone_info(0) == zone_info
-        assert db_tiles.get_zone_info(0) == zone_info
+        incomplete = [(0, 17, i) for i in range(5)]
+        assert pd_tiles.get_incomplete_packets() == incomplete
+        assert db_tiles.get_incomplete_packets() == incomplete
 
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
-        assert pd_tiles.get_zone_info(0) == []
-        assert db_tiles.get_zone_info(0) == []
+        assert pd_tiles.get_incomplete_packets() == []
+        assert db_tiles.get_incomplete_packets() == []
 
         g.df["id"] = ip.grid._gen_short_uuids(g.df.shape[0], g.worker_id)
         g.df["step_id"] = 20
         g.df["packet_id"] = 0
+        g.df["zone_id"] = 1
         pd_tiles.insert_tiles(g.df)
         db_tiles.insert_tiles(g.df)
 
-        assert pd_tiles.get_zone_info(0) == [(20, 0)]
-        assert db_tiles.get_zone_info(0) == [(20, 0)]
+        assert pd_tiles.get_incomplete_packets() == [(1, 20, 0)]
+        assert db_tiles.get_incomplete_packets() == [(1, 20, 0)]
+
+    def test_get_zone_info(self):
+        g, pd_tiles, db_tiles = self.prepped_dbs()
+        assert pd_tiles.get_zone_steps() == {0: 17}
+        assert db_tiles.get_zone_steps() == {0: 17}
 
     def test_write_results(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()

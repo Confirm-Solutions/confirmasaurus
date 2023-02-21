@@ -12,11 +12,13 @@ from confirm.adagrid.init import _launch_task
 logger = logging.getLogger(__name__)
 
 
-async def process_packet_set(algo, zone_id, packets):
+async def process_packet_set(algo, packets):
     coros = [
         process_packet(algo, zone_id, step_id, packet_id)
-        for step_id, packet_id in packets
+        for zone_id, step_id, packet_id in packets
     ]
+    if len(coros) == 0:
+        return []
     tasks = await asyncio.gather(*coros)
     insert_tasks, report_tasks = zip(*tasks)
     await asyncio.gather(*insert_tasks)
@@ -91,12 +93,12 @@ async def _new_step(algo, zone_id, new_step_id):
     report["runtime_convergence_criterion"] = time.time() - start
     if converged:
         logger.debug("Convergence!!")
-        return WorkerStatus.CONVERGED, report, dict()
+        return WorkerStatus.CONVERGED, report, 0
     elif new_step_id >= algo.cfg["n_steps"]:
         logger.debug("Reached maximum number of steps. Terminating.")
         # NOTE: no need to coordinate with other workers. They will reach
         # n_steps on their own time.
-        return WorkerStatus.REACHED_N_STEPS, report, dict()
+        return WorkerStatus.REACHED_N_STEPS, report, 0
 
     # If we haven't converged, we create a new step.
     start = time.time()
@@ -108,7 +110,7 @@ async def _new_step(algo, zone_id, new_step_id):
         # New step is empty so we have terminated but
         # failed to converge.
         logger.debug("New step is empty despite failure to converge.")
-        return WorkerStatus.EMPTY_STEP, report, dict()
+        return WorkerStatus.EMPTY_STEP, report, 0
 
     selection_df["finisher_id"] = algo.cfg["worker_id"]
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
@@ -143,7 +145,7 @@ async def _new_step(algo, zone_id, new_step_id):
             "No tiles are refined or deepened in this step."
             " Marking these parent tiles as finished and trying again."
         )
-        return WorkerStatus.NO_NEW_TILES, report, dict(n_packets=0, n_tiles=0)
+        return WorkerStatus.NO_NEW_TILES, report, 0
 
     # Actually deepen and refine!
     g_new = refine_and_deepen(
@@ -205,6 +207,7 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     # sometimes when a tile clearly needs *way* more sims. how to
     # determine this?
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
+    g_deepen.df["coordination_id"] = df["coordination_id"].values[0]
 
     g_refine_in = imprint.grid.Grid(df.loc[df["refine"]], worker_id)
     inherit_cols = ["K", "coordination_id"]
