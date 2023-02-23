@@ -26,6 +26,9 @@ import random
 import jax
 import jax.numpy as jnp
 from scipy.special import expit, logit
+from jax.config import config
+
+config.update("jax_enable_x64", True)
 ```
 
 First, we will replicate example 4.1
@@ -87,39 +90,17 @@ n_TNBC_first_stage_per_arm, n_HRplus_first_stage_per_arm = split(n_requested_fir
 n_TNBC_first_stage_total = n_TNBC_first_stage_per_arm * 2
 n_HRplus_first_stage_total = n_HRplus_first_stage_per_arm * 2
 n_first_stage = n_TNBC_first_stage_total + n_HRplus_first_stage_total
-n_TNBC_first_stage_per_arm, n_HRplus_first_stage_per_arm, n_first_stage
+print(n_TNBC_first_stage_per_arm, n_HRplus_first_stage_per_arm, n_first_stage)
 
-```
-
-```python
 n_TNBC_second_stage_per_arm, n_HRplus_second_stage_per_arm = split(n_requested_second_stage)
 n_TNBC_second_stage_total = n_TNBC_second_stage_per_arm * 2
 n_HRplus_second_stage_total = n_HRplus_second_stage_per_arm * 2
 n_second_stage = n_TNBC_second_stage_total + n_HRplus_second_stage_total
-n_TNBC_second_stage_per_arm, n_HRplus_second_stage_per_arm, n_second_stage
+print(n_TNBC_second_stage_per_arm, n_HRplus_second_stage_per_arm, n_second_stage)
 ```
 
 ```python
-# Numpy randoms are reproducible in subsets.
-np.random.seed(0)
-A = np.random.uniform(size=10)
-np.random.seed(0)
-B = np.concatenate((np.random.uniform(size=5), np.random.uniform(size=5)))
-A - B
-```
-
-```python
-# We'll repeat this for the second half, which is the same size as the first half
-# TODO: 54% TNBC, 46% HR+ (look at the paper) and then equal splits between
-# treatment and control within those subgroups.
-
-# npatientstotal = 600
-# npatientsperarm_firststage = 75  # for the first interim analysis
-
-# npatientstotal = 300
-# npatientsperarm_firststage = 37  # for the first interim analysis
-#
-def sim(pcontrol_TNBC=0.34, ptreat_TNBC=0.38, pcontrol_HRplus=0.23, ptreat_HRplus=0.27):
+def sim(i, pcontrol_TNBC=0.34, ptreat_TNBC=0.38, pcontrol_HRplus=0.23, ptreat_HRplus=0.27):
     # We now have to make a list of the relevant
     # intersection hypotheses,
     # which are indentified by which subgroups are part of them
@@ -182,7 +163,7 @@ def sim(pcontrol_TNBC=0.34, ptreat_TNBC=0.38, pcontrol_HRplus=0.23, ptreat_HRplu
     if not hypofull_live:  # In this case we drop the HRplus arm
         # Here, we ignored n_HRplus_second_stage_per_arm patients because the
         # HRplus arm has been dropped.
-        npatientsperarm_secondstage = n_requested_second_stage // 2
+        npatientsperarm_secondstage = n_second_stage // 2
         unifsTNBCcontrol = np.random.uniform(size=npatientsperarm_secondstage)
         unifsTNBCtreat = np.random.uniform(size=npatientsperarm_secondstage)
         outcomesTNBCcontrol = unifsTNBCcontrol < pcontrol_TNBC
@@ -250,10 +231,8 @@ def sim(pcontrol_TNBC=0.34, ptreat_TNBC=0.38, pcontrol_HRplus=0.23, ptreat_HRplu
     HI_zsecond = (
         hypofull_live
         * hypoTNBC_live
-        * (
-            scipy.stats.norm.ppf(
-                1 - 2 * (1 - scipy.stats.norm.cdf(max(zTNBC_stage2, zfull_stage2)))
-            )
+        * scipy.stats.norm.ppf(
+            1 - 2 * (1 - scipy.stats.norm.cdf(max(zTNBC_stage2, zfull_stage2)))
         )
     )
     HI_zsecond += (not hypofull_live) * hypoTNBC_live * zTNBC_stage2
@@ -291,20 +270,16 @@ def sim(pcontrol_TNBC=0.34, ptreat_TNBC=0.38, pcontrol_HRplus=0.23, ptreat_HRplu
         HI_zcombined=HI_zcombined,
     )
 
-np.random.seed(1)
-results = pd.DataFrame([sim(ptreat_TNBC=0.44, ptreat_HRplus=0.33) for i in range(50000)])
+np.random.seed(0)
+# results = pd.DataFrame([sim(ptreat_TNBC=0.44, ptreat_HRplus=0.33) for i in range(500)])
+
+results = pd.DataFrame([sim(i, ptreat_TNBC=0.44, ptreat_HRplus=0.33) for i in range(500)])
 ```
 
 ```python
-results.mean()
-```
-
-```python
-results.std()
-```
-
-```python
-results['zfull_stage2'].replace([-np.inf], np.nan).dropna().std()
+print(results.mean())
+print('\nstd dev')
+print(results.std())
 ```
 
 ```python
@@ -322,266 +297,204 @@ plt.hist(results["zfull_stage2"].replace(-np.inf, np.nan).dropna(), bins=20)
 plt.show()
 ```
 
-## Old Mike scratch
+## Make it clean and fast, phase 1
 
 ```python
-# STOP HERE! THe below is just random scratch code, which might be useful later
-```
-
-```python
-grid = ip.cartesian_grid(
-    [-1, 1],
-    [-1, 1],
-    n=[20, 20],
-    prune=True,
-    null_hypos=[
-        ip.hypo("theta0 < " + str(logit(0.3))),
-        ip.hypo("theta1 <" + str(logit(0.3))),
-    ],
-)
-# x=BinomialClosed(0, 2, n = [100,100])
-# outs = x.sim_batch(0, 2, theta = grid.get_theta(), null_truth=grid.df[["null_truth0", "null_truth1", "null_truth2"]])
-```
-
-```python
-class BinomialClosed:
-    def __init__(self, seed, max_K, *, n):
-        self.family = "binomial"
-        self.family_params = {"n": n[0]}
-        self.n = n
-        key = jax.random.PRNGKey(seed)
-        splitkeys = jax.random.split(key, num=2)
-        self.samples_arm1 = jax.random.uniform(
-            splitkeys[1], shape=(max_K, n[1]), dtype=np.float32
-        )
-
-        self.samples_arm0 = jax.random.uniform(
-            splitkeys[0], shape=(max_K, n[0]), dtype=np.float32
-        )
-
-    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
-        p = expit(theta)
-        # successes is a 2-dimensional array of shape: (n_tiles, n_sims = K)
-        successes1 = np.sum(
-            self.samples_arm1[None, begin_sim:end_sim, :] < p[:, None, None, 1], axis=2
-        )
-        successes0 = np.sum(
-            self.samples_arm0[None, begin_sim:end_sim, :] < p[:, None, None, 0], axis=2
-        )
-        phat1 = successes1 / self.n[1]
-        phat0 = successes0 / self.n[0]
-        # pooledphat = (phat1*self.n[1] + phat0*self.n[0]) / (self.n[1] + self.n[0])
-        zstat0 = (phat0 - 0.5) / np.sqrt(phat0 * (1 - phat0) / self.n[0])
-        zstat1 = (phat1 - 0.7) / np.sqrt(phat1 * (1 - phat1) / self.n[1])
-        zstatcombo = (0.4 * (phat0 - 0.5) + 0.6 * (phat1 - 0.7)) / np.sqrt(
-            0.4**2 * phat0 * (1 - phat0) / self.n[0]
-            + 0.6**2 * phat1 * (1 - phat1) / self.n[1]
-        )
-        pvalues = 1 - scipy.stats.norm.cdf([zstat0, zstat1, zstatcombo])
-        pvalues = np.nan_to_num(pvalues) + (
-            [phat0, phat1, phat1 * phat0] == np.full_like(pvalues, 0)
-        )
-        # The following needs to be vectorized
-        possible_critical_values = np.sort(
-            np.concatenate(
-                (
-                    pvalues,
-                    2 * pvalues,
-                    3 * pvalues,
-                    np.full_like(pvalues[1, :, :], 100)[None, :, :],
-                )
-            ),
-            axis=0,
-        )
-        # next we need to apply closed testing to the 3 pvalues for EVERY choice in the list of possible critical values
-        rejections_list = closed_test_full(pvalues, possible_critical_values)
-        nullstatus = np.asarray(np.transpose(null_truth))
-        falserejs = np.logical_and(rejections_list, nullstatus[None, :, :, None])
-        fwer = np.any(falserejs, axis=1)
-        # some akwardness to cause the following minimum to give us the right answer
-        temp = 1000 * (1 - fwer) + fwer * possible_critical_values
-        out = np.min(temp, axis=0)
-        # out.shape : n_tiles, n_sims
-        return out
-```
-
-```python
-# Make sure to grid -lambda space!
-grid = ip.cartesian_grid(
-    [-2.0, -1.0],
-    [-2.0, -1.0],
-    n=[20, 20],
-    prune=True,
-    null_hypos=[ip.hypo("theta0 < theta1")],
-)
-```
-
-```python
-# @jax.vmap
-@jax.jit
-def logrank_test(all_rvs, group, censoring_time):
-    n0 = jnp.array([jnp.sum(~group), jnp.sum(group)])
-    ordering = jnp.argsort(all_rvs)
-    ordered = all_rvs[ordering]
-    ordered_group = group[ordering]
-    include = ordered <= censoring_time
-    event_now = jnp.stack((~ordered_group, ordered_group), axis=0) * include
-    events_so_far = jnp.concatenate(
-        (jnp.zeros((2, 1)), event_now.cumsum(axis=1)[:, :-1]), axis=1
+def zTNBC(phatTNBCcontrol, phatTNBCtreat, n_per_arm):
+    TNBC_pooledaverage = (phatTNBCtreat + phatTNBCcontrol) / 2
+    denominatorTNBC = jnp.sqrt(
+        TNBC_pooledaverage * (1 - TNBC_pooledaverage) * (2 / n_per_arm)
     )
-    Nij = n0[:, None] - events_so_far
-    Oij = event_now
-    Nj = Nij.sum(axis=0)
-    Oj = Oij.sum(axis=0)
-    Eij = Nij * (Oj / Nj)
-    Vij = Eij * ((Nj - Oj) / Nj) * ((Nj - Nij) / (Nj - 1))
-    denom = jnp.sum(jnp.where(~jnp.isnan(Vij[0]), Vij[0], 0), axis=0)
-    return jnp.sum(Oij[0] - Eij[0], axis=0) / jnp.sqrt(denom)
+    return (phatTNBCtreat - phatTNBCcontrol) / denominatorTNBC
+
+
+def zfull(phatTNBCcontrol, phatTNBCtreat, phatHRpluscontrol, phatHRplustreat):
+    totally_pooledaverage = (
+        phatTNBCtreat + phatTNBCcontrol
+    ) * n_TNBC_first_stage_per_arm / n_first_stage + (
+        phatHRplustreat + phatHRpluscontrol
+    ) * n_HRplus_first_stage_per_arm / n_first_stage
+    denominatortotallypooled = jnp.sqrt(
+        totally_pooledaverage
+        * (1 - totally_pooledaverage)
+        * (2 / (n_TNBC_first_stage_per_arm + n_HRplus_first_stage_per_arm))
+    )
+    tnbc_effect = phatTNBCtreat - phatTNBCcontrol
+    hrplus_effect = phatHRplustreat - phatHRpluscontrol
+    return (
+        (tnbc_effect * n_TNBC_first_stage_total / n_first_stage)
+        + (hrplus_effect * n_HRplus_first_stage_total / n_first_stage)
+    ) / denominatortotallypooled
+
+
+def sample(unifs, next_idx, n, p):
+    return next_idx + n, jnp.mean(unifs[next_idx : next_idx + n] < p, dtype=unifs.dtype)
+
+@jax.jit
+def stage1(unifs, pcontrol_TNBC, ptreat_TNBC, pcontrol_HRplus, ptreat_HRplus):
+    next_idx, phatTNBCcontrol = sample(unifs, 0, n_TNBC_first_stage_per_arm, pcontrol_TNBC)
+    next_idx, phatTNBCtreat = sample(unifs, next_idx, n_TNBC_first_stage_per_arm, ptreat_TNBC)
+    next_idx, phatHRpluscontrol = sample(unifs,
+        next_idx, n_HRplus_first_stage_per_arm, pcontrol_HRplus
+    )
+    next_idx, phatHRplustreat = sample(unifs,
+        next_idx, n_HRplus_first_stage_per_arm, ptreat_HRplus
+    )
+
+    # Arm-dropping logic: drop all elementary hypotheses with larger than 0.1 difference in effect size
+    tnbc_effect = phatTNBCtreat - phatTNBCcontrol
+    hrplus_effect = phatHRplustreat - phatHRpluscontrol
+    effectsize_difference = tnbc_effect - hrplus_effect
+    # TODO: investigate this dropping logic. Section 3.4, ctrl-f "epsilon"
+    # TODO: this is wrong and should be compared to the weighted average
+    # treatment effects instead of the HRplus treatment effect??
+    hypofull_live = effectsize_difference <= 0.1
+    hypoTNBC_live = effectsize_difference >= -0.1
+
+    return (
+        next_idx,
+        zTNBC(phatTNBCcontrol, phatTNBCtreat, n_TNBC_first_stage_per_arm),
+        zfull(phatTNBCcontrol, phatTNBCtreat, phatHRpluscontrol, phatHRplustreat),
+        phatTNBCcontrol,
+        phatTNBCtreat,
+        phatHRpluscontrol,
+        phatHRplustreat,
+        effectsize_difference,
+        hypofull_live,
+        hypoTNBC_live,
+    )
 ```
 
 ```python
 
-```
+def sim(
+    unifs,
+    pcontrol_TNBC=0.34,
+    ptreat_TNBC=0.38,
+    pcontrol_HRplus=0.23,
+    ptreat_HRplus=0.27,
+):
+    # We now have to make a list of the relevant
+    # intersection hypotheses,
+    # which are indentified by which subgroups are part of them
+    # In this example, there are 2 elementary hypotheses
+    # hypoTNBC_live = True
+    # hypofull_live = True
+    # There is also the intersection hypothesis:
+    # hypo_both_live
 
-```python
-# writing pseudocode for Wassmer and Dragalin (2015)
-# Let's do example 4.3 but applied to the subgroups of 4.1
-# Calculate worst-possible lengths: max sample size is 300; 54% HRplus / 46% split
-# Control rates are assumed to be: 0.34 HRplus, 0.23 otherwise.
-# We can enforce this for now, will grid it out later
+    next_idx, zTNBC_stage1, zfull_stage1, phatTNBCcontrol, phatTNBCtreat, phatHRpluscontrol, phatHRplustreat, effectsize_difference, hypofull_live, hypoTNBC_live = stage1(
+        unifs, pcontrol_TNBC, ptreat_TNBC, pcontrol_HRplus, ptreat_HRplus
+    )
 
-# (1) Generate max-samples in 4 columns: [HRplus T, HRplus C, HR+ T, HT+ C]
-# (2) Check effect size after first 150 patients; if difference > 0.1, drop the loser
-# (3) Do a z-combination test of the log-rank stats from the two time-points
-# (4) do closed testing if both groups are live. alpha = 0.025
-# (5) the intersection test
-
-# start the above with validation on treatment effects grid
-# then do it validating over
-```
-
-```python
-totalpatients = 600
-# Groups list:
-# 1: !HRplus ^ PH-; 2: HRplus ^ PH+; 3: !HRplus ^ PH+; 4: HRplus ^ PH-
-# The 4 groups to analyze are:
-# F = All groups, 1+2+3+4
-# S1: HRplus = 2 + 4
-# S2: PHS = 2 + 3
-# S3: HRplus + PHS = 2
-popfractions = [0.24, 0.3, 0.36, 0.10]
-samplesizes = totalpatients * np.array(popfractions)
-# These will have to be halved for treatment and control later!
-np.repeat(samplesizes, 2) / 2  # input sample sizes!
-# subgroup 0: all groups
-```
-
-#Steps of the design:
-
-\begin{itemize}
-\item Determine the nullspace:
-In this case, we're going to analyze
-closed testing's Type I Error separately for each intersection hypothesis. For conservatism, we'll assume the alternative guy trips the test, and is retained in the design to increase variability, but also does not eliminate any of the other arms (?)
-...oh no I think this doesn't work! Backing up!!!
-\item
-Simulate exponentials
-Determine the interim analysis time: first 150 events
-Perform the log-rank test on that subset of events
-Use the epsilon-selection to select arms:
-0.667 > (control events / treat events)\_best - (control events / treat events)
-Eliminate hypotheses completely for dropped arms
-Determine the final analysis time: first 151-300 events
-Determine the final analysis time: 300 events
-
-Normal combination test (sqrt(2)) factor
-\end{itemize}
-
-
-```python
-
-```
-
-```python
-
-```
-
-```python
-maxN = [
-    int(HRplus_selected_final_samps[0]),
-    HRplus_selected_final_samps[1],
-    HER_selected_final_samps[2],
-    HER_selected_final_samps[3],
-]
-```
-
-```python
-import scipy.stats
-
-rvs = scipy.stats.expon.rvs(size=(maxN[0], 6))
-hazard_ratio = 1
-control_HRplus = rvs[:, 0]
-control_HER = rvs[:, 1]
-control_group3 = rvs[:, 2]
-treat_HRplus = rvs[:, 1] / hazard_ratio
-treat_HER = rvs[:, 3] / hazard_ratio
-```
-
-```python
-def logrank_2group(control, treatment):
-    outcomes = np.concatenate([control, treatment])
-    group = np.concatenate(
-        [np.zeros(control.shape[0]), np.ones(treatment.shape[0])]
-    ).astype(bool)
-    ours = logrank_test(outcomes, group, censoring_time=10000)
-    return ours
-```
-
-```python
-output = logrank_2group(control_HRplus, treat_HRplus)
-```
-
-```python
-output
-```
-
-```python
-class LogRankVlad:
-    def __init__(self, seed, max_K, *, n, censoring_time):
-        self.max_K = max_K
-        self.censoring_time = censoring_time
-        self.n = n
-        self.family = "exponential"
-        self.family_params = {"n": n}
-
-        self.key = jax.random.PRNGKey(seed)
-        self.samples_1 = jax.random.exponential(self.key, shape=(max_K, n, 4))
-        self.group = jnp.concatenate(
-            [jnp.zeros((max_K, n)), jnp.ones((max_K, n))], axis=1
-        ).astype(bool)
-        self.vmap_logrank_test = jax.vmap(
-            jax.vmap(logrank_test, in_axes=(0, 0, None)), in_axes=(0, None, None)
+    # now compute second-stage z-statistics
+    if not hypofull_live:  # In this case we drop the HRplus arm
+        # Here, we ignored n_HRplus_second_stage_per_arm patients because the
+        # HRplus arm has been dropped.
+        npatientsperarm_secondstage = n_second_stage // 2
+        next_idx, phatTNBCcontrol = sample(unifs,
+            next_idx, npatientsperarm_secondstage, pcontrol_TNBC
+        )
+        next_idx, phatTNBCtreat = sample(unifs,
+            next_idx, npatientsperarm_secondstage, ptreat_TNBC
+        )
+        zTNBC_stage2 = zTNBC(
+            phatTNBCcontrol, phatTNBCtreat, npatientsperarm_secondstage
+        )
+        zfull_stage2 = -np.inf
+    else:
+        next_idx, phatTNBCcontrol = sample(unifs,
+            next_idx, n_TNBC_second_stage_per_arm, pcontrol_TNBC
+        )
+        next_idx, phatTNBCtreat = sample(unifs,
+            next_idx, n_TNBC_second_stage_per_arm, ptreat_TNBC
+        )
+        next_idx, phatHRpluscontrol = sample(unifs,
+            next_idx, n_HRplus_second_stage_per_arm, pcontrol_HRplus
+        )
+        next_idx, phatHRplustreat = sample(unifs,
+            next_idx, n_HRplus_second_stage_per_arm, ptreat_HRplus
+        )
+        zTNBC_stage2 = zTNBC(
+            phatTNBCcontrol, phatTNBCtreat, n_TNBC_second_stage_per_arm
+        )
+        zfull_stage2 = zfull(
+            phatTNBCcontrol, phatTNBCtreat, phatHRpluscontrol, phatHRplustreat
         )
 
-    def sim_batch(self, begin_sim, end_sim, theta, null_truth, detailed=False):
-        control_hazard = -theta[:, 0]
-        treatment_hazard = -theta[:, 1]
-        hazard_ratio = treatment_hazard / control_hazard
-        control_rvs = jnp.tile(
-            self.samples[None, :, :, 0], (hazard_ratio.shape[0], 1, 1)
-        )
-        treatment_rvs = self.samples[None, :, :, 1] / hazard_ratio[:, None, None]
-        all_rvs = jnp.concatenate([control_rvs, treatment_rvs], axis=2)
-        test_stat = -self.vmap_logrank_test(all_rvs, self.group, self.censoring_time)
-        return test_stat
-```
+    # now combine test statistics
+    # Now we go through the 3 intersection tests:
+    hypTNBC_zstat = zTNBC_stage1 / np.sqrt(2) + zTNBC_stage2 / np.sqrt(2)
+    hypfull_zstat = zfull_stage1 / np.sqrt(2) + zfull_stage2 / np.sqrt(2)
 
-```python
-g = ip.cartesian_grid(
-    [-1, -1], [-1, -1], n=[1, 1], null_hypos=[ip.hypo("theta0 > theta1")]
+    # Now doing the combination rule for the intersection test
+    # we multiply the p-value by two by analogy to bonferroni
+    HI_pfirst = 2 * (1 - scipy.stats.norm.cdf(max(zTNBC_stage1, zfull_stage1)))
+    HI_zfirst = scipy.stats.norm.ppf(1 - HI_pfirst)
+    HI_zsecond = np.where(
+        hypofull_live and hypoTNBC_live,
+        (
+            scipy.stats.norm.ppf(
+                1 - 2 * (1 - scipy.stats.norm.cdf(max(zTNBC_stage2, zfull_stage2)))
+            )
+        ),
+        np.where(hypoTNBC_live, zTNBC_stage2, zfull_stage2)
+    )
+
+    HI_zcombined = HI_zfirst / np.sqrt(2) + HI_zsecond / np.sqrt(2)
+
+    # Now we resolve which elementary statistics actually reject the null hypothesis
+    rejectintersection = HI_zcombined > 1.96
+    rejectTNBC_elementary = hypTNBC_zstat > 1.96
+    rejectfull_elementary = hypfull_zstat > 1.96
+
+    rejectTNBC_final = (
+        rejectTNBC_elementary & rejectintersection
+    )  # we use this for actual hypothesis rejections!
+    rejectfull_final = (
+        rejectfull_elementary & rejectintersection
+    )  # we use this for actual hypothesis rejections!
+    return dict(
+        hypoTNBC_live=bool(hypoTNBC_live),
+        hypofull_live=bool(hypofull_live),
+        rejectTNBC_final=bool(rejectTNBC_final),
+        rejectfull_final=bool(rejectfull_final),
+        zTNBC_stage1=float(zTNBC_stage1),
+        zTNBC_stage2=float(zTNBC_stage2),
+        zfull_stage1=float(zfull_stage1),
+        zfull_stage2=float(zfull_stage2),
+        HI_pfirst=float(HI_pfirst),
+        HI_zfirst=float(HI_zfirst),
+        HI_zsecond=float(HI_zsecond),
+        HI_zcombined=float(HI_zcombined),
+    )
+
+
+np.random.seed(0)
+N = 500
+unifs = np.random.uniform(size=(N, n_first_stage + n_second_stage)).astype(np.float64)
+new_results = pd.DataFrame(
+    [sim(unifs[i], ptreat_TNBC=0.44, ptreat_HRplus=0.33) for i in range(N)]
 )
+
 ```
 
 ```python
-lr = LogRank(0, 200000, n=100, censoring_time=10000000)
-stats = lr.sim_batch(0, lr.max_K, g.get_theta(), g.get_null_truth())
+results.iloc[310]
+```
+
+```python
+new_results.iloc[310]
+```
+
+```python
+np.where(results['rejectTNBC_final'] != new_results['rejectTNBC_final'])
+```
+
+```python
+pd.testing.assert_frame_equal(results.drop(171), new_results.drop(171))
+```
+
+```python
+
 ```
