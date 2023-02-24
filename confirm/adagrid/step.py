@@ -76,7 +76,7 @@ async def _process(algo, zone_id, step_id, packet_id, report):
 
 
 async def new_step(algo, zone_id, new_step_id):
-    status, report, n_packets = await _new_step(algo, zone_id, new_step_id)
+    status, n_packets, report = await _new_step(algo, zone_id, new_step_id)
     report["status"] = status.name
     report["zone_id"] = zone_id
     report["step_id"] = new_step_id
@@ -98,7 +98,11 @@ async def _new_step(algo, zone_id, new_step_id):
         logger.debug("Reached maximum number of steps. Terminating.")
         # NOTE: no need to coordinate with other workers. They will reach
         # n_steps on their own time.
-        return WorkerStatus.REACHED_N_STEPS, report, 0
+        return WorkerStatus.REACHED_N_STEPS, 0, report
+
+    existing_packets_task = await _launch_task(
+        algo.db, algo.db.n_existing_packets, zone_id, new_step_id
+    )
 
     # If we haven't converged, we create a new step.
     start = time.time()
@@ -110,7 +114,7 @@ async def _new_step(algo, zone_id, new_step_id):
         # New step is empty so we have terminated but
         # failed to converge.
         logger.debug("New step is empty despite failure to converge.")
-        return WorkerStatus.EMPTY_STEP, report, 0
+        return WorkerStatus.EMPTY_STEP, 0, report
 
     selection_df["finisher_id"] = algo.cfg["worker_id"]
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
@@ -145,7 +149,7 @@ async def _new_step(algo, zone_id, new_step_id):
             "No tiles are refined or deepened in this step."
             " Marking these parent tiles as finished and trying again."
         )
-        return WorkerStatus.NO_NEW_TILES, report, 0
+        return WorkerStatus.NO_NEW_TILES, 0, report
 
     # Actually deepen and refine!
     g_new = refine_and_deepen(
@@ -181,6 +185,11 @@ async def _new_step(algo, zone_id, new_step_id):
     g_active.df["packet_id"] = assign_packets(g_active.df)
     n_packets = g_active.df["packet_id"].max() + 1
 
+    n_existing_packets = await existing_packets_task
+    if n_existing_packets is not None and n_existing_packets > 0:
+        logger.debug(f"Step {new_step_id} already exists. Skipping.")
+        return WorkerStatus.ALREADY_EXISTS, n_existing_packets, report
+
     await asyncio.gather(
         await _launch_task(algo.db, algo.db.finish, done_df),
         await _launch_task(algo.db, insert_inactive),
@@ -190,7 +199,7 @@ async def _new_step(algo, zone_id, new_step_id):
         f"For zone {zone_id}, starting step {new_step_id}"
         f" with {g_active.n_tiles} tiles to simulate."
     )
-    return WorkerStatus.NEW_STEP, report, n_packets
+    return WorkerStatus.NEW_STEP, n_packets, report
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):

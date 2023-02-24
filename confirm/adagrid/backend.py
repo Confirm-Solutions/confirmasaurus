@@ -208,7 +208,8 @@ def maybe_start_event_loop(coro):
     try:
         loop = asyncio.get_running_loop()
         existing_loop = True
-    except RuntimeError:
+    except RuntimeError as e:
+        print(e)
         existing_loop = False
 
     # We run here instead of under the except statement so that any

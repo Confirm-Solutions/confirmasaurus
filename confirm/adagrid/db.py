@@ -93,6 +93,7 @@ class PandasTiles:
 
     def insert_report(self, report):
         self.reports.append(report)
+        return report
 
     def get_reports(self):
         return pd.DataFrame(self.reports)
@@ -226,6 +227,7 @@ class DuckDBTiles:
 
     def insert_report(self, report):
         self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
+        return report
 
     def get_incomplete_packets(self):
         if self._results_table_exists():
@@ -252,6 +254,14 @@ class DuckDBTiles:
             """
             ).fetchall()
         )
+
+    def n_existing_packets(self, zone_id, step_id):
+        return self.con.query(
+            f"""
+            select max(packet_id) + 1 from tiles
+                where zone_id = {zone_id} and step_id = {step_id}
+            """
+        ).fetchone()[0]
 
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())

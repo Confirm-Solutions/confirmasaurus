@@ -2,6 +2,7 @@ import asyncio
 import copy
 
 import numpy as np
+import pandas as pd
 
 import confirm.cloud.clickhouse as ch
 import imprint as ip
@@ -127,8 +128,14 @@ def test_new_step():
         await process_packet_set(algo, [(0, 0, i) for i in range(3)])
 
         status, n_packets, report_task = await new_step(algo, 0, 1)
+        # call new_step twice to confirm idempotency
+        status2, n_packets2, report_task2 = await new_step(algo, 0, 1)
         assert status == WorkerStatus.NEW_STEP
+        assert status2 == WorkerStatus.ALREADY_EXISTS
+
         assert n_packets == 3
+        assert n_packets2 == 3
+
         tiles_df = algo.db.get_tiles()
         results_df = algo.db.get_results()
 
@@ -147,8 +154,7 @@ def test_new_step():
         assert (done["active"] == 0).all()
         assert (done["step_id"] == 0).all()
 
-        await report_task
-        report = algo.db.get_reports().iloc[-1]
+        report = await report_task
         assert report["status"] == "NEW_STEP"
         assert report["n_refine"] == 3
 
@@ -201,5 +207,14 @@ def test_coordinate(ch_db):
             zone_map_df.set_index("id").loc[post_df["id"], "zone_id"].values
             == post_df["zone_id"]
         ).all()
+
+        # Coordinate again to check idempotency
+        status, lazy_tasks = await coordinate(algo, 0, 2)
+        idem_df = ch_db.get_results()
+        pd.testing.assert_frame_equal(
+            idem_df.drop("coordination_id", axis=1),
+            post_df.drop("coordination_id", axis=1),
+        )
+        assert (idem_df["coordination_id"] == 2).all()
 
     asyncio.run(_test())

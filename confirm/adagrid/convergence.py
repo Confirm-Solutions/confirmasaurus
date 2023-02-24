@@ -11,6 +11,7 @@ class WorkerStatus(Enum):
     # Normal solo work statuses.
     NEW_STEP = 4
     WORKING = 5
+    ALREADY_EXISTS = 6
     EMPTY_PACKET = 7
     # Coordination
     COORDINATED = 8

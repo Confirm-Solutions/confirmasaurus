@@ -289,6 +289,7 @@ class Clickhouse:
             f"insert into reports values ('{json.dumps(report)}')",
             settings=insert_settings,
         )
+        return report
 
     def get_incomplete_packets(self):
         if self.results_table_exists():
@@ -325,6 +326,14 @@ class Clickhouse:
             """
         ).result_set
         return dict(raw)
+
+    def n_existing_packets(self, zone_id, step_id):
+        return self.client.query(
+            f"""
+            select max(packet_id) + 1 from tiles
+                where zone_id = {zone_id} and step_id = {step_id}
+        """
+        ).result_set[0][0]
 
     def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")

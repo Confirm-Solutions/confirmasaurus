@@ -162,7 +162,7 @@ def ada_validate(
     prod: bool = True,
     overrides: dict = None,
     callback=print_report,
-    backend=LocalBackend(),
+    backend=None,
 ):
     """
     The entrypoint for the adaptive validation algorithm.
@@ -229,4 +229,6 @@ def ada_validate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
+    if backend is None:
+        backend = LocalBackend()
     return backend.run(AdaValidate, locals())

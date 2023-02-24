@@ -67,6 +67,7 @@ async def _coordinate(algo, step_id, n_zones, report):
             and id not in (select id from done)
             and active = 1
             and id not in (select id from inactive)
+        ORDER BY id
         """,
     )
     report["n_tiles"] = df.shape[0]
@@ -115,7 +116,7 @@ async def _coordinate(algo, step_id, n_zones, report):
                 ORDER BY (coordination_id, zone_id)
                 """
             )
-        mapping_df = df[["id", "coordination_id", "zone_id"]]
+        mapping_df = df[["id", "coordination_id", "zone_id"]].copy()
         mapping_df["old_zone_id"] = old_zone_id
         ch._insert_df(algo.db.client, "zone_mapping", mapping_df)
 

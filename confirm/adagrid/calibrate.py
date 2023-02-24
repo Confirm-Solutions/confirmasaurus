@@ -252,7 +252,7 @@ def ada_calibrate(
     prod: bool = True,
     overrides: dict = None,
     callback=print_report,
-    backend=LocalBackend(),
+    backend=None,
 ):
     """
     The main entrypoint for the adaptive calibration algorithm.
@@ -318,4 +318,6 @@ def ada_calibrate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
+    if backend is None:
+        backend = LocalBackend()
     return backend.run(AdaCalibrate, locals())
