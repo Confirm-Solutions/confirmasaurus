@@ -137,25 +137,30 @@ def test_calibration_checkpointing():
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
         db = ada.db.DuckDBTiles.connect()
-        _ = ada.ada_calibrate(ZTest1D, g=g, db=db, nB=3, init_K=4, n_iter=2)
+        _ = ada.ada_calibrate(ZTest1D, g=g, db=db, nB=3, init_K=4, n_steps=2)
 
-        db_two2 = ada.ada_calibrate(ZTest1D, db=db, overrides=dict(n_iter=1))
+        db_two2 = ada.ada_calibrate(ZTest1D, db=db, overrides=dict(n_steps=3))
         reports_two = db_two2.get_reports()
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db_once = ada.ada_calibrate(ZTest1D, g=g, nB=3, init_K=4, n_iter=3)
+        db_once = ada.ada_calibrate(ZTest1D, g=g, nB=3, init_K=4, n_steps=3)
         reports_once = db_once.get_reports()
 
-    assert len(reports_two) == len(reports_once)
+    assert len(reports_two) == len(reports_once) + 1
     df_reports_one = pd.DataFrame(reports_once)
-    drop_cols = ["worker_id", "worker_iter"] + [
+    drop_cols = ["worker_id"] + [
         c for c in df_reports_one.columns if c.startswith("runtime")
     ]
     df_reports_one = df_reports_one.drop(drop_cols, axis=1)
-    df_reports_two = pd.DataFrame(reports_two).drop(drop_cols, axis=1)
+    df_reports_two = (
+        pd.DataFrame(reports_two)
+        .drop(3, axis=0)
+        .drop(drop_cols, axis=1)
+        .reset_index(drop=True)
+    )
     pd.testing.assert_frame_equal(df_reports_two, df_reports_one)
 
     nondeterministic_cols = ["creator_id", "processor_id"]

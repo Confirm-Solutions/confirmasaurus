@@ -80,6 +80,7 @@ async def new_step(algo, zone_id, new_step_id):
     report["status"] = status.name
     report["zone_id"] = zone_id
     report["step_id"] = new_step_id
+    report["n_packets"] = n_packets
     insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
     algo.callback(report, algo.db)
     return status, n_packets, insert_report
@@ -93,7 +94,7 @@ async def _new_step(algo, zone_id, new_step_id):
     report["runtime_convergence_criterion"] = time.time() - start
     if converged:
         logger.debug("Convergence!!")
-        return WorkerStatus.CONVERGED, report, 0
+        return WorkerStatus.CONVERGED, 0, report
     elif new_step_id >= algo.cfg["n_steps"]:
         logger.debug("Reached maximum number of steps. Terminating.")
         # NOTE: no need to coordinate with other workers. They will reach
@@ -187,7 +188,10 @@ async def _new_step(algo, zone_id, new_step_id):
 
     n_existing_packets = await existing_packets_task
     if n_existing_packets is not None and n_existing_packets > 0:
-        logger.debug(f"Step {new_step_id} already exists. Skipping.")
+        logger.debug(
+            f"Step {new_step_id} already exists with"
+            f" {n_existing_packets} packets. Skipping."
+        )
         return WorkerStatus.ALREADY_EXISTS, n_existing_packets, report
 
     await asyncio.gather(

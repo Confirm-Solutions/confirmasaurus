@@ -88,9 +88,7 @@ from pprint import pformat
 import jax.numpy as jnp
 import numpy as np
 
-from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.coordinate import coordinate
-from confirm.adagrid.init import _launch_task
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet_set
@@ -108,7 +106,7 @@ class LocalBackend:
 
     async def _run_async(self, algo_type, kwargs):
         algo, incomplete_packets, zone_steps = await init(
-            algo_type, self.n_zones, kwargs
+            algo_type, 1, self.n_zones, kwargs
         )
         incomplete_packets = np.array(incomplete_packets)
         self.lazy_tasks.extend(await process_packet_set(algo, incomplete_packets))
@@ -116,60 +114,44 @@ class LocalBackend:
         min_step_completed = min(zone_steps.values())
         max_step_completed = max(zone_steps.values())
         print("min_step_completed", min_step_completed)
+
         # if next_coord is 5, do we coordinate after or before step 5?
         # --> before!
-        # suppose min_step_completed is 4 and max_step_completed is 4,
-        # next_coord should be 5
+        # min_step_completed = 4, max_step_completed = 4, next_coord = 5
+        # min_step_completed = 1, max_step_completed = 3, next_coord = 5
         #
-        # coordinate_every = 5
-        # suppose step is 0, then next_coord should be 5
-        # suppose step is 1, then next_coord should be 5
-        # suppose step is 2, then next_coord should be 5
-        # suppose step is 3, then next_coord should be 5
-        # suppose step is 4, then next_coord should be 5
-        # suppose step is 5, then next_coord should be 10
-        # suppose step is 6, then next_coord should be 10
         every = algo.cfg["coordinate_every"]
         next_coord = get_next_coord(min_step_completed, every)
         assert next_coord == get_next_coord(max_step_completed, every)
         this_step = min_step_completed + 1
 
         while this_step < algo.cfg["n_steps"]:
-            await asyncio.gather(
+            # TODO: last_step vs this_step is confusing!!
+            last_step = min(next_coord, algo.cfg["n_steps"])
+            statuses = await asyncio.gather(
                 *[
-                    self._run_zone(
-                        algo, zone_id, this_step, min(next_coord, algo.cfg["n_steps"])
-                    )
+                    self._run_zone(algo, zone_id, this_step, last_step + 1)
                     for zone_id in zone_steps
                 ]
             )
-            this_step = next_coord
-            next_coord += every
-            if algo.db.is_distributed:
-                status, lazy_tasks = await coordinate(algo, this_step, self.n_zones)
+
+            # If there's only one zone and that zone is done, then we're
+            # totally done.
+            if len(statuses) == 1:
+                if statuses[0].done():
+                    break
+            else:  # If there's more than one zone, then we need to coordinate.
+                status, lazy_tasks = await coordinate(algo, last_step + 1, self.n_zones)
                 zone_steps = {zone_id: this_step for zone_id in range(self.n_zones)}
                 self.lazy_tasks.extend(lazy_tasks)
-                if (
-                    status == WorkerStatus.CONVERGED
-                    or status == WorkerStatus.EMPTY_STEP
-                ):
-                    break
-            else:
-                report = dict()
-                report["step_id"] = this_step
-                converged, _ = algo.convergence_criterion(None, report)
-                # TODO: this is a lie.
-                status = (
-                    WorkerStatus.CONVERGED if converged else WorkerStatus.COORDINATED
-                )
-                report["status"] = status.name
-                self.lazy_tasks.append(
-                    await _launch_task(algo.db, algo.db.insert_report, report)
-                )
-                if converged:
+                if status.done():
                     break
 
+            this_step = last_step
+            next_coord += every
+
         await asyncio.gather(*self.lazy_tasks)
+        self.lazy_tasks = []
         return algo.db
 
     async def _run_zone(self, algo, zone_id, start_step_id, end_step_id):
@@ -187,11 +169,7 @@ class LocalBackend:
                     algo, [(zone_id, step_id, i) for i in range(n_packets)]
                 )
             )
-            if (
-                status == WorkerStatus.CONVERGED
-                or status == WorkerStatus.EMPTY_STEP
-                or status == WorkerStatus.REACHED_N_STEPS
-            ):
+            if status.done():
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
                 break
         return status
@@ -208,8 +186,7 @@ def maybe_start_event_loop(coro):
     try:
         loop = asyncio.get_running_loop()
         existing_loop = True
-    except RuntimeError as e:
-        print(e)
+    except RuntimeError:
         existing_loop = False
 
     # We run here instead of under the except statement so that any

@@ -18,27 +18,30 @@ from confirm.adagrid.db import DuckDBTiles
 logger = logging.getLogger(__name__)
 
 
-async def init(algo_type, n_zones, kwargs):
-    db = kwargs["db"]
-    g = kwargs["g"]
+async def init(algo_type, worker_id, n_zones, kwargs):
+    db = kwargs.get("db", None)
+    g = kwargs.get("g", None)
+    imprint.log.worker_id.set(worker_id)
 
     if db is None and g is None:
-        raise ValueError("Must provide an initial grid or an existing database!")
+        raise ValueError("If no grid is provided, a database must be provided.")
 
     if db is None:
         db = DuckDBTiles.connect()
+        tiles_exists = False
+    else:
+        tiles_exists = db.does_table_exist("tiles")
 
-    worker_id = kwargs.get("worker_id", None)
-    if worker_id is None:
-        worker_id = db.new_workers(1)[0]
-    imprint.log.worker_id.set(worker_id)
+    if g is None and not tiles_exists:
+        raise ValueError("If no grid is provided, the database must contain tiles.")
 
-    if g is not None:
+    if g is not None and not tiles_exists:
         cfg, null_hypos = first(kwargs)
     else:
         cfg, null_hypos = join(db, kwargs)
 
     cfg["worker_id"] = worker_id
+
     add_system_cfg(cfg)
     # we wrap set_or_append in a lambda so that the db.store access can be
     # run in a separate thread in case the Store __init__ method does any
@@ -49,12 +52,16 @@ async def init(algo_type, n_zones, kwargs):
         )
     ]
 
-    if g is not None:
+    if g is not None and not tiles_exists:
         wait_for_grid, incomplete_packets, zone_steps = await init_grid(
             g, db, cfg, n_zones
         )
         wait_for.extend(wait_for_grid)
     else:
+        if g is not None:
+            logger.warning(
+                "Ignoring grid because tiles already exist in the provided database."
+            )
         incomplete_packets = db.get_incomplete_packets()
         zone_steps = db.get_zone_steps()
 

@@ -1,9 +1,7 @@
-import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
 from typing import List
-from typing import Tuple
 
 import duckdb
 import pandas as pd
@@ -31,10 +29,7 @@ class PandasTiles:
     results_df: pd.DataFrame = None
     done_df: pd.DataFrame = None
     reports: List[Dict] = field(default_factory=list)
-    _next_worker_id: int = 2
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
-    step_info: Dict[int, Tuple[int, int]] = field(default_factory=dict)
-    lock = contextlib.suppress()
     is_distributed: bool = False
     supports_threads: bool = False
 
@@ -48,14 +43,28 @@ class PandasTiles:
             + 1
         )
 
-    def heartbeat(self, worker_id: int):
-        return contextlib.AsyncExitStack()
-
     def _tiles_columns(self) -> List[str]:
         return self.tiles_df.columns
 
     def _results_columns(self) -> List[str]:
         return self.results_df.columns
+
+    def does_table_exist(self, table_name: str) -> bool:
+        if table_name in ["tiles", "results", "done", "reports"]:
+            return True
+        return table_name in self._tables
+
+    def get_tiles(self) -> pd.DataFrame:
+        return self.tiles_df.reset_index(drop=True)
+
+    def get_results(self) -> pd.DataFrame:
+        return self.results_df.reset_index(drop=True)
+
+    def get_done(self):
+        return self.done_df.reset_index(drop=True)
+
+    def get_reports(self):
+        return pd.DataFrame(self.reports)
 
     def get_incomplete_packets(self):
         if self.results_df is None:
@@ -82,21 +91,9 @@ class PandasTiles:
     def get_zone_steps(self):
         return self.tiles_df.groupby("zone_id")["step_id"].max().to_dict()
 
-    def get_tiles(self) -> pd.DataFrame:
-        return self.tiles_df.reset_index(drop=True)
-
-    def get_results(self) -> pd.DataFrame:
-        return self.results_df.reset_index(drop=True)
-
-    def get_done(self):
-        return self.done_df.reset_index(drop=True)
-
     def insert_report(self, report):
         self.reports.append(report)
         return report
-
-    def get_reports(self):
-        return pd.DataFrame(self.reports)
 
     def insert_tiles(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
@@ -111,6 +108,17 @@ class PandasTiles:
         else:
             self.results_df = pd.concat((self.results_df, df), axis=0)
 
+    def finish(self, df: pd.DataFrame) -> None:
+        df = df.set_index("id")
+        df.insert(0, "id", df.index)
+        if self.done_df is None:
+            self.done_df = df
+        else:
+            self.done_df = pd.concat((self.done_df, df), axis=0)
+        self.tiles_df.loc[df["id"], "active"] = df["active"]
+        self.results_df.loc[df["id"], "eligible"] = False
+        self.results_df.loc[df["id"], "active"] = df["active"]
+
     def get_packet(self, zone_id: int, step_id: int, packet_id: int) -> pd.DataFrame:
         where = (self.tiles_df["step_id"] == step_id) & (
             self.tiles_df["packet_id"] == packet_id
@@ -122,17 +130,6 @@ class PandasTiles:
     ) -> pd.DataFrame:
         out = self.results_df.loc[self.results_df["eligible"]].nsmallest(n, order_col)
         return out
-
-    def finish(self, df: pd.DataFrame) -> None:
-        df = df.set_index("id")
-        df.insert(0, "id", df.index)
-        if self.done_df is None:
-            self.done_df = df
-        else:
-            self.done_df = pd.concat((self.done_df, df), axis=0)
-        self.tiles_df.loc[df["id"], "active"] = df["active"]
-        self.results_df.loc[df["id"], "eligible"] = False
-        self.results_df.loc[df["id"], "active"] = df["active"]
 
     def bootstrap_lamss(self, zone_id: int) -> pd.Series:
         nB = (
@@ -151,14 +148,6 @@ class PandasTiles:
         df.insert(0, "id", df.index)
         self.tiles_df = df
 
-    def new_workers(self, n) -> List[int]:
-        return [self._new_worker() for _ in range(n)]
-
-    def _new_worker(self) -> int:
-        out = self._next_worker_id
-        self._next_worker_id += 1
-        return out
-
 
 @dataclass
 class DuckDBTiles:
@@ -172,7 +161,6 @@ class DuckDBTiles:
 
     con: duckdb.DuckDBPyConnection
     store: DuckDBStore = None
-    lock = contextlib.suppress()
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
     _d: int = None
@@ -187,10 +175,6 @@ class DuckDBTiles:
                 (zone_id int, step_id int, packet_id int)
             """
         )
-
-    def heartbeat(self, worker_id):
-        # null-op context manager.
-        return contextlib.AsyncExitStack()
 
     def dimension(self):
         if self._d is None:
@@ -212,6 +196,18 @@ class DuckDBTiles:
             )
         return self._results_columns_cache
 
+    def does_table_exist(self, table_name):
+        out = self.con.query(
+            f"""
+            select name from sqlite_master 
+                where type='table' 
+                and name='{table_name}'
+            """
+        ).fetchall()
+        if len(out) == 0:
+            return False
+        return True
+
     def get_tiles(self):
         return self.con.execute("select * from tiles").df()
 
@@ -225,12 +221,8 @@ class DuckDBTiles:
         json_strs = self.con.execute("select * from reports").fetchall()
         return pd.DataFrame([json.loads(s[0]) for s in json_strs])
 
-    def insert_report(self, report):
-        self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
-        return report
-
     def get_incomplete_packets(self):
-        if self._results_table_exists():
+        if self.does_table_exist("results"):
             restrict = "where id not in (select id from results)"
         else:
             restrict = ""
@@ -263,28 +255,20 @@ class DuckDBTiles:
             """
         ).fetchone()[0]
 
+    def insert_report(self, report):
+        self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
+        return report
+
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
 
     def insert_results(self, df: pd.DataFrame, orderer: str):
-        if not self._results_table_exists():
+        if not self.does_table_exist("results"):
             self.con.execute("create table if not exists results as select * from df")
             return
         column_order = ",".join(self._results_columns())
         self.con.execute(f"insert into results select {column_order} from df")
-
-    def _results_table_exists(self):
-        out = self.con.query(
-            """
-            select name from sqlite_master 
-                where type='table' 
-                and name='results'
-            """
-        ).fetchall()
-        if len(out) == 0:
-            return False
-        return True
 
     def finish(self, which):
         logger.debug(f"finish: {which.head()}")
@@ -301,15 +285,9 @@ class DuckDBTiles:
             """
         )
 
-    def worst_tile(self, zone_id, order_col):
-        # zone_id is ignored because DuckDB only supports one zone.
-        return self.con.execute(
-            f"select * from results where active=true order by {order_col} limit 1"
-        ).df()
-
     def get_packet(self, zone_id: int, step_id: int, packet_id: int):
         # zone_id is ignored because DuckDB only supports one zone.
-        if self._results_table_exists():
+        if self.does_table_exist("results"):
             restrict_results = "and id not in (select id from results)"
         else:
             restrict_results = ""
@@ -356,20 +334,52 @@ class DuckDBTiles:
 
         return lamss
 
+    def worst_tile(self, zone_id, order_col):
+        # zone_id is ignored because DuckDB only supports one zone.
+        return self.con.execute(
+            f"select * from results where active=true order by {order_col} limit 1"
+        ).df()
+
+    def update_active_eligible(self):
+        # Null op because duckdb updates during `finish`
+        pass
+
+    def get_active_eligible(self):
+        return self.con.execute(
+            """
+            SELECT * FROM results
+            WHERE eligible = 1
+                and active = 1
+            ORDER BY id
+            """,
+        ).df()
+
+    def delete_previous_coordination(self, old_coordination_id):
+        # TODO: ...
+        self.con.execute(
+            f"""
+            DELETE FROM results 
+                WHERE eligible = 1
+                    and active = 1
+                    and coordination_id = {old_coordination_id}
+            """
+        )
+
+    def insert_mapping(self, mapping_df):
+        if not self.does_table_exist("zone_mapping"):
+            self.con.execute("create table zone_mapping as select * from mapping_df")
+        else:
+            cols = self.con.execute("select * from zone_mapping limit 0").df().columns
+            col_order = ",".join(cols)
+            self.con.execute(
+                f"insert into zone_mapping select {col_order} from mapping_df"
+            )
+
+    def get_zone_mapping(self):
+        return self.con.execute("select * from zone_mapping").df()
+
     def close(self) -> None:
         self.con.close()
-
-    def new_workers(self, n: int) -> List[int]:
-        return [self._new_worker() for _ in range(n)]
-
-    def _new_worker(self) -> int:
-        self.con.execute(
-            "create sequence if not exists worker_id start with 1 increment by 1"
-        )
-        worker_id = self.con.execute("select nextval('worker_id')").fetchone()[0] + 1
-        self.con.execute("create table if not exists workers (id int)")
-        self.con.execute(f"insert into workers values ({worker_id})")
-        return worker_id
 
     async def init_tiles(self, df: pd.DataFrame, wait: bool = False) -> None:
         self.con.execute("create table tiles as select * from df")

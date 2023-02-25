@@ -156,7 +156,6 @@ def ada_validate(
     global_target=0.005,
     n_steps: int = 100,
     step_size=2**10,
-    n_iter=1000,
     packet_size: int = None,
     coordinate_every: int = 5,
     prod: bool = True,
@@ -201,10 +200,6 @@ def ada_validate(
            packet_size because we select tiles once and then run many
            simulation "iterations" in parallel each processing one
            packet of tiles. Defaults to 2**10.
-        n_iter: The number of packets this worker should simulate before
-            exiting. Defaults to None which places no limit. Limiting the number of
-            packets is useful for stopping a worker after a specified amount of
-            work.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
         coordinate_every: The number of steps between each distributed coordination.

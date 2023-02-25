@@ -22,54 +22,29 @@ async def _coordinate(algo, step_id, n_zones, report):
     # This function should only ever run for the clickhouse database. So,
     # rather than abstracting the various database calls, we just write
     # them in here directly.
-    import confirm.cloud.clickhouse as ch
-
     report["step_id"] = step_id
     report["worker_id"] = algo.cfg["worker_id"]
     report["n_zones"] = n_zones
 
-    alter_settings = {
-        "allow_nondeterministic_mutations": "1",
-        "mutations_sync": 2,
-    }
-    # This can happen asynchronously because:
+    # Updating active/eligible state can happen asynchronously because:
     # 1. An inactive tile or ineligible tile will never revert to being active
     #    or eligible, respectively.
     # 2. The done and inactive tables are append-only.
     # 3. All queries that depend on active and eligible use the and(...) anyway.
     # So, it's not necessary to update eligible and active but it will make future
     # queries faster.
-    update_active_eligible_task = await _launch_task(
-        algo.db,
-        algo.db.client.command,
-        """
-        ALTER TABLE results
-        UPDATE
-            eligible = and(eligible=true, id not in (select id from done)),
-            active = and(active=true, id not in (select id from inactive))
-        WHERE
-            eligible = 1
-            and active = 1
-        """,
-        settings=alter_settings,
-    )
-    lazy_tasks = [update_active_eligible_task]
+    lazy_tasks = [
+        await _launch_task(
+            algo.db,
+            algo.db.update_active_eligible,
+        )
+    ]
 
     converged, _ = algo.convergence_criterion(None, report)
     if converged:
         return WorkerStatus.CONVERGED, lazy_tasks
 
-    df = ch._query_df(
-        algo.db.client,
-        """
-        SELECT * FROM results
-        WHERE eligible = 1
-            and id not in (select id from done)
-            and active = 1
-            and id not in (select id from inactive)
-        ORDER BY id
-        """,
-    )
+    df = algo.db.get_active_eligible()
     report["n_tiles"] = df.shape[0]
     if df.shape[0] == 0:
         return WorkerStatus.EMPTY_STEP, lazy_tasks
@@ -84,43 +59,17 @@ async def _coordinate(algo, step_id, n_zones, report):
     df["coordination_id"] += 1
 
     insert_task = await _launch_task(
-        algo.db, ch._insert_df, algo.db.client, "results", df
+        algo.db, algo.db.insert_results, df, algo.get_orderer()
     )
     delete_task = await _launch_task(
-        algo.db,
-        algo.db.client.command,
-        f"""
-        ALTER TABLE results
-        DELETE WHERE eligible = 1
-                and id not in (select id from done)
-                and active = 1
-                and id not in (select id from inactive)
-                and coordination_id = {old_coordination_id}
-        """,
-        settings=alter_settings,
+        algo.db, algo.db.delete_previous_coordination, old_coordination_id
     )
-
-    def insert_mapping(old_zone_id, df):
-        if not ch.does_table_exist(algo.db.client, algo.db.job_id, "zone_mapping"):
-            id_type = ch.type_map[df["id"].dtype.name]
-            algo.db.client.command(
-                f"""
-                CREATE TABLE zone_mapping
-                (
-                    id {id_type},
-                    coordination_id UInt32,
-                    old_zone_id Int32,
-                    zone_id Int32
-                )
-                ENGINE = MergeTree()
-                ORDER BY (coordination_id, zone_id)
-                """
-            )
-        mapping_df = df[["id", "coordination_id", "zone_id"]].copy()
-        mapping_df["old_zone_id"] = old_zone_id
-        ch._insert_df(algo.db.client, "zone_mapping", mapping_df)
-
-    insert_mapping_task = await _launch_task(algo.db, insert_mapping, old_zone_id, df)
+    mapping_df = df[["id", "coordination_id", "zone_id"]].copy()
+    mapping_df["old_zone_id"] = old_zone_id
+    mapping_df["before_step_id"] = step_id
+    insert_mapping_task = await _launch_task(
+        algo.db, algo.db.insert_mapping, mapping_df
+    )
     await asyncio.gather(insert_task, delete_task)
 
     lazy_tasks.append(insert_mapping_task)

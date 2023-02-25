@@ -239,6 +239,27 @@ class Clickhouse:
             ).columns
         return self._results_columns_cache
 
+    def does_table_exist(self, table_name: str) -> bool:
+        return (
+            len(
+                self.client.query(
+                    f"""
+            select * from information_schema.tables
+                where table_schema = '{self.job_id}'
+                    and table_name = '{table_name}'
+            """
+                ).result_set
+            )
+            > 0
+        )
+
+    def results_table_exists(self):
+        if not self._results_table_exists:
+            self._results_table_exists = self.does_table_exist("results")
+            if not self._results_table_exists:
+                return False
+        return True
+
     def get_tiles(self):
         cols = ",".join(
             [c for c in self._tiles_columns() if c not in ["active", "eligible"]]
@@ -284,13 +305,6 @@ class Clickhouse:
             by=["zone_id", "step_id", "packet_id"]
         )
 
-    def insert_report(self, report):
-        self.client.command(
-            f"insert into reports values ('{json.dumps(report)}')",
-            settings=insert_settings,
-        )
-        return report
-
     def get_incomplete_packets(self):
         if self.results_table_exists():
             restrict = "where id not in (select id from results)"
@@ -306,7 +320,7 @@ class Clickhouse:
         ).result_set
 
     def get_zone_steps(self):
-        if does_table_exist(self.client, self.job_id, "zone_mapping"):
+        if self.does_table_exist("zone_mapping"):
             cte = """
             with (select max(coordination_id) from zone_mapping) 
                 as max_coordination_id
@@ -335,6 +349,13 @@ class Clickhouse:
         """
         ).result_set[0][0]
 
+    def insert_report(self, report):
+        self.client.command(
+            f"insert into reports values ('{json.dumps(report)}')",
+            settings=insert_settings,
+        )
+        return report
+
     def insert_tiles(self, df: pd.DataFrame):
         logger.debug(f"writing {df.shape[0]} tiles")
         _insert_df(self.client, "tiles", df)
@@ -345,36 +366,9 @@ class Clickhouse:
         _insert_df(self.client, "results", df)
         self._results_table_exists = True
 
-    def results_table_exists(self):
-        if not self._results_table_exists:
-            self._results_table_exists = does_table_exist(
-                self.client, self.job_id, "results"
-            )
-            if not self._results_table_exists:
-                return False
-        return True
-
     def finish(self, which):
         logger.debug(f"finish: {which.head()}")
         _insert_df(self.client, "done", which)
-
-    def worst_tile(self, zone_id, orderer):
-        if zone_id is None:
-            zone_id_clause = ""
-        else:
-            zone_id_clause = f"and zone_id = {zone_id}"
-
-        return _query_df(
-            self.client,
-            f"""
-            select * from results
-                where
-                    active=true
-                    and id not in (select id from inactive)
-                    {zone_id_clause}
-            order by {orderer} limit 1
-        """,
-        )
 
     def get_packet(self, zone_id, step_id, packet_id):
         """
@@ -414,6 +408,24 @@ class Clickhouse:
         """,
         )
 
+    def worst_tile(self, zone_id, orderer):
+        if zone_id is None:
+            zone_id_clause = ""
+        else:
+            zone_id_clause = f"and zone_id = {zone_id}"
+
+        return _query_df(
+            self.client,
+            f"""
+            select * from results
+                where
+                    active=true
+                    and id not in (select id from inactive)
+                    {zone_id_clause}
+            order by {orderer} limit 1
+        """,
+        )
+
     def bootstrap_lamss(self, zone_id):
         # Get the number of bootstrap lambda* columns
         nB = (
@@ -438,6 +450,66 @@ class Clickhouse:
 
         return lamss
 
+    alter_settings = {
+        "allow_nondeterministic_mutations": "1",
+        "mutations_sync": 2,
+    }
+
+    def update_active_eligible(self):
+        self.client.command(
+            """
+            ALTER TABLE results
+            UPDATE
+                eligible = and(eligible=true, id not in (select id from done)),
+                active = and(active=true, id not in (select id from inactive))
+            WHERE
+                eligible = 1
+                and active = 1
+            """,
+            settings=self.alter_settings,
+        )
+
+    def get_active_eligible(self):
+        return _query_df(
+            self.client,
+            """
+            SELECT * FROM results
+            WHERE eligible = 1
+                and id not in (select id from done)
+                and active = 1
+                and id not in (select id from inactive)
+            ORDER BY id
+            """,
+        )
+
+    def delete_previous_coordination(self, old_coordination_id):
+        self.client.command(
+            f"""
+            ALTER TABLE results
+            DELETE WHERE eligible = 1
+                    and id not in (select id from done)
+                    and active = 1
+                    and id not in (select id from inactive)
+                    and coordination_id = {old_coordination_id}
+            """,
+            settings=self.alter_settings,
+        )
+
+    def insert_mapping(self, mapping_df):
+        if not self.does_table_exist("zone_mapping"):
+            cols = get_create_table_cols(mapping_df)
+            self.client.command(
+                f"""
+                CREATE TABLE zone_mapping ({",".join(cols)})
+                ENGINE = MergeTree()
+                ORDER BY (coordination_id, zone_id)
+                """
+            )
+        _insert_df(self.client, "zone_mapping", mapping_df)
+
+    def get_zone_mapping(self):
+        return _query_df(self.client, "select * from zone_mapping")
+
     def _create_results_table(self, results_df, orderer):
         if self._results_table_exists:
             return
@@ -450,15 +522,6 @@ class Clickhouse:
 
     def close(self):
         self.client.close()
-
-    def new_workers(self, n):
-        return [2 + i for i in range(n)]
-
-    #     p = self.redis_con.pipeline()
-    #     p.setnx(f"{self.job_id}:next_worker_id", 2)
-    #     p.incrby(f"{self.job_id}:next_worker_id", n)
-    #     _, cur_id = p.execute()
-    #     return [cur_id - n + i for i in range(n)]
 
     async def init_tiles(self, tiles_df):
         # tables:
@@ -617,21 +680,6 @@ class Clickhouse:
 
         logger.info(f"Connected to job {job_id}")
         return Clickhouse(connection_details, client, job_id)
-
-
-def does_table_exist(client, job_id: str, table_name: str) -> bool:
-    return (
-        len(
-            client.query(
-                f"""
-        select * from information_schema.tables
-            where table_schema = '{job_id}'
-                and table_name = '{table_name}'
-        """
-            ).result_set
-        )
-        > 0
-    )
 
 
 def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):
