@@ -157,7 +157,6 @@ def ada_validate(
     n_steps: int = 100,
     step_size=2**10,
     packet_size: int = None,
-    coordinate_every: int = 5,
     prod: bool = True,
     overrides: dict = None,
     callback=print_report,
@@ -202,8 +201,6 @@ def ada_validate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
-        coordinate_every: The number of steps between each distributed coordination.
-            This is ignored for local runs. Defaults to 5.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. Defaults to True.

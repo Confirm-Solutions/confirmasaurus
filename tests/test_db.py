@@ -48,10 +48,11 @@ class DBTester:
         asyncio.run(db_tiles.init_tiles(g.df))
         return g, pd_tiles, db_tiles
 
-    def insert_fake_results(self, db):
+    def insert_fake_results(self, db, zone_id=0):
         work = db.get_tiles().nsmallest(100, "theta0")
         work["orderer"] = np.linspace(5, 6, work.shape[0])
         work["eligible"] = True
+        work["zone_id"] = zone_id
         db.insert_results(work, "orderer")
 
     def test_connect(self):
@@ -145,14 +146,13 @@ class DBTester:
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
 
-        pd_work = pd_tiles.next(0, 0, 3, "theta0")
-        db_work = db_tiles.next(0, 0, 3, "theta0")
+        pd_work = pd_tiles.next(0, 18, 3, "theta0")
+        db_work = db_tiles.next(0, 18, 3, "theta0")
         assert_frame_equal_special(pd_work, db_work)
         assert_frame_equal_special(pd_tiles.get_results(), db_tiles.get_results())
 
         def finish(db_work, pd_work):
             cols = [
-                "coordination_id",
                 "zone_id",
                 "step_id",
                 "packet_id",
@@ -175,8 +175,8 @@ class DBTester:
         finish(db_work, pd_work)
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-        pd_work = pd_tiles.next(0, 0, 7, "theta0")
-        db_work = db_tiles.next(0, 0, 7, "theta0")
+        pd_work = pd_tiles.next(0, 18, 7, "theta0")
+        db_work = db_tiles.next(0, 18, 7, "theta0")
         assert pd_work.shape[0] == 2
         assert db_work.shape[0] == 2
         assert_frame_equal_special(pd_work, db_work)
@@ -187,6 +187,12 @@ class DBTester:
         assert not db_tiles.get_results()["eligible"].any()
         assert not pd_tiles.get_tiles()["active"].any()
         assert not db_tiles.get_tiles()["active"].any()
+
+    def test_next_two_zones(self):
+        g, pd_tiles, db_tiles = self.prepped_dbs()
+        self.insert_fake_results(db_tiles, zone_id=0)
+        self.insert_fake_results(db_tiles, zone_id=1)
+        assert db_tiles.next(1, 18, 15, "theta0").shape[0] == 5
 
     def test_get_packet(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()

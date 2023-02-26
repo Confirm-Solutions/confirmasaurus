@@ -286,7 +286,6 @@ class DuckDBTiles:
         )
 
     def get_packet(self, zone_id: int, step_id: int, packet_id: int):
-        # zone_id is ignored because DuckDB only supports one zone.
         if self.does_table_exist("results"):
             restrict_results = "and id not in (select id from results)"
         else:
@@ -295,7 +294,8 @@ class DuckDBTiles:
             f"""
             select * from tiles
                 where
-                    step_id = {step_id}
+                    zone_id = {zone_id}
+                    and step_id = {step_id}
                     and packet_id = {packet_id}
                     {restrict_results}
             """,
@@ -304,14 +304,15 @@ class DuckDBTiles:
     def next(
         self, zone_id: int, new_step_id: int, n: int, orderer: str
     ) -> pd.DataFrame:
-        # zone_id is ignored because DuckDB only supports one zone.
-        #
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
         t = self.con.begin()
         out = t.execute(
             f"""
-            select * from results where eligible=true
+            select * from results 
+                where eligible=true
+                    and zone_id = {zone_id}
+                    and step_id < {new_step_id}
             order by {orderer} limit {n}
             """
         ).df()
@@ -319,7 +320,6 @@ class DuckDBTiles:
         return out
 
     def bootstrap_lamss(self, zone_id: int) -> List[float]:
-        # zone_id is ignored because DuckDB only supports one zone.
         # Get the number of bootstrap lambda* columns
         nB = (
             max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
@@ -328,16 +328,32 @@ class DuckDBTiles:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        if zone_id is None:
+            zone_id_clause = ""
+        else:
+            zone_id_clause = f"and zone_id = {zone_id}"
         lamss = self.con.execute(
-            f"select {cols} from results where active=true"
+            f"""
+            select {cols} from results 
+                where active=true
+                    {zone_id_clause}
+            """
         ).fetchall()[0]
 
         return lamss
 
     def worst_tile(self, zone_id, order_col):
-        # zone_id is ignored because DuckDB only supports one zone.
+        if zone_id is None:
+            zone_id_clause = ""
+        else:
+            zone_id_clause = f"and zone_id = {zone_id}"
         return self.con.execute(
-            f"select * from results where active=true order by {order_col} limit 1"
+            f"""
+            select * from results
+                where active=true
+                    {zone_id_clause}
+                order by {order_col} limit 1
+            """
         ).df()
 
     def update_active_eligible(self):

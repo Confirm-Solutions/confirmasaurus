@@ -97,17 +97,36 @@ logger = logging.getLogger(__name__)
 
 
 class LocalBackend:
-    def __init__(self, n_zones=1):
+    def __init__(self, n_zones=1, coordinate_every=5):
+        """
+        _summary_
+
+        Args:
+            n_zones: _description_. Defaults to 1.
+            coordinate_every: The number of steps between each distributed coordination.
+                This is ignored for local runs. Defaults to 5.
+        """
         self.lazy_tasks = []
-        self.n_zones = n_zones
+        # self.input_cfg should not be read directly, instead access
+        # algo.cfg['...'] instead. the reason is so that we correctly handle
+        # loading a configuration. for example, coordinate_every should not
+        # change over the lifetime of a job.
+        # TODO: this feels sketchy...
+        # TODO: n_zones would be changeable if we fixed the selection rule and
+        # convergence criterion during each coordination.
+        self.input_cfg = {"coordinate_every": coordinate_every, "n_zones": n_zones}
 
     def run(self, algo_type, kwargs):
+        kwargs.update(self.input_cfg)
         return maybe_start_event_loop(self._run_async(algo_type, kwargs))
 
     async def _run_async(self, algo_type, kwargs):
+        # it's okay to use input_cfg['n_zones'] here because it's only used at
+        # the start of a job.
         algo, incomplete_packets, zone_steps = await init(
-            algo_type, 1, self.n_zones, kwargs
+            algo_type, 1, self.input_cfg["n_zones"], kwargs
         )
+        n_zones = algo.cfg["n_zones"]
         incomplete_packets = np.array(incomplete_packets)
         self.lazy_tasks.extend(await process_packet_set(algo, incomplete_packets))
 
@@ -119,18 +138,16 @@ class LocalBackend:
         # --> before!
         # min_step_completed = 4, max_step_completed = 4, next_coord = 5
         # min_step_completed = 1, max_step_completed = 3, next_coord = 5
-        #
         every = algo.cfg["coordinate_every"]
         next_coord = get_next_coord(min_step_completed, every)
         assert next_coord == get_next_coord(max_step_completed, every)
-        this_step = min_step_completed + 1
+        first_step = min_step_completed + 1
 
-        while this_step < algo.cfg["n_steps"]:
-            # TODO: last_step vs this_step is confusing!!
+        while first_step < algo.cfg["n_steps"]:
             last_step = min(next_coord, algo.cfg["n_steps"])
             statuses = await asyncio.gather(
                 *[
-                    self._run_zone(algo, zone_id, this_step, last_step + 1)
+                    self._run_zone(algo, zone_id, first_step, last_step + 1)
                     for zone_id in zone_steps
                 ]
             )
@@ -140,14 +157,20 @@ class LocalBackend:
             if len(statuses) == 1:
                 if statuses[0].done():
                     break
-            else:  # If there's more than one zone, then we need to coordinate.
-                status, lazy_tasks = await coordinate(algo, last_step + 1, self.n_zones)
-                zone_steps = {zone_id: this_step for zone_id in range(self.n_zones)}
+
+            if n_zones > 1:
+                # If there's more than one zone, then we need to coordinate.
+                # NOTE: coordinations happen *before* the same-named step.
+                # e.g. a coordination at step 5 happens before new_step and
+                # process_packets for 5.
+                coord_status, lazy_tasks, zone_steps = await coordinate(
+                    algo, last_step + 1, n_zones
+                )
                 self.lazy_tasks.extend(lazy_tasks)
-                if status.done():
+                if coord_status.done():
                     break
 
-            this_step = last_step
+            first_step = last_step + 1
             next_coord += every
 
         await asyncio.gather(*self.lazy_tasks)

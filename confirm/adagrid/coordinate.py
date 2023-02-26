@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 
 async def coordinate(algo, step_id, n_zones):
     report = dict()
-    status, lazy_tasks = await _coordinate(algo, step_id, n_zones, report)
+    status, lazy_tasks, zone_steps = await _coordinate(algo, step_id, n_zones, report)
     report["status"] = status.name
     algo.callback(report, algo.db)
     insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
     lazy_tasks.append(insert_report)
-    return status, lazy_tasks
+    return status, lazy_tasks, zone_steps
 
 
 async def _coordinate(algo, step_id, n_zones, report):
@@ -42,18 +42,19 @@ async def _coordinate(algo, step_id, n_zones, report):
 
     converged, _ = algo.convergence_criterion(None, report)
     if converged:
-        return WorkerStatus.CONVERGED, lazy_tasks
+        return WorkerStatus.CONVERGED, lazy_tasks, None
 
     df = algo.db.get_active_eligible()
     report["n_tiles"] = df.shape[0]
     if df.shape[0] == 0:
-        return WorkerStatus.EMPTY_STEP, lazy_tasks
+        return WorkerStatus.EMPTY_STEP, lazy_tasks, None
 
     df["eligible"] = True
     df["active"] = True
     old_zone_id = df["zone_id"].values.copy()
     new_zone_id = assign_tiles(df.shape[0], n_zones)
     df["zone_id"] = new_zone_id
+    zone_steps = {i: step_id for i, zone in df.groupby("zone_id")}
     old_coordination_id = df["coordination_id"].values[0]
     assert (df["coordination_id"] == old_coordination_id).all()
     df["coordination_id"] += 1
@@ -73,4 +74,4 @@ async def _coordinate(algo, step_id, n_zones, report):
     await asyncio.gather(insert_task, delete_task)
 
     lazy_tasks.append(insert_mapping_task)
-    return WorkerStatus.COORDINATED, lazy_tasks
+    return WorkerStatus.COORDINATED, lazy_tasks, zone_steps

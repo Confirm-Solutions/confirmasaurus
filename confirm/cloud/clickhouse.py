@@ -342,12 +342,18 @@ class Clickhouse:
         return dict(raw)
 
     def n_existing_packets(self, zone_id, step_id):
-        return self.client.query(
+        rows = self.client.query(
             f"""
-            select max(packet_id) + 1 from tiles
+            select packet_id from tiles
                 where zone_id = {zone_id} and step_id = {step_id}
+                order by packet_id desc
+                limit 1
         """
-        ).result_set[0][0]
+        ).result_set
+        if len(rows) == 0:
+            return 0
+        else:
+            return rows[0][0] + 1
 
     def insert_report(self, report):
         self.client.command(
