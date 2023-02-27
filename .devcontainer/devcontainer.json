@@ -76,5 +76,8 @@
     "seccomp=unconfined",
     "--privileged",
     "--init"
-  ]
+  ],
+  "containerEnv": {
+    "GOFLAGS": "-buildvcs=false" // silences an error during gitleaks install.
+  }
 }
