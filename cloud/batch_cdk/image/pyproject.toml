@@ -14,7 +14,7 @@ scipy = "^1.9.3"
 sympy = "^1.11.1"
 matplotlib = "^3.6.2"
 pandas = "^1.5.1"
-jax = "0.3.24"
+jax = "0.4.4"
 numpyro = "^0.10.1"
 jaxlib = [
     {version = "0.3.22", platform = "darwin", source="pypi"},
