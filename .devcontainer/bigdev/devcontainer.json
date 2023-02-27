@@ -1,4 +1,14 @@
 // For format details, see https://aka.ms/devcontainer.json.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
+// NOTE: This is super rusty and hasn't been used in a long long time.
 {
   "name": "bigdev",
   "build": {
@@ -42,8 +52,7 @@
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
   // Use 'postCreateCommand' to run commands after the container is created.
-  // CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
-  "onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh",
+  "onCreateCommand": "./cloud/codespaces/install.sh",
   // Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
   // We are connecting as root because it simplifies things and there is no
   // strong reason to have isolation in this context.

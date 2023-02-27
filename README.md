@@ -11,7 +11,7 @@ Directories:
 - `docs` - documentation.
 - `research` - Research! Stuff in here might be in various of states of rough/polished.
 - `cloud` - [tools for working on cloud infrastructure including AWS and Codespaces.](cloud/README.md)
-- Doing something new? Just make a new top level folder.
+- Doing something new? Just make a new top level folder or a folder in research.
 
 ## Getting set up
 

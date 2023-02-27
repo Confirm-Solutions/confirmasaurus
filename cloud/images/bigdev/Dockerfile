@@ -1,3 +1,13 @@
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
 # Many things here are modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
 # mambaforge image: https://github.com/conda-forge/miniforge-images/blob/master/ubuntu/Dockerfile
