@@ -7,23 +7,29 @@ import numpy as np
 
 import imprint as ip
 
+default_frac_tnbc = 0.54
+
 
 class WD41Null(ip.grid.NullHypothesis):
-    def __init__(self, frac_tnbc):
+    def __init__(self, frac_tnbc=default_frac_tnbc):
         self.frac_tnbc = frac_tnbc
+        self.jit_f = jax.jit(jax.vmap(self.f))
 
-        def f(theta):
-            (
-                pcontrol_tnbc,
-                ptreat_tnbc,
-                pcontrol_hrplus,
-                ptreat_hrplus,
-            ) = jax.scipy.special.expit(theta)
-            control_term = frac_tnbc * pcontrol_tnbc + (1 - frac_tnbc) * pcontrol_hrplus
-            treat_term = frac_tnbc * ptreat_tnbc + (1 - frac_tnbc) * ptreat_hrplus
-            return control_term - treat_term
+    def get_theta(self, theta):
+        return theta
 
-        self.jit_f = jax.jit(jax.vmap(f))
+    def f(self, theta):
+        (
+            pcontrol_tnbc,
+            ptreat_tnbc,
+            pcontrol_hrplus,
+            ptreat_hrplus,
+        ) = jax.scipy.special.expit(self.get_theta(theta))
+        control_term = (
+            self.frac_tnbc * pcontrol_tnbc + (1 - self.frac_tnbc) * pcontrol_hrplus
+        )
+        treat_term = self.frac_tnbc * ptreat_tnbc + (1 - self.frac_tnbc) * ptreat_hrplus
+        return control_term - treat_term
 
     def dist(self, theta):
         return self.jit_f(theta)
@@ -46,7 +52,7 @@ class WD41(ip.Model):
         max_K,
         n_requested_first_stage=150,
         n_requested_second_stage=150,
-        frac_tnbc=0.54,
+        frac_tnbc=default_frac_tnbc,
         dtype=jnp.float32,
     ):
         def split(n_stage):
