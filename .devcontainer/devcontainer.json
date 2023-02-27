@@ -1,12 +1,28 @@
 // For format details, see https://aka.ms/devcontainer.json.
 {
   "name": "smalldev",
-  "image": "ghcr.io/confirm-solutions/smalldev",
 
-  // "build": {
-  //   "context": "..",
-  //   "dockerfile": "./smalldev/Dockerfile"
-  // },
+  "build": {
+    "context": "..",
+    "dockerfile": "../cloud/codespaces/Dockerfile"
+  },
+  
+  "features": {
+    // Copied from https://github.com/devcontainers/images/blob/main/src/base-ubuntu/.devcontainer/devcontainer.json
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": "true",
+      "username": "vscode",
+      "userUid": "1000",
+      "userGid": "1000",
+      "upgradePackages": "true"
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+        "version": "latest",
+        "ppa": "false"
+    },
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/go:1": {}
+  },
 
   // Configure tool-specific properties.
   "customizations": {
@@ -38,13 +54,10 @@
   },
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   // "forwardPorts": [],
-  // Use 'postCreateCommand' to run commands after the container is created.
-  // CONFIRM_IMPRINT_HTTPS is required to make sure that we use an https remote.
-  "onCreateCommand": "CONFIRM_IMPRINT_HTTPS=1 ./install.sh",
-  // Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
+  "onCreateCommand": "./cloud/codespaces/install.sh",
   // We are connecting as root because it simplifies things and there is no
   // strong reason to have isolation in this context.
-  // "remoteUser": "vscode"
+  "remoteUser": "root",
 
   "hostRequirements": {
     "gpu": true
