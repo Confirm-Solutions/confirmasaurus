@@ -77,6 +77,7 @@ async def _process(algo, zone_id, step_id, packet_id, report):
 
 async def new_step(algo, zone_id, new_step_id):
     status, n_packets, report = await _new_step(algo, zone_id, new_step_id)
+    report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
     report["zone_id"] = zone_id
     report["step_id"] = new_step_id

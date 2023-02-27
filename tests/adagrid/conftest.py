@@ -5,6 +5,9 @@ from confirm.adagrid.db import DuckDBTiles
 
 @pytest.fixture()
 def ch_db(request):
+    if not request.config.getoption("--run-slow"):
+        pytest.skip("skipping clickhouse tests because --run-slow was not specified")
+
     import confirm.cloud.clickhouse as ch
 
     db = ch.Clickhouse.connect()

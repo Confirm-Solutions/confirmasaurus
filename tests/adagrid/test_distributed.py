@@ -65,9 +65,9 @@ def test_init_first(both_dbs):
     asyncio.run(_test())
 
 
-def test_init_join(ch_db):
+def test_init_join(both_dbs):
     kwargs = get_test_defaults(ada_validate)
-    kwargs["db"] = ch_db
+    kwargs["db"] = both_dbs
 
     async def _test():
         algo1, _, _ = await init(AdaValidate, 1, 1, kwargs)
@@ -93,8 +93,9 @@ def test_init_join(ch_db):
     asyncio.run(_test())
 
 
-def test_process():
+def test_process(both_dbs):
     kwargs = get_test_defaults(ada_validate)
+    kwargs["db"] = both_dbs
 
     async def _test():
         algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs)
@@ -120,8 +121,9 @@ def test_process():
     asyncio.run(_test())
 
 
-def test_new_step():
+def test_new_step(both_dbs):
     kwargs = get_test_defaults(ada_validate)
+    kwargs["db"] = both_dbs
 
     async def _test():
         algo, _, _ = await init(AdaValidate, 1, 1, kwargs)
@@ -161,8 +163,9 @@ def test_new_step():
     asyncio.run(_test())
 
 
-def test_reload_zone_info():
+def test_reload_zone_info(both_dbs):
     kwargs = get_test_defaults(ada_validate)
+    kwargs["db"] = both_dbs
 
     async def _test():
         algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
@@ -191,7 +194,8 @@ def test_coordinate(both_dbs):
         assert pre_df["zone_id"].unique() == [0]
         assert (pre_df["coordination_id"] == 0).all()
 
-        status, lazy_tasks = await coordinate(algo, 0, 2)
+        status, lazy_tasks, zone_steps = await coordinate(algo, 0, 2)
+        assert zone_steps == {0: 0, 1: 0}
         assert status == WorkerStatus.COORDINATED
         post_df = db.get_results()
         assert (np.sort(post_df["zone_id"].unique()) == [0, 1]).all()
@@ -210,7 +214,8 @@ def test_coordinate(both_dbs):
         ).all()
 
         # Coordinate again to check idempotency
-        status, lazy_tasks = await coordinate(algo, 0, 2)
+        status2, _, _ = await coordinate(algo, 0, 2)
+        assert status == status2
         idem_df = db.get_results()
         pd.testing.assert_frame_equal(
             idem_df.drop("coordination_id", axis=1),
@@ -221,15 +226,15 @@ def test_coordinate(both_dbs):
     asyncio.run(_test())
 
 
-def test_idempotency(duckdb):
+def test_idempotency(both_dbs):
     kwargs = get_test_defaults(ada_validate)
-    kwargs["db"] = duckdb
+    kwargs["db"] = both_dbs
     backend = LocalBackend(n_zones=1)
     backend.run(AdaValidate, kwargs)
-    reports = duckdb.get_reports()
+    reports = both_dbs.get_reports()
     backend.run(AdaValidate, kwargs)
     backend.run(AdaValidate, kwargs)
-    reports2 = duckdb.get_reports()
+    reports2 = both_dbs.get_reports()
     print(reports2.iloc[-2])
     print(reports2.iloc[-1])
     assert reports.shape[0] + 2 == reports2.shape[0]
