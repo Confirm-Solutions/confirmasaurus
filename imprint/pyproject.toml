@@ -20,7 +20,7 @@ sympy = "^1.11.1"
 matplotlib = "^3.6.3"
 pandas = "^1.5.3"
 jax = "0.3.24"
-numpyro = "^0.10.1"
+numpyro = "^0.11.0"
 jaxlib = [
     { version = "0.3.22", platform = "darwin", source = "pypi" },
     { version = "0.3.24+cuda11.cudnn82", platform = "linux" },
