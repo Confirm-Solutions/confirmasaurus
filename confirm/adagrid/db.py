@@ -394,6 +394,116 @@ class DuckDBTiles:
     def get_zone_mapping(self):
         return self.con.execute("select * from zone_mapping").df()
 
+    async def verify(db):
+        duplicate_tiles = db.con.query(
+            "select id from tiles group by id having count(*) > 1"
+        ).df()
+        if len(duplicate_tiles) > 0:
+            raise ValueError(f"Duplicate tiles: {duplicate_tiles}")
+
+        duplicate_results = db.con.query(
+            "select id from results group by id having count(*) > 1"
+        ).df()
+        if len(duplicate_results) > 0:
+            raise ValueError(f"Duplicate results: {duplicate_results}")
+
+        duplicate_done = db.con.query(
+            "select id from done group by id having count(*) > 1"
+        ).df()
+        if len(duplicate_done) > 0:
+            raise ValueError(f"Duplicate done: {duplicate_done}")
+
+        results_without_tiles = db.con.query(
+            """
+        select id from results
+            where id not in (select id from tiles)
+        """
+        ).df()
+        if len(results_without_tiles) > 0:
+            raise ValueError(
+                "Rows in results without corresponding rows in tiles:"
+                f" {results_without_tiles}"
+            )
+
+        tiles_without_results = db.con.query(
+            """
+        select id from tiles
+            where id not in (select id from results)
+        """
+        ).df()
+        if len(tiles_without_results) > 0:
+            raise ValueError(
+                "Rows in tiles without corresponding rows in results:"
+                f" {tiles_without_results}"
+            )
+
+        tiles_without_parents = db.con.query(
+            """
+        select parent_id, id from tiles
+            where parent_id not in (select id from done)
+        """
+        ).df()
+        if len(tiles_without_parents) > 0:
+            raise ValueError(f"tiles without parents: {tiles_without_parents}")
+
+        tiles_with_active_or_eligible_parents = db.con.query(
+            """
+        select parent_id, id from tiles
+            where parent_id in 
+                (select id from results where active=true or eligible=true)
+        """
+        ).df()
+        if len(tiles_with_active_or_eligible_parents) > 0:
+            raise ValueError(
+                f"tiles with active parents: {tiles_with_active_or_eligible_parents}"
+            )
+
+        inactive_tiles_with_no_children = db.con.query(
+            """
+        select id from tiles
+            where 
+                active=false and
+                id not in (select parent_id from tiles)
+        """
+        ).df()
+        if len(inactive_tiles_with_no_children) > 0:
+            raise ValueError(
+                f"inactive tiles with no children: {inactive_tiles_with_no_children}"
+            )
+
+        refined_tiles_with_incorrect_child_count = db.con.query(
+            """
+        select d.id, count(*) as n_children, max(refine) as n_expected
+            from done d
+            left join tiles t
+                on t.parent_id = d.id
+            where refine > 0
+            group by d.id
+            having count(*) != max(refine)
+        """
+        ).df()
+        if len(refined_tiles_with_incorrect_child_count) > 0:
+            raise ValueError(
+                "refined tiles with wrong number of children:"
+                f" {refined_tiles_with_incorrect_child_count}"
+            )
+
+        deepened_tiles_with_incorrect_child_count = db.con.query(
+            """
+        select d.id, count(*) from done d
+            left join tiles t
+                on t.parent_id = d.id
+            where deepen=true
+            group by d.id
+            having count(*) != 1
+        """
+        ).df()
+        if len(deepened_tiles_with_incorrect_child_count) > 0:
+            raise ValueError(
+                "deepened tiles with wrong number of children:"
+                f" {deepened_tiles_with_incorrect_child_count}"
+            )
+
     def close(self) -> None:
         self.con.close()
 
@@ -408,14 +518,13 @@ class DuckDBTiles:
                     id UBIGINT,
                     active BOOL,
                     finisher_id UINTEGER,
-                    refine BOOL,
-                    deepen BOOL,
+                    refine UINTEGER,
+                    deepen UINTEGER,
                     split BOOL)
             """
         )
-        # TODO: should we copy the clickhouse code to put pre-existing parents
-        # in done?
-        self.con.execute("insert into done values (0, 0, 0, 0, 0, 0, 0, 0, 0)")
+        absent_parents_df = get_absent_parents(df)  # noqa
+        self.con.execute("insert into done select * from absent_parents_df")
         self.con.execute(
             """
             create table reports (json TEXT)
@@ -434,3 +543,23 @@ class DuckDBTiles:
             The tile database.
         """
         return DuckDBTiles(duckdb.connect(path))
+
+
+def get_absent_parents(tiles_df):
+    # these tiles have no parents. poor sad tiles :(
+    # we need to put these absent parents into the done table
+    absent_parents = pd.DataFrame(
+        tiles_df["parent_id"].unique()[:, None], columns=["id"]
+    )
+    for c in [
+        "zone_id",
+        "step_id",
+        "packet_id",
+        "active",
+        "finisher_id",
+        "refine",
+        "deepen",
+        "split",
+    ]:
+        absent_parents[c] = 0
+    return absent_parents

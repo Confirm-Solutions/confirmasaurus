@@ -8,6 +8,7 @@ import pandas as pd
 import imprint.timer
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import _launch_task
+from imprint.grid import Grid
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,8 @@ async def new_step(algo, zone_id, new_step_id):
     report["n_packets"] = n_packets
     insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
     algo.callback(report, algo.db)
-    return status, n_packets, insert_report
+
+    return status, n_packets, [insert_report]
 
 
 async def _new_step(algo, zone_id, new_step_id):
@@ -120,6 +122,13 @@ async def _new_step(algo, zone_id, new_step_id):
 
     selection_df["finisher_id"] = algo.cfg["worker_id"]
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
+
+    # NOTE: this is a pathway towards eventually having variable splitting
+    # logic?
+    dim = Grid(selection_df, None).d
+    selection_df["refine"] = selection_df["refine"].astype(int) * (2**dim)
+    selection_df["deepen"] = selection_df["deepen"].astype(int) * 2
+
     if "split" not in selection_df.columns:
         selection_df["split"] = False
     done_cols = [
@@ -135,8 +144,8 @@ async def _new_step(algo, zone_id, new_step_id):
     ]
     done_df = selection_df[done_cols]
 
-    n_refine = selection_df["refine"].sum()
-    n_deepen = selection_df["deepen"].sum()
+    n_refine = (selection_df["refine"] > 0).sum()
+    n_deepen = (selection_df["deepen"] > 0).sum()
     report.update(
         dict(
             n_refine=n_refine,
@@ -168,8 +177,8 @@ async def _new_step(algo, zone_id, new_step_id):
         inactive_df = g_new.df[~g_new.df["active"]].copy()
         inactive_df["packet_id"] = np.int32(-1)
         algo.db.insert_tiles(inactive_df)
-        inactive_df["refine"] = False
-        inactive_df["deepen"] = False
+        inactive_df["refine"] = 0
+        inactive_df["deepen"] = 0
         inactive_df["split"] = True
         inactive_df["finisher_id"] = algo.cfg["worker_id"]
         algo.db.finish(inactive_df[done_cols])
@@ -208,7 +217,9 @@ async def _new_step(algo, zone_id, new_step_id):
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):
-    g_deepen_in = imprint.grid.Grid(df.loc[df["deepen"] & (df["K"] < max_K)], worker_id)
+    g_deepen_in = imprint.grid.Grid(
+        df.loc[(df["deepen"] > 0) & (df["K"] < max_K)], worker_id
+    )
     g_deepen = imprint.grid._raw_init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
@@ -223,7 +234,7 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
     g_deepen.df["coordination_id"] = df["coordination_id"].values[0]
 
-    g_refine_in = imprint.grid.Grid(df.loc[df["refine"]], worker_id)
+    g_refine_in = imprint.grid.Grid(df.loc[df["refine"] > 0], worker_id)
     inherit_cols = ["K", "coordination_id"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.
@@ -235,21 +246,3 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     out = g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols)
     out.df.loc[out._which_alternative(), "active"] = False
     return out
-
-
-def verify_adagrid(db):
-    _ = db.get_tiles()
-    results_df = db.get_results()
-
-    duplicate_ids = results_df["id"].value_counts()
-    assert duplicate_ids.max() == 1
-
-    inactive_ids = results_df.loc[~results_df["active"], "id"]
-    assert inactive_ids.unique().shape == inactive_ids.shape
-
-    parents = results_df["parent_id"].unique()
-    parents_that_dont_exist = np.setdiff1d(parents, inactive_ids)
-    inactive_tiles_with_no_children = np.setdiff1d(inactive_ids, parents)
-    assert parents_that_dont_exist.shape[0] == 1
-    assert parents_that_dont_exist[0] == 0
-    assert inactive_tiles_with_no_children.shape[0] == 0

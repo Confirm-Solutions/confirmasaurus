@@ -173,8 +173,13 @@ class LocalBackend:
             first_step = last_step + 1
             next_coord += every
 
+        # TODO: currently we only verify at the end, should we do it more often?
+        verify_task = asyncio.create_task(algo.db.verify())
+
         await asyncio.gather(*self.lazy_tasks)
         self.lazy_tasks = []
+
+        await verify_task
         return algo.db
 
     async def _run_zone(self, algo, zone_id, start_step_id, end_step_id):
@@ -185,8 +190,8 @@ class LocalBackend:
             f"through step {end_step_id - 1}."
         )
         for step_id in range(start_step_id, end_step_id):
-            status, n_packets, report_task = await new_step(algo, zone_id, step_id)
-            self.lazy_tasks.append(report_task)
+            status, n_packets, lazy_tasks = await new_step(algo, zone_id, step_id)
+            self.lazy_tasks.extend(lazy_tasks)
             self.lazy_tasks.extend(
                 await process_packet_set(
                     algo, [(zone_id, step_id, i) for i in range(n_packets)]

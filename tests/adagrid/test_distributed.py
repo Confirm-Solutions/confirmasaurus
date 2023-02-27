@@ -27,6 +27,7 @@ def get_test_defaults(f):
         if v.default is not inspect.Parameter.empty
     }
     kwargs["prod"] = False
+    kwargs["verify"] = True
     kwargs["model_type"] = ZTest1D
     kwargs["g"] = ip.cartesian_grid(
         theta_min=[-1], theta_max=[1], n=[10], null_hypos=[ip.hypo("x0 < 0")]
@@ -235,8 +236,6 @@ def test_idempotency(both_dbs):
     backend.run(AdaValidate, kwargs)
     backend.run(AdaValidate, kwargs)
     reports2 = both_dbs.get_reports()
-    print(reports2.iloc[-2])
-    print(reports2.iloc[-1])
     assert reports.shape[0] + 2 == reports2.shape[0]
     drop_cols = [c for c in reports2.columns if "runtime" in c]
     pd.testing.assert_series_equal(

@@ -20,6 +20,7 @@ import pyarrow
 
 import confirm.adagrid.json as json
 import imprint.log
+from confirm.adagrid.db import get_absent_parents
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
 
@@ -526,6 +527,152 @@ class Clickhouse:
         """
         self.client.command(cmd)
 
+    async def verify(self):
+        async def duplicate_tiles():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                "select id from tiles group by id having count(*) > 1",
+            )
+            if len(df) > 0:
+                raise ValueError(f"Duplicate tiles: {df}")
+
+        async def duplicate_results():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                "select id from results group by id having count(*) > 1",
+            )
+            if len(df) > 0:
+                raise ValueError(f"Duplicate results: {df}")
+
+        async def duplicate_done():
+            df = _query_df(
+                self.client, "select id from done group by id having count(*) > 1"
+            )
+            if len(df) > 0:
+                raise ValueError(f"Duplicate done: {df}")
+
+        async def results_without_tiles():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select id from results
+                    where id not in (select id from tiles)
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(
+                    f"Rows in results without corresponding rows in tiles: {df}"
+                )
+
+        async def tiles_without_results():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select id from tiles
+                    where id not in (select id from results)
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(
+                    f"Rows in tiles without corresponding rows in results: {df}"
+                )
+
+        async def tiles_without_parents():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select parent_id, id from tiles
+                    where parent_id not in (select id from done)
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(f"tiles without parents: {df}")
+
+        async def tiles_with_active_or_eligible_parents():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select parent_id, id from tiles
+                    where parent_id in (
+                        select id from results 
+                            where (active=true and id not in (select id from inactive))
+                                or (eligible=true and id not in (select id from done))
+                    )
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(f"tiles with active parents: {df}")
+
+        async def inactive_tiles_with_no_children():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select id from tiles
+                    where 
+                        (active=false or id in (select id from inactive))
+                        and id not in (select parent_id from tiles)
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(f"inactive tiles with no children: {df}")
+
+        async def refined_tiles_with_incorrect_child_count():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select d.id, count(*) as n_children, max(refine) as n_expected
+                    from done d
+                    left join tiles t
+                        on t.parent_id = d.id
+                    where refine > 0
+                    group by d.id
+                    having count(*) != max(refine)
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(
+                    "refined tiles with wrong number of children:" f" {df}"
+                )
+
+        async def deepened_tiles_with_incorrect_child_count():
+            df = await asyncio.to_thread(
+                _query_df,
+                self.client,
+                """
+                select d.id, count(*) from done d
+                    left join tiles t
+                        on t.parent_id = d.id
+                    where deepen=true
+                    group by d.id
+                    having count(*) != 1
+                """,
+            )
+            if len(df) > 0:
+                raise ValueError(
+                    "deepened tiles with wrong number of children:" f" {df}"
+                )
+
+        await asyncio.gather(
+            duplicate_tiles(),
+            duplicate_results(),
+            duplicate_done(),
+            results_without_tiles(),
+            tiles_without_results(),
+            tiles_without_parents(),
+            tiles_with_active_or_eligible_parents(),
+            inactive_tiles_with_no_children(),
+            refined_tiles_with_incorrect_child_count(),
+            deepened_tiles_with_incorrect_child_count(),
+        )
+
     def close(self):
         self.client.close()
 
@@ -551,8 +698,8 @@ class Clickhouse:
                         id {id_type},
                         active Bool,
                         finisher_id UInt32,
-                        refine Bool,
-                        deepen Bool,
+                        refine UInt32,
+                        deepen UInt32,
                         split Bool)
                     engine = MergeTree() 
                     order by (zone_id, step_id, packet_id, id)
@@ -581,23 +728,6 @@ class Clickhouse:
             )
         )
 
-        # these tiles have no parents. poor sad tiles :(
-        # we need to put these absent parents into the done table
-        absent_parents = pd.DataFrame(
-            tiles_df["parent_id"].unique()[:, None], columns=["id"]
-        )
-        for c in [
-            "zone_id",
-            "step_id",
-            "packet_id",
-            "active",
-            "finisher_id",
-            "refine",
-            "deepen",
-            "split",
-        ]:
-            absent_parents[c] = 0
-
         async def _create_inactive():
             await create_done
             await asyncio.to_thread(
@@ -619,6 +749,8 @@ class Clickhouse:
 
         # Store a reference to the task so that it doesn't get garbage collected.
         insert_tiles_task = asyncio.create_task(_insert_tiles())
+
+        absent_parents = get_absent_parents(tiles_df)
 
         async def _insert_done():
             await create_done
