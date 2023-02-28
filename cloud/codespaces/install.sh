@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Install SOPS and decrypt secrets.
+go install go.mozilla.org/sops/cmd/sops@latest
+/go/bin/sops -d --output .env test_secrets.enc.env
+
 # We don't use poetry envs. The caller should have already activated a conda
 # environment.
 poetry config virtualenvs.create false --local
@@ -18,10 +22,4 @@ pre-commit install --install-hooks
 
 # Set up our imprint remote so we can use subtree. On Codespaces, we need
 # https. Locally, we use ssh.
-if [[ -n "$CONFIRM_IMPRINT_HTTPS" ]]; then
-    git remote add -f imprint https://github.com/Confirm-Solutions/imprint.git
-fi
-
-if [[ -n "$CONFIRM_IMPRINT_SSH" ]]; then
-    git remote add -f imprint git@github.com:Confirm-Solutions/imprint.git
-fi
+git remote add -f imprint https://github.com/Confirm-Solutions/imprint.git || true
