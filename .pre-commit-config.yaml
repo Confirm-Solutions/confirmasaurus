@@ -6,17 +6,17 @@ repos:
   # current use causing the session to be lost. 3) there's no reason, those
   # notebooks are exploration anyway.
   - repo: https://github.com/psf/black
-    rev: 22.12.0
+    rev: 23.1.0
     hooks:
       - id: black-jupyter
         language_version: python3
         exclude: research/
   - repo: https://github.com/psf/black
-    rev: 22.12.0
+    rev: 23.1.0
     hooks:
       - id: black
   - repo: https://github.com/pycqa/flake8
-    rev: 5.0.4
+    rev: 6.0.0
     hooks:
       - id: flake8
         exclude: research/archive

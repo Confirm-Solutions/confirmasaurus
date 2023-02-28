@@ -41,7 +41,10 @@ optional = true
 [tool.poetry.group.cloud.dependencies]
 pyarrow = "^10.0.1"
 boto3 = "^1.26.81"
-cloudpickle = "2.0.0"
+cloudpickle = [
+    { version = ">=2.0.0,<2.1.0", python = "<3.11" },
+    { version = ">=2.2.0,<2.3.0", python = ">=3.11" },
+]
 clickhouse-connect = "^0.5.13"
 python-dotenv = "^0.21.1"
 
@@ -49,7 +52,7 @@ python-dotenv = "^0.21.1"
 optional = true
 
 [tool.poetry.group.dev.dependencies]
-black = {extras = ["jupyter"], version = "^22.12.0"}
+black = {extras = ["jupyter"], version = "^23.1.0"}
 line-profiler = "^4.0.2"
 jupytext = "^1.14.5"
 reorder-python-imports = "^3.9.0"
