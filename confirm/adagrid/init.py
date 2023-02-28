@@ -18,10 +18,12 @@ from confirm.adagrid.db import DuckDBTiles
 logger = logging.getLogger(__name__)
 
 
-async def init(algo_type, worker_id, n_zones, kwargs):
+async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     db = kwargs.get("db", None)
     g = kwargs.get("g", None)
     imprint.log.worker_id.set(worker_id)
+
+    assert (not is_leader) or (db is not None)
 
     if db is None and g is None:
         raise ValueError("If no grid is provided, a database must be provided.")
@@ -52,18 +54,21 @@ async def init(algo_type, worker_id, n_zones, kwargs):
         )
     ]
 
-    if g is not None and not tiles_exists:
+    if g is not None and not tiles_exists and is_leader:
         wait_for_grid, incomplete_packets, zone_steps = await init_grid(
             g, db, cfg, n_zones
         )
         wait_for.extend(wait_for_grid)
-    else:
+    elif is_leader:
         if g is not None:
             logger.warning(
                 "Ignoring grid because tiles already exist in the provided database."
             )
         incomplete_packets = db.get_incomplete_packets()
         zone_steps = db.get_zone_steps()
+    else:
+        incomplete_packets = None
+        zone_steps = None
 
     model_kwargs = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](

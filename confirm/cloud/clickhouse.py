@@ -374,7 +374,7 @@ class Clickhouse:
         self._results_table_exists = True
 
     def finish(self, which):
-        logger.debug(f"finish: {which.head()}")
+        logger.debug(f"finishing {which.shape[0]} tiles")
         _insert_df(self.client, "done", which)
 
     def get_packet(self, zone_id, step_id, packet_id):
@@ -767,7 +767,14 @@ class Clickhouse:
             insert_done_task,
         )
 
-    def connect(job_id: int = None, host=None, port=None, username=None, password=None):
+    def connect(
+        job_id: int = None,
+        host=None,
+        port=None,
+        username=None,
+        password=None,
+        no_create=False,
+    ):
         """
         Connect to a Clickhouse server
 
@@ -809,9 +816,10 @@ class Clickhouse:
                 )
             job_id = uuid.uuid4().hex
 
-        # Create job_id database if it doesn't exist
-        client = clickhouse_connect.get_client(**config)
-        client.command(f"create database if not exists {job_id}")
+        if not no_create:
+            # Create job_id database if it doesn't exist
+            client = clickhouse_connect.get_client(**config)
+            client.command(f"create database if not exists {job_id}")
 
         connection_details = get_ch_config(host, port, username, password, job_id)
         client = clickhouse_connect.get_client(**connection_details)

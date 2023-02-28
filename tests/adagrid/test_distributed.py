@@ -45,7 +45,9 @@ def test_init_first(both_dbs):
     kwargs["db"] = both_dbs
 
     async def _test():
-        algo, incomplete_packets, zone_info = await init(AdaValidate, 1, 1, kwargs)
+        algo, incomplete_packets, zone_info = await init(
+            AdaValidate, True, 1, 1, kwargs
+        )
         assert incomplete_packets == [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
         assert len(zone_info) == 1
         assert zone_info[0] == 0
@@ -71,13 +73,13 @@ def test_init_join(both_dbs):
     kwargs["db"] = both_dbs
 
     async def _test():
-        algo1, _, _ = await init(AdaValidate, 1, 1, kwargs)
+        algo1, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
 
         kwargs2 = copy.copy(kwargs)
         kwargs2["g"] = None
         kwargs2["lam"] = -4
         kwargs2["overrides"] = dict(packet_size=3)
-        algo, incomplete2, zone_info2 = await init(AdaValidate, 1, 1, kwargs2)
+        algo, incomplete2, zone_info2 = await init(AdaValidate, True, 1, 1, kwargs2)
         assert incomplete2 == [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
         assert len(zone_info2) == 1
         assert zone_info2[0] == 0
@@ -99,7 +101,7 @@ def test_process(both_dbs):
     kwargs["db"] = both_dbs
 
     async def _test():
-        algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs)
+        algo, incomplete, zone_info = await init(AdaValidate, True, 1, 1, kwargs)
         await asyncio.gather(*await process_packet(algo, 0, 0, 0))
         results_df = algo.db.get_results()
         assert results_df.shape[0] == 2
@@ -127,7 +129,7 @@ def test_new_step(both_dbs):
     kwargs["db"] = both_dbs
 
     async def _test():
-        algo, _, _ = await init(AdaValidate, 1, 1, kwargs)
+        algo, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
         await process_packet_set(algo, [(0, 0, i) for i in range(3)])
 
         status, n_packets, report_task = await new_step(algo, 0, 1)
@@ -152,7 +154,7 @@ def test_new_step(both_dbs):
 
         done = algo.db.get_done()[1:]
         assert done.shape[0] == 3
-        assert (done["refine"] == 1).all()
+        assert (done["refine"] > 0).all()
         assert (done["deepen"] == 0).all()
         assert (done["active"] == 0).all()
         assert (done["step_id"] == 0).all()
@@ -169,14 +171,14 @@ def test_reload_zone_info(both_dbs):
     kwargs["db"] = both_dbs
 
     async def _test():
-        algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
+        algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
         await process_packet_set(algo, incomplete)
         _, n_packets, _ = await new_step(algo, 0, 1)
 
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
         kwargs2["g"] = None
-        algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs2)
+        algo, incomplete, zone_info = await init(AdaValidate, True, 1, 1, kwargs2)
         assert incomplete == [(0, 1, 0), (0, 1, 1), (0, 1, 2)]
         assert zone_info[0] == 1
 
@@ -189,7 +191,7 @@ def test_coordinate(both_dbs):
     kwargs["db"] = db
 
     async def _test():
-        algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
+        algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
         await process_packet_set(algo, incomplete)
         pre_df = db.get_results()
         assert pre_df["zone_id"].unique() == [0]

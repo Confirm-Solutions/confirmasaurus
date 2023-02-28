@@ -10,14 +10,21 @@ test_validation_nonadagrid_using_adagrid. This is useful for several reasons:
   
 # Distributed adagrid and database backend
 
-## Principles and goals:
+## Design Principles and goals:
 - Simplicity.
-- Append-only and no updates. This makes the "story" of an adagrid run very
-  clear after the fact which is useful both for replicability and debugging.
+- Append-only and no updates to the extent possible. This makes the "story" of
+  an adagrid run very clear after the fact which is useful both for
+  replicability and debugging.
 - Results are written to DB ASAP. This avoids data loss.
-- Minimize coordination overhead, maximize performance!
-- No leader node. I don't want to have to be responsible for keeping the launch
-  node running.
+- Minimize communication overhead, maximize performance! Keep communication
+  isolated to the coordination stage.
+- Assume that the DB does not lose inserts
+- Good to separate computation from communications.
+- Idempotency is the most important property of each stage in the pipeline. -->
+  we should be able to kill any stage at any point and then re-run it and get
+  the same answer.
+- Define properties that the system should have at each stage and verify those
+  properties as much as possible.
 
 ## Databases for Adagrid
 
@@ -124,7 +131,7 @@ class LocalBackend:
         # it's okay to use input_cfg['n_zones'] here because it's only used at
         # the start of a job.
         algo, incomplete_packets, zone_steps = await init(
-            algo_type, 1, self.input_cfg["n_zones"], kwargs
+            algo_type, True, 1, self.input_cfg["n_zones"], kwargs
         )
         n_zones = algo.cfg["n_zones"]
         incomplete_packets = np.array(incomplete_packets)
@@ -224,60 +231,6 @@ def maybe_start_event_loop(coro):
         return asyncio.run_coroutine_threadsafe(coro, loop).result()
     else:
         return asyncio.run(coro)
-
-
-class ModalBackend:
-    def __init__(self, n_workers=1):
-        self.n_workers = n_workers
-
-    #     async def run(self, ada):
-    #         import confirm.cloud.clickhouse as ch
-
-    #         model_type = ada.model_type
-    #         algo_type = ada.algo_type
-    #         callback = ada.callbackk
-    #         job_id = ada.db.job_id
-
-    #         def _worker():
-    #             db = ch.Clickhouse.connect(job_id=job_id)
-    #             runner = Adagrid(model_type, None, db, algo_type, callback,
-    #                dict(), dict())
-    #             runner._run_local()
-
-    # async def run(self, ada, initial_worker_ids):
-    #     import modal
-    #     import confirm.cloud.clickhouse as ch
-    #     import confirm.cloud.modal_util as modal_util
-
-    #     assert len(initial_worker_ids) == self.n_workers
-
-    #     job_id = ada.db.job_id
-    #     algo_type = ada.algo_type
-    #     pass_params = dict(
-    #         callback=ada.callback,
-    #         model_type=ada.model_type,
-    #         overrides=dict(),
-    #         backend=LocalBackend(),
-    #         g=None,
-    #     )
-
-    #     stub = modal.Stub(f"{self.job_name_prefix}_{job_id}")
-
-    #     p = modal_util.get_defaults()
-    #     p.update(dict(gpu=self.gpu, serialized=True))
-
-    #     @stub.function(**p)
-    #     def _modal_adagrid_worker(i):
-    #         modal_util.setup_env()
-    #         kwargs = copy.deepcopy(pass_params)
-    #         kwargs["db"] = ch.Clickhouse.connect(job_id=job_id)
-    #         kwargs["worker_id"] = initial_worker_ids[i]
-    #         asyncio.run(init_and_run(algo_type, **kwargs))
-
-    #     logger.info(f"Launching Modal job with {self.n_workers} workers")
-    #     with stub.run(show_progress=False):
-    #         _ = list(_modal_adagrid_worker.map(range(self.n_workers)))
-    #     return ada.db
 
 
 def print_report(report, _db):

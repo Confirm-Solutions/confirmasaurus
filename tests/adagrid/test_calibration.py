@@ -113,18 +113,15 @@ def test_solo_coordinations(snapshot):
     )
 
 
-def four_zones_tester(db, snapshot):
+def four_zones_tester(db, snapshot, backend=None):
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
+        if backend is None:
+            backend = ada.LocalBackend(n_zones=4, coordinate_every=1)
         db = ada.ada_calibrate(
-            ZTest1D,
-            g=g,
-            db=db,
-            nB=5,
-            tile_batch_size=1,
-            backend=ada.LocalBackend(n_zones=4, coordinate_every=1),
+            ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, backend=backend
         )
 
     ip.testing.check_imprint_results(
@@ -145,19 +142,11 @@ def test_four_zones_ch(ch_db, snapshot):
 
 @pytest.mark.slow
 def test_calibration_clickhouse_distributed(snapshot, ch_db):
-    snapshot.set_test_name("test_calibration")
-    g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    db = ada.ada_calibrate(
-        ZTest1D,
-        g=g,
-        db=ch_db,
-        nB=5,
-        packet_size=1,
-        tile_batch_size=1,
-        backend=ada.ModalBackend(n_workers=4, coordinate_every=1, gpu=False),
-    )
-    ip.testing.check_imprint_results(
-        ip.Grid(db.get_results(), None).prune_inactive(), snapshot
+    snapshot.set_test_name("test_four_zones")
+    four_zones_tester(
+        ch_db,
+        snapshot,
+        backend=ada.ModalBackend(n_zones=4, coordinate_every=1, gpu=False),
     )
 
 
