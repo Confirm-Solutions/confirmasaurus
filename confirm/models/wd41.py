@@ -54,7 +54,10 @@ class WD41(ip.Model):
         n_requested_second_stage=150,
         frac_tnbc=default_frac_tnbc,
         dtype=jnp.float32,
+        ignore_intersection=False,
     ):
+        self.ignore_intersection = ignore_intersection
+
         def split(n_stage):
             return (
                 int(np.floor((n_stage * frac_tnbc) * 0.5)),
@@ -89,12 +92,18 @@ class WD41(ip.Model):
         self.unifs = jax.random.uniform(
             key, (max_K, self.n_first_stage + self.n_second_stage), dtype=dtype
         )
+
+        def sim_wrapper(unifs, theta, detailed):
+            p = jax.scipy.special.expit(theta)
+            return self.sim(
+                unifs, p[..., 0], p[..., 1], p[..., 2], p[..., 3], detailed=detailed
+            )
+
         self.sim_jit = jax.vmap(
             jax.vmap(
-                jax.jit(self.sim, static_argnames=("detailed",)),
-                in_axes=(0, None, None, None, None),
+                jax.jit(sim_wrapper, static_argnums=(2,)), in_axes=(0, None, None)
             ),
-            in_axes=(None, 0, 0, 0, 0),
+            in_axes=(None, 0, None),
         )
 
         self.null_hypos = [
@@ -189,12 +198,14 @@ class WD41(ip.Model):
         # 0.1 difference in effect size
         tnbc_effect = phattnbctreat - phattnbccontrol
         hrplus_effect = phathrplustreat - phathrpluscontrol
-        effectsize_difference = tnbc_effect - hrplus_effect
-        # TODO: investigate this dropping logic. Section 3.4, ctrl-f "epsilon"
-        # TODO: this is wrong and should be compared to the weighted average
-        # treatment effects instead of the hrplus treatment effect??
-        hypofull_live = effectsize_difference <= 0.1
-        hypotnbc_live = effectsize_difference >= -0.1
+        full_effect = (
+            self.true_frac_tnbc * tnbc_effect
+            + (1 - self.true_frac_tnbc) * hrplus_effect
+        )
+        effect_diff = tnbc_effect - full_effect
+
+        hypofull_live = effect_diff <= 0.1
+        hypotnbc_live = effect_diff >= -0.1
 
         return (
             self.ztnbc(phattnbccontrol, phattnbctreat, self.n_tnbc_first_stage_per_arm),
@@ -303,8 +314,16 @@ class WD41(ip.Model):
 
         HI_zcombined = (HI_zfirst + HI_zsecond) / jnp.sqrt(2)
 
-        tnbc_stat = jax.scipy.stats.norm.cdf(-jnp.minimum(hyptnbc_zstat, HI_zcombined))
-        full_stat = jax.scipy.stats.norm.cdf(-jnp.minimum(hypfull_zstat, HI_zcombined))
+        if self.ignore_intersection:
+            tnbc_stat = jax.scipy.stats.norm.cdf(-hyptnbc_zstat)
+            full_stat = jax.scipy.stats.norm.cdf(-hypfull_zstat)
+        else:
+            tnbc_stat = jax.scipy.stats.norm.cdf(
+                -jnp.minimum(hyptnbc_zstat, HI_zcombined)
+            )
+            full_stat = jax.scipy.stats.norm.cdf(
+                -jnp.minimum(hypfull_zstat, HI_zcombined)
+            )
 
         # # Now we resolve which elementary statistics actually reject the null
         # hypothesis
@@ -323,16 +342,18 @@ class WD41(ip.Model):
             return dict(
                 hypotnbc_live=hypotnbc_live,
                 hypofull_live=hypofull_live,
+                hyptnbc_zstat=hyptnbc_zstat,
+                hypfull_zstat=hypfull_zstat,
+                HI_zcombined=HI_zcombined,
                 tnbc_stat=tnbc_stat,
                 full_stat=full_stat,
                 ztnbc_stage1=ztnbc_stage1,
                 ztnbc_stage2=ztnbc_stage2,
                 zfull_stage1=zfull_stage1,
                 zfull_stage2=zfull_stage2,
-                HI_pfirst=HI_pfirst,
-                HI_zfirst=HI_zfirst,
-                HI_zsecond=HI_zsecond,
-                HI_zcombined=HI_zcombined,
+                # HI_pfirst=HI_pfirst,
+                # HI_zfirst=HI_zfirst,
+                # HI_zsecond=HI_zsecond,
             )
         else:
             return tnbc_stat, full_stat
@@ -345,10 +366,8 @@ class WD41(ip.Model):
         null_truth: jnp.ndarray,
         detailed: bool = False,
     ):
-        p = jax.scipy.special.expit(theta)
-        subsample = self.unifs[begin_sim:end_sim]
         tnbc_stat, full_stat = self.sim_jit(
-            subsample, p[:, 0], p[:, 1], p[:, 2], p[:, 3]
+            self.unifs[begin_sim:end_sim], theta, detailed
         )
         rejected = np.stack((tnbc_stat, full_stat), axis=-1)
         stat = jnp.min(jnp.where(null_truth[:, None], rejected, 1e9), axis=-1)
