@@ -152,14 +152,14 @@ def test_new_step(both_dbs):
         assert (new_tiles["step_id"] == 1).all()
         assert (new_tiles["creator_id"] == algo.cfg["worker_id"]).all()
 
-        done = algo.db.get_done()[1:]
+        done = algo.db.get_done().sort_values(by=["id"])[1:]
         assert done.shape[0] == 3
         assert (done["refine"] > 0).all()
         assert (done["deepen"] == 0).all()
         assert (done["active"] == 0).all()
         assert (done["step_id"] == 0).all()
 
-        report = await report_task
+        report = await report_task[0]
         assert report["status"] == "NEW_STEP"
         assert report["n_refine"] == 3
 

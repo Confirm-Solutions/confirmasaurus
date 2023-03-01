@@ -197,8 +197,8 @@ class DBTester:
     def test_get_packet(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
 
-        pd_work = pd_tiles.get_packet(0, 0, 17, 5)
-        db_work = db_tiles.get_packet(0, 0, 17, 5)
+        pd_work = pd_tiles.get_packet(0, 17, 5)
+        db_work = db_tiles.get_packet(0, 17, 5)
         assert_frame_equal_special(pd_work, db_work)
 
     def test_bootstrap_lamss(self):

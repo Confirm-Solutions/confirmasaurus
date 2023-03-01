@@ -581,7 +581,10 @@ class Clickhouse:
                 self.client,
                 """
                 select id from tiles
-                    where id not in (select id from results)
+                -- packet_id >= 0 excludes tiles that were split before
+                -- being submitted.
+                    where packet_id >= 0
+                        id not in (select id from results)
                 """,
             )
             if len(df) > 0:

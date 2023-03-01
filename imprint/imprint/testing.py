@@ -1,4 +1,19 @@
 """
+# Testing tools
+
+## Why is this here instead of conftest.py?
+
+Typically, this kind of testing support code would go in conftest.py if imprint
+were the only place in which that testing support code were used. But, we're
+also importing these testing tools from other packages/repos internal to
+Confirm. So, it makes sense to keep it in a separate module for importability.
+Then we can load it as a pytest plugin
+(https://docs.pytest.org/en/7.1.x/how-to/writing_plugins.html) with:
+`pytest -p imprint.testing`
+This flag is included in the default pytest configuration in pyproject.toml.
+
+## Snapshot testing
+
 Here you will find tools for snapshot testing. Snapshot testing is a way to
 check that the output of a function is the same as it used to be. This is
 particularly useful for end to end tests where we don't have a comparison point

@@ -111,7 +111,7 @@ class LocalBackend:
         Args:
             n_zones: _description_. Defaults to 1.
             coordinate_every: The number of steps between each distributed coordination.
-                This is ignored for local runs. Defaults to 5.
+                This is ignored when n_zones == 1. Defaults to 5.
         """
         self.lazy_tasks = []
         # self.input_cfg should not be read directly, instead access

@@ -25,9 +25,9 @@ class PandasTiles:
     demonstration.
     """
 
-    tiles_df: pd.DataFrame = None
-    results_df: pd.DataFrame = None
-    done_df: pd.DataFrame = None
+    tiles: pd.DataFrame = None
+    results: pd.DataFrame = None
+    done: pd.DataFrame = None
     reports: List[Dict] = field(default_factory=list)
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
     is_distributed: bool = False
@@ -44,39 +44,39 @@ class PandasTiles:
         )
 
     def _tiles_columns(self) -> List[str]:
-        return self.tiles_df.columns
+        return self.tiles.columns
 
     def _results_columns(self) -> List[str]:
-        return self.results_df.columns
+        return self.results.columns
 
     def does_table_exist(self, table_name: str) -> bool:
         if table_name in ["tiles", "results", "done", "reports"]:
-            return True
+            return getattr(self, table_name) is not None
         return table_name in self._tables
 
     def get_tiles(self) -> pd.DataFrame:
-        return self.tiles_df.reset_index(drop=True)
+        return self.tiles.reset_index(drop=True)
 
     def get_results(self) -> pd.DataFrame:
-        return self.results_df.reset_index(drop=True)
+        return self.results.reset_index(drop=True)
 
     def get_done(self):
-        return self.done_df.reset_index(drop=True)
+        return self.done.reset_index(drop=True)
 
     def get_reports(self):
         return pd.DataFrame(self.reports)
 
     def get_incomplete_packets(self):
-        if self.results_df is None:
-            not_yet_simulated_df = self.tiles_df
+        if self.results is None:
+            not_yet_simulated_df = self.tiles
         else:
-            joined_df = self.tiles_df.set_index("id").merge(
-                self.results_df[["id"]].set_index("id"),
+            joined_df = self.tiles.set_index("id").merge(
+                self.results[["id"]].set_index("id"),
                 on="id",
                 how="left",
                 indicator=True,
             )
-            not_yet_simulated_df = self.tiles_df[joined_df["_merge"] == "left_only"]
+            not_yet_simulated_df = self.tiles[joined_df["_merge"] == "left_only"]
 
         return list(
             map(
@@ -89,7 +89,15 @@ class PandasTiles:
         )
 
     def get_zone_steps(self):
-        return self.tiles_df.groupby("zone_id")["step_id"].max().to_dict()
+        return self.tiles.groupby("zone_id")["step_id"].max().to_dict()
+
+    def n_existing_packets(self, zone_id, step_id):
+        return (
+            self.tiles[
+                (self.tiles["zone_id"] == zone_id) & (self.tiles["step_id"] == step_id)
+            ]["packet_id"].max()
+            + 1
+        )
 
     def insert_report(self, report):
         self.reports.append(report)
@@ -98,55 +106,58 @@ class PandasTiles:
     def insert_tiles(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
-        self.tiles_df = pd.concat((self.tiles_df, df), axis=0)
+        self.tiles = pd.concat((self.tiles, df), axis=0)
 
     def insert_results(self, df: pd.DataFrame, orderer: str) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
-        if self.results_df is None:
-            self.results_df = df
+        if self.results is None:
+            self.results = df
         else:
-            self.results_df = pd.concat((self.results_df, df), axis=0)
+            self.results = pd.concat((self.results, df), axis=0)
 
     def finish(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
-        if self.done_df is None:
-            self.done_df = df
+        if self.done is None:
+            self.done = df
         else:
-            self.done_df = pd.concat((self.done_df, df), axis=0)
-        self.tiles_df.loc[df["id"], "active"] = df["active"]
-        self.results_df.loc[df["id"], "eligible"] = False
-        self.results_df.loc[df["id"], "active"] = df["active"]
+            self.done = pd.concat((self.done, df), axis=0)
+        self.tiles.loc[df["id"], "active"] = df["active"]
+        self.results.loc[df["id"], "eligible"] = False
+        self.results.loc[df["id"], "active"] = df["active"]
 
     def get_packet(self, zone_id: int, step_id: int, packet_id: int) -> pd.DataFrame:
-        where = (self.tiles_df["step_id"] == step_id) & (
-            self.tiles_df["packet_id"] == packet_id
+        where = (self.tiles["step_id"] == step_id) & (
+            self.tiles["packet_id"] == packet_id
         )
-        return self.tiles_df.loc[where]
+        return self.tiles.loc[where]
 
     def next(
         self, zone_id: int, new_step_id: int, n: int, order_col: str
     ) -> pd.DataFrame:
-        out = self.results_df.loc[self.results_df["eligible"]].nsmallest(n, order_col)
+        out = self.results.loc[self.results["eligible"]].nsmallest(n, order_col)
         return out
 
     def bootstrap_lamss(self, zone_id: int) -> pd.Series:
         nB = (
-            max([int(c[6:]) for c in self.results_df.columns if c.startswith("B_lams")])
+            max([int(c[6:]) for c in self.results.columns if c.startswith("B_lams")])
             + 1
         )
-        active_tiles = self.results_df.loc[self.results_df["active"]]
+        active_tiles = self.results.loc[self.results["active"]]
         return active_tiles[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0)
 
     def worst_tile(self, zone_id: int, orderer: str) -> pd.DataFrame:
-        active_tiles = self.results_df.loc[self.results_df["active"]]
+        active_tiles = self.results.loc[self.results["active"]]
         return active_tiles.loc[[active_tiles[orderer].idxmin()]]
+
+    async def verify(self):
+        pass
 
     async def init_tiles(self, df: pd.DataFrame, wait=False) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
-        self.tiles_df = df
+        self.tiles = df
 
 
 @dataclass
@@ -423,9 +434,9 @@ class DuckDBTiles:
 
         results_without_tiles = db.con.query(
             """
-        select id from results
-            where id not in (select id from tiles)
-        """
+            select id from results
+                where id not in (select id from tiles)
+            """
         ).df()
         if len(results_without_tiles) > 0:
             raise ValueError(
@@ -435,9 +446,11 @@ class DuckDBTiles:
 
         tiles_without_results = db.con.query(
             """
-        select id from tiles
-            where id not in (select id from results)
-        """
+            select id from tiles
+            -- packet_id >= 0 excludes tiles that were split or pruned
+                where packet_id >= 0
+                    and id not in (select id from results)
+            """
         ).df()
         if len(tiles_without_results) > 0:
             raise ValueError(
@@ -447,19 +460,19 @@ class DuckDBTiles:
 
         tiles_without_parents = db.con.query(
             """
-        select parent_id, id from tiles
-            where parent_id not in (select id from done)
-        """
+            select parent_id, id from tiles
+                where parent_id not in (select id from done)
+            """
         ).df()
         if len(tiles_without_parents) > 0:
             raise ValueError(f"tiles without parents: {tiles_without_parents}")
 
         tiles_with_active_or_eligible_parents = db.con.query(
             """
-        select parent_id, id from tiles
-            where parent_id in 
-                (select id from results where active=true or eligible=true)
-        """
+            select parent_id, id from tiles
+                where parent_id in 
+                    (select id from results where active=true or eligible=true)
+            """
         ).df()
         if len(tiles_with_active_or_eligible_parents) > 0:
             raise ValueError(
@@ -468,11 +481,12 @@ class DuckDBTiles:
 
         inactive_tiles_with_no_children = db.con.query(
             """
-        select id from tiles
-            where 
-                active=false and
-                id not in (select parent_id from tiles)
-        """
+            select id from tiles
+            -- packet_id >= 0 excludes tiles that were split or pruned
+                where packet_id >= 0
+                    and active=false
+                    and id not in (select parent_id from tiles)
+            """
         ).df()
         if len(inactive_tiles_with_no_children) > 0:
             raise ValueError(
@@ -481,14 +495,14 @@ class DuckDBTiles:
 
         refined_tiles_with_incorrect_child_count = db.con.query(
             """
-        select d.id, count(*) as n_children, max(refine) as n_expected
-            from done d
-            left join tiles t
-                on t.parent_id = d.id
-            where refine > 0
-            group by d.id
-            having count(*) != max(refine)
-        """
+            select d.id, count(*) as n_children, max(refine) as n_expected
+                from done d
+                left join tiles t
+                    on t.parent_id = d.id
+                where refine > 0
+                group by d.id
+                having count(*) != max(refine)
+            """
         ).df()
         if len(refined_tiles_with_incorrect_child_count) > 0:
             raise ValueError(
@@ -498,13 +512,13 @@ class DuckDBTiles:
 
         deepened_tiles_with_incorrect_child_count = db.con.query(
             """
-        select d.id, count(*) from done d
-            left join tiles t
-                on t.parent_id = d.id
-            where deepen=true
-            group by d.id
-            having count(*) != 1
-        """
+            select d.id, count(*) from done d
+                left join tiles t
+                    on t.parent_id = d.id
+                where deepen=true
+                group by d.id
+                having count(*) != 1
+            """
         ).df()
         if len(deepened_tiles_with_incorrect_child_count) > 0:
             raise ValueError(
@@ -553,21 +567,26 @@ class DuckDBTiles:
         return DuckDBTiles(duckdb.connect(path))
 
 
+done_cols = [
+    "zone_id",
+    "step_id",
+    "packet_id",
+    "id",
+    "active",
+    "finisher_id",
+    "refine",
+    "deepen",
+    "split",
+]
+
+
 def get_absent_parents(tiles_df):
     # these tiles have no parents. poor sad tiles :(
     # we need to put these absent parents into the done table
     absent_parents = pd.DataFrame(
         tiles_df["parent_id"].unique()[:, None], columns=["id"]
     )
-    for c in [
-        "zone_id",
-        "step_id",
-        "packet_id",
-        "active",
-        "finisher_id",
-        "refine",
-        "deepen",
-        "split",
-    ]:
-        absent_parents[c] = 0
-    return absent_parents
+    for c in done_cols:
+        if c not in absent_parents.columns:
+            absent_parents[c] = 0
+    return absent_parents[done_cols]
