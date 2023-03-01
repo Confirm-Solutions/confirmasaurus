@@ -581,10 +581,9 @@ class Clickhouse:
                 self.client,
                 """
                 select id from tiles
-                -- packet_id >= 0 excludes tiles that were split before
-                -- being submitted.
+                -- packet_id >= 0 excludes tiles that were split or pruned
                     where packet_id >= 0
-                        id not in (select id from results)
+                        and id not in (select id from results)
                 """,
             )
             if len(df) > 0:
@@ -626,8 +625,9 @@ class Clickhouse:
                 self.client,
                 """
                 select id from tiles
-                    where 
-                        (active=false or id in (select id from inactive))
+                -- packet_id >= 0 excludes tiles that were split or pruned
+                    where packet_id >= 0
+                        and (active=false or id in (select id from inactive))
                         and id not in (select parent_id from tiles)
                 """,
             )
