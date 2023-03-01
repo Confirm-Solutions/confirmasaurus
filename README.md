@@ -36,13 +36,15 @@ To get a fully functional development environment...
    in [`pyproject.toml`](pyproject.toml).
 
    ```bash
-   mamba update -y conda
+   mamba update -y conda mamba
    # create a development virtual environment with useful tools
    mamba env create
    conda activate confirm
 
-   # install the confirm package plus development tools
+   # the following line makes poetry install into already activated
+   # environment.
    poetry config virtualenvs.create false --local
+   # install the confirm package plus development tools
    poetry install --with=dev,test,cloud,cloud_dev
    ```
 

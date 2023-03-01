@@ -92,7 +92,7 @@ import asyncio
 import logging
 from pprint import pformat
 
-import jax.numpy as jnp
+import jax
 import numpy as np
 
 from confirm.adagrid.coordinate import coordinate
@@ -239,7 +239,7 @@ def print_report(report, _db):
         if (
             isinstance(ready[k], float)
             or isinstance(ready[k], np.floating)
-            or isinstance(ready[k], jnp.DeviceArray)
+            or isinstance(ready[k], jax.Array)
         ):
             ready[k] = f"{ready[k]:.6f}"
     logger.debug(pformat(ready))
