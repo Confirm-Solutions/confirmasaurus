@@ -17,11 +17,11 @@ scipy = "^1.10.1"
 sympy = "^1.11.1"
 matplotlib = "^3.7.0"
 pandas = "^1.5.3"
-jax = "0.3.24"
-numpyro = "^0.10.1"
+jax = "^0.4.4"
+numpyro = "^0.11.0"
 jaxlib = [
-    { version = "0.3.22", platform = "darwin", source = "pypi" },
-    { version = "0.3.24+cuda11.cudnn82", platform = "linux" },
+    { version = "0.4.3", platform = "darwin", source = "pypi" },
+    { version = "0.4.4+cuda11.cudnn86", platform = "linux" },
 ]
 duckdb = "^0.7.1"
 
@@ -67,7 +67,7 @@ optional = true
 
 [tool.poetry.group.cloud_dev.dependencies]
 aws-cdk-lib = "^2.66.1"
-aws-cdk-aws-batch-alpha = "^2"
+"aws-cdk.aws-batch-alpha" = "^2"
 modal-client = "^0.46.1403"
 
 [[tool.poetry.source]]

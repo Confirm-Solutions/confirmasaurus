@@ -42,7 +42,7 @@ def get_image(dependency_groups=["cloud"]):
     ]
 
     return modal.Image.from_dockerhub(
-        "nvidia/cuda:11.8.0-devel-ubuntu22.04",
+        "nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04",
         setup_commands=[
             "apt-get update",
             "apt-get install -y python-is-python3 python3-pip",
