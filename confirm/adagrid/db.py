@@ -178,7 +178,7 @@ class DuckDBTiles:
 
     def dimension(self):
         if self._d is None:
-            cols = self.con.execute("select * from tiles limit 0").df().columns
+            cols = self._tiles_columns()
             self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
         return self._d
 
@@ -361,12 +361,20 @@ class DuckDBTiles:
         pass
 
     def get_active_eligible(self):
+        # We need a unique and deterministic ordering for the tiles returned
+        # herer. Since we are filtering to active/eligible tiles, there can be
+        # no duplicates when sorted by
+        # (theta0,...,thetan, null_truth0, ..., null_truthn)
+        ordering = ",".join(
+            [f"theta{i}" for i in range(self.dimension())]
+            + [c for c in self._results_columns() if c.startswith("null_truth")]
+        )
         return self.con.execute(
-            """
+            f"""
             SELECT * FROM results
             WHERE eligible = 1
                 and active = 1
-            ORDER BY id
+            ORDER BY {ordering}
             """,
         ).df()
 

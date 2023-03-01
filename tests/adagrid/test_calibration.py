@@ -141,12 +141,14 @@ def test_four_zones_ch(ch_db, snapshot):
 
 
 @pytest.mark.slow
-def test_calibration_clickhouse_distributed(snapshot, ch_db):
+def test_four_zones_distributed(snapshot, ch_db):
+    from confirm.adagrid.modal_backend import ModalBackend
+
     snapshot.set_test_name("test_four_zones")
     four_zones_tester(
         ch_db,
         snapshot,
-        backend=ada.ModalBackend(n_zones=4, coordinate_every=1, gpu=False),
+        backend=ModalBackend(n_zones=4, coordinate_every=1, gpu=False),
     )
 
 

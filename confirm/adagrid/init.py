@@ -23,7 +23,7 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     g = kwargs.get("g", None)
     imprint.log.worker_id.set(worker_id)
 
-    assert (not is_leader) or (db is not None)
+    assert (db is not None) or is_leader
 
     if db is None and g is None:
         raise ValueError("If no grid is provided, a database must be provided.")
