@@ -4,6 +4,7 @@ This file is used to run tests in the cloud using Modal.
 import sys
 
 import dotenv
+import jax
 import modal
 import pytest
 
@@ -45,6 +46,7 @@ def run_tests(argv=None):
     secrets=[modal.Secret.from_name("kms-sops")],
 )
 def run_cloud_tests(argv=None):
+    assert jax.lib.xla_bridge.get_backend().platform == "gpu"
     modal_util.setup_env()
     return run_tests(argv=argv)
 
