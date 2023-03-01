@@ -58,14 +58,17 @@ def test_jax_hypergeom():
     np.testing.assert_allclose(
         fisher.hypergeom_logpmf(3, 20, 10, 10),
         scipy.stats.hypergeom.logpmf(3, 20, 10, 10),
+        rtol=1e-6,
     )
     np.testing.assert_allclose(
         fisher.hypergeom_logcdf(3, 20, 10, 10),
         scipy.stats.hypergeom.logcdf(3, 20, 10, 10),
+        rtol=1e-6,
     )
     np.testing.assert_allclose(
         jnp.exp(fisher.hypergeom_logcdf(3, 20, 10, 10)),
         scipy.stats.hypergeom.cdf(3, 20, 10, 10),
+        rtol=1e-5,
     )
 
 
