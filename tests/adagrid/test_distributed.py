@@ -147,9 +147,9 @@ def test_new_step(both_dbs):
         assert tiles_df.shape[0] == 11
         assert results_df.shape[0] == 5
 
-        new_tiles = tiles_df.iloc[5:]
+        new_tiles = tiles_df[tiles_df["step_id"] == 1]
+        assert new_tiles.shape[0] == 6
         assert (new_tiles["zone_id"] == 0).all()
-        assert (new_tiles["step_id"] == 1).all()
         assert (new_tiles["creator_id"] == algo.cfg["worker_id"]).all()
 
         done = algo.db.get_done().sort_values(by=["id"])[1:]
