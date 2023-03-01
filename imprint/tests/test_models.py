@@ -80,4 +80,5 @@ def test_fisher_exact_jax_vs_scipy():
     np.testing.assert_allclose(
         fisher._sim_scipy(model.samples[0:10], theta, null_truth),
         model.sim_batch(0, 10, theta, null_truth),
+        rtol=1e-7,
     )

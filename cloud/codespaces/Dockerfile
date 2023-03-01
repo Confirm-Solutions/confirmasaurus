@@ -4,7 +4,7 @@
 FROM condaforge/mambaforge as mambaforge_upstream
 
 FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu-22.04
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
 COPY --from=mambaforge_upstream /opt /opt/
 
