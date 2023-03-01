@@ -17,11 +17,11 @@ scipy = "^1.10.1"
 sympy = "^1.11.1"
 matplotlib = "^3.7.0"
 pandas = "^1.5.3"
-jax = "0.4.4"
+jax = "^0.4.4"
 numpyro = "^0.11.0"
 jaxlib = [
-    { version = "0.4.3", platform = "darwin", source = "pypi" },
-    { version = "0.4.4+cuda11.cudnn86", platform = "linux" },
+    { version = "^0.4.4", extras=[], platform = "darwin", source = "jorenham/jax_pep503" },
+    { version = "^0.4.4", extras=["cuda"], platform = "linux", source="jorenham/jax_pep503" },
 ]
 duckdb = "^0.7.1"
 
@@ -71,10 +71,9 @@ aws-cdk-lib = "^2.66.1"
 modal-client = "^0.46.1403"
 
 [[tool.poetry.source]]
-name = "jax"
-url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
-default = false
-secondary = false
+name = "jorenham/jax_pep503"
+url = "https://jorenham.github.io/jax_pep503/"
+secondary = true
 
 [tool.isort]
 profile = "black"
