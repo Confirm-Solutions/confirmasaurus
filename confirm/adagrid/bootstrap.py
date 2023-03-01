@@ -27,7 +27,6 @@ class BootstrapCalibrate:
     def __init__(
         self, model, bootstrap_seed, nB, Ks, tile_batch_size=64, worker_id=None
     ):
-
         self.model = model
         self.worker_id = worker_id
         self.forward_boundv, self.backward_boundv = driver.get_bound(

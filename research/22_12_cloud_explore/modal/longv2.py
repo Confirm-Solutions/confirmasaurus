@@ -10,7 +10,6 @@ launch_time = time.time()
 
 @stub.function()
 def train():
-
     if time.time() - launch_time > 60:
         modal.container_app.stop()
 

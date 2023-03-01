@@ -45,7 +45,6 @@ def interpn(points, values, xi):
 
 # This code is copied from scipy.interpolate.interpn and modified for working with JAX.
 def _find_indices(grid, xi):
-
     # find relevant edges between which xi are situated
     indices = []
     # compute distance to lower edge in unity units
