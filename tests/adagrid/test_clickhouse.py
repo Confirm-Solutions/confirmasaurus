@@ -1,8 +1,8 @@
 import pytest
-from test_db import DBTester
-from test_store import StoreTester
 
 import confirm.cloud.clickhouse as ch
+from ..test_db import DBTester
+from ..test_store import StoreTester
 
 
 class ClickhouseCleanup:
@@ -14,7 +14,7 @@ class ClickhouseCleanup:
         job_ids = [db.job_id for db in self.dbs]
         for db in self.dbs:
             db.close()
-        ch.clear_dbs(client, None, names=job_ids, yes=True)
+        ch.clear_dbs(client, names=job_ids, yes=True)
 
     def _connect(self):
         self.dbs.append(ch.Clickhouse.connect())

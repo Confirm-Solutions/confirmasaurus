@@ -49,10 +49,9 @@ class StoreTester:
         # Currently, we tolerate this. This test accomodates this rare
         # possibility by sorting the data.
         pd.testing.assert_frame_equal(
-            c.get("key").sort_values(by=["a"]).reset_index(drop=True),
+            c.get("key").sort_values(by=["a", "b"]).reset_index(drop=True),
             pd.concat([ex, ex2], axis=0)
-            .sort_values(by=["a"])
-            .sort_values(by=["a"])
+            .sort_values(by=["a", "b"])
             .reset_index(drop=True),
         )
 
