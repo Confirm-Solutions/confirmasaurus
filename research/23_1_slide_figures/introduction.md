@@ -32,7 +32,7 @@ grid = ip.cartesian_grid(
     theta_min=theta_min,
     theta_max=theta_max,
     n=n_gridpts,
-    null_hypos=[ip.hypo("x <= 0")],
+    null_hypos=[ip.hypo("theta0 <= 1e-12"), ip.hypo("theta1 <= 0")],
 )
 
 model = TTest1DAda(
@@ -59,7 +59,7 @@ plt.show()
 ```
 
 ```python
-def validate_2d(theta_min, theta_max, n, n_sims):
+def validate_2d(theta_min, theta_max, n, n_sims, lam=0.05):
     q0 = scipy.special.logit(0.1)
     grid = ip.cartesian_grid(
         theta_min=theta_min,
@@ -73,7 +73,7 @@ def validate_2d(theta_min, theta_max, n, n_sims):
     rej_df = ip.validate(
         BayesianBasket,
         g=grid,
-        lam=0.05,
+        lam=lam,
         K=n_sims,
     )
     return grid, rej_df
@@ -83,11 +83,12 @@ def validate_2d(theta_min, theta_max, n, n_sims):
 theta_min = [-3.5, -3.5, -2.3]
 theta_max = [1.0, 1.0, -2.3]
 ns = [2, 4, 8, 16, 256]
-n_sims = 1000
+n_sims = 5000
+lam = 0.005
 ```
 
 ```python
-out = [validate_2d(theta_min, theta_max, [n0, n0, 1], n_sims) for n0 in ns]
+out = [validate_2d(theta_min, theta_max, [n0, n0, 1], n_sims, lam) for n0 in ns]
 ```
 
 ```python
