@@ -84,7 +84,7 @@ class ClickhouseStore(Store):
     A store using Clickhouse as the backend.
     """
 
-    client: clickhouse_connect.driver.httpclient.HttpClient
+    client: "clickhouse_connect.driver.httpclient.HttpClient"
     job_id: str
 
     def __post_init__(self):
@@ -204,7 +204,7 @@ class Clickhouse:
     """
 
     connection_details: Dict[str, str]
-    client: clickhouse_connect.driver.httpclient.HttpClient
+    client: "clickhouse_connect.driver.httpclient.HttpClient"
     job_id: str
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
@@ -840,11 +840,11 @@ class Clickhouse:
         return Clickhouse(connection_details, client, job_id)
 
 
-def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):
+def get_ch_client(host=None, port=None, username=None, password=None, database=None):
     import clickhouse_connect
 
     clickhouse_connect.common.set_setting("autogenerate_session_id", False)
-    connection_details = get_ch_config(host, port, username, password, job_id)
+    connection_details = get_ch_config(host, port, username, password, database)
     return clickhouse_connect.get_client(**connection_details)
 
 
