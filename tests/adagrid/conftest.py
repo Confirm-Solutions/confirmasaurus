@@ -37,11 +37,14 @@ def ch_db(request):
         should_cleanup = not request.node.rep_call.failed
 
     if should_cleanup:
-        print(f"Closing connection to Clickhouse database {db.job_id}")
         db.close()
         if not request.config.option.keep_clickhouse:
-            print(f"Erasing Clickhouse database {db.job_id}")
             ch.clear_dbs(ch.get_ch_client(), names=[db.job_id], yes=True)
+        else:
+            print(
+                f"Keeping Clickhouse database {db.job_id}"
+                " because --keep-clickhouse was specified."
+            )
     else:
         print(f"Keeping Clickhouse database {db.job_id} because test failed")
 

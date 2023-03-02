@@ -1,16 +1,14 @@
 import asyncio
-import logging
 import time
 
 import numpy as np
 import pandas as pd
 
-import imprint.timer
+import imprint as ip
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import _launch_task
-from imprint.grid import Grid
 
-logger = logging.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 async def process_packet_set(algo, packets):
@@ -125,7 +123,7 @@ async def _new_step(algo, zone_id, new_step_id):
 
     # NOTE: this is a pathway towards eventually having variable splitting
     # logic?
-    dim = Grid(selection_df, None).d
+    dim = ip.Grid(selection_df, None).d
     selection_df["refine"] = selection_df["refine"].astype(int) * (2**dim)
     selection_df["deepen"] = selection_df["deepen"].astype(int) * 2
 
@@ -169,7 +167,7 @@ async def _new_step(algo, zone_id, new_step_id):
     g_new.df["zone_id"] = np.uint32(zone_id)
     g_new.df["step_id"] = new_step_id
     g_new.df["creator_id"] = algo.cfg["worker_id"]
-    g_new.df["creation_time"] = imprint.timer.simple_timer()
+    g_new.df["creation_time"] = ip.timer.simple_timer()
 
     # there might be new inactive tiles that resulted from splitting with
     # the null hypotheses. we need to mark these tiles as finished.
@@ -217,10 +215,8 @@ async def _new_step(algo, zone_id, new_step_id):
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):
-    g_deepen_in = imprint.grid.Grid(
-        df.loc[(df["deepen"] > 0) & (df["K"] < max_K)], worker_id
-    )
-    g_deepen = imprint.grid._raw_init_grid(
+    g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)], worker_id)
+    g_deepen = ip.grid._raw_init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
         worker_id=worker_id,
@@ -234,7 +230,7 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
     g_deepen.df["coordination_id"] = df["coordination_id"].values[0]
 
-    g_refine_in = imprint.grid.Grid(df.loc[df["refine"] > 0], worker_id)
+    g_refine_in = ip.grid.Grid(df.loc[df["refine"] > 0], worker_id)
     inherit_cols = ["K", "coordination_id"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.

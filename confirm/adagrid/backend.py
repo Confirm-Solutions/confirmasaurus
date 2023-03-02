@@ -89,18 +89,18 @@ using a distributed lock. The simulation step is parallelized across all
 workers.
 """
 import asyncio
-import logging
 from pprint import pformat
 
 import jax
 import numpy as np
 
+import imprint as ip
 from confirm.adagrid.coordinate import coordinate
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet_set
 
-logger = logging.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 class LocalBackend:
@@ -139,7 +139,6 @@ class LocalBackend:
 
         min_step_completed = min(zone_steps.values())
         max_step_completed = max(zone_steps.values())
-        print("min_step_completed", min_step_completed)
 
         # if next_coord is 5, do we coordinate after or before step 5?
         # --> before!

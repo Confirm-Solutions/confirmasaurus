@@ -2,7 +2,6 @@ import asyncio
 import codecs
 import copy
 import json
-import logging
 import platform
 import subprocess
 import warnings
@@ -12,16 +11,16 @@ import jax
 import numpy as np
 import pandas as pd
 
-import imprint.timer
+import imprint as ip
 from confirm.adagrid.db import DuckDBTiles
 
-logger = logging.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     db = kwargs.get("db", None)
     g = kwargs.get("g", None)
-    imprint.log.worker_id.set(worker_id)
+    ip.log.worker_id.set(worker_id)
 
     assert (db is not None) or is_leader
 
@@ -187,7 +186,7 @@ async def init_grid(g, db, cfg, n_zones):
     df["zone_id"] = assign_tiles(g.n_tiles, n_zones)
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df["creator_id"] = 1
-    df["creation_time"] = imprint.timer.simple_timer()
+    df["creation_time"] = ip.timer.simple_timer()
 
     wait_for = [
         await _launch_task(db, db.init_tiles, df, in_thread=False),

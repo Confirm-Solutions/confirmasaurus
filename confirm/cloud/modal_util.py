@@ -4,9 +4,9 @@ from pathlib import Path
 import dotenv
 import modal
 
-import imprint.log
+import imprint as ip
 
-logger = imprint.log.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 def get_image(dependency_groups=["cloud"]):
