@@ -1,9 +1,9 @@
 import asyncio
 import logging
 
-from confirm.adagrid.convergence import WorkerStatus
-from confirm.adagrid.init import _launch_task
-from confirm.adagrid.init import assign_tiles
+from .convergence import WorkerStatus
+from .init import _launch_task
+from .init import assign_tiles
 
 logger = logging.getLogger(__name__)
 

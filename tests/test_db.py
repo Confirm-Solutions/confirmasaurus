@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid import db
+from confirm.adagrid.db import DatabaseLogging
+from confirm.adagrid.db import DuckDBTiles
+from confirm.adagrid.db import PandasTiles
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,7 @@ class DBTester:
     def prepped_dbs(self):
         g = example_grid(-1, 1)
         g.df.index = g.df.index.astype(np.uint64)
-        pd_tiles = db.PandasTiles()
+        pd_tiles = PandasTiles()
 
         asyncio.run(pd_tiles.init_tiles(g.df))
 
@@ -67,11 +69,11 @@ class DBTester:
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
     def test_insert_report(self):
-        g, pd_tiles, db_tiles = self.prepped_dbs()
+        db = self.connect(no_async=True)
+        asyncio.run(db.init_tiles(example_grid(-1, 1).df))
         R = dict(zone_id=1, step_id=2, packet_id=3, testA="testB")
-        pd_tiles.insert_report(R)
-        db_tiles.insert_report(R)
-        pd.testing.assert_frame_equal(pd_tiles.get_reports(), db_tiles.get_reports())
+        db.insert_report(R)
+        pd.testing.assert_frame_equal(pd.DataFrame([R]), db.get_reports())
 
     def test_write_tiles(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
@@ -213,7 +215,7 @@ class DBTester:
         g = g.add_cols(pd.DataFrame(data, index=g.df.index, columns=cols))
         g.df["orderer"] = np.linspace(-1, 1, g.n_tiles)
 
-        pd_tiles = db.PandasTiles()
+        pd_tiles = PandasTiles()
         asyncio.run(pd_tiles.init_tiles(g.df))
         pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
@@ -225,27 +227,30 @@ class DBTester:
         )
 
     def test_db_logging(self):
-        db_obj = self.connect()
-        asyncio.run(db_obj.init_tiles(example_grid(-1, 1).df))
-        with db.DatabaseLogging(db=db_obj):
+        db = self.connect(no_async=True)
+        asyncio.run(db.init_tiles(example_grid(-1, 1).df))
+        with DatabaseLogging(db=db):
             logger.debug("informative")
             logger.warning("scary")
-            logger.error("eviscerating")
-        logs = db_obj.get_logs()
+            logger.error("ameoba")
+        logs = db.get_logs().sort_values(by=["t"])
+        assert (logs["name"] == "tests.test_db").all()
+        assert logs.iloc[1]["message"] == "scary"
+        assert (logs["pathname"] == __file__).all()
         assert logs.shape[0] == 3
 
 
 class TestDuckDB(DBTester):
-    def connect(self):
-        return db.DuckDBTiles.connect()
+    def connect(self, **kwargs):
+        return DuckDBTiles.connect()
 
     def test_duckdb_load(self):
         g = example_grid(-1, 1)
         p = Path("test.db")
         p.unlink(missing_ok=True)
-        db_tiles = db.DuckDBTiles.connect(path=str(p))
+        db_tiles = DuckDBTiles.connect(path=str(p))
         asyncio.run(db_tiles.init_tiles(g.df))
         db_tiles.close()
 
-        db_tiles2 = db.DuckDBTiles.connect(path=str(p))
+        db_tiles2 = DuckDBTiles.connect(path=str(p))
         assert_frame_equal_special(g.df, db_tiles2.get_tiles())

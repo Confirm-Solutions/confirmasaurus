@@ -7,10 +7,11 @@ import numpy as np
 import confirm.cloud.modal_util as modal_util
 from .backend import get_next_coord
 from .backend import maybe_start_event_loop
-from confirm.adagrid.coordinate import coordinate
-from confirm.adagrid.init import init
-from confirm.adagrid.step import new_step
-from confirm.adagrid.step import process_packet
+from .coordinate import coordinate
+from .db import DatabaseLogging
+from .init import init
+from .step import new_step
+from .step import process_packet
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,14 @@ class ModalWorker:
 
         if not self.initialized:
             modal_util.setup_env()
-            kwargs["db"] = ch.Clickhouse.connect(job_id, no_create=True)
-            worker_id = await worker_id_queue.get(block=False)
-            if worker_id is None:
-                raise RuntimeError("No worker ID available")
-            self.algo, _, _ = await init(algo_type, False, worker_id, None, kwargs)
-            self.initialized = True
+            db = ch.Clickhouse.connect(job_id, no_create=True)
+            kwargs["db"] = db
+            with DatabaseLogging(db=db):
+                worker_id = await worker_id_queue.get(block=False)
+                if worker_id is None:
+                    raise RuntimeError("No worker ID available")
+                self.algo, _, _ = await init(algo_type, False, worker_id, None, kwargs)
+                self.initialized = True
 
     @stub.function(**modal_config)
     async def process_packet(self, worker_cfg, packet):

@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid.convergence import WorkerStatus
-from confirm.adagrid.init import _launch_task
+from .convergence import WorkerStatus
+from .init import _launch_task
 
 logger = logging.getLogger(__name__)
 

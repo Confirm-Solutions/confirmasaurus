@@ -26,8 +26,8 @@ def configure_logging(is_testing=False):
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.NOTSET)
     formatter = logging.Formatter(
-        "[worker_id=%(worker_id)s] \n"
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        "[worker_id=%(worker_id)s] %(asctime)s - %(name)s - %(levelname)s \n"
+        "%(message)s"
     )
     handler.setFormatter(formatter)
     logging.getLogger().addHandler(handler)

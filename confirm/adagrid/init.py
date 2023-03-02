@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid.db import DuckDBTiles
+from .db import DuckDBTiles
 
 logger = logging.getLogger(__name__)
 

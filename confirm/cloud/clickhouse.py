@@ -11,6 +11,7 @@ import asyncio
 import os
 import uuid
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Dict
 from typing import List
 from typing import TYPE_CHECKING
@@ -108,18 +109,19 @@ def _query_df(client, query):
     return retry_ch_action(client.query_arrow, query).to_pandas()
 
 
-insert_settings = dict(
+default_insert_settings = dict(
     insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
 )
+default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
 
 
-def _insert_df(client, table, df):
+def _insert_df(client, table, df, settings=None):
     # Same as _query_df, inserting through arrow is faster!
     retry_ch_action(
         client.insert_arrow,
         table,
         pyarrow.Table.from_pandas(df, preserve_index=False),
-        settings=insert_settings,
+        settings=settings or default_insert_settings,
     )
 
 
@@ -176,7 +178,7 @@ class ClickhouseStore(Store):
                 self.client,
                 "insert into store_tables values (%s, %s)",
                 (key, table_name),
-                settings=insert_settings,
+                settings=default_insert_settings,
             )
         logger.debug(f"set({key}) -> {exists} {table_name}")
         cols = get_create_table_cols(df)
@@ -269,6 +271,9 @@ class Clickhouse:
     is_distributed: bool = True
     supports_threads: bool = True
     _store: ClickhouseStore = None
+    async_insert_settings: Dict[str, str] = field(
+        default_factory=lambda: default_async_insert_settings
+    )
 
     @property
     def store(self):
@@ -421,7 +426,10 @@ class Clickhouse:
             self.client,
             f"insert into reports values ('{json.dumps(report)}')",
             # no need for synchronous quorum inserts for reports
-            settings={},
+            # however, even an "async insert" in clickhouse requires one
+            # roundtrip to the server so we should probably still run report
+            # inserts in a separate thread.
+            settings=self.async_insert_settings,
         )
         return report
 
@@ -750,12 +758,8 @@ class Clickhouse:
             deepened_tiles_with_incorrect_child_count(),
         )
 
-    def insert_log(self, *, worker_id, t, name, levelno, levelname, msg):
-        return _command(
-            self.client,
-            "insert into logs values (%s, %s, %s, %s, %s, %s)",
-            (worker_id, t, name, levelno, levelname, msg),
-        )
+    def insert_logs(self, df):
+        return _insert_df(self.client, "logs", df, settings=self.async_insert_settings)
 
     def get_logs(self):
         return _query_df(self.client, "select * from logs")
@@ -824,9 +828,11 @@ class Clickhouse:
                 self.client,
                 """
                 create table logs (
-                    worker_id UInt32,
+                    worker_id Int32,
                     t DateTime64(6),
                     name String,
+                    pathname String,
+                    lineno UInt32,
                     levelno UInt32,
                     levelname String,
                     message String)
@@ -914,19 +920,19 @@ class Clickhouse:
         Returns:
             A Clickhouse tile database object.
         """
-        config = get_ch_config(host, port, username, password)
+        connection_details = get_ch_config(host, port, username, password)
         if job_id is None:
             test_host = os.environ["CLICKHOUSE_TEST_HOST"]
             if not (
-                (test_host is not None and test_host in config["host"])
-                or "localhost" in config["host"]
+                (test_host is not None and test_host in connection_details["host"])
+                or "localhost" in connection_details["host"]
             ):
                 raise RuntimeError(
                     "To run a production job, please choose an explicit unique job_id."
                 )
             job_id = uuid.uuid4().hex
 
-        client = get_ch_client(**config)
+        client = get_ch_client(connection_details=connection_details)
         if not no_create:
             # Create job_id database if it doesn't exist
             _command(client, f"create database if not exists {job_id}")
@@ -936,14 +942,22 @@ class Clickhouse:
         client.database = job_id
 
         logger.info(f"Connected to job {job_id}")
-        return Clickhouse(config, client, job_id)
+        return Clickhouse(connection_details, client, job_id)
 
 
-def get_ch_client(host=None, port=None, username=None, password=None, database=None):
+def get_ch_client(
+    connection_details=None,
+    host=None,
+    port=None,
+    username=None,
+    password=None,
+    database=None,
+):
     import clickhouse_connect
 
     clickhouse_connect.common.set_setting("autogenerate_session_id", False)
-    connection_details = get_ch_config(host, port, username, password, database)
+    if connection_details is None:
+        connection_details = get_ch_config(host, port, username, password, database)
     return clickhouse_connect.get_client(**connection_details)
 
 

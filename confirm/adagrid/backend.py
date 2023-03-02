@@ -89,17 +89,18 @@ using a distributed lock. The simulation step is parallelized across all
 workers.
 """
 import asyncio
+import contextlib
 import logging
 from pprint import pformat
 
 import jax
 import numpy as np
 
-from confirm.adagrid.coordinate import coordinate
-from confirm.adagrid.db import DatabaseLogging
-from confirm.adagrid.init import init
-from confirm.adagrid.step import new_step
-from confirm.adagrid.step import process_packet_set
+from .coordinate import coordinate
+from .db import DatabaseLogging
+from .init import init
+from .step import new_step
+from .step import process_packet_set
 
 logger = logging.getLogger(__name__)
 
@@ -129,12 +130,19 @@ class LocalBackend:
         return maybe_start_event_loop(self.async_entrypoint(algo_type, kwargs))
 
     async def async_entrypoint(self, algo_type, kwargs):
-        # it's okay to use input_cfg['n_zones'] here because it's only used at
-        # the start of a job.
-        algo, incomplete_packets, zone_steps = await init(
-            algo_type, True, 1, self.input_cfg["n_zones"], kwargs
-        )
-        # handler = logging.StreamHandler(stream=db.get_logging_stream())
+        if kwargs.get("db", None):
+            db_logging = DatabaseLogging(db=kwargs["db"])
+        else:
+            # nullop context manager
+            db_logging = contextlib.suppress()
+
+        with db_logging:
+            # it's okay to use input_cfg['n_zones'] here because it's only used at
+            # the start of a job.
+            algo, incomplete_packets, zone_steps = await init(
+                algo_type, True, 1, self.input_cfg["n_zones"], kwargs
+            )
+
         with DatabaseLogging(db=algo.db):
             return await self._run(algo, incomplete_packets, zone_steps)
 
