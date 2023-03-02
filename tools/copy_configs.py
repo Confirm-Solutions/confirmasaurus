@@ -37,7 +37,6 @@ def transfer_pyproject():
     copy_entry("tool.poetry.dependencies")
     copy_entry("tool.poetry.group.test")
     copy_entry("tool.poetry.group.dev")
-    copy_entry("tool.poetry.source")
 
     with open("imprint/pyproject.toml", "wb") as f:
         tomli_w.dump(imprint_pp, f)
@@ -45,14 +44,9 @@ def transfer_pyproject():
     subprocess.call("poetry lock", shell=True, cwd="imprint")
 
 
-def run_poetry_lock():
-    subprocess.run(["poetry", "lock"], cwd="imprint")
-
-
 def main():
     copy_simple()
     transfer_pyproject()
-    # run_poetry_lock()
 
 
 if __name__ == "__main__":
