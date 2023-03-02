@@ -37,6 +37,7 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
 
     def __init__(self, db, capacity=10, flushLevel=logging.WARNING):
         self.db = db
+        assert hasattr(self.db, "insert_logs")
         self.capacity = capacity
         self.flushLevel = flushLevel
         super().__init__(self.capacity)

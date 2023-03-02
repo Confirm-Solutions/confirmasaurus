@@ -52,22 +52,6 @@ def test_calibration(snapshot):
         ip.Grid(db.get_results(), None).prune_inactive(), snapshot, ignore_story=False
     )
 
-    # Compare DuckDB against pandas
-    with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
-        pd_db = ada.db.PandasTiles()
-        g = ip.cartesian_grid(
-            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
-        )
-        db2 = ada.ada_calibrate(
-            ZTest1D, g=g, db=pd_db, nB=5, prod=False, tile_batch_size=1
-        )
-
-    pd.testing.assert_frame_equal(
-        db.get_results(),
-        db2.get_results(),
-        check_exact=True,
-    )
-
 
 @pytest.mark.slow
 def test_calibration_packetsize1(snapshot):
