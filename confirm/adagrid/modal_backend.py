@@ -5,8 +5,8 @@ import modal.aio
 import numpy as np
 
 import confirm.cloud.modal_util as modal_util
+from .backend import Backend
 from .backend import get_next_coord
-from .backend import maybe_start_event_loop
 from .coordinate import coordinate
 from .db import DatabaseLogging
 from .init import init
@@ -69,30 +69,17 @@ class ModalWorker:
         return status
 
 
-class ModalBackend:
+class ModalBackend(Backend):
     def __init__(self, n_zones=1, coordinate_every=5, gpu="any"):
+        super().__init__()
         self.lazy_tasks = []
         self.input_cfg = {
             "coordinate_every": coordinate_every,
             "n_zones": n_zones,
             "gpu": gpu,
         }
-        self.already_run = False
 
-    def run(self, algo_type, kwargs):
-        if self.already_run:
-            raise RuntimeError("ModalBackend can only be used once")
-        self.already_run = True
-        kwargs.update(self.input_cfg)
-        return maybe_start_event_loop(self._run_async(algo_type, kwargs))
-
-    async def _run_async(self, algo_type, kwargs):
-        # it's okay to use input_cfg['n_zones'] here because it's only used at
-        # the start of a job.
-        algo, incomplete_packets, zone_steps = await init(
-            algo_type, True, 1, self.input_cfg["n_zones"], kwargs
-        )
-
+    async def run(self, algo, incomplete_packets, zone_steps, algo_type, kwargs):
         w = ModalWorker()
 
         incomplete_packets = np.array(incomplete_packets)
@@ -155,12 +142,3 @@ class ModalBackend:
 
                 first_step = last_step + 1
                 next_coord += every
-
-            # TODO: currently we only verify at the end, should we do it more often?
-            verify_task = asyncio.create_task(algo.db.verify())
-
-            await asyncio.gather(*self.lazy_tasks)
-            self.lazy_tasks = []
-
-            await verify_task
-            return algo.db

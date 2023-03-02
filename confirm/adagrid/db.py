@@ -84,6 +84,9 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
                     for record in self.buffer
                 ]
             )
+            # TODO: make this run lazily!
+            # slightly tricky because this isn't an async function and we don't
+            # have access to backend.lazy_tasks
             self.db.insert_logs(df)
             self.buffer = []
         finally:

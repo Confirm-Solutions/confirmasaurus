@@ -425,11 +425,7 @@ class Clickhouse:
         _command(
             self.client,
             f"insert into reports values ('{json.dumps(report)}')",
-            # no need for synchronous quorum inserts for reports
-            # however, even an "async insert" in clickhouse requires one
-            # roundtrip to the server so we should probably still run report
-            # inserts in a separate thread.
-            settings=self.async_insert_settings,
+            settings=default_insert_settings,
         )
         return report
 
@@ -759,6 +755,8 @@ class Clickhouse:
         )
 
     def insert_logs(self, df):
+        # TODO: the async_insert here is suboptimal... try to just move to
+        # another thread.
         return _insert_df(self.client, "logs", df, settings=self.async_insert_settings)
 
     def get_logs(self):

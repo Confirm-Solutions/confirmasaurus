@@ -88,8 +88,8 @@ and correctness. We effectively put these steps inside a "critical" code region
 using a distributed lock. The simulation step is parallelized across all
 workers.
 """
+import abc
 import asyncio
-import contextlib
 import logging
 from pprint import pformat
 
@@ -98,6 +98,7 @@ import numpy as np
 
 from .coordinate import coordinate
 from .db import DatabaseLogging
+from .db import DuckDBTiles
 from .init import init
 from .step import new_step
 from .step import process_packet_set
@@ -105,7 +106,48 @@ from .step import process_packet_set
 logger = logging.getLogger(__name__)
 
 
-class LocalBackend:
+def entrypoint(algo_type, kwargs):
+    backend = kwargs.get("backend", None)
+    if backend is None:
+        backend = LocalBackend()
+    if backend.already_run:
+        raise RuntimeError("An adagrid backend can only be used once.")
+    backend.already_run = True
+    kwargs.update(backend.input_cfg)
+    return maybe_start_event_loop(async_entrypoint(backend, algo_type, kwargs))
+
+
+async def async_entrypoint(backend, algo_type, kwargs):
+    if kwargs.get("db", None) is None:
+        kwargs["db"] = DuckDBTiles.connect()
+    with DatabaseLogging(db=kwargs["db"]):
+        # it's okay to use input_cfg['n_zones'] here because it's only used at
+        # the start of a job.
+        algo, incomplete_packets, zone_steps = await init(
+            algo_type, True, 1, backend.input_cfg["n_zones"], kwargs
+        )
+
+        await backend.run(algo, incomplete_packets, zone_steps, algo_type, kwargs)
+
+        # TODO: currently we only verify at the end, should we do it more often?
+        verify_task = asyncio.create_task(algo.db.verify())
+
+        await asyncio.gather(*backend.lazy_tasks)
+
+        await verify_task
+        return algo.db
+
+
+class Backend(abc.ABC):
+    def __init__(self):
+        self.already_run = False
+
+    @abc.abstractmethod
+    async def run(self, algo, incomplete_packets, zone_steps):
+        pass
+
+
+class LocalBackend(Backend):
     def __init__(self, n_zones=1, coordinate_every=5):
         """
         _summary_
@@ -115,6 +157,7 @@ class LocalBackend:
             coordinate_every: The number of steps between each distributed coordination.
                 This is ignored when n_zones == 1. Defaults to 5.
         """
+        super().__init__()
         self.lazy_tasks = []
         # self.input_cfg should not be read directly, instead access
         # algo.cfg['...'] instead. the reason is so that we correctly handle
@@ -125,28 +168,7 @@ class LocalBackend:
         # convergence criterion during each coordination.
         self.input_cfg = {"coordinate_every": coordinate_every, "n_zones": n_zones}
 
-    def run(self, algo_type, kwargs):
-        kwargs.update(self.input_cfg)
-        return maybe_start_event_loop(self.async_entrypoint(algo_type, kwargs))
-
-    async def async_entrypoint(self, algo_type, kwargs):
-        if kwargs.get("db", None):
-            db_logging = DatabaseLogging(db=kwargs["db"])
-        else:
-            # nullop context manager
-            db_logging = contextlib.suppress()
-
-        with db_logging:
-            # it's okay to use input_cfg['n_zones'] here because it's only used at
-            # the start of a job.
-            algo, incomplete_packets, zone_steps = await init(
-                algo_type, True, 1, self.input_cfg["n_zones"], kwargs
-            )
-
-        with DatabaseLogging(db=algo.db):
-            return await self._run(algo, incomplete_packets, zone_steps)
-
-    async def _run(self, algo, incomplete_packets, zone_steps):
+    async def run(self, algo, incomplete_packets, zone_steps, algo_type, kwargs):
         n_zones = algo.cfg["n_zones"]
         incomplete_packets = np.array(incomplete_packets)
         self.lazy_tasks.extend(await process_packet_set(algo, incomplete_packets))
@@ -194,12 +216,6 @@ class LocalBackend:
             next_coord += every
 
         # TODO: currently we only verify at the end, should we do it more often?
-        verify_task = asyncio.create_task(algo.db.verify())
-
-        await asyncio.gather(*self.lazy_tasks)
-        self.lazy_tasks = []
-
-        await verify_task
         return algo.db
 
     async def _run_zone(self, algo, zone_id, start_step_id, end_step_id):

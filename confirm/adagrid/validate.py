@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
-from .backend import LocalBackend
+from .backend import entrypoint
 from .backend import print_report
 
 logger = logging.getLogger(__name__)
@@ -223,6 +223,4 @@ def ada_validate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    if backend is None:
-        backend = LocalBackend()
-    return backend.run(AdaValidate, locals())
+    return entrypoint(AdaValidate, locals())
