@@ -1,6 +1,5 @@
+import jax
 import numpy as np
-import scipy.stats
-from scipy.special import logit
 
 
 def fast_invert(S, d):
@@ -29,10 +28,12 @@ def calc_posterior_x(sigma_sq: float, mu_sig_sq: float, sample_I, thetahat, mu_0
 
 
 def calc_dirty_bayes(y_i, n_i, mu_0_scalar, logit_p1, thresh, sigma2_rule):
+    import scipy.stats
+
     N, d = y_i.shape
     phat = y_i[:, :] / n_i[:, :]
     # NOTE: we use the logit_p1 offset when converting from p space to logit space.
-    thetahat = logit(phat) - logit_p1
+    thetahat = jax.scipy.special.logit(phat) - logit_p1
     sample_I = n_i[:, :] * phat * (1 - phat)  # diag(n*phat*(1-phat))
     mu_0 = np.full_like(phat, mu_0_scalar)
     mu_sig_sq = 100

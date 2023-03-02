@@ -7,9 +7,9 @@ import logging
 import sys
 import time
 
+import jax
 import numpy as np
 import typer
-from scipy.special import logit
 
 import confirm.adagrid.binomial as binomial
 import confirm.berrylib.fast_inla as fast_inla
@@ -59,7 +59,8 @@ def build_grid(config):
 
     logger.info("setting up grid.")
     null_hypos = [
-        grid.HyperPlane(-np.identity(n_arms)[i], -logit(0.1)) for i in range(n_arms)
+        grid.HyperPlane(-np.identity(n_arms)[i], -jax.scipy.special.logit(0.1))
+        for i in range(n_arms)
     ]
     theta1d = [
         np.linspace(

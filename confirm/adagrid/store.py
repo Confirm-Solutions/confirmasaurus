@@ -3,9 +3,12 @@ import re
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
+from typing import TYPE_CHECKING
 
-import duckdb
 import pandas as pd
+
+if TYPE_CHECKING:
+    import duckdb
 
 
 def is_table_name(s):
@@ -78,7 +81,7 @@ class PandasStore(Store):
 
 @dataclass
 class DuckDBStore(Store):
-    con: duckdb.DuckDBPyConnection
+    con: "duckdb.DuckDBPyConnection"
 
     def __post_init__(self):
         self.con.execute(
@@ -160,4 +163,6 @@ class DuckDBStore(Store):
         Returns:
             The database.
         """
+        import duckdb
+
         return DuckDBStore(duckdb.connect(path))

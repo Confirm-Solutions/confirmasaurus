@@ -4,7 +4,6 @@ import logging
 import modal.aio
 import numpy as np
 
-import confirm.cloud.clickhouse as ch
 import confirm.cloud.modal_util as modal_util
 from .backend import get_next_coord
 from .backend import maybe_start_event_loop
@@ -25,6 +24,8 @@ class ModalWorker:
         self.initialized = False
 
     async def setup(self, *, algo_type, job_id, kwargs, worker_id_queue):
+        import confirm.cloud.clickhouse as ch
+
         if not self.initialized:
             modal_util.setup_env()
             kwargs["db"] = ch.Clickhouse.connect(job_id, no_create=True)
@@ -160,52 +161,3 @@ class ModalBackend:
 
             await verify_task
             return algo.db
-
-    #     async def run(self, ada):
-    #         import confirm.cloud.clickhouse as ch
-
-    #         model_type = ada.model_type
-    #         algo_type = ada.algo_type
-    #         callback = ada.callbackk
-    #         job_id = ada.db.job_id
-
-    #         def _worker():
-    #             db = ch.Clickhouse.connect(job_id=job_id)
-    #             runner = Adagrid(model_type, None, db, algo_type, callback,
-    #                dict(), dict())
-    #             runner._run_local()
-
-    # async def run(self, ada, initial_worker_ids):
-    #     import modal
-    #     import confirm.cloud.clickhouse as ch
-    #     import confirm.cloud.modal_util as modal_util
-
-    #     assert len(initial_worker_ids) == self.n_workers
-
-    #     job_id = ada.db.job_id
-    #     algo_type = ada.algo_type
-    #     pass_params = dict(
-    #         callback=ada.callback,
-    #         model_type=ada.model_type,
-    #         overrides=dict(),
-    #         backend=LocalBackend(),
-    #         g=None,
-    #     )
-
-    #     stub = modal.Stub(f"{self.job_name_prefix}_{job_id}")
-
-    #     p = modal_util.get_defaults()
-    #     p.update(dict(gpu=self.gpu, serialized=True))
-
-    #     @stub.function(**p)
-    #     def _modal_adagrid_worker(i):
-    #         modal_util.setup_env()
-    #         kwargs = copy.deepcopy(pass_params)
-    #         kwargs["db"] = ch.Clickhouse.connect(job_id=job_id)
-    #         kwargs["worker_id"] = initial_worker_ids[i]
-    #         asyncio.run(init_and_run(algo_type, **kwargs))
-
-    #     logger.info(f"Launching Modal job with {self.n_workers} workers")
-    #     with stub.run(show_progress=False):
-    #         _ = list(_modal_adagrid_worker.map(range(self.n_workers)))
-    #     return ada.db

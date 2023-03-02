@@ -4,7 +4,6 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpyro.handlers as handlers
 
 
 def from_numpyro(model, pin, shape):
@@ -39,6 +38,8 @@ def from_numpyro(model, pin, shape):
         1. an example dictionary of parameters
         2. the log joint density function
     """
+    import numpyro.handlers as handlers
+
     d = _examine_model(model, jnp.zeros(shape))
     param_example = pin_params({k: np.zeros(n) for k, n in d.items()}, pin)
 
@@ -60,6 +61,8 @@ def from_numpyro(model, pin, shape):
 
 @partial(jax.jit, static_argnums=(0,))
 def _examine_model(model, data):
+    import numpyro.handlers as handlers
+
     seeded_model = handlers.seed(model, jax.random.PRNGKey(10))
     trace = handlers.trace(seeded_model).get_trace(data)
     d = {

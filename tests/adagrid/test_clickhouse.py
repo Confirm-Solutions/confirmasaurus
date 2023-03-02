@@ -1,6 +1,5 @@
 import pytest
 
-import confirm.cloud.clickhouse as ch
 from ..test_db import DBTester
 from ..test_store import StoreTester
 
@@ -10,6 +9,8 @@ class ClickhouseCleanup:
         self.dbs = []
 
     def teardown_method(self, method):
+        import confirm.cloud.clickhouse as ch
+
         client = ch.get_ch_client()
         job_ids = [db.job_id for db in self.dbs]
         for db in self.dbs:
@@ -17,6 +18,8 @@ class ClickhouseCleanup:
         ch.clear_dbs(client, names=job_ids, yes=True)
 
     def _connect(self):
+        import confirm.cloud.clickhouse as ch
+
         self.dbs.append(ch.Clickhouse.connect())
         return self.dbs[-1]
 
@@ -35,6 +38,8 @@ class TestClickhouseStore(StoreTester, ClickhouseCleanup):
 
 @pytest.mark.slow
 def test_connect_prod_no_job_id():
+    import confirm.cloud.clickhouse as ch
+
     with pytest.raises(RuntimeError) as excinfo:
         ch.Clickhouse.connect(host="fakeprod")
     assert "To run a production job" in str(excinfo.value)
@@ -42,6 +47,8 @@ def test_connect_prod_no_job_id():
 
 @pytest.mark.slow
 def test_clear_dbs_only_test():
+    import confirm.cloud.clickhouse as ch
+
     class FakeClient:
         def __init__(self):
             self.url = "fakeprod"

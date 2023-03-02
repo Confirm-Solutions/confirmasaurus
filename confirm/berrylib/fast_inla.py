@@ -4,10 +4,7 @@ from typing import Callable
 import jax
 import jax.numpy as jnp
 import numpy as np
-import scipy.linalg
-import scipy.stats
 from jax.config import config
-from scipy.special import logit
 
 import confirm.berrylib.util as util
 from confirm.berrylib.fast_math import jax_fast_invert
@@ -56,6 +53,9 @@ class FastINLA:
         critical_value=0.85,
         opt_tol=1e-3,
     ):
+        import scipy.stats
+        from scipy.special import logit
+
         self.n_arms = n_arms
         self.mu_0 = mu_0
         self.mu_sig2 = mu_sig2
@@ -174,6 +174,8 @@ class FastINLA:
                 mode of p(theta_i, y, sigma^2)
             hess_inv: the inverse hessian at the mode of p(theta_i, y, sigma^2)
         """
+        import scipy.stats
+
         if thresh_theta is None:
             thresh_theta = self.thresh_theta
 
