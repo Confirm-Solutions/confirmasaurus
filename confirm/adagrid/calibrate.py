@@ -50,12 +50,12 @@ The great glossary of adagrid:
 import numpy as np
 import pandas as pd
 
-import imprint.log
+import imprint as ip
 from . import bootstrap
 from .backend import LocalBackend
 from .backend import print_report
 
-logger = imprint.log.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 class AdaCalibrate:
@@ -87,7 +87,7 @@ class AdaCalibrate:
 
         lams_df = self.driver.bootstrap_calibrate(tiles_df, self.cfg["alpha"])
         lams_df.insert(0, "processor_id", self.cfg["worker_id"])
-        lams_df.insert(1, "processing_time", imprint.timer.simple_timer())
+        lams_df.insert(1, "processing_time", ip.timer.simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data

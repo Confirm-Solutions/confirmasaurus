@@ -1,11 +1,11 @@
 import numpy as np
 import pandas as pd
 
-import imprint
+import imprint as ip
 from .backend import LocalBackend
 from .backend import print_report
 
-logger = imprint.log.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 class AdaValidate:
@@ -17,7 +17,7 @@ class AdaValidate:
 
         self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
-        self.driver = imprint.driver.Driver(
+        self.driver = ip.driver.Driver(
             model, tile_batch_size=self.cfg["tile_batch_size"]
         )
 
@@ -47,7 +47,7 @@ class AdaValidate:
             tiles_df, self.cfg["lam"], delta=self.cfg["delta"]
         )
         rej_df.insert(0, "processor_id", self.cfg["worker_id"])
-        rej_df.insert(1, "processing_time", imprint.timer.simple_timer())
+        rej_df.insert(1, "processing_time", ip.timer.simple_timer())
         rej_df.insert(2, "eligible", True)
         rej_df.insert(3, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
         rej_df.insert(4, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])

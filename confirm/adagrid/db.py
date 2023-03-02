@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-import imprint.log
+import imprint as ip
 from confirm.adagrid.store import DuckDBStore
 from confirm.adagrid.store import PandasStore
 from confirm.adagrid.store import Store
@@ -15,7 +15,7 @@ from confirm.adagrid.store import Store
 if TYPE_CHECKING:
     import duckdb
 
-logger = imprint.log.getLogger(__name__)
+logger = ip.getLogger(__name__)
 
 
 @dataclass
