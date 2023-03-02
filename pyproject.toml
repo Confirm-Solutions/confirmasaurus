@@ -19,10 +19,6 @@ matplotlib = "^3.7.0"
 pandas = "^1.5.3"
 jax = "^0.4.4"
 numpyro = "^0.11.0"
-jaxlib = [
-    { version = "0.4.3", platform = "darwin", source = "pypi" },
-    { version = "0.4.4+cuda11.cudnn86", platform = "linux" },
-]
 duckdb = "^0.7.1"
 
 [tool.poetry.group.test]
@@ -69,12 +65,6 @@ optional = true
 aws-cdk-lib = "^2.66.1"
 "aws-cdk.aws-batch-alpha" = "^2"
 modal-client = "^0.46.1403"
-
-[[tool.poetry.source]]
-name = "jax"
-url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
-default = false
-secondary = false
 
 [tool.isort]
 profile = "black"

@@ -8,11 +8,6 @@ go install go.mozilla.org/sops/cmd/sops@latest
 # environment.
 poetry config virtualenvs.create false --local
 
-# Install dependencies. This might fail in Codespaces or Dev Containers due to
-# not being run as root. That's okay because in those settings, we've already
-# installed our dependencies in the Dockerfile.
-poetry install || true
-
 # Install our package (if the above line failed, we still want to make sure we
 # install the confirm package itself!)
 poetry install --only-root

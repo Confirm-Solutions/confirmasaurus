@@ -13,6 +13,7 @@ def copy_simple():
     shutil.copy2(".gitleaks.toml", "imprint/.gitleaks.toml")
     shutil.copy2(".vscode/settings.json", "imprint/.vscode/settings.json")
     shutil.copy2("setup.cfg", "imprint/setup.cfg")
+    shutil.copy2("requirements-jax-cuda.txt", "imprint/requirements-jax-cuda.txt")
 
 
 def transfer_pyproject():
