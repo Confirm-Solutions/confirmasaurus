@@ -52,12 +52,13 @@ validation_df = ip.validate(
     # This is the binomial n parameter, the number of patients recruited to each arm of the trial.
     model_kwargs={"n_arm_samples": 35},
 )
+g_val = g.add_cols(validation_df)
 ```
 
 ```python
 ip.setup_nb()
 plt.figure(figsize=(10, 4), constrained_layout=True)
-theta_tiles = g.get_theta()
+theta_tiles = g_val.get_theta()
 t2 = np.unique(theta_tiles[:, 2])[4]
 selection = theta_tiles[:, 2] == t2
 
@@ -66,12 +67,12 @@ plt.title(f"slice: $\\theta_2 \\approx$ {t2:.1f}")
 cntf = plt.tricontourf(
     theta_tiles[selection, 0],
     theta_tiles[selection, 1],
-    validation_df["tie_est"][selection],
+    g_val.df["tie_est"][selection],
 )
 plt.tricontour(
     theta_tiles[selection, 0],
     theta_tiles[selection, 1],
-    validation_df["tie_est"][selection],
+    g_val.df["tie_est"][selection],
     colors="k",
     linestyles="-",
     linewidths=0.5,
@@ -86,12 +87,12 @@ plt.subplot(1, 2, 2)
 cntf = plt.tricontourf(
     theta_tiles[selection, 0],
     theta_tiles[selection, 1],
-    validation_df["tie_bound"][selection],
+    g_val.df["tie_bound"][selection],
 )
 plt.tricontour(
     theta_tiles[selection, 0],
     theta_tiles[selection, 1],
-    validation_df["tie_bound"][selection],
+    g_val.df["tie_bound"][selection],
     colors="k",
     linestyles="-",
     linewidths=0.5,
@@ -167,15 +168,15 @@ g_unpruned = g_raw.add_null_hypos(null_hypos)
 We can see that the tiles now have `null_truth` columns. Each of these columns represents whether that particular null hypothesis is true or false on that tile.
 
 ```python
-g_unpruned.active().df.head(n=10)
+g_unpruned.prune_inactive().df.head(n=10)
 ```
 
-Next, for the sake of investigating Type I Error, we only care about regions of space where the null hypothesis is true! 
+Next, for the sake of investigating Type I Error, we only care about regions of space where the null hypothesis is true!
 
-In order to reduce computational effort, we can "prune" our grid by removing any tiles that are entirely in the alternative hypothesis space for all hypotheses.
+In order to reduce computational effort, we can "prune" our grid by removing any tiles that are entirely in the alternative hypothesis space for all hypotheses and removing any "inactive" tiles that resulted from the earlier splitting process.
 
 ```python
-g = g_unpruned.prune()
+g = g_unpruned.prune_alternative().prune_inactive()
 ```
 
 ```python
@@ -190,7 +191,8 @@ g = ip.cartesian_grid(
     theta_max=[1.0, 1.0, 1.0],
     n=[16, 16, 16],
     null_hypos=[ip.hypo(f"theta{i} < {logit(0.1)}") for i in range(3)],
-    prune=True,
+    prune_alternative=True,
+    prune_inactive=True,
 )
 ```
 

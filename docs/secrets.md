@@ -37,12 +37,20 @@ sops -e --output test_secrets.enc.env .env
 
 ## Accessing secrets in code
 
-Use the `getenv` package to load the `.env` file and access its entries. For example:
+Use the `dotenv` package to load the `.env` file and access its entries. For example:
 
 ```
-import getenv
-host = getenv.dotenv_values()['CLICKHOUSE_HOST']
+import dotenv
+host = dotenv.dotenv_values()['CLICKHOUSE_HOST']
 ```
+
+or 
+
+```
+dotenv.load_dotenv()
+```
+
+to load the entire `.env` file into `os.environ`.
 
 ## Decrypting secrets in GitHub actions
 

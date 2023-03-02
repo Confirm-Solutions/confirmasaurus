@@ -4,13 +4,13 @@ This file is used to run tests in the cloud using Modal.
 import sys
 
 import dotenv
+import jax
 import modal
 import pytest
 
 import confirm.cloud.modal_util as modal_util
 
 # Load environment variables from .env file to get Modal tokens.
-
 dotenv.load_dotenv()
 
 stub = modal.Stub("test_runner")
@@ -35,22 +35,19 @@ def run_tests(argv=None):
     image=img,
     gpu=modal.gpu.A100(),
     retries=0,
-    mounts=(
-        modal.create_package_mounts(["confirm", "imprint"])
-        + [
-            modal.Mount(local_dir="./tests", remote_dir="/root/tests"),
-            modal.Mount(local_dir="./imprint/tests", remote_dir="/root/imprint/tests"),
-            modal.Mount(
-                local_dir="./imprint/tutorials", remote_dir="/root/imprint/tutorials"
-            ),
-            modal.Mount(local_dir="./", remote_dir="/root", recursive=False),
-        ]
-    ),
+    mounts=[
+        *modal.create_package_mounts(["confirm", "imprint"]),
+        modal.Mount.from_local_dir("./tests", remote_path="/root/tests")
+        .add_local_dir("./imprint/tests", remote_path="/root/imprint/tests")
+        .add_local_dir("./imprint/tutorials", remote_path="/root/imprint/tutorials")
+        .add_local_dir("./", remote_path="/root", recursive=False),
+    ],
     timeout=60 * 60 * 1,
     secrets=[modal.Secret.from_name("kms-sops")],
 )
 def run_cloud_tests(argv=None):
-    modal_util.decrypt_secrets()
+    assert jax.lib.xla_bridge.get_backend().platform == "gpu"
+    modal_util.setup_env()
     return run_tests(argv=argv)
 
 

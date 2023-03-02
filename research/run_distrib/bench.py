@@ -22,7 +22,7 @@ def worker(start, job_id=None, n_workers=0):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        iter, reports, _ = ada.ada_calibrate(
+        reports, _ = ada.ada_calibrate(
             ZTest1D,
             g=g,
             db=db,
@@ -73,7 +73,7 @@ def serial(db="ch"):
     else:
         db = ada.DuckDBTiles.connect()
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
-    iter, reports, _ = ada.ada_calibrate(
+    reports, _ = ada.ada_calibrate(
         ZTest1D,
         g=g,
         db=db,

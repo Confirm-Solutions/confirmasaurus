@@ -1,10 +1,10 @@
 import copy
+import warnings
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-import scipy.stats
 
 import imprint.bound as bound
 from . import batching
@@ -33,17 +33,22 @@ def get_bound(family, family_params):
 
 
 def clopper_pearson(tie_sum, K, delta):
+    import scipy.stats
+
     tie_cp_bound = scipy.stats.beta.ppf(1 - delta, tie_sum + 1, K - tie_sum)
     # If typeI_sum == sim_sizes, scipy.stats outputs nan. Output 0 instead
     # because there is no way to go higher than 1.0
     return np.where(np.isnan(tie_cp_bound), 0, tie_cp_bound)
 
 
-def calc_tuning_threshold(sorted_stats, sorted_order, alpha):
-    K = sorted_stats.shape[0]
-    cv_idx = jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
+def calc_calibration_threshold(sorted_stats, sorted_order, alpha):
+    idx = _calibration_index(sorted_stats.shape[0], alpha)
     # indexing a sorted array with sorted indices results in a sorted array!!
-    return sorted_stats[sorted_order[cv_idx]]
+    return sorted_stats[sorted_order[idx]]
+
+
+def _calibration_index(K, alpha):
+    return jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
 
 
 def _groupby_apply_K(df, f):
@@ -60,6 +65,19 @@ def _groupby_apply_K(df, f):
     return pd.concat(out).loc[df.index]
 
 
+def _check_stats(stats, K, theta):
+    if stats.shape[0] != theta.shape[0]:
+        raise ValueError(
+            f"sim_batch returned test statistics for {stats.shape[0]}"
+            f"tiles but {theta.shape[0]} tiles were expected."
+        )
+    if stats.shape[1] != K:
+        raise ValueError(
+            f"sim_batch returned test statistics for {stats.shape[1]} "
+            f"simulations but {K} simulations were expected."
+        )
+
+
 class Driver:
     def __init__(self, model, *, tile_batch_size):
         self.model = model
@@ -70,7 +88,7 @@ class Driver:
 
         self.calibratev = jax.jit(
             jax.vmap(
-                calc_tuning_threshold,
+                calc_calibration_threshold,
                 in_axes=(0, None, 0),
             )
         )
@@ -82,13 +100,15 @@ class Driver:
             theta = K_g.get_theta()
             # TODO: batching
             stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
+            _check_stats(stats, K, theta)
             return stats
 
         return _groupby_apply_K(df, f)
 
     def validate(self, df, lam, *, delta=0.01):
         def _batched(K, theta, null_truth):
-            stats = self.model.sim_batch(0, K, theta, null_truth)
+            stats = self.model.sim_batch(0, K, theta.copy(), null_truth.copy())
+            _check_stats(stats, K, theta)
             return jnp.sum(stats < lam, axis=-1)
 
         def f(K, K_df):
@@ -115,38 +135,61 @@ class Driver:
                 index=K_df.index,
             )
 
-        return _groupby_apply_K(df, f)
+        out = _groupby_apply_K(df, f)
+        out["K"] = df["K"]
+        return out
 
     def calibrate(self, df, alpha):
         def _batched(K, theta, vertices, null_truth):
             stats = self.model.sim_batch(0, K, theta, null_truth)
+            _check_stats(stats, K, theta)
             sorted_stats = jnp.sort(stats, axis=-1)
-            alpha0 = self.backward_boundv(alpha, theta, vertices)
-            bootstrap_lams = self.calibratev(sorted_stats, np.arange(K), alpha0)
-            return bootstrap_lams
+            alpha0 = self.backward_boundv(
+                np.full(theta.shape[0], alpha), theta, vertices
+            )
+            return self.calibratev(sorted_stats, np.arange(K), alpha0), alpha0
 
         def f(K, K_df):
             K_g = grid.Grid(K_df, None)
 
             theta, vertices = K_g.get_theta_and_vertices()
-            bootstrap_lams = batching.batch(
+            lams, alpha0 = batching.batch(
                 _batched,
                 self.tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
-            return pd.DataFrame(bootstrap_lams, columns=["lams"], index=K_df.index)
+            out = pd.DataFrame(index=K_df.index)
+            out["lams"] = lams
+            out["alpha0"] = alpha0
+            return out
 
-        return _groupby_apply_K(df, f)
+        out = _groupby_apply_K(df, f)
+        out["idx"] = _calibration_index(df["K"].to_numpy(), out["alpha0"].to_numpy())
+        out["K"] = df["K"]
+        return out
 
 
-def _setup(modeltype, g, model_seed, K, model_kwargs):
-    g = copy.deepcopy(g)
+# If K is not specified we just use a default value that's a decent
+# guess.
+default_K = 2**14
+
+
+def _setup(model_type, g, model_seed, K, model_kwargs):
+    g_pruned = g.prune_inactive()
+    if g_pruned.n_tiles < g.n_tiles:
+        warnings.warn(
+            "Pruning inactive tiles before simulation. "
+            "Mark these tiles as active if you want to simulate for them."
+        )
+    else:
+        # NOTE: a no_copy parameter would be sensible in cases where the grid is
+        # very large.
+        # If pruning occured, a copy is not necessary.
+        g = copy.deepcopy(g)
+
     if K is not None:
         g.df["K"] = K
     else:
-        # If K is not specified we just use a default value that's a decent
-        # guess.
-        default_K = 2**14
         if "K" not in g.df.columns:
             g.df["K"] = default_K
         # If the K column is present but has some 0s, we replace those with the
@@ -155,12 +198,12 @@ def _setup(modeltype, g, model_seed, K, model_kwargs):
 
     if model_kwargs is None:
         model_kwargs = {}
-    model = modeltype(model_seed, g.df["K"].max(), **model_kwargs)
+    model = model_type(model_seed, g.df["K"].max(), **model_kwargs)
     return model, g
 
 
 def validate(
-    modeltype,
+    model_type,
     *,
     g,
     lam,
@@ -168,13 +211,13 @@ def validate(
     model_seed=0,
     K=None,
     tile_batch_size=64,
-    model_kwargs=None
+    model_kwargs=None,
 ):
     """
     Calculate the Type I Error bound.
 
     Args:
-        modeltype: The model class.
+        model_type: The model class.
         g: The grid.
         lam: The critical threshold in the rejection rule. Test statistics
              below this value will be rejected.
@@ -196,27 +239,27 @@ def validate(
                         simulation point.
         - tie_bound: The bound on the Type I error over the whole tile.
     """
-    model, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    model, g = _setup(model_type, g, model_seed, K, model_kwargs)
     driver = Driver(model, tile_batch_size=tile_batch_size)
     rej_df = driver.validate(g.df, lam, delta=delta)
     return rej_df
 
 
 def calibrate(
-    modeltype,
+    model_type,
     *,
     g,
     alpha=0.025,
     model_seed=0,
     K=None,
     tile_batch_size=64,
-    model_kwargs=None
+    model_kwargs=None,
 ):
     """
     Calibrate the critical threshold for a given level of Type I Error control.
 
     Args:
-        modeltype: The model class.
+        model_type: The model class.
         g: The grid.
         model_seed: The random seed. Defaults to 0.
         alpha: The Type I Error control level. Defaults to 0.025.
@@ -231,7 +274,7 @@ def calibrate(
         A dataframe with one row for each tile containing just the "lams"
         column, which contains lambda* for each tile.
     """
-    model, g = _setup(modeltype, g, model_seed, K, model_kwargs)
+    model, g = _setup(model_type, g, model_seed, K, model_kwargs)
     driver = Driver(model, tile_batch_size=tile_batch_size)
     calibrate_df = driver.calibrate(g.df, alpha)
     return calibrate_df

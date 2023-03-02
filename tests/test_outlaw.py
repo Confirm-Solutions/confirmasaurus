@@ -2,10 +2,7 @@ import time
 
 import numpy as np
 import pytest
-import scipy.stats
 from numpy import nan
-from scipy.special import expit
-from scipy.special import logit
 
 import confirm.outlaw.berry as berry
 import confirm.outlaw.inla as inla
@@ -18,6 +15,8 @@ import jax.numpy as jnp
 
 
 def test_log_joint_from_numpyro():
+    import scipy.stats
+
     params = dict(sig2=10.0, theta=np.array([0, 0, 0]))
     data = np.array([[6.0, 35], [5, 35], [4, 35]])
     ll_fnc, _ = numpyro_interface.from_numpyro(berry.model(3), "sig2", (3, 2))
@@ -35,7 +34,9 @@ def test_log_joint_from_numpyro():
         params["theta"], np.repeat(mu_0, 3), cov
     )
     binomial_term = scipy.stats.binom.logpmf(
-        data[..., 0], data[..., 1], expit(params["theta"] + logit(0.3))
+        data[..., 0],
+        data[..., 1],
+        jax.scipy.special.expit(params["theta"] + jax.scipy.special.logit(0.3)),
     )
     np.testing.assert_allclose(
         ll, invgamma_term + normal_term + sum(binomial_term), rtol=1e-6

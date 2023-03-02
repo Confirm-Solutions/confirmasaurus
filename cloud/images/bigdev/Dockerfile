@@ -1,3 +1,13 @@
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
+# NOTE: This is super rusty and hasn't been used in a long long time.
 # Many things here are modified from:
 # https://github.com/microsoft/vscode-dev-containers/blob/v0.238.1/containers/python-3-miniconda/.devcontainer/base.Dockerfile
 # mambaforge image: https://github.com/conda-forge/miniforge-images/blob/master/ubuntu/Dockerfile
@@ -160,7 +170,7 @@ RUN mkdir -p $NVM_DIR \
 # Create a sagemath conda environment.
 # Since the environment is part of our conda installation, the resulting
 # jupyter kernel can be selected from VSCode's kernel selector.
-COPY environment.yml pyproject.toml poetry.lock /tmp/conda-tmp/
+COPY environment.yml requirements.txt requirements-jax-cuda.txt pyproject.toml poetry.lock /tmp/conda-tmp/
 RUN mamba create -n sagemath -y sage \
 # Set up our conda environment! Since we're inside a container, we'll just
 # install everything into the "base" environment.
@@ -175,6 +185,7 @@ RUN mamba create -n sagemath -y sage \
     && mamba install -y radian \
     && poetry config virtualenvs.create false \
     && poetry install --with=test,dev,cloud\
+    && pip install --upgrade -r requirements-jax-cuda.txt \
     && cd / \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \

@@ -6,16 +6,12 @@ Tools for working with Jupyter notebooks.
 
 """
 import time
+import warnings
 from pathlib import Path
 from unittest import mock
 
-import IPython
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from IPython.core.interactiveshell import prepended_to_syspath
-from IPython.core.interactiveshell import warn
 
 
 def magic(*text):
@@ -36,6 +32,8 @@ def configure_mpl_fast():
 
 def configure_mpl_pretty():
     """Retina and Latex matplotlib figures"""
+    import matplotlib.pyplot as plt
+
     magic("config", "InlineBackend.figure_format='retina'")
     plt.rcParams["text.usetex"] = True
     plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath, amssymb}"
@@ -56,6 +54,8 @@ def setup_nb(text_size_ratio=1.0, pretty=True, autoreload=True):
         magic("load_ext", "autoreload")
         magic("autoreload", "2")
 
+    import matplotlib.pyplot as plt
+
     if pretty:
         configure_mpl_pretty()
     else:
@@ -75,6 +75,8 @@ def setup_nb(text_size_ratio=1.0, pretty=True, autoreload=True):
 
 
 def scale_text(factor=1.0):
+    import matplotlib.pyplot as plt
+
     plt.rcParams["font.size"] = 15 * factor
     plt.rcParams["axes.labelsize"] = 13 * factor
     plt.rcParams["axes.titlesize"] = 15 * factor
@@ -93,8 +95,8 @@ def safe_execfile_ipy(
     the cell_indices argument. This lets us run only a subset of the cells in
     a notebook.
 
-    Permalink for the copied source. If this breaks, check if the upstream
-    source has changed substantially.
+    Permalink for the copied source. If this function breaks, check if the
+    upstream source has changed substantially.
         https://github.com/ipython/ipython/blob/57eaa12cb50c9a95213b9e155032e400b9424871/IPython/core/interactiveshell.py#L2766 # noqa
 
     Original docstring below:
@@ -113,6 +115,9 @@ def safe_execfile_ipy(
     raise_exceptions : bool (False)
         If True raise exceptions everywhere.  Meant for testing.
     """
+    from IPython.core.interactiveshell import prepended_to_syspath
+    from IPython.core.interactiveshell import warn
+
     fname = Path(fname).expanduser().resolve()
 
     # Make sure we can open the file
@@ -165,6 +170,13 @@ def run_notebook(filepath, cell_indices=None):
     Programmatically run a notebook return the notebook's namespace and the
     execution time. This is useful for testing notebooks.
 
+    Note: testbook is an alternative to this function. testbook has a critical
+    flaw because it currently runs the notebook in a separate process and uses
+    JSON to serialize objects. In addition, testbook seems undermaintained and
+    I would rather have our own thin 50 LOC implementation.
+    https://github.com/nteract/testbook
+    see: https://github.com/Confirm-Solutions/confirmasaurus/issues/266
+
     Args:
         filepath: Path to the notebook to run.
         cell_indices: The indices of the cells to run. Runs all cells if None.
@@ -173,13 +185,21 @@ def run_notebook(filepath, cell_indices=None):
     Returns:
         tuple of (namespace, execution time)
     """
+    import IPython
+    import matplotlib
+
     # Using Agg backend to prevent figures from popping up
     matplotlib.use("Agg")
-    # mock pyplot so that we don't spend runtime on figures that are going to
-    # be thrown out.
-    with mock.patch("matplotlib.pyplot"):
-        ipy = IPython.terminal.embed.InteractiveShellEmbed()
-        start = time.time()
-        safe_execfile_ipy(ipy, filepath, cell_indices=cell_indices)
-        end = time.time()
-        return ipy.user_ns, end - start
+
+    # mock pyplot because CI doesn't have latex and we don't want to install that.
+    with mock.patch("matplotlib.pyplot.show"):
+        with mock.patch("matplotlib.pyplot.savefig"):
+            ipy = IPython.terminal.embed.InteractiveShellEmbed()
+            start = time.time()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                safe_execfile_ipy(
+                    ipy, filepath, cell_indices=cell_indices, raise_exceptions=True
+                )
+            end = time.time()
+    return ipy.user_ns, end - start

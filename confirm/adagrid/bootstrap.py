@@ -27,7 +27,6 @@ class BootstrapCalibrate:
     def __init__(
         self, model, bootstrap_seed, nB, Ks, tile_batch_size=64, worker_id=None
     ):
-
         self.model = model
         self.worker_id = worker_id
         self.forward_boundv, self.backward_boundv = driver.get_bound(
@@ -35,7 +34,7 @@ class BootstrapCalibrate:
         )
         self.calibratevv = jax.jit(
             jax.vmap(
-                jax.vmap(driver.calc_tuning_threshold, in_axes=(None, 0, None)),
+                jax.vmap(driver.calc_calibration_threshold, in_axes=(None, 0, None)),
                 in_axes=(0, None, 0),
             )
         )
@@ -92,8 +91,11 @@ class BootstrapCalibrate:
             # order to calibrate. So, the likely fastest solution is to have multiple
             # layers of batching. This is not currently implemented.
             stats = self.model.sim_batch(0, K, theta, null_truth)
+            driver._check_stats(stats, K, theta)
             sorted_stats = jnp.sort(stats, axis=-1)
-            alpha0 = self.backward_boundv(alpha, theta, vertices)
+            alpha0 = self.backward_boundv(
+                np.full(theta.shape[0], alpha), theta, vertices
+            )
             return (
                 self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0),
                 alpha0,
@@ -125,7 +127,9 @@ class BootstrapCalibrate:
             lams_df.insert(
                 0, "twb_max_lams", bootstrap_lams[:, 1 + self.nB :].max(axis=1)
             )
+            lams_df.insert(0, "idx", driver._calibration_index(K, alpha0))
             lams_df.insert(0, "alpha0", alpha0)
+            lams_df.insert(0, "K", K)
 
             return lams_df
 
@@ -140,6 +144,7 @@ class BootstrapCalibrate:
             # NOTE: no batching implemented here. Currently, this function is only
             # called with a single tile so it's not necessary.
             stats = self.model.sim_batch(0, K, theta, K_g.get_null_truth())
+            driver._check_stats(stats, K, theta)
             tie_sum = jnp.sum(stats[..., None] < lams_arr[None, None, :], axis=1)
             return pd.DataFrame(
                 tie_sum,
@@ -151,7 +156,7 @@ class BootstrapCalibrate:
 
 
 def bootstrap_calibrate(
-    modeltype,
+    model_type,
     *,
     g: grid.Grid,
     alpha: float = 0.025,
@@ -178,7 +183,7 @@ def bootstrap_calibrate(
     to add more simulations to a tile.
 
     Args:
-        modeltype: The model class.
+        model_type: The model class.
         g: The grid.
         alpha: The Type I Error control level. Defaults to 0.025.
         model_seed: The random seed. Defaults to 0.
@@ -206,7 +211,7 @@ def bootstrap_calibrate(
         - twb_max_lams: The maximum of the twb_lams{i} columns.
         - alpha0: The alpha0 value used to calibrate the lambda*.
     """
-    model, g = driver._setup(modeltype, g, model_seed, K, model_kwargs)
+    model, g = driver._setup(model_type, g, model_seed, K, model_kwargs)
     Ks = np.sort(g.df["K"].unique())
     cal_df = BootstrapCalibrate(
         model, bootstrap_seed, nB, Ks, tile_batch_size

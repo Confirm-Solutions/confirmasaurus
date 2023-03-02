@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
+import imprint as ip
 from imprint.nb_util import run_notebook
 
 
@@ -13,8 +13,7 @@ def get_tutorial_path(filename):
 @pytest.mark.slow
 def test_ztest_tutorial(snapshot):
     ns, _ = run_notebook(get_tutorial_path("ztest.ipynb"))
-    rej_df = ns["rej_df"]
-    pd.testing.assert_frame_equal(rej_df, snapshot(rej_df))
+    ip.testing.check_imprint_results(ns["g_rej"], snapshot)
 
 
 @pytest.mark.slow
@@ -29,7 +28,22 @@ def test_fisher_exact_tutorial(snapshot):
 @pytest.mark.slow
 def test_basket_tutorial(snapshot):
     ns, _ = run_notebook(get_tutorial_path("basket.ipynb"), cell_indices=[0, 1])
-    pd.testing.assert_frame_equal(ns["validation_df"], snapshot(ns["validation_df"]))
+    ip.testing.check_imprint_results(ns["g_val"], snapshot)
+
+
+@pytest.mark.slow
+def test_chisq_tutorial(snapshot):
+    run_notebook(get_tutorial_path("chisq_test.ipynb"))
+
+
+@pytest.mark.slow
+def test_t_test_adaptive_tutorial(snapshot):
+    run_notebook(get_tutorial_path("t_test_adaptive.ipynb"))
+
+
+@pytest.mark.slow
+def test_t_test_tutorial(snapshot):
+    run_notebook(get_tutorial_path("t_test.ipynb"))
 
 
 def main():
@@ -45,4 +59,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # main2()

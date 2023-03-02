@@ -1,7 +1,12 @@
 import subprocess
 from pathlib import Path
 
+import dotenv
 import modal
+
+import imprint.log
+
+logger = imprint.log.getLogger(__name__)
 
 
 def get_image(dependency_groups=["cloud"]):
@@ -10,6 +15,9 @@ def get_image(dependency_groups=["cloud"]):
     context_files = {
         "/.pyproject.toml": str(poetry_dir.joinpath("pyproject.toml")),
         "/.poetry.lock": str(poetry_dir.joinpath("poetry.lock")),
+        "/.requirements-jax-cuda.txt": str(
+            poetry_dir.joinpath("requirements-jax-cuda.txt")
+        ),
         "/.test_secrets.enc.env": str(poetry_dir.joinpath("test_secrets.enc.env")),
     }
 
@@ -29,15 +37,17 @@ def get_image(dependency_groups=["cloud"]):
         "RUN python -m pip install poetry",
         "COPY /.poetry.lock /tmp/poetry/poetry.lock",
         "COPY /.pyproject.toml /tmp/poetry/pyproject.toml",
+        "COPY /.requirements-jax-cuda.txt /tmp/poetry/requirements-jax-cuda.txt",
         f"""
         RUN cd /tmp/poetry && \\
             poetry config virtualenvs.create false && \\
-            poetry install --with={','.join(dependency_groups)} --no-root
+            poetry install --with={','.join(dependency_groups)} --no-root && \\
+            pip install --upgrade -r requirements-jax-cuda.txt
         """,
     ]
 
     return modal.Image.from_dockerhub(
-        "nvidia/cuda:11.8.0-devel-ubuntu22.04",
+        "nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04",
         setup_commands=[
             "apt-get update",
             "apt-get install -y python-is-python3 python3-pip",
@@ -45,16 +55,23 @@ def get_image(dependency_groups=["cloud"]):
     ).dockerfile_commands(dockerfile_commands, context_files=context_files)
 
 
+def get_defaults():
+    return dict(
+        image=get_image(dependency_groups=["test", "cloud"]),
+        retries=0,
+        mounts=(modal.create_package_mounts(["confirm", "imprint"])),
+        secret=modal.Secret.from_name("kms-sops"),
+    )
+
+
 def modalize(stub, **kwargs):
     def decorator(f):
+        p = get_defaults()
+        p.update(kwargs)
         return stub.function(
             raw_f=f,
-            image=get_image(dependency_groups=["test", "cloud"]),
-            retries=0,
-            mounts=(modal.create_package_mounts(["confirm", "imprint"])),
-            secret=modal.Secret.from_name("kms-sops"),
             name=f.__qualname__,
-            **kwargs,
+            **p,
         )()
 
     return decorator
@@ -67,5 +84,20 @@ def run_on_modal(f, **kwargs):
         return wrapper.call()
 
 
-def decrypt_secrets(sops_binary="/go/bin/sops"):
-    subprocess.run([sops_binary, "-d", "--output", ".env", "test_secrets.enc.env"])
+def setup_env(sops_binary="/go/bin/sops"):
+    p = subprocess.run(
+        [sops_binary, "-d", "--output", "/root/.env", "/root/test_secrets.enc.env"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=True,
+    )
+    logger.debug("Decrypting secrets. stdout from sops:\n %s", p.stdout.decode("utf-8"))
+    env_file = "/root/.env"
+    env = dotenv.dotenv_values(env_file)
+    logger.debug("Environment variables loaded from %s: %s", env_file, list(env.keys()))
+    dotenv.load_dotenv(env_file)
+
+    logger.debug("Enabling 64-bit floats in JAX.")
+    from jax.config import config
+
+    config.update("jax_enable_x64", True)

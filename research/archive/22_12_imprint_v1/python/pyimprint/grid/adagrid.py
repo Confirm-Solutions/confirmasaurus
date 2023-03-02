@@ -233,7 +233,6 @@ class AdaGrid(AdaGridInternal):
 
         itr = 0
         while (grid_range.n_gridpts() > 0) and (itr < max_iter):
-
             if rand_iter:
                 # TODO: how do we ensure that the seed change
                 # won't correlate the simulations across iterations?

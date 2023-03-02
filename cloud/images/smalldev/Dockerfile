@@ -66,11 +66,12 @@ ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
 ENV LD_LIBRARY_PATH /usr/local/cuda/compat:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
 ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
-COPY environment.yml requirements.txt pyproject.toml poetry.lock /tmp/conda-tmp/
+COPY environment.yml requirements.txt requirements-jax-cuda.txt pyproject.toml poetry.lock /tmp/conda-tmp/
 RUN cd /tmp/conda-tmp/ \
     && mamba env update -n base -f environment.yml \
     && poetry config virtualenvs.create false \
     && poetry install --no-root --with=test,dev,cloud \
+    && pip install --upgrade -r requirements-jax-cuda.txt \
     && cd / \
     && rm -rf /tmp/conda-tmp \
     && mamba clean --all --yes \

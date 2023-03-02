@@ -88,20 +88,22 @@ class LogRank:
         control_hazard = -theta[:, 0]
         treatment_hazard = -theta[:, 1]
         hazard_ratio = treatment_hazard / control_hazard
-        control_rvs = jnp.tile(self.samples[None, :, :, 0], (hazard_ratio.shape[0], 1, 1))
-        treatment_rvs = self.samples[None, :, :, 1] / hazard_ratio[:, None, None]
+        sample_subset = self.samples[begin_sim:end_sim]
+        group_subset = self.group[begin_sim:end_sim]
+
+        control_rvs = jnp.tile(sample_subset[None, :, :, 0], (hazard_ratio.shape[0], 1, 1))
+        treatment_rvs = sample_subset[None, :, :, 1] / hazard_ratio[:, None, None]
         all_rvs = jnp.concatenate([control_rvs, treatment_rvs], axis=2)
         test_stat = -self.vmap_logrank_test(
-            all_rvs, self.group, self.censoring_time
+            all_rvs, group_subset, self.censoring_time
         )
         return test_stat
 ```
 
 ```python
-g = ip.cartesian_grid([-1, -1], [-1, -1], n=[1, 1], null_hypos=[ip.hypo("theta0 > theta1")])
-```
-
-```python
+g = ip.cartesian_grid(
+    [-2, -2], [-1, -1], n=[1, 1], null_hypos=[ip.hypo("theta0 > theta1")]
+)
 lr = LogRank(0, 200000, n=100, censoring_time=10000000)
 stats = lr.sim_batch(0, lr.max_K, g.get_theta(), g.get_null_truth())
 ```
@@ -150,6 +152,79 @@ plt.colorbar()
 plt.subplot(1,2,2)
 plt.title('Total Bound')
 plt.scatter(g.df['theta0'], g.df['theta1'], c=rej_df['tie_bound'])
+plt.xlabel('$\lambda_0$')
+plt.ylabel('$\lambda_1$')
+plt.colorbar()
+
+plt.show()
+```
+
+```python
+g = ip.cartesian_grid([-10, -10], [-0.05, -0.05], n=[100, 100], null_hypos=[ip.hypo("theta0 > theta1")])
+```
+
+```python
+import confirm.adagrid as ada
+import confirm.cloud.clickhouse as ch
+db = ch.Clickhouse.connect()
+ada.ada_validate(
+    LogRank,
+    g=g,
+    db=db,
+    lam=-1.96,
+    step_size=2**15,
+    packet_size=2**10,
+    model_kwargs=dict(n=10, censoring_time=12),
+    backend=ada.ModalBackend(n_workers=4, gpu="T4")
+)
+```
+
+```python
+reports = db.get_reports()
+reports
+```
+
+```python
+total_runtime = (
+    reports["work_extraction_time"].max() - reports["work_extraction_time"].min()
+)
+total_processing = reports["runtime_processing"].sum()
+total_processing, total_runtime, total_processing / total_runtime
+```
+
+```python
+(reports['runtime_processing'].sum() / reports['runtime_full_iter'].sum(),
+reports['runtime_get_work'].sum() / reports['runtime_full_iter'].sum(),
+reports['runtime_convergence_criterion'].sum() / reports['runtime_full_iter'].sum(),
+reports['runtime_new_step'].sum() / reports['runtime_full_iter'].sum())
+```
+
+```python
+results_df = db.get_results()
+df = ip.Grid(results_df, None).prune_inactive().df
+```
+
+```python
+df.shape
+```
+
+```python
+results_df['K'].sum() / 1e6
+```
+
+```python
+import matplotlib.pyplot as plt
+plt.figure(figsize=(10,5), constrained_layout=True)
+plt.subplot(1,2,1)
+plt.title('TIE estimate')
+plt.scatter(df['theta0'], df['theta1'], c=df['tie_est'])
+plt.xlabel('$\lambda_0$')
+plt.ylabel('$\lambda_1$')
+plt.colorbar()
+
+plt.subplot(1,2,2)
+plt.title('Total Bound')
+plt.scatter(df['theta0'], df['theta1'], c=df['tie_bound'])
 plt.xlabel('$\lambda_0$')
 plt.ylabel('$\lambda_1$')
 plt.colorbar()

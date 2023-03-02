@@ -2,7 +2,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-import scipy.interpolate
 
 from confirm.outlaw.interp import interpn
 
@@ -17,6 +16,8 @@ def test_interpn():
 
 @pytest.mark.parametrize("dim", [1, 3])
 def test_against_scipy_multi_value(dim):
+    import scipy.interpolate
+
     for i in range(3):
         np.random.seed(10)
         grid = [np.sort(np.random.uniform(size=10)) for _ in range(2)]

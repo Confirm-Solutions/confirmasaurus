@@ -1,4 +1,19 @@
 """
+# Testing tools
+
+## Why is this here instead of conftest.py?
+
+Typically, this kind of testing support code would go in conftest.py if imprint
+were the only place in which that testing support code were used. But, we're
+also importing these testing tools from other packages/repos internal to
+Confirm. So, it makes sense to keep it in a separate module for importability.
+Then we can load it as a pytest plugin
+(https://docs.pytest.org/en/7.1.x/how-to/writing_plugins.html) with:
+`pytest -p imprint.testing`
+This flag is included in the default pytest configuration in pyproject.toml.
+
+## Snapshot testing
+
 Here you will find tools for snapshot testing. Snapshot testing is a way to
 check that the output of a function is the same as it used to be. This is
 particularly useful for end to end tests where we don't have a comparison point
@@ -192,4 +207,86 @@ def snapshot(request):
     return SnapshotAssertion(
         update_snapshots=request.config.option.update_snapshots,
         request=request,
+    )
+
+
+def check_imprint_results(g, snapshot, ignore_story=True):
+    """
+    This is a helper method for snapshot testing of calibration and validation
+    outputs. The goal is:
+    1. to ensure that the outputs are identical to stored results.
+    2. when the results have changed, isolate whether the change should be
+        concerning or not:
+        - it's very worrying if the calibration outputs change
+        - on the other hand, it's not particularly worrying if there's a new
+          column in the output!
+
+    The checks proceed from portions of the data where it is absolutely
+    necessary to have an exact match on to portions of the data where the data
+    schema is more volatile.
+
+    Args:
+        g: The grid to compare.
+        snapshot: The imprint.testing.snapshot object.
+        ignore_story: Should we only test the grid + outputs and ignore
+            storyline outputs like id, packet_id, event time, etc. Defaults to
+            True.
+    """
+    if "lams" in g.df.columns:
+        lamss = g.prune_inactive().df["lams"].min()
+        np.testing.assert_allclose(lamss, snapshot(lamss))
+    if "tie_bound" in g.df.columns:
+        max_tie = g.prune_inactive().df["tie_bound"].max()
+        np.testing.assert_allclose(max_tie, snapshot(max_tie))
+
+    # For a correctly set up problem, the grid should have a unique ordering
+    order_cols = (
+        ["active"]
+        + [f"theta{i}" for i in range(g.d)]
+        + [f"radii{i}" for i in range(g.d)]
+        + [f"null_truth{i}" for i in range(g.d)]
+        + ["K"]
+    )
+    df = g.df.sort_values(by=order_cols).reset_index(drop=True)
+
+    important_cols = (
+        order_cols
+        + [c for c in df.columns if "lams" in c]
+        + [c for c in df.columns if "tie" in c]
+    )
+    check_subset = df[important_cols]
+    compare = (
+        snapshot(check_subset)
+        .sort_values(by=order_cols)
+        .reset_index(drop=True)[important_cols]
+    )
+
+    # First check the cal/val outputs. These are the most important values
+    # to get correct.
+    pd.testing.assert_frame_equal(check_subset, compare, check_dtype=False)
+    if ignore_story:
+        return
+
+    df_idx = df.set_index("id")
+    compare_all_cols = snapshot(df_idx)
+    shared_cols = list(set(df_idx.columns).intersection(compare_all_cols.columns))
+    # Compare the shared columns. This is helpful for ensuring that existing
+    # columns are identical in a situation where we add a new column.
+    pd.testing.assert_frame_equal(
+        df_idx[shared_cols],
+        compare_all_cols[shared_cols],
+        check_like=True,
+        check_index_type=False,
+        check_dtype=False,
+    )
+
+    # Second, we check the remaining values. These are less important to be
+    # precisely reproduced, but we still want to make sure they are
+    # deterministic.
+    pd.testing.assert_frame_equal(
+        df_idx,
+        compare_all_cols,
+        check_like=True,
+        check_index_type=False,
+        check_dtype=False,
     )

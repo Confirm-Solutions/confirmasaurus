@@ -11,7 +11,7 @@ Directories:
 - `docs` - documentation.
 - `research` - Research! Stuff in here might be in various of states of rough/polished.
 - `cloud` - [tools for working on cloud infrastructure including AWS and Codespaces.](cloud/README.md)
-- Doing something new? Just make a new top level folder.
+- Doing something new? Just make a new top level folder or a folder in research.
 
 ## Getting set up
 
@@ -36,14 +36,19 @@ To get a fully functional development environment...
    in [`pyproject.toml`](pyproject.toml).
 
    ```bash
-   mamba update -y conda
+   mamba update -y conda mamba
    # create a development virtual environment with useful tools
    mamba env create
    conda activate confirm
 
-   # install the confirm package plus development tools
+   # the following line makes poetry install into already activated
+   # environment.
    poetry config virtualenvs.create false --local
+   # install the confirm package plus development tools
    poetry install --with=dev,test,cloud,cloud_dev
+
+   # OPTIONALLY: Install a CUDA-enabled JAX build on Linux
+   pip install --upgrade -r requirements-jax-cuda.txt
    ```
 
 ## Committing code
