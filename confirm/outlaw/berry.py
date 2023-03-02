@@ -9,10 +9,8 @@ mu_sig2 = 100.0
 sig2_alpha = 0.0005
 sig2_beta = 0.000005
 
-
-def logit_p1():
-    # lazily import of jax.scipy.special
-    return jax.scipy.special.logit(0.3)
+p1 = 0.3
+logit_p1 = np.log(p1 / (1 - p1))
 
 
 def figure1_data(N=1):
@@ -40,7 +38,7 @@ def model(d):
         )
         numpyro.sample(
             "y",
-            dist.BinomialLogits(theta + logit_p1(), total_count=data[..., 1]),
+            dist.BinomialLogits(theta + logit_p1, total_count=data[..., 1]),
             obs=data[..., 0],
         )
 
@@ -58,7 +56,7 @@ def log_joint(d):
             + dist.MultivariateNormal(mu_0, cov).log_prob(params["theta"])
             + jnp.sum(
                 dist.BinomialLogits(
-                    params["theta"] + logit_p1(), total_count=data[..., 1]
+                    params["theta"] + logit_p1, total_count=data[..., 1]
                 ).log_prob(data[..., 0])
             )
         )
@@ -66,7 +64,7 @@ def log_joint(d):
     return ll
 
 
-def optimized(sig2, n_arms=4, dtype=np.float64):
+def optimized(sig2, n_arms=4, dtype=jnp.float64):
     import scipy.stats
 
     sigma2_n = sig2.shape[0]
@@ -87,7 +85,7 @@ def optimized(sig2, n_arms=4, dtype=np.float64):
         y = data[..., 0]
         n = data[..., 1]
         theta_m0 = theta - data.dtype.type(mu_0)
-        theta_adj = theta + data.dtype.type(logit_p1())
+        theta_adj = theta + data.dtype.type(logit_p1)
         exp_theta_adj = jnp.exp(theta_adj)
         quad = jnp.sum(
             theta_m0 * (dotJI_vmap(neg_precQ_a, neg_precQ_b, theta_m0)),
@@ -106,7 +104,7 @@ def optimized(sig2, n_arms=4, dtype=np.float64):
         y = data[..., 0]
         n = data[..., 1]
         theta_m0 = theta - dtype(mu_0)
-        exp_theta_adj = jnp.exp(theta + dtype(logit_p1()))
+        exp_theta_adj = jnp.exp(theta + dtype(logit_p1))
         C = 1 / (exp_theta_adj + 1)
         nCeta = n[None] * C * exp_theta_adj
         grad = dotJI_vmap(neg_precQ_a, neg_precQ_b, theta_m0) + y[None] - nCeta
@@ -242,7 +240,7 @@ def build_dirty_bayes(sig2, n_arms=4, dtype=np.float64):
         y = data[..., 0]
         n = data[..., 1]
         phat = y / n
-        thetahat = jax.scipy.special.logit(phat) - logit_p1()
+        thetahat = jax.scipy.special.logit(phat) - logit_p1
         sample_I = n * phat * (1 - phat)
         prec_post_a = prec_a[:, None] + sample_I[None]
         sigma_post = inv_basket_vmap(prec_post_a, prec_b)
