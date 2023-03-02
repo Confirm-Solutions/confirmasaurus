@@ -2,6 +2,7 @@ import asyncio
 import codecs
 import copy
 import json
+import logging
 import platform
 import subprocess
 import warnings
@@ -14,7 +15,7 @@ import pandas as pd
 import imprint as ip
 from confirm.adagrid.db import DuckDBTiles
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def init(algo_type, is_leader, worker_id, n_zones, kwargs):

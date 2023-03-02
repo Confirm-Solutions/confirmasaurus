@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -5,7 +7,7 @@ import imprint as ip
 from .backend import LocalBackend
 from .backend import print_report
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AdaValidate:

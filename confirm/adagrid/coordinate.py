@@ -1,11 +1,11 @@
 import asyncio
+import logging
 
-import imprint as ip
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import _launch_task
 from confirm.adagrid.init import assign_tiles
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def coordinate(algo, step_id, n_zones):

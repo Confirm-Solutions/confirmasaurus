@@ -19,7 +19,6 @@ import pandas as pd
 import pyarrow
 
 import confirm.adagrid.json as json
-import imprint as ip
 from confirm.adagrid.db import get_absent_parents
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
@@ -27,7 +26,9 @@ from confirm.adagrid.store import Store
 if TYPE_CHECKING:
     import clickhouse_connect
 
-logger = ip.getLogger(__name__)
+import logging
+
+logger = logging.getLogger(__name__)
 
 type_map = {
     "uint8": "UInt8",
@@ -267,14 +268,13 @@ class Clickhouse:
     _results_table_exists: bool = False
     is_distributed: bool = True
     supports_threads: bool = True
-
-    @property
-    def _host(self):
-        return self.connection_details["host"]
+    _store: ClickhouseStore = None
 
     @property
     def store(self):
-        return ClickhouseStore(self.client, self.job_id)
+        if self._store is None:
+            self._store = ClickhouseStore(self.client, self.job_id)
+        return self._store
 
     def dimension(self):
         if self._d is None:
@@ -420,7 +420,8 @@ class Clickhouse:
         _command(
             self.client,
             f"insert into reports values ('{json.dumps(report)}')",
-            settings=insert_settings,
+            # no need for synchronous quorum inserts for reports
+            settings={},
         )
         return report
 
@@ -749,6 +750,16 @@ class Clickhouse:
             deepened_tiles_with_incorrect_child_count(),
         )
 
+    def insert_log(self, *, worker_id, t, name, levelno, levelname, msg):
+        return _command(
+            self.client,
+            "insert into logs values (%s, %s, %s, %s, %s, %s)",
+            (worker_id, t, name, levelno, levelname, msg),
+        )
+
+    def get_logs(self):
+        return _query_df(self.client, "select * from logs")
+
     def close(self):
         self.client.close()
 
@@ -807,6 +818,24 @@ class Clickhouse:
             )
         )
 
+        create_logs = asyncio.create_task(
+            asyncio.to_thread(
+                _command,
+                self.client,
+                """
+                create table logs (
+                    worker_id UInt32,
+                    t DateTime64(6),
+                    name String,
+                    levelno UInt32,
+                    levelname String,
+                    message String)
+                engine = MergeTree() 
+                order by (worker_id, t)
+                """,
+            )
+        )
+
         async def _create_inactive():
             await create_done
             await asyncio.to_thread(
@@ -840,6 +869,7 @@ class Clickhouse:
 
         await asyncio.gather(
             create_reports,
+            create_logs,
             create_tiles,
             create_done,
             create_inactive,

@@ -1,10 +1,10 @@
 import asyncio
+import logging
 
 import modal.aio
 import numpy as np
 
 import confirm.cloud.modal_util as modal_util
-import imprint as ip
 from .backend import get_next_coord
 from .backend import maybe_start_event_loop
 from confirm.adagrid.coordinate import coordinate
@@ -12,7 +12,7 @@ from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 stub = modal.aio.AioStub()
 stub.worker_id_queue = modal.aio.AioQueue()

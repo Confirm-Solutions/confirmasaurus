@@ -72,7 +72,7 @@ profile = "black"
 
 [tool.pytest.ini_options]
 addopts = "-p imprint.testing --capture=no --show-capture=no --tb=short --strict-markers --doctest-modules"
-testpaths = ["tests", "imprint/imprint"]
+testpaths = ["tests", "imprint/tests"]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"

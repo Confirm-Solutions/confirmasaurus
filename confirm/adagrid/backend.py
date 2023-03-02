@@ -89,18 +89,19 @@ using a distributed lock. The simulation step is parallelized across all
 workers.
 """
 import asyncio
+import logging
 from pprint import pformat
 
 import jax
 import numpy as np
 
-import imprint as ip
 from confirm.adagrid.coordinate import coordinate
+from confirm.adagrid.db import DatabaseLogging
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet_set
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class LocalBackend:
@@ -125,14 +126,19 @@ class LocalBackend:
 
     def run(self, algo_type, kwargs):
         kwargs.update(self.input_cfg)
-        return maybe_start_event_loop(self._run_async(algo_type, kwargs))
+        return maybe_start_event_loop(self.async_entrypoint(algo_type, kwargs))
 
-    async def _run_async(self, algo_type, kwargs):
+    async def async_entrypoint(self, algo_type, kwargs):
         # it's okay to use input_cfg['n_zones'] here because it's only used at
         # the start of a job.
         algo, incomplete_packets, zone_steps = await init(
             algo_type, True, 1, self.input_cfg["n_zones"], kwargs
         )
+        # handler = logging.StreamHandler(stream=db.get_logging_stream())
+        with DatabaseLogging(db=algo.db):
+            return await self._run(algo, incomplete_packets, zone_steps)
+
+    async def _run(self, algo, incomplete_packets, zone_steps):
         n_zones = algo.cfg["n_zones"]
         incomplete_packets = np.array(incomplete_packets)
         self.lazy_tasks.extend(await process_packet_set(algo, incomplete_packets))

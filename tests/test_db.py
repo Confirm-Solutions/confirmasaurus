@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -6,6 +7,8 @@ import pandas as pd
 
 import imprint as ip
 from confirm.adagrid import db
+
+logger = logging.getLogger(__name__)
 
 
 def example_grid(x1, x2):
@@ -220,6 +223,16 @@ class DBTester:
         np.testing.assert_allclose(
             pd_tiles.bootstrap_lamss(None), db_tiles.bootstrap_lamss(None)
         )
+
+    def test_db_logging(self):
+        db_obj = self.connect()
+        asyncio.run(db_obj.init_tiles(example_grid(-1, 1).df))
+        with db.DatabaseLogging(db=db_obj):
+            logger.debug("informative")
+            logger.warning("scary")
+            logger.error("eviscerating")
+        logs = db_obj.get_logs()
+        assert logs.shape[0] == 3
 
 
 class TestDuckDB(DBTester):

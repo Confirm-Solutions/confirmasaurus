@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import time
 
 import numpy as np
@@ -8,7 +9,7 @@ import imprint as ip
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.init import _launch_task
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def process_packet_set(algo, packets):

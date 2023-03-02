@@ -47,6 +47,8 @@ The great glossary of adagrid:
 - worst tile: the tile for which lams is smallest:
  `lams[worst_tile] == lamss == lambda**`
 """
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -55,7 +57,7 @@ from . import bootstrap
 from .backend import LocalBackend
 from .backend import print_report
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AdaCalibrate:

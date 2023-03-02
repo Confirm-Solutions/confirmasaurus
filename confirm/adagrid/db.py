@@ -1,3 +1,5 @@
+import datetime
+import logging
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
@@ -15,7 +17,29 @@ from confirm.adagrid.store import Store
 if TYPE_CHECKING:
     import duckdb
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+
+class DatabaseLogging(logging.Handler):
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+
+    def __enter__(self):
+        logging.getLogger().addHandler(self)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        logging.getLogger().removeHandler(self)
+
+    def emit(self, record):
+        self.db.insert_log(
+            worker_id=ip.log.worker_id.get(),
+            t=datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
+            name=record.name,
+            levelno=record.levelno,
+            levelname=record.levelname,
+            msg=record.msg,
+        )
 
 
 @dataclass
@@ -185,8 +209,14 @@ class DuckDBTiles:
         self.store = DuckDBStore(self.con)
         self.con.execute(
             """
-            create table if not exists packet_flags
-                (zone_id int, step_id int, packet_id int)
+            create table if not exists logs (
+                worker_id UINTEGER,
+                t TIMESTAMP,
+                name TEXT,
+                levelno UINTEGER,
+                levelname TEXT,
+                message TEXT
+            )
             """
         )
 
@@ -528,6 +558,15 @@ class DuckDBTiles:
                 "deepened tiles with wrong number of children:"
                 f" {deepened_tiles_with_incorrect_child_count}"
             )
+
+    def insert_log(self, *, worker_id, t, name, levelno, levelname, msg):
+        self.con.execute(
+            "insert into logs values (?, ?, ?, ?, ?, ?)",
+            (worker_id, t, name, levelno, levelname, msg),
+        )
+
+    def get_logs(self):
+        return self.con.execute("select * from logs").df()
 
     def close(self) -> None:
         self.con.close()
