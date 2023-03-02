@@ -308,14 +308,14 @@ tests-no-zope = ["cloudpickle", "cloudpickle", "hypothesis", "hypothesis", "mypy
 
 [[package]]
 name = "aws-cdk-asset-awscli-v1"
-version = "2.2.85"
+version = "2.2.86"
 description = "A library that contains the AWS CLI for use in Lambda Layers"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-awscli-v1-2.2.85.tar.gz", hash = "sha256:9f38be3f1879d0b15a3e2fa23913c4fe57b6d5043ebf6ef854f273ec6fd45fe2"},
-    {file = "aws_cdk.asset_awscli_v1-2.2.85-py3-none-any.whl", hash = "sha256:aff1cae527ffc9bcce3a9210cfef02a94f87cc2cced861dc0e25740fc8d4fe59"},
+    {file = "aws-cdk.asset-awscli-v1-2.2.86.tar.gz", hash = "sha256:68ef6ddc4994c33aefd49d085588fe4b828d11df8ce25b2d7aac4d7d39de5488"},
+    {file = "aws_cdk.asset_awscli_v1-2.2.86-py3-none-any.whl", hash = "sha256:2069921e8cb49b63610b4755772b0e9af709556b6ca26772e08433162bda3474"},
 ]
 
 [package.dependencies]
@@ -342,14 +342,14 @@ typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-asset-node-proxy-agent-v5"
-version = "2.0.71"
+version = "2.0.72"
 description = "@aws-cdk/asset-node-proxy-agent-v5"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.71.tar.gz", hash = "sha256:85c1876b1a322cc29b20ca5f4cdf6517b84ddbad0021438151882fe76db89b0c"},
-    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.71-py3-none-any.whl", hash = "sha256:1d62d2f30185b71ebe4abfade9eb0f9a00e4d42fc585c2578cb5b390b417128a"},
+    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.72.tar.gz", hash = "sha256:16a8b7dfe0193ee64fcbbc2b76bb7a217006493f4f55ec26d9490766ed575701"},
+    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.72-py3-none-any.whl", hash = "sha256:be76dbbf3f33bc16b91045973c65239458e27c8d0352b1f315bf9f35c30668fc"},
 ]
 
 [package.dependencies]
@@ -915,14 +915,14 @@ test = ["pytest"]
 
 [[package]]
 name = "constructs"
-version = "10.1.264"
+version = "10.1.265"
 description = "A programming model for software-defined state"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "constructs-10.1.264-py3-none-any.whl", hash = "sha256:87bca7218a956137d580edef6e7c3f6416c39db4af1fbf752149c3d821bf0bc6"},
-    {file = "constructs-10.1.264.tar.gz", hash = "sha256:e54cda38e8cb7d7c561be6ee25c91ab6f23a49eaa10bd0b731a038f2ac43e204"},
+    {file = "constructs-10.1.265-py3-none-any.whl", hash = "sha256:90c996f65378456e43b8931e17617f25862cd34d5e509912341e8c2f42cbce77"},
+    {file = "constructs-10.1.265.tar.gz", hash = "sha256:f7c26ae7291d09537c91789f1f004274d5a70f1a90e7bc61af5e362736298c19"},
 ]
 
 [package.dependencies]
@@ -1678,52 +1678,29 @@ tpu = ["jaxlib (==0.4.4)", "libtpu-nightly (==0.1.dev20230216)", "requests"]
 
 [[package]]
 name = "jaxlib"
-version = "0.4.3"
+version = "0.4.4"
 description = "XLA library for JAX"
 category = "main"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "jaxlib-0.4.3-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:512b31532cdec88bf04721bff66ad8639a8d95a462284cb9af2e7a9b7a9d37ed"},
-    {file = "jaxlib-0.4.3-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ae631f788c060e0c765c01176c210723fcb9b6824b2a189bfd13c2152c228c1d"},
-    {file = "jaxlib-0.4.3-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:f17b53736aca7c31a5eedd4cdad64be92c8b774c943a516d72296d6e2a3dc6c2"},
-    {file = "jaxlib-0.4.3-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:71a77f3fa7922a5e87c24596abc246e1af85c77eee20b67c161d9d85b3e22944"},
-    {file = "jaxlib-0.4.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:af2cd5613feb1fb4b8895483f0d3140378803f591d79ac6db7718b7b21664baf"},
-    {file = "jaxlib-0.4.3-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:2a284b9b7972b25a4bbfba674be91c295b4cacd62640d956045383d7b40525ba"},
-    {file = "jaxlib-0.4.3-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:2ab6546ad6fd2b3a4720ba0b03e355e59840a61e0852991ea78bb6ab7e9dc60e"},
-    {file = "jaxlib-0.4.3-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:0c78c3b24a84e177a8a9ac668d5fc991f23f0a7406dcd3e262b6a29a7c907855"},
-    {file = "jaxlib-0.4.3-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:2f00f05970c62fea2054ce081d0d14c4d2d40655c9c58bc4b7967fe6888d2143"},
-    {file = "jaxlib-0.4.3-cp39-cp39-macosx_10_14_x86_64.whl", hash = "sha256:9aa4e89c6d8f1415af70d5f02dfb40e6895337896680b900b801ed648151ac4b"},
-    {file = "jaxlib-0.4.3-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:8e8765fe1a5284b072fab8d10018c88449c6922a4752a91c9211b2fe4c95151a"},
-    {file = "jaxlib-0.4.3-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:ca5532c2865f10f782a5d106d355a40fd80a1a509d0400a5886f83254003fb14"},
+    {file = "jaxlib-0.4.4-cp310-cp310-macosx_10_14_x86_64.whl", hash = "sha256:6ab7e24f0f3269f2708d1c0984a6f2d8eef2dfee24b21dcf8da296f49809d689"},
+    {file = "jaxlib-0.4.4-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c2e3a6a0279395db2549ad0ca269907937be4582a150c6a6d595eb812a2ffbc5"},
+    {file = "jaxlib-0.4.4-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:e154fdd3d001fad8b91f342fb1a656358e8c4bf188b65544147f6a7999d4b8a4"},
+    {file = "jaxlib-0.4.4-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:43f7c2193c2572c33106f41e4c206c70e4b30e97139699134d29a3e4ba367afb"},
+    {file = "jaxlib-0.4.4-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:6e8794ec07504a2e68f49f7751130ff4bc1754eb554560e70a9e2004b6f728bf"},
+    {file = "jaxlib-0.4.4-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:49acc44c2fe8fc7e3e66a0056b6ea55fc6bd4685686070d57d05d7bbd7872cdf"},
+    {file = "jaxlib-0.4.4-cp38-cp38-macosx_10_14_x86_64.whl", hash = "sha256:32141275ca791277ae6cb26f3e0c51be3c3eff96d2a886a32b34090ce66eacf6"},
+    {file = "jaxlib-0.4.4-cp38-cp38-macosx_11_0_arm64.whl", hash = "sha256:f3f065cb4596d360a259ea9dd6ff86b937d9a0536ade73c4391e24e1660a2555"},
+    {file = "jaxlib-0.4.4-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:754bbe7a78cdf04b6cd6227089e4d6e4940b9ce304cc92bd606f16d36770c6a9"},
+    {file = "jaxlib-0.4.4-cp39-cp39-macosx_10_14_x86_64.whl", hash = "sha256:d2e56b310d6294ad233b1b770e474f37398bc12aae0cd3718ec36e982af4483b"},
+    {file = "jaxlib-0.4.4-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:6c41bb297ed270a7de6e65445f87b72e8a0fa6b57e584192bb55f0646159c9e4"},
+    {file = "jaxlib-0.4.4-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:a54176971e8897c1e7e75f2a207fbd2b1e46158c246915d294e8cc0d4897863b"},
 ]
 
 [package.dependencies]
 numpy = ">=1.20"
 scipy = ">=1.5"
-
-[[package]]
-name = "jaxlib"
-version = "0.4.4+cuda11.cudnn86"
-description = "XLA library for JAX"
-category = "main"
-optional = false
-python-versions = ">=3.8"
-files = [
-    {file = "jaxlib-0.4.4+cuda11.cudnn86-cp310-cp310-manylinux2014_x86_64.whl", hash = "sha256:2248ce9c99bdc58a7ca634047bc90bddff227a58224f0a9f7fddc736f9dcec52"},
-    {file = "jaxlib-0.4.4+cuda11.cudnn86-cp311-cp311-manylinux2014_x86_64.whl", hash = "sha256:2801b02db6d801b1c1abaebb9d5dbc10d483b6834dbf3270f126efdbc5e834fd"},
-    {file = "jaxlib-0.4.4+cuda11.cudnn86-cp38-cp38-manylinux2014_x86_64.whl", hash = "sha256:b2294328da65de22ba4228f735b387151e4d4bfb840214a37eec5a203a9ce5c1"},
-    {file = "jaxlib-0.4.4+cuda11.cudnn86-cp39-cp39-manylinux2014_x86_64.whl", hash = "sha256:7cc659c7fe8110917715ae0458d3f7939080d21ac94e696ac5d5015a65cfb7be"},
-]
-
-[package.dependencies]
-numpy = ">=1.20"
-scipy = ">=1.5"
-
-[package.source]
-type = "legacy"
-url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
-reference = "jax"
 
 [[package]]
 name = "jedi"
@@ -2468,13 +2445,13 @@ files = [
 
 [[package]]
 name = "modal-client"
-version = "0.46.1429"
+version = "0.46.1433"
 description = "Python client library for Modal"
 category = "dev"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "modal_client-0.46.1429-py3-none-any.whl", hash = "sha256:110f90dd9e7cdf8925b694285f9b844d6002b2ced290f2725eea4cc61167d9aa"},
+    {file = "modal_client-0.46.1433-py3-none-any.whl", hash = "sha256:2e6fab30339152fe5a29e0a24ff0173aedf27f52ba5d23b3286ba3fa05b860cc"},
 ]
 
 [package.dependencies]
@@ -4164,6 +4141,18 @@ files = [
 ]
 
 [[package]]
+name = "tomli-w"
+version = "1.0.0"
+description = "A lil' TOML writer"
+category = "dev"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "tomli_w-1.0.0-py3-none-any.whl", hash = "sha256:9f2a07e8be30a0729e533ec968016807069991ae2fd921a78d42f429ae5f4463"},
+    {file = "tomli_w-1.0.0.tar.gz", hash = "sha256:f463434305e0336248cac9c2dc8076b707d8a12d019dd349f5c1e382dd1ae1b9"},
+]
+
+[[package]]
 name = "tornado"
 version = "6.2"
 description = "Tornado is a Python web framework and asynchronous networking library, originally developed at FriendFeed."
@@ -4617,4 +4606,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.8.1,<3.11"
-content-hash = "efe06b41e99547553497fae71a383bbe751100842282340a48e244da0fdf5582"
+content-hash = "beee91ee3477ee5ef40022825a9972ab0d9ed496a3f3069610c1176aaaa677d6"

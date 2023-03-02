@@ -46,6 +46,9 @@ To get a fully functional development environment...
    poetry config virtualenvs.create false --local
    # install the confirm package plus development tools
    poetry install --with=dev,test,cloud,cloud_dev
+
+   # OPTIONALLY: Install a CUDA-enabled JAX build on Linux
+   pip install --upgrade -r requirements-jax-cuda.txt
    ```
 
 ## Committing code
