@@ -81,7 +81,7 @@ class PandasStore(Store):
 
 @dataclass
 class DuckDBStore(Store):
-    con: duckdb.DuckDBPyConnection
+    con: "duckdb.DuckDBPyConnection"
 
     def __post_init__(self):
         self.con.execute(

@@ -173,7 +173,7 @@ class DuckDBTiles:
     https://github.com/Confirm-Solutions/confirmasaurus/issues/95
     """
 
-    con: duckdb.DuckDBPyConnection
+    con: "duckdb.DuckDBPyConnection"
     store: DuckDBStore = None
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None

@@ -50,7 +50,6 @@ def pytest_collection_modifyitems(items):
         "scipy",
         "numpyro",
         "jax.scipy.special",
-        "modal",
         "duckdb",
         "clickhouse_connect",
     ]:
