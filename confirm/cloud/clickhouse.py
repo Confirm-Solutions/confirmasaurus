@@ -13,8 +13,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Dict
 from typing import List
+from typing import TYPE_CHECKING
 
-import clickhouse_connect
 import pandas as pd
 import pyarrow
 
@@ -24,7 +24,8 @@ from confirm.adagrid.db import get_absent_parents
 from confirm.adagrid.store import is_table_name
 from confirm.adagrid.store import Store
 
-clickhouse_connect.common.set_setting("autogenerate_session_id", False)
+if TYPE_CHECKING:
+    import clickhouse_connect
 
 logger = imprint.log.getLogger(__name__)
 
@@ -829,17 +830,20 @@ class Clickhouse:
 
         if not no_create:
             # Create job_id database if it doesn't exist
-            client = clickhouse_connect.get_client(**config)
+            client = get_ch_client(**config)
             client.command(f"create database if not exists {job_id}")
 
         connection_details = get_ch_config(host, port, username, password, job_id)
-        client = clickhouse_connect.get_client(**connection_details)
+        client = get_ch_client(**connection_details)
 
         logger.info(f"Connected to job {job_id}")
         return Clickhouse(connection_details, client, job_id)
 
 
 def get_ch_client(host=None, port=None, username=None, password=None, job_id=None):
+    import clickhouse_connect
+
+    clickhouse_connect.common.set_setting("autogenerate_session_id", False)
     connection_details = get_ch_config(host, port, username, password, job_id)
     return clickhouse_connect.get_client(**connection_details)
 

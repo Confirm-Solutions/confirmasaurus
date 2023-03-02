@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Dict
 from typing import List
+from typing import TYPE_CHECKING
 
-import duckdb
 import pandas as pd
 
 import confirm.adagrid.json as json
@@ -11,6 +11,9 @@ import imprint.log
 from confirm.adagrid.store import DuckDBStore
 from confirm.adagrid.store import PandasStore
 from confirm.adagrid.store import Store
+
+if TYPE_CHECKING:
+    import duckdb
 
 logger = imprint.log.getLogger(__name__)
 
@@ -564,6 +567,8 @@ class DuckDBTiles:
         Returns:
             The tile database.
         """
+        import duckdb
+
         return DuckDBTiles(duckdb.connect(path))
 
 

@@ -1,8 +1,7 @@
-import matplotlib.pyplot as plt
-
-
 # TODO: let's make this work for arbitrary slices?
 def summarize_validate(g, rej_df, plot_dims=(0, 1)):
+    import matplotlib.pyplot as plt
+
     d1, d2 = plot_dims
     plt.figure(figsize=(10, 10), constrained_layout=True)
     plt.subplot(2, 2, 1)

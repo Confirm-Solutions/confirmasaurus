@@ -1,12 +1,9 @@
 from functools import partial
 from typing import Callable
 
+import jax
 import jax.numpy as jnp
-import jax.scipy.special
 import numpy as np
-import numpyro.distributions as dist
-import scipy.special
-import scipy.stats
 
 
 def binomial_accumulator(rejection_fnc):
@@ -159,7 +156,7 @@ def upper_bound(
     corners, you can pass in a 3D array like:
     (n_tiles, 1, n_arms)
     """
-    p_tiles = scipy.special.expit(theta_tiles)
+    p_tiles = jax.scipy.special.expit(theta_tiles)
     v_diff = eval_pts - theta_tiles[:, None]
     v_sq = v_diff**2
 
@@ -212,6 +209,8 @@ def upper_bound(
 
 
 def zero_order_bound(typeI_sum, sim_sizes, delta, delta_prop_0to1):
+    import scipy.stats
+
     d0 = typeI_sum / sim_sizes
     # clopper-pearson upper bound in beta form.
     d0u_factor = 1.0 - delta * delta_prop_0to1
@@ -244,10 +243,12 @@ def second_order_bound(v_sq, theta_tiles, tile_radii, n_arm_samples):
     n_eval_per_tile = v_sq.shape[1]
 
     p_lower = np.tile(
-        scipy.special.expit(theta_tiles - tile_radii)[:, None], (1, n_eval_per_tile, 1)
+        jax.scipy.special.expit(theta_tiles - tile_radii)[:, None],
+        (1, n_eval_per_tile, 1),
     )
     p_upper = np.tile(
-        scipy.special.expit(theta_tiles + tile_radii)[:, None], (1, n_eval_per_tile, 1)
+        jax.scipy.special.expit(theta_tiles + tile_radii)[:, None],
+        (1, n_eval_per_tile, 1),
     )
     special = (p_lower <= 0.5) & (0.5 <= p_upper)
     max_p = np.where(np.abs(p_upper - 0.5) < np.abs(p_lower - 0.5), p_upper, p_lower)
@@ -273,6 +274,7 @@ def _build_odi_constant_func(q: float):
     Args:
         q: The moment to compute. Must be a float greater than 1.
     """
+    import numpyro.distributions as dist
 
     def f(n, p):
         if isinstance(p, float):
