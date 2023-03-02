@@ -6,12 +6,12 @@ We will implement them first for the 1-dimensional z-test, then the 2- and 3-dim
 
 ```python
 import numpy as np
+import jax
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import pandas 
-import seaborn 
-import sklearn 
-#import ipython
+import sklearn
 from sklearn.cluster import KMeans
 ```
 
@@ -39,11 +39,11 @@ kmeans= KMeans(n_clusters=n_clusters,
 ```
 
 ```python
-kmeans.fit(standardized_rejections.reshape(-1,1))
+kmeans.fit(rejections.reshape(-1,1))
 ```
 
 ```python
-mu_cluster_centers = kmeans.cluster_centers_ * np.std(rejections) + np.mean(rejections)
+mu_cluster_centers = kmeans.cluster_centers_
 mu_cluster_centers
 ```
 
@@ -77,33 +77,20 @@ target_fraction
 Now let's get into the business of doing the importance samples and re-weights
 
 ```python
-
-```
-
-```python
-
-```
-
-```python
 # Now we construct the weights matrix: how many sims are we planning for each value of theta?
 n_per_thetaj = 1000
 # We want this to net out to, let's say, 1% of the total weight...
 sum_rejects = np.delete(target_fraction, 0, axis = 0)
 any_successes = np.sum(sum_rejects, axis = 0) > 0
-any_successes
 relevant_mu = mu[any_successes]
+any_successes
 ```
 
 ```python
-temp = sum_rejects / np.sum(sum_rejects,axis = 0)[None,:]
+temp = sum_rejects / np.maximum(np.sum(sum_rejects,axis = 0)[None,:], 1)
 wjj = 0.01
 important_weights = temp[:,any_successes]*(1 - wjj)
 important_weights.shape
-```
-
-```python
-
-
 ```
 
 ```python
@@ -117,7 +104,10 @@ np.diag(np.full_like(relevant_mu,wjj)).shape
 ```python
 full_weights = np.append(np.diag(np.full_like(relevant_mu,wjj)), important_weights, axis = 0)
 np.sum(full_weights, axis = 0)
+```
 
+```python
+full_weights.shape
 ```
 
 ```python
@@ -129,6 +119,36 @@ data_importance = mu_importance[None,:] + z_importance
 
 ```python
 data_importance.shape, mu_importance.shape, relevant_mu.shape, np.transpose(full_weights).shape
+```
+
+```python
+def mixture_ratio(j, X_ik, wj, mus):
+    muj = mus[j]
+    ratio = jnp.exp((mus - muj) * X_ik - 0.5 * (mus ** 2 - muj ** 2))
+    return wj @ ratio
+
+def average_rej(j, rejs, X_k, wj, mus):
+    mr_vm = jax.vmap(mixture_ratio, in_axes=(None, 0, None, None))
+    return jnp.mean(rejs / mr_vm(j, X_k, wj, mus))
+
+def imp_est_j(j, rejs, X, wj, mus):
+    avg_rej_vm = jax.vmap(average_rej, in_axes=(None, 0, 0, None, None))
+    return wj @ avg_rej_vm(j, rejs, X, wj, mus)
+
+@jax.jit
+def imp_est(rejs, X, ws, mus):
+    idx = jnp.arange(0, ws.shape[0])
+    return jax.vmap(imp_est_j, in_axes=(0, None, None, 0, None))(
+        idx, rejs, X, ws, mus
+    )
+```
+
+```python
+X = data_importance.T
+rejs = X > 1.96
+ws = full_weights.T
+mus = mu_importance
+imp_est(rejs, X, ws, mus)
 ```
 
 ```python
@@ -154,9 +174,7 @@ final_variance_estimate
 ```python
 #estimated sample size ratio
 ((final_result * (1-final_result)) / (1000)) /final_variance_estimate
-# Hmm... this is not excellent. Importance sampling is doing better for the first few values of mu, but not consistently for larger values.
-# I'm betting that this is due to an incorrect variance calculation
-
+# EXCELLENT!
 ```
 
 ```python

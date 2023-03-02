@@ -58,6 +58,7 @@ jupyter = "^1.0.0"
 rich = "^13.3.1"
 ipdb = "^0.13.11"
 tomli-w = "^1.0.0"
+scikit-learn = "^1.2.1"
 
 [tool.poetry.group.cloud_dev]
 optional = true
