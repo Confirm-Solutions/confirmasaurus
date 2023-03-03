@@ -41,7 +41,7 @@ version = "^3.2.0"
 optional = true
 
 [tool.poetry.group.dev.dependencies]
-line-profiler = "^4.0.2"
+line-profiler = "^3.5.1"
 jupytext = "^1.14.5"
 reorder-python-imports = "^3.9.0"
 flake8 = "^6.0.0"
@@ -61,7 +61,9 @@ profile = "black"
 
 [tool.pytest.ini_options]
 addopts = "-p imprint.testing --capture=no --show-capture=no --tb=short --strict-markers -Werror"
-testpaths = ["tests"]
+testpaths = [
+    "tests",
+]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"
