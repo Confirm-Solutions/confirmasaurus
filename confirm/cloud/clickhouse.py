@@ -914,6 +914,7 @@ class Clickhouse:
             port: The Clickhouse server port. Defaults to None.
             username: The Clickhouse username. Defaults to None.
             password: The Clickhouse password. Defaults to None.
+            no_create: If True, do not create the job_id database. Defaults to False.
 
         Returns:
             A Clickhouse tile database object.
