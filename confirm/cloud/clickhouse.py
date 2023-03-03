@@ -933,7 +933,11 @@ class Clickhouse:
         client = get_ch_client(connection_details=connection_details)
         if not no_create:
             # Create job_id database if it doesn't exist
-            _command(client, f"create database if not exists {job_id}")
+            _command(
+                client,
+                f"create database if not exists {job_id}",
+                settings=default_insert_settings,
+            )
 
         # NOTE: client.database is invading private API, but based on reading
         # the clickhouse_connect code, this is unlikely to break
