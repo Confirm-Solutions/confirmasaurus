@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 from .convergence import WorkerStatus
 from .init import _launch_task
@@ -9,9 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 async def coordinate(algo, step_id, n_zones):
+    start = time.time()
     report = dict()
     status, lazy_tasks, zone_steps = await _coordinate(algo, step_id, n_zones, report)
     report["status"] = status.name
+    report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
     insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
     lazy_tasks.append(insert_report)

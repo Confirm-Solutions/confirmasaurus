@@ -22,7 +22,7 @@ def get_logs(job_id, query="select * from logs order by t"):
     db = ch.Clickhouse.connect(job_id)
     log_df = ch._query_df(db.client, query)
     log_df["t_str"] = log_df["t"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M:%S.%f"))
-    return reconstruct_messages(log_df), log_df
+    return reconstruct_messages(log_df), log_df, db
 
 
 def reconstruct_messages(log_df):

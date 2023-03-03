@@ -49,7 +49,7 @@ optional = true
 
 [tool.poetry.group.dev.dependencies]
 black = {extras = ["jupyter"], version = "^23.1.0"}
-line-profiler = "^4.0.2"
+line-profiler = "^3.5.1"
 jupytext = "^1.14.5"
 reorder-python-imports = "^3.9.0"
 flake8 = "^6.0.0"

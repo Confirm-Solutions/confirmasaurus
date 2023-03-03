@@ -92,6 +92,7 @@ import abc
 import asyncio
 import contextlib
 import logging
+import time
 from pprint import pformat
 
 import jax
@@ -139,6 +140,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
     if kwargs.get("db", None) is None:
         kwargs["db"] = DuckDBTiles.connect()
     with DatabaseLogging(db=kwargs["db"]):
+        start = time.time()
         algo, incomplete_packets, zone_steps = await init(
             algo_type, True, 1, kwargs["n_zones"], kwargs
         )
@@ -155,13 +157,21 @@ async def async_entrypoint(backend, algo_type, kwargs):
         assert next_coord == get_next_coord(max_step_completed, every)
         start_step = min_step_completed + 1
         n_zones = algo.cfg["n_zones"]
+        logger.debug("init took %s", time.time() - start)
 
+        start = time.time()
         async with backend.setup(algo_type, algo, kwargs):
+            logger.debug("setup took %s", time.time() - start)
+
+            start = time.time()
             await backend.process_initial_incompletes(incomplete_packets)
+            logger.debug("process_initial_incompletes took %s", time.time() - start)
 
             while start_step < algo.cfg["n_steps"]:
+                start = time.time()
                 end_step = min(next_coord, algo.cfg["n_steps"]) + 1
                 statuses = await backend.run_zones(zone_steps, start_step, end_step)
+                logger.debug("run_zones took %s", time.time() - start)
 
                 # If there's only one zone and that zone is done, then we're
                 # totally done.
@@ -174,22 +184,26 @@ async def async_entrypoint(backend, algo_type, kwargs):
                     # NOTE: coordinations happen *before* the same-named step.
                     # e.g. a coordination at step 5 happens before new_step and
                     # process_packets for 5.
+                    start = time.time()
                     coord_status, lazy_tasks, zone_steps = await coordinate(
                         algo, end_step, n_zones
                     )
                     backend.lazy_tasks.extend(lazy_tasks)
+                    logger.debug("coordinate took %s", time.time() - start)
                     if coord_status.done():
                         break
 
                 start_step = end_step
                 next_coord += every
 
+        start = time.time()
         # TODO: currently we only verify at the end, should we do it more often?
         verify_task = asyncio.create_task(algo.db.verify())
 
         await asyncio.gather(*backend.lazy_tasks)
 
         await verify_task
+        logger.debug("verify and lazy_tasks took %s", time.time() - start)
         return algo.db
 
 
@@ -249,6 +263,7 @@ class LocalBackend(Backend):
     async def _run_zone(self, algo, zone_id, start_step, end_step):
         if start_step >= end_step:
             return
+        start = time.time()
         logger.debug(
             f"Zone {zone_id} running from step {start_step} "
             f"through step {end_step - 1}."
@@ -264,6 +279,10 @@ class LocalBackend(Backend):
             if status.done():
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
                 break
+        logger.debug(
+            f"_run_zone({zone_id}, {start_step}, {end_step}) "
+            f"took {time.time() - start:.2f}"
+        )
         return status
 
 

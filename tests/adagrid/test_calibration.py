@@ -77,7 +77,7 @@ def test_one_zone_distributed(snapshot, ch_db):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_calibration")
-    cal_tester(ch_db, snapshot, backend=ModalBackend(n_zones=1, gpu=False), n_steps=3)
+    cal_tester(ch_db, snapshot, backend=ModalBackend(n_zones=1, gpu=False))
 
 
 @pytest.mark.slow
