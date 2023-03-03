@@ -90,6 +90,7 @@ workers.
 """
 import abc
 import asyncio
+import contextlib
 import logging
 from pprint import pformat
 
@@ -114,136 +115,8 @@ def entrypoint(algo_type, kwargs):
         raise RuntimeError("An adagrid backend can only be used once.")
     backend.already_run = True
     kwargs.update(backend.input_cfg)
-    return maybe_start_event_loop(async_entrypoint(backend, algo_type, kwargs))
+    coro = async_entrypoint(backend, algo_type, kwargs)
 
-
-async def async_entrypoint(backend, algo_type, kwargs):
-    if kwargs.get("db", None) is None:
-        kwargs["db"] = DuckDBTiles.connect()
-    with DatabaseLogging(db=kwargs["db"]):
-        # it's okay to use input_cfg['n_zones'] here because it's only used at
-        # the start of a job.
-        algo, incomplete_packets, zone_steps = await init(
-            algo_type, True, 1, backend.input_cfg["n_zones"], kwargs
-        )
-
-        await backend.run(algo, incomplete_packets, zone_steps, algo_type, kwargs)
-
-        # TODO: currently we only verify at the end, should we do it more often?
-        verify_task = asyncio.create_task(algo.db.verify())
-
-        await asyncio.gather(*backend.lazy_tasks)
-
-        await verify_task
-        return algo.db
-
-
-class Backend(abc.ABC):
-    def __init__(self):
-        self.already_run = False
-
-    @abc.abstractmethod
-    async def run(self, algo, incomplete_packets, zone_steps):
-        pass
-
-
-class LocalBackend(Backend):
-    def __init__(self, n_zones=1, coordinate_every=5):
-        """
-        _summary_
-
-        Args:
-            n_zones: _description_. Defaults to 1.
-            coordinate_every: The number of steps between each distributed coordination.
-                This is ignored when n_zones == 1. Defaults to 5.
-        """
-        super().__init__()
-        self.lazy_tasks = []
-        # self.input_cfg should not be read directly, instead access
-        # algo.cfg['...'] instead. the reason is so that we correctly handle
-        # loading a configuration. for example, coordinate_every should not
-        # change over the lifetime of a job.
-        # TODO: this feels sketchy...
-        # TODO: n_zones would be changeable if we fixed the selection rule and
-        # convergence criterion during each coordination.
-        self.input_cfg = {"coordinate_every": coordinate_every, "n_zones": n_zones}
-
-    async def run(self, algo, incomplete_packets, zone_steps, algo_type, kwargs):
-        n_zones = algo.cfg["n_zones"]
-        incomplete_packets = np.array(incomplete_packets)
-        self.lazy_tasks.extend(await process_packet_set(algo, incomplete_packets))
-
-        min_step_completed = min(zone_steps.values())
-        max_step_completed = max(zone_steps.values())
-
-        # if next_coord is 5, do we coordinate after or before step 5?
-        # --> before!
-        # min_step_completed = 4, max_step_completed = 4, next_coord = 5
-        # min_step_completed = 1, max_step_completed = 3, next_coord = 5
-        every = algo.cfg["coordinate_every"]
-        next_coord = get_next_coord(min_step_completed, every)
-        assert next_coord == get_next_coord(max_step_completed, every)
-        first_step = min_step_completed + 1
-
-        while first_step < algo.cfg["n_steps"]:
-            last_step = min(next_coord, algo.cfg["n_steps"])
-            statuses = await asyncio.gather(
-                *[
-                    self._run_zone(algo, zone_id, first_step, last_step + 1)
-                    for zone_id in zone_steps
-                ]
-            )
-
-            # If there's only one zone and that zone is done, then we're
-            # totally done.
-            if len(statuses) == 1:
-                if statuses[0].done():
-                    break
-
-            if n_zones > 1:
-                # If there's more than one zone, then we need to coordinate.
-                # NOTE: coordinations happen *before* the same-named step.
-                # e.g. a coordination at step 5 happens before new_step and
-                # process_packets for 5.
-                coord_status, lazy_tasks, zone_steps = await coordinate(
-                    algo, last_step + 1, n_zones
-                )
-                self.lazy_tasks.extend(lazy_tasks)
-                if coord_status.done():
-                    break
-
-            first_step = last_step + 1
-            next_coord += every
-
-        # TODO: currently we only verify at the end, should we do it more often?
-        return algo.db
-
-    async def _run_zone(self, algo, zone_id, start_step_id, end_step_id):
-        if start_step_id >= end_step_id:
-            return
-        logger.debug(
-            f"Zone {zone_id} running from step {start_step_id} "
-            f"through step {end_step_id - 1}."
-        )
-        for step_id in range(start_step_id, end_step_id):
-            status, n_packets, lazy_tasks = await new_step(algo, zone_id, step_id)
-            self.lazy_tasks.extend(lazy_tasks)
-            self.lazy_tasks.extend(
-                await process_packet_set(
-                    algo, [(zone_id, step_id, i) for i in range(n_packets)]
-                )
-            )
-            if status.done():
-                logger.debug(f"Zone {zone_id} finished with status {status}.")
-                break
-        return status
-
-
-def get_next_coord(step_id, every):
-    return step_id + every - (step_id % every)
-
-
-def maybe_start_event_loop(coro):
     # Check if an event loop is already running. If we're running through
     # Jupyter, then an event loop will already be running and we're not allowed
     # to start a new event loop inside of the existing one.
@@ -260,6 +133,138 @@ def maybe_start_event_loop(coro):
         return asyncio.run_coroutine_threadsafe(coro, loop).result()
     else:
         return asyncio.run(coro)
+
+
+async def async_entrypoint(backend, algo_type, kwargs):
+    if kwargs.get("db", None) is None:
+        kwargs["db"] = DuckDBTiles.connect()
+    with DatabaseLogging(db=kwargs["db"]):
+        algo, incomplete_packets, zone_steps = await init(
+            algo_type, True, 1, kwargs["n_zones"], kwargs
+        )
+
+        incomplete_packets = np.array(incomplete_packets)
+        min_step_completed = min(zone_steps.values())
+        max_step_completed = max(zone_steps.values())
+        every = algo.cfg["coordinate_every"]
+
+        def get_next_coord(step_id, every):
+            return step_id + every - (step_id % every)
+
+        next_coord = get_next_coord(min_step_completed, every)
+        assert next_coord == get_next_coord(max_step_completed, every)
+        start_step = min_step_completed + 1
+        n_zones = algo.cfg["n_zones"]
+
+        async with backend.setup(algo_type, algo, kwargs):
+            await backend.process_initial_incompletes(incomplete_packets)
+
+            while start_step < algo.cfg["n_steps"]:
+                end_step = min(next_coord, algo.cfg["n_steps"]) + 1
+                statuses = await backend.run_zones(zone_steps, start_step, end_step)
+
+                # If there's only one zone and that zone is done, then we're
+                # totally done.
+                if len(statuses) == 1:
+                    if statuses[0].done():
+                        break
+
+                if n_zones > 1:
+                    # If there's more than one zone, then we need to coordinate.
+                    # NOTE: coordinations happen *before* the same-named step.
+                    # e.g. a coordination at step 5 happens before new_step and
+                    # process_packets for 5.
+                    coord_status, lazy_tasks, zone_steps = await coordinate(
+                        algo, end_step, n_zones
+                    )
+                    backend.lazy_tasks.extend(lazy_tasks)
+                    if coord_status.done():
+                        break
+
+                start_step = end_step
+                next_coord += every
+
+        # TODO: currently we only verify at the end, should we do it more often?
+        verify_task = asyncio.create_task(algo.db.verify())
+
+        await asyncio.gather(*backend.lazy_tasks)
+
+        await verify_task
+        return algo.db
+
+
+class Backend(abc.ABC):
+    def __init__(self):
+        self.already_run = False
+        # some variables from input_cfg should not be read directly, instead
+        # access algo.cfg['...'] instead. the reason is so that we correctly
+        # handle loading a configuration. for example, coordinate_every should
+        # not change over the lifetime of a job.
+        self.input_cfg = {}
+
+    @abc.abstractmethod
+    @contextlib.asynccontextmanager
+    async def setup(self, algo_type, algo, kwargs):
+        pass
+
+    @abc.abstractmethod
+    async def process_initial_incompletes(self, incomplete_packets):
+        pass
+
+    @abc.abstractmethod
+    async def run_zones(self, zone_steps, start_step, end_step):
+        pass
+
+
+class LocalBackend(Backend):
+    def __init__(self, n_zones=1, coordinate_every=5):
+        """
+        Args:
+            n_zones: _description_. Defaults to 1.
+            coordinate_every: The number of steps between each distributed coordination.
+                This is ignored when n_zones == 1. Defaults to 5.
+        """
+        super().__init__()
+        self.lazy_tasks = []
+        self.input_cfg = {"coordinate_every": coordinate_every, "n_zones": n_zones}
+
+    @contextlib.asynccontextmanager
+    async def setup(self, algo_type, algo, kwargs):
+        self.algo_type = algo_type
+        self.algo = algo
+        self.kwargs = kwargs
+        yield
+
+    async def process_initial_incompletes(self, incomplete_packets):
+        self.lazy_tasks.extend(await process_packet_set(self.algo, incomplete_packets))
+
+    async def run_zones(self, zone_steps, start_step, end_step):
+        return await asyncio.gather(
+            *[
+                self._run_zone(self.algo, zone_id, start_step, end_step)
+                for zone_id in zone_steps
+            ]
+        )
+
+    async def _run_zone(self, algo, zone_id, start_step, end_step):
+        if start_step >= end_step:
+            return
+        logger.debug(
+            f"Zone {zone_id} running from step {start_step} "
+            f"through step {end_step - 1}."
+        )
+        for step_id in range(start_step, end_step):
+            status, n_packets, lazy_tasks = await new_step(algo, zone_id, step_id)
+            self.lazy_tasks.extend(lazy_tasks)
+            self.lazy_tasks.extend(
+                await process_packet_set(
+                    algo, [(zone_id, step_id, i) for i in range(n_packets)]
+                )
+            )
+            if status.done():
+                logger.debug(f"Zone {zone_id} finished with status {status}.")
+                break
+        return status
 
 
 def print_report(report, _db):
