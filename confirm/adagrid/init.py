@@ -2,6 +2,7 @@ import asyncio
 import codecs
 import copy
 import json
+import logging
 import platform
 import subprocess
 import warnings
@@ -12,29 +13,20 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid.db import DuckDBTiles
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
-    db = kwargs.get("db", None)
+    db = kwargs["db"]
     g = kwargs.get("g", None)
     ip.log.worker_id.set(worker_id)
 
-    assert (db is not None) or is_leader
-
-    if db is None and g is None:
-        raise ValueError("If no grid is provided, a database must be provided.")
-
-    if db is None:
-        db = DuckDBTiles.connect()
-        tiles_exists = False
-    else:
-        tiles_exists = db.does_table_exist("tiles")
-
+    tiles_exists = db.does_table_exist("tiles")
     if g is None and not tiles_exists:
         raise ValueError("If no grid is provided, the database must contain tiles.")
+    if g is not None and tiles_exists:
+        raise ValueError("If a grid is provided, the database must not contain tiles.")
 
     if g is not None and not tiles_exists:
         cfg, null_hypos = first(kwargs)

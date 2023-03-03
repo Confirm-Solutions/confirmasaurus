@@ -17,17 +17,19 @@ class ClickhouseCleanup:
             db.close()
         ch.clear_dbs(client, names=job_ids, yes=True)
 
-    def _connect(self):
+    def _connect(self, no_async=False):
         import confirm.cloud.clickhouse as ch
 
         self.dbs.append(ch.Clickhouse.connect())
+        if no_async:
+            self.dbs[-1].async_insert_settings = ch.default_insert_settings
         return self.dbs[-1]
 
 
 @pytest.mark.slow
 class TestClickhouse(DBTester, ClickhouseCleanup):
-    def connect(self):
-        return self._connect()
+    def connect(self, no_async=False):
+        return self._connect(no_async=no_async)
 
 
 @pytest.mark.slow

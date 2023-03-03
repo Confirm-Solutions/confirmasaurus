@@ -1,14 +1,15 @@
 import asyncio
+import logging
 import time
 
 import numpy as np
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid.convergence import WorkerStatus
-from confirm.adagrid.init import _launch_task
+from .convergence import WorkerStatus
+from .init import _launch_task
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 async def process_packet_set(algo, packets):
@@ -20,14 +21,18 @@ async def process_packet_set(algo, packets):
         return []
     tasks = await asyncio.gather(*coros)
     insert_tasks, report_tasks = zip(*tasks)
+    start = time.time()
     await asyncio.gather(*insert_tasks)
+    logger.debug("waiting for packet insertion took %s", time.time() - start)
     return report_tasks
 
 
 async def process_packet(algo, zone_id, step_id, packet_id):
+    start = time.time()
     report = dict()
     status, insert_results = await _process(algo, zone_id, step_id, packet_id, report)
     report["status"] = status.name
+    report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
     insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
     return insert_results, insert_report
@@ -75,14 +80,16 @@ async def _process(algo, zone_id, step_id, packet_id, report):
 
 
 async def new_step(algo, zone_id, new_step_id):
+    start = time.time()
     status, n_packets, report = await _new_step(algo, zone_id, new_step_id)
     report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
     report["zone_id"] = zone_id
     report["step_id"] = new_step_id
     report["n_packets"] = n_packets
-    insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
+    report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
+    insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
 
     return status, n_packets, [insert_report]
 

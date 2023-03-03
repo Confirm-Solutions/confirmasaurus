@@ -1,5 +1,7 @@
+import logging.handlers
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
 from typing import Dict
 from typing import List
 from typing import TYPE_CHECKING
@@ -7,15 +9,89 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-import imprint as ip
-from confirm.adagrid.store import DuckDBStore
-from confirm.adagrid.store import PandasStore
-from confirm.adagrid.store import Store
+from .store import DuckDBStore
+from .store import PandasStore
+from .store import Store
+
 
 if TYPE_CHECKING:
     import duckdb
 
-logger = ip.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
+
+class DatabaseLogging(logging.handlers.BufferingHandler):
+    """
+    A logging handler context manager that buffers log record writes to a
+    database.
+    - the handler is added to the root logger when entering the context.
+    - the handler is removed from the root logger when exiting the context.
+    - whenever `capacity` log records are buffered, they flushed to the database.
+    - whenever a log is `flushLevel` or higher, all buffered log records are flushed.
+    - when the context manager exits, any remaining log records are flushed.
+
+    Check out the documentation and source for logging.Handler and
+    logging.handlers.BufferingHandler to understand more about what's going on
+    here.
+    """
+
+    def __init__(self, db, capacity=10, flushLevel=logging.WARNING):
+        self.db = db
+        assert hasattr(self.db, "insert_logs")
+        self.capacity = capacity
+        self.flushLevel = flushLevel
+        super().__init__(self.capacity)
+
+    def __enter__(self):
+        logging.getLogger().addHandler(self)
+
+    def __exit__(self, *_):
+        self.close()
+        logging.getLogger().removeHandler(self)
+
+    def shouldFlush(self, record):
+        """
+        Check for buffer full or a record at the flushLevel or higher.
+        Cribbed from logging.MemoryHandler.
+        """
+        return (len(self.buffer) >= self.capacity) or (
+            record.levelno >= self.flushLevel
+        )
+
+    def flush(self):
+        """
+        Overriden.
+        """
+        self.acquire()
+        try:
+            if len(self.buffer) == 0:
+                return
+            df = pd.DataFrame(
+                [
+                    # See here for a list of record attributes:
+                    # https://docs.python.org/3/library/logging.html#logrecord-attributes
+                    dict(
+                        worker_id=record.worker_id if record.worker_id else -1,
+                        t=datetime.fromtimestamp(record.created).strftime(
+                            "%Y-%m-%d %H:%M:%S.%f"
+                        ),
+                        name=record.name,
+                        pathname=record.pathname,
+                        lineno=record.lineno,
+                        levelno=record.levelno,
+                        levelname=record.levelname,
+                        message=self.format(record),
+                    )
+                    for record in self.buffer
+                ]
+            )
+            # TODO: make this run lazily!
+            # slightly tricky because this isn't an async function and we don't
+            # have access to backend.lazy_tasks
+            self.db.insert_logs(df)
+            self.buffer = []
+        finally:
+            self.release()
 
 
 @dataclass
@@ -185,8 +261,16 @@ class DuckDBTiles:
         self.store = DuckDBStore(self.con)
         self.con.execute(
             """
-            create table if not exists packet_flags
-                (zone_id int, step_id int, packet_id int)
+            create table if not exists logs (
+                worker_id INTEGER,
+                t TIMESTAMP,
+                name TEXT,
+                pathname TEXT,
+                lineno UINTEGER,
+                levelno UINTEGER,
+                levelname TEXT,
+                message TEXT
+            )
             """
         )
 
@@ -528,6 +612,12 @@ class DuckDBTiles:
                 "deepened tiles with wrong number of children:"
                 f" {deepened_tiles_with_incorrect_child_count}"
             )
+
+    def insert_logs(self, df):
+        self.con.execute("insert into logs select * from df")
+
+    def get_logs(self):
+        return self.con.execute("select * from logs").df()
 
     def close(self) -> None:
         self.con.close()

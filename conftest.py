@@ -27,6 +27,9 @@ def pytest_collection_modifyitems(items):
     ```
 
     On my system, this is currently running in 0.9 seconds when run warm.
+
+    This is run inside pytest_collection_modifyitems because that hook runs
+    after all test modules have been imported.
     """
     for m in [
         "sympy",

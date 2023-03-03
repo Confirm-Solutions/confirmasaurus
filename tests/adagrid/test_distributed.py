@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
+from confirm.adagrid.backend import entrypoint
 from confirm.adagrid.backend import LocalBackend
 from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.coordinate import coordinate
@@ -232,19 +233,16 @@ def test_coordinate(both_dbs):
 def test_idempotency(both_dbs):
     kwargs = get_test_defaults(ada_validate)
     kwargs["db"] = both_dbs
-    backend = LocalBackend(n_zones=1)
-    backend.run(AdaValidate, kwargs)
+    kwargs["backend"] = LocalBackend(n_zones=1)
+    entrypoint(AdaValidate, kwargs)
     reports = both_dbs.get_reports()
-    backend.run(AdaValidate, kwargs)
-    backend.run(AdaValidate, kwargs)
+
+    del kwargs["g"]
+    kwargs["backend"] = LocalBackend(n_zones=1)
+    entrypoint(AdaValidate, kwargs)
     reports2 = both_dbs.get_reports()
-    assert reports.shape[0] + 2 == reports2.shape[0]
+    assert reports.shape[0] + 1 == reports2.shape[0]
     drop_cols = [c for c in reports2.columns if "runtime" in c]
-    pd.testing.assert_series_equal(
-        reports2.iloc[-3].drop(drop_cols),
-        reports2.iloc[-2].drop(drop_cols),
-        check_names=False,
-    )
     pd.testing.assert_series_equal(
         reports2.iloc[-2].drop(drop_cols),
         reports2.iloc[-1].drop(drop_cols),
