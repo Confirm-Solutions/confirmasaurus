@@ -32,7 +32,11 @@ def get_bound(family, family_params):
     )
 
 
+@jax.jit
 def clopper_pearson(tie_sum, K, delta):
+    # internally numpyro uses tensorflow_probability
+    # https://github.com/pyro-ppl/numpyro/blob/e28a3feaa4f95d76b361101f0c75dcb5add2365e/numpyro/distributions/util.py#L426
+    # https://github.com/google/jax/issues/2399#issuecomment-1225990206
     from numpyro.distributions.util import betaincinv
 
     tie_cp_bound2 = betaincinv(tie_sum + 1, K - tie_sum, 1 - delta)
@@ -111,15 +115,16 @@ class Driver:
             stats = self.model.sim_batch(0, K, theta.copy(), null_truth.copy())
             _check_stats(stats, K, theta)
             tie_sum = jnp.sum(stats < lam, axis=-1)
+            tie_est = tie_sum / K
             tie_cp_bound = clopper_pearson(tie_sum, K, delta)
             tie_bound = self.forward_boundv(tie_cp_bound, theta, vertices)
-            return tie_sum, tie_cp_bound, tie_bound
+            return tie_sum, tie_est, tie_cp_bound, tie_bound
 
         def f(K, K_df):
             K_g = grid.Grid(K_df, None)
             theta, vertices = K_g.get_theta_and_vertices()
 
-            tie_sum, tie_cp_bound, tie_bound = batching.batch(
+            tie_sum, tie_est, tie_cp_bound, tie_bound = batching.batch(
                 _batched,
                 self.tile_batch_size,
                 in_axes=(None, 0, 0, 0),
@@ -128,7 +133,7 @@ class Driver:
             return pd.DataFrame(
                 dict(
                     tie_sum=tie_sum,
-                    tie_est=tie_sum / K,
+                    tie_est=tie_est,
                     tie_cp_bound=tie_cp_bound,
                     tie_bound=tie_bound,
                 ),

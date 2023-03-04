@@ -425,7 +425,7 @@ class Clickhouse:
         _command(
             self.client,
             f"insert into reports values ('{json.dumps(report)}')",
-            settings=default_insert_settings,
+            settings=self.async_insert_settings,
         )
         return report
 
@@ -754,6 +754,24 @@ class Clickhouse:
             deepened_tiles_with_incorrect_child_count(),
         )
 
+    def create_logs_table(self):
+        _command(
+            self.client,
+            """
+            create table logs (
+                worker_id Int32,
+                t DateTime64(6),
+                name String,
+                pathname String,
+                lineno UInt32,
+                levelno UInt32,
+                levelname String,
+                message String)
+            engine = MergeTree() 
+            order by (worker_id, t)
+            """,
+        )
+
     def insert_logs(self, df):
         # TODO: the async_insert here is suboptimal... try to just move to
         # another thread.
@@ -820,26 +838,6 @@ class Clickhouse:
             )
         )
 
-        create_logs = asyncio.create_task(
-            asyncio.to_thread(
-                _command,
-                self.client,
-                """
-                create table logs (
-                    worker_id Int32,
-                    t DateTime64(6),
-                    name String,
-                    pathname String,
-                    lineno UInt32,
-                    levelno UInt32,
-                    levelname String,
-                    message String)
-                engine = MergeTree() 
-                order by (worker_id, t)
-                """,
-            )
-        )
-
         async def _create_inactive():
             await create_done
             await asyncio.to_thread(
@@ -873,7 +871,6 @@ class Clickhouse:
 
         await asyncio.gather(
             create_reports,
-            create_logs,
             create_tiles,
             create_done,
             create_inactive,

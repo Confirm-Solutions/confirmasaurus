@@ -1,4 +1,6 @@
 import logging.handlers
+import queue
+import time
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -20,14 +22,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class DBQueueListener(logging.handlers.QueueListener):
+    def __init__(self, db, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.db = db
+
+    def start(self):
+        self.db.create_logs_table()
+        super().start()
+
+
 class DatabaseLogging(logging.handlers.BufferingHandler):
     """
     A logging handler context manager that buffers log record writes to a
     database.
-    - the handler is added to the root logger when entering the context.
-    - the handler is removed from the root logger when exiting the context.
+    - a queue handler is added to the root logger when entering the context.
+    - the queue handler is removed from the root logger when exiting the context.
+    - a queue listener in a separate thread is started when entering the context.
     - whenever `capacity` log records are buffered, they flushed to the database.
     - whenever a log is `flushLevel` or higher, all buffered log records are flushed.
+    - whenever more than `interval` seconds have elapsed since the last flush,
+      all buffered log records are flushed.
     - when the context manager exits, any remaining log records are flushed.
 
     Check out the documentation and source for logging.Handler and
@@ -35,27 +50,44 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
     here.
     """
 
-    def __init__(self, db, capacity=10, flushLevel=logging.WARNING):
+    def __init__(self, db, capacity=100, interval=15, flushLevel=logging.WARNING):
         self.db = db
         assert hasattr(self.db, "insert_logs")
         self.capacity = capacity
         self.flushLevel = flushLevel
+        self.interval = interval
+        self.lastFlush = time.time()
+        self.queue = queue.Queue(-1)
+        self.queue_handler = logging.handlers.QueueHandler(self.queue)
+        self.listener = DBQueueListener(db, self.queue, self)
         super().__init__(self.capacity)
 
     def __enter__(self):
-        logging.getLogger().addHandler(self)
+        self.lastFlush = time.time()
+        if self.db.supports_threads:
+            logging.getLogger().addHandler(self.queue_handler)
+            self.listener.start()
+        else:
+            logging.getLogger().addHandler(self)
 
     def __exit__(self, *_):
-        self.close()
-        logging.getLogger().removeHandler(self)
+        if self.db.supports_threads:
+            self.listener.stop()
+            self.close()
+            logging.getLogger().removeHandler(self.queue_handler)
+        else:
+            self.close()
+            logging.getLogger().removeHandler(self)
 
     def shouldFlush(self, record):
         """
         Check for buffer full or a record at the flushLevel or higher.
         Cribbed from logging.MemoryHandler.
         """
-        return (len(self.buffer) >= self.capacity) or (
-            record.levelno >= self.flushLevel
+        return (
+            (len(self.buffer) >= self.capacity)
+            or (record.levelno >= self.flushLevel)
+            or (time.time() > self.lastFlush + self.interval)
         )
 
     def flush(self):
@@ -91,6 +123,7 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
             self.db.insert_logs(df)
             self.buffer = []
         finally:
+            self.lastFlush = time.time()
             self.release()
 
 
