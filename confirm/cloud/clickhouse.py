@@ -1,14 +1,6 @@
-"""
-Some notes I don't want to lose:
-
-Speeding up clickhouse stuff by using threading and specifying column_types:
-    https://clickhousedb.slack.com/archives/CU478UEQZ/p1673560678632889
-
-Fast min/max with clickhouse:
-    https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
-"""
 import asyncio
 import os
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Dict
@@ -103,7 +95,10 @@ def _query_df(client, query):
     # query_df directly to load a pandas dataframe. I'm guessing that loading
     # through arrow is a little less flexible or something, but for our
     # purposes, faster loading is great.
-    return retry_ch_action(client.query_arrow, query).to_pandas()
+    start = time.time()
+    out = retry_ch_action(client.query_arrow, query).to_pandas()
+    logger.debug(f"Query took {time.time() - start} seconds\n{query}")
+    return out
 
 
 default_insert_settings = dict(
@@ -114,20 +109,31 @@ default_insert_settings = dict(
 
 def _insert_df(client, table, df, settings=None):
     # Same as _query_df, inserting through arrow is faster!
+    start = time.time()
     retry_ch_action(
         client.insert_arrow,
         table,
         pyarrow.Table.from_pandas(df, preserve_index=False),
         settings=settings or default_insert_settings,
     )
+    logger.debug(
+        f"Inserting {df.shape[0]} rows into {table} took"
+        f" {time.time() - start} seconds"
+    )
 
 
 def _query(client, query, *args, **kwargs):
-    return retry_ch_action(client.query, query, *args, **kwargs)
+    start = time.time()
+    out = retry_ch_action(client.query, query, *args, **kwargs)
+    logger.debug(f"Query took {time.time() - start} seconds\n{query} ")
+    return out
 
 
 def _command(client, query, *args, **kwargs):
-    return retry_ch_action(client.command, query, *args, **kwargs)
+    start = time.time()
+    out = retry_ch_action(client.command, query, *args, **kwargs)
+    logger.debug(f"Command took {time.time() - start} seconds\n{query}")
+    return out
 
 
 @dataclass
@@ -238,7 +244,7 @@ class Clickhouse:
             f"""
             select {cols},
                 and(active=true,
-                    (id not in (select id from inactive)))
+                    (id not in (select id from done where active=false)))
                     as active
             from tiles
         """,
@@ -253,7 +259,7 @@ class Clickhouse:
             f"""
             select {cols},
                 and(active=true,
-                    (id not in (select id from inactive)))
+                    (id not in (select id from done where active=false)))
                     as active,
                 and(eligible=true,
                     (id not in (select id from done)))
@@ -396,7 +402,7 @@ class Clickhouse:
             select * from results
                 where
                     active=true
-                    and id not in (select id from inactive)
+                    and id not in (select id from done where active=false)
                     {zone_id_clause}
             order by {orderer} limit 1
         """,
@@ -420,7 +426,7 @@ class Clickhouse:
             f"""
             select {cols} from results where
                 active=true
-                and id not in (select id from inactive)
+                and id not in (select id from done where active=false)
                 {zone_id_clause}
         """,
         ).result_set[0]
@@ -439,7 +445,8 @@ class Clickhouse:
             ALTER TABLE results
             UPDATE
                 eligible = and(eligible=true, id not in (select id from done)),
-                active = and(active=true, id not in (select id from inactive))
+                active = and(active=true, 
+                    id not in (select id from done where active=false))
             WHERE
                 eligible = 1
                 and active = 1
@@ -463,7 +470,6 @@ class Clickhouse:
             WHERE eligible = 1
                 and id not in (select id from done)
                 and active = 1
-                and id not in (select id from inactive)
             ORDER BY {ordering}
             """,
         )
@@ -476,7 +482,6 @@ class Clickhouse:
             DELETE WHERE eligible = 1
                     and id not in (select id from done)
                     and active = 1
-                    and id not in (select id from inactive)
                     and coordination_id = {old_coordination_id}
             """,
             settings=self.alter_settings,
@@ -584,7 +589,8 @@ class Clickhouse:
                 select parent_id, id from tiles
                     where parent_id in (
                         select id from results 
-                            where (active=true and id not in (select id from inactive))
+                            where (active=true and id not in 
+                                    (select id from done where active=false))
                                 or (eligible=true and id not in (select id from done))
                     )
                 """,
@@ -600,7 +606,8 @@ class Clickhouse:
                 select id from tiles
                 -- packet_id >= 0 excludes tiles that were split or pruned
                     where packet_id >= 0
-                        and (active=false or id in (select id from inactive))
+                        and (active=false 
+                            or id in (select id from done where active=false))
                         and id not in (select parent_id from tiles)
                 """,
             )
@@ -775,22 +782,6 @@ class Clickhouse:
             )
         )
 
-        async def _create_inactive():
-            await create_done
-            await asyncio.to_thread(
-                _command,
-                self.client,
-                """
-                create materialized view inactive
-                    engine = MergeTree()
-                    order by (zone_id, step_id, id)
-                    as select zone_id, step_id, id from done 
-                    where active=false
-                """,
-            )
-
-        create_inactive = asyncio.create_task(_create_inactive())
-
         async def _insert_tiles():
             await create_tiles
             await asyncio.to_thread(self.insert_tiles, tiles_df)
@@ -822,7 +813,6 @@ class Clickhouse:
 
         await asyncio.gather(
             create_reports,
-            create_inactive,
             insert_tiles_task,
             insert_done_task,
             insert_null_hypos_task,

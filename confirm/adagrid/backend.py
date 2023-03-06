@@ -270,6 +270,7 @@ class LocalBackend(Backend):
             f"through step {end_step - 1}."
         )
         for step_id in range(start_step, end_step):
+            logger.debug(f"Zone {zone_id} beginning step {step_id}")
             status, tiles_df, before_next_step_tasks, lazy_tasks = await new_step(
                 algo, zone_id, step_id
             )

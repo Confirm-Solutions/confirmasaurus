@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
+import imprint.log
 
 
 if TYPE_CHECKING:
@@ -23,10 +24,12 @@ class DBQueueListener(logging.handlers.QueueListener):
     def __init__(self, db, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.db = db
+        self.worker_id = imprint.log.worker_id.get()
 
-    def start(self):
+    def _monitor(self):
         self.db.create_logs_table()
-        super().start()
+        imprint.log.worker_id.set(self.worker_id)
+        super()._monitor()
 
 
 class DatabaseLogging(logging.handlers.BufferingHandler):
