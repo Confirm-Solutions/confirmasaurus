@@ -1,4 +1,6 @@
 import logging.handlers
+import queue
+import time
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -9,9 +11,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-from .store import DuckDBStore
-from .store import PandasStore
-from .store import Store
+import imprint.log
 
 
 if TYPE_CHECKING:
@@ -20,14 +20,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class DBQueueListener(logging.handlers.QueueListener):
+    def __init__(self, db, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.db = db
+        self.worker_id = imprint.log.worker_id.get()
+
+    def _monitor(self):
+        self.db.create_logs_table()
+        imprint.log.worker_id.set(self.worker_id)
+        super()._monitor()
+
+
 class DatabaseLogging(logging.handlers.BufferingHandler):
     """
     A logging handler context manager that buffers log record writes to a
     database.
-    - the handler is added to the root logger when entering the context.
-    - the handler is removed from the root logger when exiting the context.
+    - a queue handler is added to the root logger when entering the context.
+    - the queue handler is removed from the root logger when exiting the context.
+    - a queue listener in a separate thread is started when entering the context.
     - whenever `capacity` log records are buffered, they flushed to the database.
     - whenever a log is `flushLevel` or higher, all buffered log records are flushed.
+    - whenever more than `interval` seconds have elapsed since the last flush,
+      all buffered log records are flushed.
     - when the context manager exits, any remaining log records are flushed.
 
     Check out the documentation and source for logging.Handler and
@@ -35,27 +50,44 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
     here.
     """
 
-    def __init__(self, db, capacity=10, flushLevel=logging.WARNING):
+    def __init__(self, db, capacity=100, interval=15, flushLevel=logging.WARNING):
         self.db = db
         assert hasattr(self.db, "insert_logs")
         self.capacity = capacity
         self.flushLevel = flushLevel
+        self.interval = interval
+        self.lastFlush = time.time()
+        self.queue = queue.Queue(-1)
+        self.queue_handler = logging.handlers.QueueHandler(self.queue)
+        self.listener = DBQueueListener(db, self.queue, self)
         super().__init__(self.capacity)
 
     def __enter__(self):
-        logging.getLogger().addHandler(self)
+        self.lastFlush = time.time()
+        if self.db.supports_threads:
+            logging.getLogger().addHandler(self.queue_handler)
+            self.listener.start()
+        else:
+            logging.getLogger().addHandler(self)
 
     def __exit__(self, *_):
-        self.close()
-        logging.getLogger().removeHandler(self)
+        if self.db.supports_threads:
+            self.listener.stop()
+            self.close()
+            logging.getLogger().removeHandler(self.queue_handler)
+        else:
+            self.close()
+            logging.getLogger().removeHandler(self)
 
     def shouldFlush(self, record):
         """
         Check for buffer full or a record at the flushLevel or higher.
         Cribbed from logging.MemoryHandler.
         """
-        return (len(self.buffer) >= self.capacity) or (
-            record.levelno >= self.flushLevel
+        return (
+            (len(self.buffer) >= self.capacity)
+            or (record.levelno >= self.flushLevel)
+            or (time.time() > self.lastFlush + self.interval)
         )
 
     def flush(self):
@@ -91,6 +123,7 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
             self.db.insert_logs(df)
             self.buffer = []
         finally:
+            self.lastFlush = time.time()
             self.release()
 
 
@@ -111,10 +144,6 @@ class PandasTiles:
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
     is_distributed: bool = False
     supports_threads: bool = False
-
-    @property
-    def store(self) -> Store:
-        return PandasStore(self._tables)
 
     def dimension(self) -> int:
         return (
@@ -195,7 +224,7 @@ class PandasTiles:
         else:
             self.results = pd.concat((self.results, df), axis=0)
 
-    def finish(self, df: pd.DataFrame) -> None:
+    def insert_done(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         if self.done is None:
@@ -233,7 +262,7 @@ class PandasTiles:
     async def verify(self):
         pass
 
-    async def init_tiles(self, df: pd.DataFrame, wait=False) -> None:
+    async def init_grid(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         self.tiles = df
@@ -250,7 +279,6 @@ class DuckDBTiles:
     """
 
     con: "duckdb.DuckDBPyConnection"
-    store: DuckDBStore = None
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
     _d: int = None
@@ -258,7 +286,6 @@ class DuckDBTiles:
     supports_threads: bool = False
 
     def __post_init__(self):
-        self.store = DuckDBStore(self.con)
         self.con.execute(
             """
             create table if not exists logs (
@@ -368,7 +395,7 @@ class DuckDBTiles:
         column_order = ",".join(self._results_columns())
         self.con.execute(f"insert into results select {column_order} from df")
 
-    def finish(self, which):
+    def insert_done(self, which):
         logger.debug(f"finish: {which.head()}")
         column_order = ",".join(which.columns)
         self.con.execute(f"insert into done select {column_order} from which")
@@ -383,19 +410,20 @@ class DuckDBTiles:
             """
         )
 
-    def get_packet(self, zone_id: int, step_id: int, packet_id: int):
+    def get_packet(self, zone_id: int, step_id: int, packet_id: int = None):
         if self.does_table_exist("results"):
-            restrict_results = "and id not in (select id from results)"
+            restrict_clause = "and id not in (select id from results)"
         else:
-            restrict_results = ""
+            restrict_clause = ""
+        if packet_id is not None:
+            restrict_clause += f"and packet_id = {packet_id}"
         return self.con.execute(
             f"""
             select * from tiles
                 where
                     zone_id = {zone_id}
                     and step_id = {step_id}
-                    and packet_id = {packet_id}
-                    {restrict_results}
+                    {restrict_clause}
             """,
         ).df()
 
@@ -622,8 +650,19 @@ class DuckDBTiles:
     def close(self) -> None:
         self.con.close()
 
-    async def init_tiles(self, df: pd.DataFrame, wait: bool = False) -> None:
-        self.con.execute("create table tiles as select * from df")
+    def get_null_hypos(self):
+        return self.con.query("select * from null_hypos").df()
+
+    def get_config(self):
+        return self.con.query("select * from config").df()
+
+    def insert_config(self, cfg_df):
+        return self.con.execute("insert into config select * from cfg_df")
+
+    async def init_grid(
+        self, tiles_df: pd.DataFrame, null_hypos_df: pd.DataFrame, cfg_df: pd.DataFrame
+    ) -> None:
+        self.con.execute("create table tiles as select * from tiles_df")
         self.con.execute(
             """
             create table done (
@@ -638,13 +677,11 @@ class DuckDBTiles:
                     split BOOL)
             """
         )
-        absent_parents_df = get_absent_parents(df)  # noqa
+        absent_parents_df = get_absent_parents(tiles_df)  # noqa
         self.con.execute("insert into done select * from absent_parents_df")
-        self.con.execute(
-            """
-            create table reports (json TEXT)
-            """
-        )
+        self.con.execute("create table reports (json TEXT)")
+        self.con.execute("create table null_hypos as select * from null_hypos_df")
+        self.con.execute("create table config as select * from cfg_df")
 
     @staticmethod
     def connect(path=":memory:"):

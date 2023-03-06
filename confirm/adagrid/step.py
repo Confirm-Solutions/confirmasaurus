@@ -13,13 +13,19 @@ logger = logging.getLogger(__name__)
 
 
 async def process_packet_set(algo, packets):
-    coros = [
-        process_packet(algo, zone_id, step_id, packet_id)
+    tasks = [
+        await process_packet(algo, zone_id, step_id, packet_id)
         for zone_id, step_id, packet_id in packets
     ]
-    if len(coros) == 0:
+    if len(tasks) == 0:
         return []
-    tasks = await asyncio.gather(*coros)
+    # coros = [
+    #     process_packet(algo, zone_id, step_id, packet_id)
+    #     for zone_id, step_id, packet_id in packets
+    # ]
+    # if len(coros) == 0:
+    #     return []
+    # tasks = await asyncio.gather(*coros)
     insert_tasks, report_tasks = zip(*tasks)
     start = time.time()
     await asyncio.gather(*insert_tasks)
@@ -27,10 +33,29 @@ async def process_packet_set(algo, packets):
     return report_tasks
 
 
-async def process_packet(algo, zone_id, step_id, packet_id):
+async def process_packet_df(algo, tiles_df):
+    if tiles_df is None or tiles_df.shape[0] == 0:
+        return []
+    tasks = []
+    for packet_id, packet_df in tiles_df.groupby("packet_id"):
+        zone_id = packet_df.iloc[0]["zone_id"]
+        step_id = packet_df.iloc[0]["zone_id"]
+        tasks.append(
+            await process_packet(algo, zone_id, step_id, packet_id, packet_df=packet_df)
+        )
+    insert_tasks, report_tasks = zip(*tasks)
+    start = time.time()
+    await asyncio.gather(*insert_tasks)
+    logger.debug("waiting for packet insertion took %s", time.time() - start)
+    return report_tasks
+
+
+async def process_packet(algo, zone_id, step_id, packet_id, packet_df=None):
     start = time.time()
     report = dict()
-    status, insert_results = await _process(algo, zone_id, step_id, packet_id, report)
+    status, insert_results = await _process(
+        algo, zone_id, step_id, packet_id, report, packet_df=packet_df
+    )
     report["status"] = status.name
     report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
@@ -38,22 +63,25 @@ async def process_packet(algo, zone_id, step_id, packet_id):
     return insert_results, insert_report
 
 
-async def _process(algo, zone_id, step_id, packet_id, report):
+async def _process(algo, zone_id, step_id, packet_id, report, packet_df=None):
     report["worker_id"] = algo.cfg["worker_id"]
     report["zone_id"] = zone_id
     report["step_id"] = step_id
     report["packet_id"] = packet_id
 
-    logger.debug(
-        "waiting for work: (zone_id=%s, step_id=%s, packet_id=%s)",
-        zone_id,
-        step_id,
-        packet_id,
-    )
-    get_work = await _launch_task(
-        algo.db, algo.db.get_packet, zone_id, step_id, packet_id
-    )
-    work = await get_work
+    if packet_df is None:
+        logger.debug(
+            "waiting for work: (zone_id=%s, step_id=%s, packet_id=%s)",
+            zone_id,
+            step_id,
+            packet_id,
+        )
+        get_work = await _launch_task(
+            algo.db, algo.db.get_packet, zone_id, step_id, packet_id
+        )
+        work = await get_work
+    else:
+        work = packet_df
 
     if work.shape[0] == 0:
         logger.warning(
@@ -65,6 +93,7 @@ async def _process(algo, zone_id, step_id, packet_id, report):
     report["n_tiles"] = work.shape[0]
 
     start = time.time()
+    logger.debug("Processing %d tiles.", work.shape[0])
     results_df = algo.process_tiles(tiles_df=work, report=report)
     report["runtime_process_tiles"] = time.time() - start
 
@@ -81,49 +110,56 @@ async def _process(algo, zone_id, step_id, packet_id, report):
 
 async def new_step(algo, zone_id, new_step_id):
     start = time.time()
-    status, n_packets, report = await _new_step(algo, zone_id, new_step_id)
+    status, tiles_df, report, before_next_step_tasks, lazy_tasks = await _new_step(
+        algo, zone_id, new_step_id
+    )
     report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
     report["zone_id"] = zone_id
     report["step_id"] = new_step_id
-    report["n_packets"] = n_packets
+    report["n_packets"] = tiles_df["packet_id"].nunique() if tiles_df is not None else 0
     report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
-    insert_report = await _launch_task(algo.db, algo.db.insert_report, report)
+    lazy_tasks.append(await _launch_task(algo.db, algo.db.insert_report, report))
 
-    return status, n_packets, [insert_report]
+    return status, tiles_df, before_next_step_tasks, lazy_tasks
 
 
 async def _new_step(algo, zone_id, new_step_id):
     report = dict()
 
-    start = time.time()
-    converged, convergence_data = algo.convergence_criterion(zone_id, report)
-    report["runtime_convergence_criterion"] = time.time() - start
-    if converged:
-        logger.debug("Convergence!!")
-        return WorkerStatus.CONVERGED, 0, report
-    elif new_step_id >= algo.cfg["n_steps"]:
-        logger.debug("Reached maximum number of steps. Terminating.")
-        # NOTE: no need to coordinate with other workers. They will reach
-        # n_steps on their own time.
-        return WorkerStatus.REACHED_N_STEPS, 0, report
-
+    convergence_task = asyncio.create_task(algo.convergence_criterion(zone_id, report))
+    selection_task = asyncio.create_task(
+        algo.select_tiles(zone_id, new_step_id, report, convergence_task)
+    )
     existing_packets_task = await _launch_task(
         algo.db, algo.db.n_existing_packets, zone_id, new_step_id
     )
 
-    # If we haven't converged, we create a new step.
     start = time.time()
-    logger.debug(f"Selecting tiles for step {new_step_id}.")
-    selection_df = algo.select_tiles(zone_id, new_step_id, report, convergence_data)
-    report["runtime_select_tiles"] = time.time() - start
+    converged, convergence_data = await convergence_task
+    report["runtime_convergence_criterion"] = time.time() - start
+    if converged:
+        logger.debug("Convergence!!")
+        selection_task.cancel()
+        existing_packets_task.cancel()
+        return WorkerStatus.CONVERGED, None, report, [], []
+    elif new_step_id >= algo.cfg["n_steps"]:
+        logger.debug("Reached maximum number of steps. Terminating.")
+        # NOTE: no need to coordinate with other workers. They will reach
+        # n_steps on their own time.
+        selection_task.cancel()
+        existing_packets_task.cancel()
+        return WorkerStatus.REACHED_N_STEPS, None, report, [], []
+
+    # If we haven't converged, we create a new step.
+    selection_df = await selection_task
 
     if selection_df is None:
         # New step is empty so we have terminated but
         # failed to converge.
         logger.debug("New step is empty despite failure to converge.")
-        return WorkerStatus.EMPTY_STEP, 0, report
+        return WorkerStatus.EMPTY_STEP, None, report, [], []
 
     selection_df["finisher_id"] = algo.cfg["worker_id"]
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
@@ -165,7 +201,7 @@ async def _new_step(algo, zone_id, new_step_id):
             "No tiles are refined or deepened in this step."
             " Marking these parent tiles as finished and trying again."
         )
-        return WorkerStatus.NO_NEW_TILES, 0, report
+        return WorkerStatus.NO_NEW_TILES, None, report, [], []
 
     # Actually deepen and refine!
     g_new = refine_and_deepen(
@@ -178,15 +214,14 @@ async def _new_step(algo, zone_id, new_step_id):
 
     # there might be new inactive tiles that resulted from splitting with
     # the null hypotheses. we need to mark these tiles as finished.
-    def insert_inactive():
-        inactive_df = g_new.df[~g_new.df["active"]].copy()
-        inactive_df["packet_id"] = np.int32(-1)
-        algo.db.insert_tiles(inactive_df)
-        inactive_df["refine"] = 0
-        inactive_df["deepen"] = 0
-        inactive_df["split"] = True
-        inactive_df["finisher_id"] = algo.cfg["worker_id"]
-        algo.db.finish(inactive_df[done_cols])
+    inactive_df = g_new.df[~g_new.df["active"]].copy()
+    inactive_df["packet_id"] = np.int32(-1)
+    inactive_done = inactive_df.copy()
+    inactive_done["refine"] = 0
+    inactive_done["deepen"] = 0
+    inactive_done["split"] = True
+    inactive_done["finisher_id"] = algo.cfg["worker_id"]
+    inactive_done = inactive_done[done_cols].copy()
 
     # Assign tiles to packets and then insert them into the database for
     # processing.
@@ -199,26 +234,41 @@ async def _new_step(algo, zone_id, new_step_id):
         )
 
     g_active.df["packet_id"] = assign_packets(g_active.df)
-    n_packets = g_active.df["packet_id"].max() + 1
-
     n_existing_packets = await existing_packets_task
     if n_existing_packets is not None and n_existing_packets > 0:
         logger.debug(
             f"Step {new_step_id} already exists with"
             f" {n_existing_packets} packets. Skipping."
         )
-        return WorkerStatus.ALREADY_EXISTS, n_existing_packets, report
+        return (
+            WorkerStatus.ALREADY_EXISTS,
+            algo.db.get_packet(zone_id, new_step_id),
+            report,
+            [],
+            [],
+        )
 
-    await asyncio.gather(
-        await _launch_task(algo.db, algo.db.finish, done_df),
-        await _launch_task(algo.db, insert_inactive),
+    before_next_step_tasks = [
+        await _launch_task(algo.db, algo.db.insert_done, done_df),
         await _launch_task(algo.db, algo.db.insert_tiles, g_active.df),
-    )
+    ]
+
+    lazy_tasks = [
+        await _launch_task(algo.db, algo.db.insert_tiles, inactive_df),
+        await _launch_task(algo.db, algo.db.insert_done, inactive_done),
+    ]
+
     logger.debug(
         f"For zone {zone_id}, starting step {new_step_id}"
         f" with {g_active.n_tiles} tiles to simulate."
     )
-    return WorkerStatus.NEW_STEP, n_packets, report
+    return (
+        WorkerStatus.NEW_STEP,
+        g_active.df,
+        report,
+        before_next_step_tasks,
+        lazy_tasks,
+    )
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):
