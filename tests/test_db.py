@@ -9,6 +9,7 @@ import imprint as ip
 from confirm.adagrid.db import DatabaseLogging
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.db import PandasTiles
+from confirm.adagrid.init import _serialize_null_hypos
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,15 @@ class DBTester:
         asyncio.run(pd_tiles.init_grid(g.df))
 
         db_tiles = self.connect()
-        asyncio.run(db_tiles.init_grid(g.df))
+        self.init_grid(db_tiles, g)
         return g, pd_tiles, db_tiles
+
+    def init_grid(self, db, g):
+        asyncio.run(
+            db.init_grid(
+                g.df, _serialize_null_hypos(g.null_hypos), pd.DataFrame([dict(a=1)])
+            )
+        )
 
     def insert_fake_results(self, db, zone_id=0):
         work = db.get_tiles().nsmallest(100, "theta0")
@@ -70,7 +78,7 @@ class DBTester:
 
     def test_insert_report(self):
         db = self.connect(no_async=True)
-        asyncio.run(db.init_grid(example_grid(-1, 1).df))
+        self.init_grid(db, example_grid(-1, 1))
         R = dict(zone_id=1, step_id=2, packet_id=3, testA="testB")
         db.insert_report(R)
         pd.testing.assert_frame_equal(pd.DataFrame([R]), db.get_reports())
@@ -219,7 +227,7 @@ class DBTester:
         asyncio.run(pd_tiles.init_grid(g.df))
         pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
-        asyncio.run(db_tiles.init_grid(g.df))
+        self.init_grid(db_tiles, g)
         db_tiles.insert_results(g.df, "orderer")
 
         np.testing.assert_allclose(
@@ -228,7 +236,7 @@ class DBTester:
 
     def test_db_logging(self):
         db = self.connect(no_async=True)
-        asyncio.run(db.init_grid(example_grid(-1, 1).df))
+        self.init_grid(db, example_grid(-1, 1))
         with DatabaseLogging(db=db):
             logger.debug("informative")
             logger.warning("scary")
@@ -249,7 +257,7 @@ class TestDuckDB(DBTester):
         p = Path("test.db")
         p.unlink(missing_ok=True)
         db_tiles = DuckDBTiles.connect(path=str(p))
-        asyncio.run(db_tiles.init_grid(g.df))
+        self.init_grid(db_tiles, g)
         db_tiles.close()
 
         db_tiles2 = DuckDBTiles.connect(path=str(p))

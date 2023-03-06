@@ -185,7 +185,7 @@ async def init_grid(g, db, cfg, n_zones):
     df["creator_id"] = 1
     df["creation_time"] = ip.timer.simple_timer()
 
-    null_hypos_df = _serializable_null_hypos(g.null_hypos)
+    null_hypos_df = _serialize_null_hypos(g.null_hypos)
     wait_for = [
         await _launch_task(
             db, db.init_grid, df, null_hypos_df, pd.DataFrame([cfg]), in_thread=False
@@ -228,7 +228,7 @@ def assign_packets(df, packet_size):
     return df.groupby("zone_id")["zone_id"].transform(f)
 
 
-def _serializable_null_hypos(null_hypos):
+def _serialize_null_hypos(null_hypos):
     # we need to convert the pickled object to a valid string so that it can be
     # inserted into a database. converting to a from base64 achieves this goal:
     # https://stackoverflow.com/a/30469744/3817027
@@ -239,8 +239,9 @@ def _serializable_null_hypos(null_hypos):
     return pd.DataFrame({"serialized": serialized, "description": desc})
 
 
-def _load_null_hypos(db):
-    df = db.get_null_hypos()
+def _load_null_hypos(db, df=None):
+    if df is None:
+        df = db.get_null_hypos()
     null_hypos = []
     for i in range(df.shape[0]):
         row = df.iloc[i]

@@ -259,7 +259,7 @@ class PandasTiles:
     async def verify(self):
         pass
 
-    async def init_grid(self, df: pd.DataFrame, wait=False) -> None:
+    async def init_grid(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         self.tiles = df
@@ -646,8 +646,19 @@ class DuckDBTiles:
     def close(self) -> None:
         self.con.close()
 
-    async def init_grid(self, df: pd.DataFrame, wait: bool = False) -> None:
-        self.con.execute("create table tiles as select * from df")
+    def get_null_hypos(self):
+        return self.con.query("select * from null_hypos").df()
+
+    def get_config(self):
+        return self.con.query("select * from config").df()
+
+    def insert_config(self, cfg_df):
+        return self.con.execute("insert into config select * from cfg_df")
+
+    async def init_grid(
+        self, tiles_df: pd.DataFrame, null_hypos_df: pd.DataFrame, cfg_df: pd.DataFrame
+    ) -> None:
+        self.con.execute("create table tiles as select * from tiles_df")
         self.con.execute(
             """
             create table done (
@@ -662,13 +673,11 @@ class DuckDBTiles:
                     split BOOL)
             """
         )
-        absent_parents_df = get_absent_parents(df)  # noqa
+        absent_parents_df = get_absent_parents(tiles_df)  # noqa
         self.con.execute("insert into done select * from absent_parents_df")
-        self.con.execute(
-            """
-            create table reports (json TEXT)
-            """
-        )
+        self.con.execute("create table reports (json TEXT)")
+        self.con.execute("create table null_hypos as select * from null_hypos_df")
+        self.con.execute("create table config as select * from cfg_df")
 
     @staticmethod
     def connect(path=":memory:"):

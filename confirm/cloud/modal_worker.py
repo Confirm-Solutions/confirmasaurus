@@ -36,11 +36,17 @@ class ModalWorker:
                 self.initialized = True
 
     @stub.function(**modal_config)
-    async def process_packet(self, worker_cfg, packet):
+    async def process_packet(self, worker_cfg, packet_df):
         await self.setup(**worker_cfg)
         with DatabaseLogging(db=self.algo.db):
-            insert_task, report_task = await process_packet(self.algo, *packet)
+            zone_id = packet_df.iloc[0]["zone_id"]
+            step_id = packet_df.iloc[0]["step_id"]
+            packet_id = packet_df.iloc[0]["packet_id"]
+            insert_task, report_task = await process_packet(
+                self.algo, zone_id, step_id, packet_id, packet_df=packet_df
+            )
             await insert_task
+            # TODO: can we make this lazy
             await report_task
 
     @stub.function(**modal_config)
@@ -54,15 +60,15 @@ class ModalWorker:
                 f"through step {end_step - 1}."
             )
             for step_id in range(start_step, end_step):
-                status, n_packets, lazy_tasks = await new_step(
+                status, tiles_df, before_next_step_tasks, lazy_tasks = await new_step(
                     self.algo, zone_id, step_id
                 )
                 lazy_tasks.extend(lazy_tasks)
                 coros = []
-                for i in range(n_packets):
-                    packet = (zone_id, step_id, i)
-                    coros.append(self.process_packet.call(worker_cfg, packet))
+                for _, packet_df in tiles_df.groupby("packet_id"):
+                    coros.append(self.process_packet.call(worker_cfg, packet_df))
                 await asyncio.gather(*coros)
+                await asyncio.gather(*before_next_step_tasks)
                 if status.done():
                     logger.debug(f"Zone {zone_id} finished with status {status}.")
                     break

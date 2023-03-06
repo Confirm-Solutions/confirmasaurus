@@ -103,6 +103,7 @@ from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
 from .step import new_step
+from .step import process_packet_df
 from .step import process_packet_set
 
 logger = logging.getLogger(__name__)
@@ -269,13 +270,12 @@ class LocalBackend(Backend):
             f"through step {end_step - 1}."
         )
         for step_id in range(start_step, end_step):
-            status, n_packets, lazy_tasks = await new_step(algo, zone_id, step_id)
-            self.lazy_tasks.extend(lazy_tasks)
-            self.lazy_tasks.extend(
-                await process_packet_set(
-                    algo, [(zone_id, step_id, i) for i in range(n_packets)]
-                )
+            status, tiles_df, before_next_step_tasks, lazy_tasks = await new_step(
+                algo, zone_id, step_id
             )
+            self.lazy_tasks.extend(lazy_tasks)
+            self.lazy_tasks.extend(await process_packet_df(algo, tiles_df))
+            await asyncio.gather(*before_next_step_tasks)
             if status.done():
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
                 break
