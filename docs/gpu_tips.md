@@ -2,6 +2,20 @@
 
 This is just a place to put tips and advice for working with our tools on GPUs.
 
+### I get an error about ptxas being too old.
+
+Like [this thread](https://github.com/google/jax/discussions/10327):
+
+```
+external/org_tensorflow/tensorflow/stream_executor/gpu/asm_compiler.cc:111] *** WARNING *** You are using ptxas 10.0.145, which is older than 11.1. ptxas before 11.1 is known to miscompile XLA code, leading to incorrect results or invalid-address errors.
+```
+
+You may want to try installing the following:
+```
+conda install cuda -c nvidia
+```
+which has worked wonders for some developers.
+
 
 ### I'm getting weird errors about cuBlas execution failing
 
