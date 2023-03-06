@@ -11,9 +11,6 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-from .store import DuckDBStore
-from .store import PandasStore
-from .store import Store
 
 
 if TYPE_CHECKING:
@@ -145,10 +142,6 @@ class PandasTiles:
     is_distributed: bool = False
     supports_threads: bool = False
 
-    @property
-    def store(self) -> Store:
-        return PandasStore(self._tables)
-
     def dimension(self) -> int:
         return (
             max([int(c[5:]) for c in self._tiles_columns() if c.startswith("theta")])
@@ -228,7 +221,7 @@ class PandasTiles:
         else:
             self.results = pd.concat((self.results, df), axis=0)
 
-    def finish(self, df: pd.DataFrame) -> None:
+    def insert_done(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         if self.done is None:
@@ -266,7 +259,7 @@ class PandasTiles:
     async def verify(self):
         pass
 
-    async def init_tiles(self, df: pd.DataFrame, wait=False) -> None:
+    async def init_grid(self, df: pd.DataFrame, wait=False) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         self.tiles = df
@@ -283,7 +276,6 @@ class DuckDBTiles:
     """
 
     con: "duckdb.DuckDBPyConnection"
-    store: DuckDBStore = None
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
     _d: int = None
@@ -291,7 +283,6 @@ class DuckDBTiles:
     supports_threads: bool = False
 
     def __post_init__(self):
-        self.store = DuckDBStore(self.con)
         self.con.execute(
             """
             create table if not exists logs (
@@ -401,7 +392,7 @@ class DuckDBTiles:
         column_order = ",".join(self._results_columns())
         self.con.execute(f"insert into results select {column_order} from df")
 
-    def finish(self, which):
+    def insert_done(self, which):
         logger.debug(f"finish: {which.head()}")
         column_order = ",".join(which.columns)
         self.con.execute(f"insert into done select {column_order} from which")
@@ -655,7 +646,7 @@ class DuckDBTiles:
     def close(self) -> None:
         self.con.close()
 
-    async def init_tiles(self, df: pd.DataFrame, wait: bool = False) -> None:
+    async def init_grid(self, df: pd.DataFrame, wait: bool = False) -> None:
         self.con.execute("create table tiles as select * from df")
         self.con.execute(
             """

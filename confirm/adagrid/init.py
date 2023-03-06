@@ -36,30 +36,28 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     cfg["worker_id"] = worker_id
 
     add_system_cfg(cfg)
-    # we wrap set_or_append in a lambda so that the db.store access can be
-    # run in a separate thread in case the Store __init__ method does any
-    # substantial work (e.g. in ClickhouseStore, we create a table)
-    wait_for = [
-        await _launch_task(
-            db, lambda df: db.store.set_or_append("config", df), pd.DataFrame([cfg])
-        )
-    ]
 
+    wait_for = []
+    db_load_incompletes = False
     if g is not None and not tiles_exists and is_leader:
         wait_for_grid, incomplete_packets, zone_steps = await init_grid(
             g, db, cfg, n_zones
         )
         wait_for.extend(wait_for_grid)
-    elif is_leader:
-        if g is not None:
-            logger.warning(
-                "Ignoring grid because tiles already exist in the provided database."
-            )
-        incomplete_packets = db.get_incomplete_packets()
-        zone_steps = db.get_zone_steps()
     else:
-        incomplete_packets = None
-        zone_steps = None
+        wait_for.append(_launch_task(db, db.insert_config, pd.DataFrame([cfg])))
+        if is_leader:
+            if g is not None:
+                logger.warning(
+                    "Ignoring grid because tiles already exist "
+                    "in the provided database."
+                )
+            incomplete_packets_task = _launch_task(db, db.get_incomplete_packets)
+            zone_steps_task = _launch_task(db, db.get_zone_steps)
+            db_load_incompletes = True
+        else:
+            incomplete_packets = None
+            zone_steps = None
 
     model_kwargs = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](
@@ -68,6 +66,13 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
         **model_kwargs,
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
+
+    # wait for DB calls down here so that the Model can initialize random
+    # variates and bootstrap samples and such while the DB calls are running
+    if db_load_incompletes:
+        incomplete_packets, zone_steps = await asyncio.gather(
+            incomplete_packets_task, zone_steps_task
+        )
 
     await asyncio.gather(*wait_for)
 
@@ -110,7 +115,7 @@ def first(kwargs):
 
 def join(db, kwargs):
     # If we are resuming a job, we need to load the config from the database.
-    load_cfg_df = db.store.get("config")
+    load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
 
     # IMPORTANT: Except for overrides, entries in kwargs will be ignored!
@@ -180,9 +185,11 @@ async def init_grid(g, db, cfg, n_zones):
     df["creator_id"] = 1
     df["creation_time"] = ip.timer.simple_timer()
 
+    null_hypos_df = _serializable_null_hypos(g.null_hypos)
     wait_for = [
-        await _launch_task(db, db.init_tiles, df, in_thread=False),
-        await _launch_task(db, _store_null_hypos, db, g.null_hypos),
+        await _launch_task(
+            db, db.init_grid, df, null_hypos_df, pd.DataFrame([cfg]), in_thread=False
+        ),
     ]
 
     logger.debug(
@@ -199,7 +206,7 @@ async def init_grid(g, db, cfg, n_zones):
         incomplete_packets.extend(
             [(zone_id, 0, p) for p in range(zone["packet_id"].max() + 1)]
         )
-    zone_steps = {i: 0 for i, zone in df.groupby("zone_id")}
+    zone_steps = {zone_id: 0 for zone_id, zone in df.groupby("zone_id")}
     return wait_for, incomplete_packets, zone_steps
 
 
@@ -221,7 +228,7 @@ def assign_packets(df, packet_size):
     return df.groupby("zone_id")["zone_id"].transform(f)
 
 
-def _store_null_hypos(db, null_hypos):
+def _serializable_null_hypos(null_hypos):
     # we need to convert the pickled object to a valid string so that it can be
     # inserted into a database. converting to a from base64 achieves this goal:
     # https://stackoverflow.com/a/30469744/3817027
@@ -229,12 +236,11 @@ def _store_null_hypos(db, null_hypos):
         codecs.encode(cloudpickle.dumps(h), "base64").decode() for h in null_hypos
     ]
     desc = [h.description() for h in null_hypos]
-    df = pd.DataFrame({"serialized": serialized, "description": desc})
-    db.store.set("null_hypos", df)
+    return pd.DataFrame({"serialized": serialized, "description": desc})
 
 
 def _load_null_hypos(db):
-    df = db.store.get("null_hypos")
+    df = db.get_null_hypos()
     null_hypos = []
     for i in range(df.shape[0]):
         row = df.iloc[i]

@@ -21,8 +21,6 @@ import pyarrow
 
 import confirm.adagrid.json as json
 from confirm.adagrid.db import get_absent_parents
-from confirm.adagrid.store import is_table_name
-from confirm.adagrid.store import Store
 
 if TYPE_CHECKING:
     import clickhouse_connect
@@ -134,87 +132,6 @@ def _command(client, query, *args, **kwargs):
 
 
 @dataclass
-class ClickhouseStore(Store):
-    """
-    A store using Clickhouse as the backend.
-    """
-
-    client: "clickhouse_connect.driver.httpclient.HttpClient"
-    job_id: str
-
-    def __post_init__(self):
-        _command(
-            self.client,
-            """
-            create table if not exists store_tables
-                (key String, table_name String)
-                order by key
-            """,
-        )
-
-    def get(self, key):
-        exists, table_name = self._exists(key)
-        logger.debug(f"get({key}) -> {exists} {table_name}")
-        if exists:
-            return _query_df(self.client, f"select * from {table_name}")
-        else:
-            raise KeyError(f"Key {key} not found in store")
-
-    def set(self, key, df, nickname=None):
-        exists, table_name = self._exists(key)
-        if exists:
-            _command(self.client, f"drop table {table_name}")
-        else:
-            table_id = uuid.uuid4().hex
-            if is_table_name(key):
-                table_name = key
-            else:
-                table_name = (
-                    f"_store_{nickname}_{table_id}"
-                    if nickname is not None
-                    else f"_store_{table_id}"
-                )
-            _command(
-                self.client,
-                "insert into store_tables values (%s, %s)",
-                (key, table_name),
-                settings=default_insert_settings,
-            )
-        logger.debug(f"set({key}) -> {exists} {table_name}")
-        cols = get_create_table_cols(df)
-        _command(
-            self.client,
-            f"""
-            create table {table_name} ({",".join(cols)})
-                engine = MergeTree() order by tuple()
-        """,
-        )
-        _insert_df(self.client, self.job_id + "." + table_name, df)
-
-    def set_or_append(self, key, df):
-        exists, table_name = self._exists(key)
-        logger.debug(f"set_or_append({key}) -> {exists} {table_name}")
-        if exists:
-            _insert_df(self.client, table_name, df)
-        else:
-            self.set(key, df)
-
-    def _exists(self, key):
-        table_name = _query(
-            self.client, "select table_name from store_tables where key = %s", (key,)
-        ).result_set
-        if len(table_name) == 0:
-            return False, None
-        else:
-            return True, table_name[0][0]
-
-    def exists(self, key):
-        out = self._exists(key)[0]
-        logger.debug(f"exists({key}) = {out}")
-        return out
-
-
-@dataclass
 class Clickhouse:
     """
     A tile database built on top of Clickhouse. This should be very fast and
@@ -270,16 +187,9 @@ class Clickhouse:
     _results_table_exists: bool = False
     is_distributed: bool = True
     supports_threads: bool = True
-    _store: ClickhouseStore = None
     async_insert_settings: Dict[str, str] = field(
         default_factory=lambda: default_async_insert_settings
     )
-
-    @property
-    def store(self):
-        if self._store is None:
-            self._store = ClickhouseStore(self.client, self.job_id)
-        return self._store
 
     def dimension(self):
         if self._d is None:
@@ -439,7 +349,7 @@ class Clickhouse:
         _insert_df(self.client, "results", df)
         self._results_table_exists = True
 
-    def finish(self, which):
+    def insert_done(self, which):
         logger.debug(f"finishing {which.shape[0]} tiles")
         _insert_df(self.client, "done", which)
 
@@ -773,17 +683,24 @@ class Clickhouse:
         )
 
     def insert_logs(self, df):
-        # TODO: the async_insert here is suboptimal... try to just move to
-        # another thread.
-        return _insert_df(self.client, "logs", df, settings=self.async_insert_settings)
-
-    def get_logs(self):
-        return _query_df(self.client, "select * from logs")
+        return _insert_df(self.client, "logs", df)
 
     def close(self):
         self.client.close()
 
-    async def init_tiles(self, tiles_df):
+    def get_logs(self):
+        return _query_df(self.client, "select * from logs")
+
+    def get_null_hypos(self):
+        return _query_df(self.client, "select * from null_hypos")
+
+    def get_config(self):
+        return _query_df(self.client, "select * from config")
+
+    def insert_config(self, cfg_df):
+        return _insert_df(self.client, "config", cfg_df)
+
+    async def init_grid(self, tiles_df, null_hypos_df, cfg_df):
         # tables:
         # - tiles: id, lots of other stuff...
         # - packet: id
@@ -791,8 +708,35 @@ class Clickhouse:
         # - done: id, active
         # - inactive: materialized view based on done
         tiles_cols = get_create_table_cols(tiles_df)
+        cfg_cols = get_create_table_cols(cfg_df)
 
         id_type = type_map[tiles_df["id"].dtype.name]
+
+        create_null_hypos = asyncio.create_task(
+            asyncio.to_thread(
+                _command,
+                self.client,
+                """
+                create table null_hypos (
+                        description String,
+                        serialized String)
+                    engine = MergeTree()
+                    order by ()
+                """,
+            )
+        )
+
+        create_config = asyncio.create_task(
+            asyncio.to_thread(
+                _command,
+                self.client,
+                f"""
+                create table config ({','.join(cfg_cols)})
+                    engine = MergeTree()
+                    order by ()
+                """,
+            )
+        )
 
         create_done = asyncio.create_task(
             asyncio.to_thread(
@@ -869,13 +813,27 @@ class Clickhouse:
 
         insert_done_task = asyncio.create_task(_insert_done())
 
+        async def _insert_null_hypos():
+            await create_null_hypos
+            await asyncio.to_thread(
+                _insert_df, self.client, "null_hypos", null_hypos_df
+            )
+
+        insert_null_hypos_task = asyncio.create_task(_insert_null_hypos())
+
+        async def _insert_config():
+            await create_config
+            await asyncio.to_thread(_insert_df, self.client, "config", cfg_df)
+
+        insert_config_task = asyncio.create_task(_insert_config())
+
         await asyncio.gather(
             create_reports,
-            create_tiles,
-            create_done,
             create_inactive,
             insert_tiles_task,
             insert_done_task,
+            insert_null_hypos_task,
+            insert_config_task,
         )
 
     def connect(
@@ -958,7 +916,8 @@ def get_ch_client(
     clickhouse_connect.common.set_setting("autogenerate_session_id", False)
     if connection_details is None:
         connection_details = get_ch_config(host, port, username, password, database)
-    return clickhouse_connect.get_client(**connection_details)
+    pool_mgr = clickhouse_connect.driver.httputil.get_pool_manager(maxsize=16)
+    return clickhouse_connect.get_client(**connection_details, pool_mgr=pool_mgr)
 
 
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
@@ -981,7 +940,11 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
         password = os.environ["CLICKHOUSE_PASSWORD"]
     logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
-        host=host, port=port, username=username, password=password, database=database
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        database=database,
     )
 
 

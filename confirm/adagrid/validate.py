@@ -6,6 +6,7 @@ import pandas as pd
 import imprint as ip
 from .backend import entrypoint
 from .backend import print_report
+from .init import _launch_task
 
 logger = logging.getLogger(__name__)
 
@@ -80,11 +81,15 @@ class AdaValidate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    def convergence_criterion(self, zone_id, report):
-        max_tie_est = self.db.worst_tile(zone_id, "tie_est desc")["tie_est"].iloc[0]
-        next_tile = self.db.worst_tile(
-            zone_id, "total_cost_order, tie_bound_order"
-        ).iloc[0]
+    async def convergence_criterion(self, zone_id, report):
+        max_tie_task = await _launch_task(
+            self.db, self.db.worst_tile, zone_id, "tie_est desc"
+        )
+        next_tile_task = await _launch_task(
+            self.db, self.db.worst_tile, zone_id, "total_cost_order, tie_bound_order"
+        )
+        max_tie_est = (await max_tie_task)["tie_est"].iloc[0]
+        next_tile = (await next_tile_task).iloc[0]
         report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
         report.update(
             dict(
@@ -106,7 +111,7 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    def select_tiles(self, zone_id, new_step_id, report, max_tie_est):
+    async def select_tiles(self, zone_id, new_step_id, report, convergence_task):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
             zone_id,
@@ -114,6 +119,7 @@ class AdaValidate:
             self.cfg["step_size"],
             "total_cost_order, tie_bound_order",
         )
+        _, max_tie_est = await convergence_task
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
         tiles_df = raw_tiles[include].copy()
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")

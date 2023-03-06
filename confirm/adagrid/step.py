@@ -104,27 +104,32 @@ async def new_step(algo, zone_id, new_step_id):
 async def _new_step(algo, zone_id, new_step_id):
     report = dict()
 
+    convergence_task = asyncio.create_task(algo.convergence_criterion(zone_id, report))
+    selection_task = asyncio.create_task(
+        algo.select_tiles(zone_id, new_step_id, report, convergence_task)
+    )
+    existing_packets_task = await _launch_task(
+        algo.db, algo.db.n_existing_packets, zone_id, new_step_id
+    )
+
     start = time.time()
-    converged, convergence_data = algo.convergence_criterion(zone_id, report)
+    converged, convergence_data = await convergence_task
     report["runtime_convergence_criterion"] = time.time() - start
     if converged:
         logger.debug("Convergence!!")
+        selection_task.cancel()
+        existing_packets_task.cancel()
         return WorkerStatus.CONVERGED, 0, report, []
     elif new_step_id >= algo.cfg["n_steps"]:
         logger.debug("Reached maximum number of steps. Terminating.")
         # NOTE: no need to coordinate with other workers. They will reach
         # n_steps on their own time.
+        selection_task.cancel()
+        existing_packets_task.cancel()
         return WorkerStatus.REACHED_N_STEPS, 0, report, []
 
-    existing_packets_task = await _launch_task(
-        algo.db, algo.db.n_existing_packets, zone_id, new_step_id
-    )
-
     # If we haven't converged, we create a new step.
-    start = time.time()
-    logger.debug(f"Selecting tiles for step {new_step_id}.")
-    selection_df = algo.select_tiles(zone_id, new_step_id, report, convergence_data)
-    report["runtime_select_tiles"] = time.time() - start
+    selection_df = await selection_task
 
     if selection_df is None:
         # New step is empty so we have terminated but
@@ -216,13 +221,13 @@ async def _new_step(algo, zone_id, new_step_id):
         return WorkerStatus.ALREADY_EXISTS, n_existing_packets, report, []
 
     await asyncio.gather(
-        await _launch_task(algo.db, algo.db.finish, done_df),
+        await _launch_task(algo.db, algo.db.insert_done, done_df),
         await _launch_task(algo.db, algo.db.insert_tiles, g_active.df),
     )
 
     lazy_tasks = [
         await _launch_task(algo.db, algo.db.insert_tiles, inactive_df),
-        await _launch_task(algo.db, algo.db.finish, inactive_done),
+        await _launch_task(algo.db, algo.db.insert_done, inactive_done),
     ]
 
     logger.debug(

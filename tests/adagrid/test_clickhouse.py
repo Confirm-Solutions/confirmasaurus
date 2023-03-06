@@ -1,7 +1,6 @@
 import pytest
 
 from ..test_db import DBTester
-from ..test_store import StoreTester
 
 
 class ClickhouseCleanup:
@@ -30,12 +29,6 @@ class ClickhouseCleanup:
 class TestClickhouse(DBTester, ClickhouseCleanup):
     def connect(self, no_async=False):
         return self._connect(no_async=no_async)
-
-
-@pytest.mark.slow
-class TestClickhouseStore(StoreTester, ClickhouseCleanup):
-    def connect(self):
-        return self._connect().store
 
 
 @pytest.mark.slow

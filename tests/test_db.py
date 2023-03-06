@@ -47,10 +47,10 @@ class DBTester:
         g.df.index = g.df.index.astype(np.uint64)
         pd_tiles = PandasTiles()
 
-        asyncio.run(pd_tiles.init_tiles(g.df))
+        asyncio.run(pd_tiles.init_grid(g.df))
 
         db_tiles = self.connect()
-        asyncio.run(db_tiles.init_tiles(g.df))
+        asyncio.run(db_tiles.init_grid(g.df))
         return g, pd_tiles, db_tiles
 
     def insert_fake_results(self, db, zone_id=0):
@@ -70,7 +70,7 @@ class DBTester:
 
     def test_insert_report(self):
         db = self.connect(no_async=True)
-        asyncio.run(db.init_tiles(example_grid(-1, 1).df))
+        asyncio.run(db.init_grid(example_grid(-1, 1).df))
         R = dict(zone_id=1, step_id=2, packet_id=3, testA="testB")
         db.insert_report(R)
         pd.testing.assert_frame_equal(pd.DataFrame([R]), db.get_reports())
@@ -156,7 +156,7 @@ class DBTester:
         assert_frame_equal_special(pd_work, db_work)
         assert_frame_equal_special(pd_tiles.get_results(), db_tiles.get_results())
 
-        def finish(db_work, pd_work):
+        def insert_done(db_work, pd_work):
             cols = [
                 "zone_id",
                 "step_id",
@@ -174,10 +174,10 @@ class DBTester:
                         df[col] = i
             db_work["active"] = False
             pd_work["active"] = False
-            db_tiles.finish(db_work[cols])
-            pd_tiles.finish(pd_work[cols])
+            db_tiles.insert_done(db_work[cols])
+            pd_tiles.insert_done(pd_work[cols])
 
-        finish(db_work, pd_work)
+        insert_done(db_work, pd_work)
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
         pd_work = pd_tiles.next(0, 18, 7, "theta0")
@@ -186,7 +186,7 @@ class DBTester:
         assert db_work.shape[0] == 2
         assert_frame_equal_special(pd_work, db_work)
 
-        finish(db_work, pd_work)
+        insert_done(db_work, pd_work)
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
         assert not pd_tiles.get_results()["eligible"].any()
         assert not db_tiles.get_results()["eligible"].any()
@@ -216,10 +216,10 @@ class DBTester:
         g.df["orderer"] = np.linspace(-1, 1, g.n_tiles)
 
         pd_tiles = PandasTiles()
-        asyncio.run(pd_tiles.init_tiles(g.df))
+        asyncio.run(pd_tiles.init_grid(g.df))
         pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
-        asyncio.run(db_tiles.init_tiles(g.df))
+        asyncio.run(db_tiles.init_grid(g.df))
         db_tiles.insert_results(g.df, "orderer")
 
         np.testing.assert_allclose(
@@ -228,7 +228,7 @@ class DBTester:
 
     def test_db_logging(self):
         db = self.connect(no_async=True)
-        asyncio.run(db.init_tiles(example_grid(-1, 1).df))
+        asyncio.run(db.init_grid(example_grid(-1, 1).df))
         with DatabaseLogging(db=db):
             logger.debug("informative")
             logger.warning("scary")
@@ -249,7 +249,7 @@ class TestDuckDB(DBTester):
         p = Path("test.db")
         p.unlink(missing_ok=True)
         db_tiles = DuckDBTiles.connect(path=str(p))
-        asyncio.run(db_tiles.init_tiles(g.df))
+        asyncio.run(db_tiles.init_grid(g.df))
         db_tiles.close()
 
         db_tiles2 = DuckDBTiles.connect(path=str(p))
