@@ -511,7 +511,7 @@ class Clickhouse:
         create table if not exists results ({",".join(results_cols)})
             engine = MergeTree() order by ({orderer})
         """
-        _command(self.client, cmd)
+        _command(self.client, cmd, settings=default_insert_settings)
 
     async def verify(self):
         async def duplicate_tiles():

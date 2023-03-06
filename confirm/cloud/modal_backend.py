@@ -38,9 +38,12 @@ class ModalBackend(Backend):
         # - Thus, we need to delete the module from sys.modules at the end of
         #   this
         global stub
+        global modal_config
         stub = modal.aio.AioStub()
         stub.worker_id_queue = modal.aio.AioQueue()
         modal_config["gpu"] = self.input_cfg["gpu"]
+        modal_config["keep_warm"] = True
+        modal_config["concurrency_limit"] = self.input_cfg["n_zones"]
         from .modal_worker import ModalWorker
 
         self.w = ModalWorker()

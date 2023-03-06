@@ -34,7 +34,7 @@ def main():
         # step_size=2**14,
         # packet_size=2**10,
         # n_steps=30
-        backend=ModalBackend(gpu="any"),
+        backend=ModalBackend(n_zones=4, gpu="any"),
     )
     print(db.job_id)
 
