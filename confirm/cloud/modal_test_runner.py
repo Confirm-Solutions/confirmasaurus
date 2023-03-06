@@ -33,7 +33,7 @@ def run_tests(argv=None):
 
 @stub.function(
     image=img,
-    gpu=modal.gpu.A100(),
+    gpu="any",
     retries=0,
     mounts=[
         *modal.create_package_mounts(["confirm", "imprint"]),
