@@ -5,4 +5,10 @@ dependencies:
   - python=3.10
   - pip
   - pip:
+    # I could’ve left the requirements.txt inline inside environment.yml, but
+    # splitting it out has the advantage that Renovate bot will
+    # auto-update a requirements.txt file but won’t auto-update an
+    # environment.yml
+    # Tracking issue for Renovate conda support:
+    # https://github.com/renovatebot/renovate/issues/2213
     - -r requirements.txt

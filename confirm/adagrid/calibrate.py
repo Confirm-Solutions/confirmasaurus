@@ -47,32 +47,35 @@ The great glossary of adagrid:
 - worst tile: the tile for which lams is smallest:
  `lams[worst_tile] == lamss == lambda**`
 """
+import logging
+
 import numpy as np
 import pandas as pd
 
-import imprint.log
-from . import adagrid
+import imprint as ip
 from . import bootstrap
+from .backend import entrypoint
+from .backend import print_report
 
-logger = imprint.log.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AdaCalibrate:
-    def __init__(self, db, model, null_hypos, c):
-        self.db = db
-        self.model = model
+    def __init__(self, model, null_hypos, db, cfg, callback):
         self.null_hypos = null_hypos
-        self.c = c
+        self.db = db
+        self.cfg = cfg
+        self.callback = callback
 
-        self.Ks = self.c["init_K"] * 2 ** np.arange(self.c["n_K_double"] + 1)
+        self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
         self.driver = bootstrap.BootstrapCalibrate(
             model,
-            self.c["bootstrap_seed"],
-            self.c["nB"],
+            self.cfg["bootstrap_seed"],
+            self.cfg["nB"],
             self.Ks,
-            tile_batch_size=self.c["tile_batch_size"],
-            worker_id=self.c["worker_id"],
+            tile_batch_size=self.cfg["tile_batch_size"],
+            worker_id=self.cfg["worker_id"],
         )
 
     def get_orderer(self):
@@ -84,18 +87,18 @@ class AdaCalibrate:
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.c["alpha"])
-        lams_df.insert(0, "processor_id", self.c["worker_id"])
-        lams_df.insert(1, "processing_time", imprint.timer.simple_timer())
+        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.cfg["alpha"])
+        lams_df.insert(0, "processor_id", self.cfg["worker_id"])
+        lams_df.insert(1, "processing_time", ip.timer.simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data
-        lams_df.insert(3, "grid_cost", self.c["alpha"] - lams_df["alpha0"])
+        lams_df.insert(3, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
         lams_df.insert(
             4,
             "impossible",
             lams_df["alpha0"]
-            < (self.c["calibration_min_idx"] + 1) / (tiles_df["K"] + 1),
+            < (self.cfg["calibration_min_idx"] + 1) / (tiles_df["K"] + 1),
         )
 
         lams_df.insert(
@@ -111,7 +114,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), lams_df), axis=1)
 
-    def convergence_criterion(self, report):
+    def convergence_criterion(self, zone_id, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -120,16 +123,22 @@ class AdaCalibrate:
         #
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
-        any_impossible = self.db.worst_tile("impossible")["impossible"].iloc[0]
+        worst_tile_impossible = self.db.worst_tile(zone_id, "impossible")
+
+        # If there are no tiles, we are done.
+        if worst_tile_impossible.shape[0] == 0:
+            return True, None
+
+        any_impossible = worst_tile_impossible["impossible"].iloc[0]
         if any_impossible:
             return False, None
 
-        worst_tile = self.db.worst_tile("lams")
+        worst_tile = self.db.worst_tile(zone_id, "lams")
         lamss = worst_tile["lams"].iloc[0]
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
-        B_lamss = self.db.bootstrap_lamss()
+        B_lamss = self.db.bootstrap_lamss(zone_id)
         worst_tile_tie_sum = self.driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0]
@@ -158,14 +167,14 @@ class AdaCalibrate:
 
         # The convergence criterion itself.
         report["converged"] = (
-            (bias_tie < self.c["bias_target"])
-            and (std_tie < self.c["std_target"])
-            and (grid_cost < self.c["grid_target"])
+            (bias_tie < self.cfg["bias_target"])
+            and (std_tie < self.cfg["std_target"])
+            and (grid_cost < self.cfg["grid_target"])
         )
         return report["converged"], None
 
-    def select_tiles(self, report, convergence_data):
-        tiles_df = self.db.next(self.c["step_size"], "orderer")
+    def select_tiles(self, zone_id, new_step_id, report, convergence_data):
+        tiles_df = self.db.next(zone_id, new_step_id, self.cfg["step_size"], "orderer")
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
             return None
@@ -193,13 +202,13 @@ class AdaCalibrate:
         # If the tile's mean lambda* is less the mean lambda* of this modified
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
-        twb_worst_tile = self.db.worst_tile("twb_mean_lams")
+        twb_worst_tile = self.db.worst_tile(zone_id, "twb_mean_lams")
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
         twb_worst_tile["K"] = self.max_K
         twb_worst_tile_lams = self.driver.bootstrap_calibrate(
-            twb_worst_tile, self.c["alpha"], tile_batch_size=1
+            twb_worst_tile, self.cfg["alpha"], tile_batch_size=1
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
@@ -211,7 +220,7 @@ class AdaCalibrate:
         # The decision criteria is best described by the code below.
         ########################################
         at_max_K = tiles_df["K"] == self.max_K
-        tiles_df["refine"] = (tiles_df["grid_cost"] > self.c["grid_target"]) & (
+        tiles_df["refine"] = (tiles_df["grid_cost"] > self.cfg["grid_target"]) & (
             (~deepen_likely_to_work) | at_max_K
         )
         tiles_df["deepen"] = (~tiles_df["refine"]) & (~at_max_K)
@@ -239,12 +248,11 @@ def ada_calibrate(
     calibration_min_idx: int = 40,
     n_steps: int = 100,
     step_size: int = 2**10,
-    n_iter: int = 100,
     packet_size: int = None,
     prod: bool = True,
     overrides: dict = None,
-    callback=adagrid.print_report,
-    backend=adagrid.LocalBackend(),
+    callback=print_report,
+    backend=None,
 ):
     """
     The main entrypoint for the adaptive calibration algorithm.
@@ -282,10 +290,6 @@ def ada_calibrate(
            packet_size because we select tiles once and then run many
            simulation "iterations" in parallel each processing one
            packet of tiles. Defaults to 2**10.
-        n_iter: The number of packets this worker should simulate before
-            exiting. Defaults to None which places no limit. Limiting the number of
-            packets is useful for stopping a worker after a specified amount of
-            work.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
         prod: Is this a production run? If so, we will collection extra system
@@ -308,7 +312,4 @@ def ada_calibrate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    ada = adagrid.Adagrid(
-        model_type, g, db, AdaCalibrate, callback, overrides, locals()
-    )
-    return backend.run(ada)
+    return entrypoint(AdaCalibrate, locals())

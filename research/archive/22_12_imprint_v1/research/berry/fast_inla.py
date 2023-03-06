@@ -289,7 +289,6 @@ class FastINLA:
         # We ignore the terms that don't depend on theta since we are
         # optimizing here and constant offsets are irrelevant.
         for i in range(100):
-
             # Calculate the gradient and hessian.
             grad, hess = self.model.grad_hess(self, data, theta_max, arms_opt)
             hess_inv = np.linalg.inv(hess)

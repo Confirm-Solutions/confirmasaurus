@@ -25,7 +25,6 @@ class NumpyEncoder(json.JSONEncoder):
                 np.uint64,
             ),
         ):
-
             return int(obj)
 
         elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):

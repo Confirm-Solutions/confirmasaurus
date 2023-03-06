@@ -14,6 +14,9 @@ def get_image(dependency_groups=["cloud"]):
     context_files = {
         "/.pyproject.toml": str(poetry_dir.joinpath("pyproject.toml")),
         "/.poetry.lock": str(poetry_dir.joinpath("poetry.lock")),
+        "/.requirements-jax-cuda.txt": str(
+            poetry_dir.joinpath("requirements-jax-cuda.txt")
+        ),
         "/.test_secrets.enc.env": str(poetry_dir.joinpath("test_secrets.enc.env")),
     }
 
@@ -33,15 +36,17 @@ def get_image(dependency_groups=["cloud"]):
         "RUN python -m pip install poetry",
         "COPY /.poetry.lock /tmp/poetry/poetry.lock",
         "COPY /.pyproject.toml /tmp/poetry/pyproject.toml",
+        "COPY /.requirements-jax-cuda.txt /tmp/poetry/requirements-jax-cuda.txt",
         f"""
         RUN cd /tmp/poetry && \\
             poetry config virtualenvs.create false && \\
-            poetry install --with={','.join(dependency_groups)} --no-root
+            poetry install --with={','.join(dependency_groups)} --no-root && \\
+            pip install --upgrade -r requirements-jax-cuda.txt
         """,
     ]
 
     return modal.Image.from_dockerhub(
-        "nvidia/cuda:11.8.0-devel-ubuntu22.04",
+        "nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04",
         setup_commands=[
             "apt-get update",
             "apt-get install -y python-is-python3 python3-pip",

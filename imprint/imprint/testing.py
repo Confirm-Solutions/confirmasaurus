@@ -1,4 +1,19 @@
 """
+# Testing tools
+
+## Why is this here instead of conftest.py?
+
+Typically, this kind of testing support code would go in conftest.py if imprint
+were the only place in which that testing support code were used. But, we're
+also importing these testing tools from other packages/repos internal to
+Confirm. So, it makes sense to keep it in a separate module for importability.
+Then we can load it as a pytest plugin
+(https://docs.pytest.org/en/7.1.x/how-to/writing_plugins.html) with:
+`pytest -p imprint.testing`
+This flag is included in the default pytest configuration in pyproject.toml.
+
+## Snapshot testing
+
 Here you will find tools for snapshot testing. Snapshot testing is a way to
 check that the output of a function is the same as it used to be. This is
 particularly useful for end to end tests where we don't have a comparison point
@@ -31,14 +46,27 @@ import os
 import pickle
 from pathlib import Path
 
+import jax.config
 import jax.numpy
 import numpy as np
 import pandas as pd
 import pytest
 
+from imprint import configure_logging
+from imprint import package_settings
+
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: mark test as slow to run")
+
+    configure_logging(is_testing=True)
+    try:
+        import dotenv
+
+        dotenv.load_dotenv()
+    except ImportError:
+        pass
+    package_settings()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -66,6 +94,12 @@ def pytest_addoption(parser):
         dest="update_snapshots",
         help="Update snapshots",
     )
+
+
+@pytest.fixture()
+def cur_loc(request):
+    """The location of the file containing the current test."""
+    return Path(request.fspath).parent
 
 
 def path_and_check(filebase, ext):
@@ -214,7 +248,7 @@ def check_imprint_results(g, snapshot, ignore_story=True):
         g: The grid to compare.
         snapshot: The imprint.testing.snapshot object.
         ignore_story: Should we only test the grid + outputs and ignore
-            storyline outputs like id, step_iter, event time, etc. Defaults to
+            storyline outputs like id, packet_id, event time, etc. Defaults to
             True.
     """
     if "lams" in g.df.columns:
@@ -254,11 +288,12 @@ def check_imprint_results(g, snapshot, ignore_story=True):
 
     df_idx = df.set_index("id")
     compare_all_cols = snapshot(df_idx)
+    shared_cols = list(set(df_idx.columns).intersection(compare_all_cols.columns))
     # Compare the shared columns. This is helpful for ensuring that existing
     # columns are identical in a situation where we add a new column.
     pd.testing.assert_frame_equal(
-        df_idx[compare_all_cols.columns.tolist()],
-        compare_all_cols,
+        df_idx[shared_cols],
+        compare_all_cols[shared_cols],
         check_like=True,
         check_index_type=False,
         check_dtype=False,

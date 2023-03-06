@@ -4,18 +4,12 @@ import time
 import jax
 import numpy as np
 import pytest
-import scipy.stats
-from scipy.special import logit
 
 from confirm.berrylib import binomial
 from confirm.berrylib import dirty_bayes
 from confirm.berrylib import fast_inla
 from confirm.berrylib import quadrature
 from confirm.berrylib import util
-
-
-def logistic(x):
-    return jax.scipy.special.expit(x)
 
 
 def test_broadcast():
@@ -31,8 +25,8 @@ def test_dirty_bayes():
         y_i,
         n_i,
         fi.mu_0,
-        np.full((1, 4), logit(0.3)),
-        np.full((1, 4), logit(0.2) - logit(0.3)),
+        np.full((1, 4), jax.scipy.special.logit(0.3)),
+        np.full((1, 4), jax.scipy.special.logit(0.2) - jax.scipy.special.logit(0.3)),
         fi.sigma2_rule,
     )
     expected = [0.939209, 0.995332, 0.98075, 0.963809]
@@ -40,6 +34,8 @@ def test_dirty_bayes():
 
 
 def test_simpson_rules():
+    import scipy.integrate
+
     for n in range(3, 10, 2):
         a = np.random.uniform(0, 1)
         b = np.random.uniform(3, 4)
@@ -71,6 +67,8 @@ def test_composite_simpson():
 
 
 def test_log_gauss_rule():
+    import scipy.stats
+
     a = 1e-8
     b = 1e3
     qr = util.log_gauss_rule(90, a, b)
@@ -247,11 +245,15 @@ def test_fast_inla_same_results(N=1, iterations=1_000):
             np.testing.assert_allclose(outs1[0], outs2[0], atol=1e-3, rtol=1e-2)
             np.testing.assert_allclose(outs1[1], outs2[1], atol=1e-3)
             np.testing.assert_allclose(
-                logistic(outs1[2]), logistic(outs2[2]), atol=1e-3
+                jax.scipy.special.expit(outs1[2]),
+                jax.scipy.special.expit(outs2[2]),
+                atol=1e-3,
             )
 
 
 def test_rejection_table():
+    import scipy.stats
+
     fi = fast_inla.FastINLA(n_arms=2)
     n = 10
     table = binomial.build_rejection_table(2, n, fi.rejection_inference)

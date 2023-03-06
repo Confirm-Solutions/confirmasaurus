@@ -1,10 +1,6 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import numpyro
-import numpyro.distributions as dist
-import scipy.special
-import scipy.stats
 
 from . import inla as inla
 
@@ -12,7 +8,9 @@ mu_0 = -1.34
 mu_sig2 = 100.0
 sig2_alpha = 0.0005
 sig2_beta = 0.000005
-logit_p1 = scipy.special.logit(0.3)
+
+p1 = 0.3
+logit_p1 = np.log(p1 / (1 - p1))
 
 
 def figure1_data(N=1):
@@ -28,6 +26,9 @@ def figure2_data(N=10):
 
 
 def model(d):
+    import numpyro
+    import numpyro.distributions as dist
+
     def model(data):
         sig2 = numpyro.sample("sig2", dist.InverseGamma(sig2_alpha, sig2_beta))
         cov = jnp.full((d, d), mu_sig2) + jnp.diag(jnp.repeat(sig2, d))
@@ -45,6 +46,8 @@ def model(d):
 
 
 def log_joint(d):
+    import numpyro.distributions as dist
+
     def ll(params, data):
         sig2 = params["sig2"]
         cov = jnp.full((d, d), mu_sig2) + jnp.diag(jnp.repeat(sig2, d))
@@ -61,7 +64,9 @@ def log_joint(d):
     return ll
 
 
-def optimized(sig2, n_arms=4, dtype=np.float64):
+def optimized(sig2, n_arms=4, dtype=jnp.float64):
+    import scipy.stats
+
     sigma2_n = sig2.shape[0]
     arms = np.arange(n_arms)
     cov = np.full((sigma2_n, n_arms, n_arms), mu_sig2)
