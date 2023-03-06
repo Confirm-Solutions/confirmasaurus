@@ -43,7 +43,7 @@ async def _coordinate(algo, step_id, n_zones, report):
         )
     ]
 
-    converged, _ = algo.convergence_criterion(None, report)
+    converged, _ = await algo.convergence_criterion(None, report)
     if converged:
         return WorkerStatus.CONVERGED, lazy_tasks, None
 

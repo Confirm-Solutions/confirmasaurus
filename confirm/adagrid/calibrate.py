@@ -114,7 +114,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), lams_df), axis=1)
 
-    def convergence_criterion(self, zone_id, report):
+    async def convergence_criterion(self, zone_id, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -173,7 +173,7 @@ class AdaCalibrate:
         )
         return report["converged"], None
 
-    def select_tiles(self, zone_id, new_step_id, report, convergence_data):
+    async def select_tiles(self, zone_id, new_step_id, report, convergence_task):
         tiles_df = self.db.next(zone_id, new_step_id, self.cfg["step_size"], "orderer")
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:

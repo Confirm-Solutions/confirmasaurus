@@ -17,9 +17,10 @@ scipy = "^1.10.1"
 sympy = "^1.11.1"
 matplotlib = "^3.7.0"
 pandas = "^1.5.3"
-jax = "^0.4.4"
+jax = "^0.4.5"
 numpyro = "^0.11.0"
 duckdb = "^0.7.1"
+tensorflow-probability = "^0.19.0"
 
 [tool.poetry.group.test]
 optional = true

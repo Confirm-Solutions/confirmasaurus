@@ -1,17 +1,8 @@
-"""
-Some notes I don't want to lose:
-
-Speeding up clickhouse stuff by using threading and specifying column_types:
-    https://clickhousedb.slack.com/archives/CU478UEQZ/p1673560678632889
-
-Fast min/max with clickhouse:
-    https://clickhousedb.slack.com/archives/CU478UEQZ/p1669820710989079
-"""
 import asyncio
 import os
+import time
 import uuid
 from dataclasses import dataclass
-from dataclasses import field
 from typing import Dict
 from typing import List
 from typing import TYPE_CHECKING
@@ -21,8 +12,6 @@ import pyarrow
 
 import confirm.adagrid.json as json
 from confirm.adagrid.db import get_absent_parents
-from confirm.adagrid.store import is_table_name
-from confirm.adagrid.store import Store
 
 if TYPE_CHECKING:
     import clickhouse_connect
@@ -106,112 +95,45 @@ def _query_df(client, query):
     # query_df directly to load a pandas dataframe. I'm guessing that loading
     # through arrow is a little less flexible or something, but for our
     # purposes, faster loading is great.
-    return retry_ch_action(client.query_arrow, query).to_pandas()
+    start = time.time()
+    out = retry_ch_action(client.query_arrow, query).to_pandas()
+    logger.debug(f"Query took {time.time() - start} seconds\n{query}")
+    return out
 
 
 default_insert_settings = dict(
     insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
 )
-default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+# default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
 
 
 def _insert_df(client, table, df, settings=None):
     # Same as _query_df, inserting through arrow is faster!
+    start = time.time()
     retry_ch_action(
         client.insert_arrow,
         table,
         pyarrow.Table.from_pandas(df, preserve_index=False),
         settings=settings or default_insert_settings,
     )
+    logger.debug(
+        f"Inserting {df.shape[0]} rows into {table} took"
+        f" {time.time() - start} seconds"
+    )
 
 
 def _query(client, query, *args, **kwargs):
-    return retry_ch_action(client.query, query, *args, **kwargs)
+    start = time.time()
+    out = retry_ch_action(client.query, query, *args, **kwargs)
+    logger.debug(f"Query took {time.time() - start} seconds\n{query} ")
+    return out
 
 
 def _command(client, query, *args, **kwargs):
-    return retry_ch_action(client.command, query, *args, **kwargs)
-
-
-@dataclass
-class ClickhouseStore(Store):
-    """
-    A store using Clickhouse as the backend.
-    """
-
-    client: "clickhouse_connect.driver.httpclient.HttpClient"
-    job_id: str
-
-    def __post_init__(self):
-        _command(
-            self.client,
-            """
-            create table if not exists store_tables
-                (key String, table_name String)
-                order by key
-            """,
-        )
-
-    def get(self, key):
-        exists, table_name = self._exists(key)
-        logger.debug(f"get({key}) -> {exists} {table_name}")
-        if exists:
-            return _query_df(self.client, f"select * from {table_name}")
-        else:
-            raise KeyError(f"Key {key} not found in store")
-
-    def set(self, key, df, nickname=None):
-        exists, table_name = self._exists(key)
-        if exists:
-            _command(self.client, f"drop table {table_name}")
-        else:
-            table_id = uuid.uuid4().hex
-            if is_table_name(key):
-                table_name = key
-            else:
-                table_name = (
-                    f"_store_{nickname}_{table_id}"
-                    if nickname is not None
-                    else f"_store_{table_id}"
-                )
-            _command(
-                self.client,
-                "insert into store_tables values (%s, %s)",
-                (key, table_name),
-                settings=default_insert_settings,
-            )
-        logger.debug(f"set({key}) -> {exists} {table_name}")
-        cols = get_create_table_cols(df)
-        _command(
-            self.client,
-            f"""
-            create table {table_name} ({",".join(cols)})
-                engine = MergeTree() order by tuple()
-        """,
-        )
-        _insert_df(self.client, self.job_id + "." + table_name, df)
-
-    def set_or_append(self, key, df):
-        exists, table_name = self._exists(key)
-        logger.debug(f"set_or_append({key}) -> {exists} {table_name}")
-        if exists:
-            _insert_df(self.client, table_name, df)
-        else:
-            self.set(key, df)
-
-    def _exists(self, key):
-        table_name = _query(
-            self.client, "select table_name from store_tables where key = %s", (key,)
-        ).result_set
-        if len(table_name) == 0:
-            return False, None
-        else:
-            return True, table_name[0][0]
-
-    def exists(self, key):
-        out = self._exists(key)[0]
-        logger.debug(f"exists({key}) = {out}")
-        return out
+    start = time.time()
+    out = retry_ch_action(client.command, query, *args, **kwargs)
+    logger.debug(f"Command took {time.time() - start} seconds\n{query}")
+    return out
 
 
 @dataclass
@@ -270,16 +192,6 @@ class Clickhouse:
     _results_table_exists: bool = False
     is_distributed: bool = True
     supports_threads: bool = True
-    _store: ClickhouseStore = None
-    async_insert_settings: Dict[str, str] = field(
-        default_factory=lambda: default_async_insert_settings
-    )
-
-    @property
-    def store(self):
-        if self._store is None:
-            self._store = ClickhouseStore(self.client, self.job_id)
-        return self._store
 
     def dimension(self):
         if self._d is None:
@@ -332,7 +244,7 @@ class Clickhouse:
             f"""
             select {cols},
                 and(active=true,
-                    (id not in (select id from inactive)))
+                    (id not in (select id from done where active=false)))
                     as active
             from tiles
         """,
@@ -347,7 +259,7 @@ class Clickhouse:
             f"""
             select {cols},
                 and(active=true,
-                    (id not in (select id from inactive)))
+                    (id not in (select id from done where active=false)))
                     as active,
                 and(eligible=true,
                     (id not in (select id from done)))
@@ -422,11 +334,7 @@ class Clickhouse:
             return rows[0][0] + 1
 
     def insert_report(self, report):
-        _command(
-            self.client,
-            f"insert into reports values ('{json.dumps(report)}')",
-            settings=default_insert_settings,
-        )
+        _command(self.client, f"insert into reports values ('{json.dumps(report)}')")
         return report
 
     def insert_tiles(self, df: pd.DataFrame):
@@ -439,11 +347,11 @@ class Clickhouse:
         _insert_df(self.client, "results", df)
         self._results_table_exists = True
 
-    def finish(self, which):
+    def insert_done(self, which):
         logger.debug(f"finishing {which.shape[0]} tiles")
         _insert_df(self.client, "done", which)
 
-    def get_packet(self, zone_id, step_id, packet_id):
+    def get_packet(self, zone_id: int, step_id: int, packet_id: int = None):
         """
         `get_packet` is used to select tiles for processing/simulation.
         """
@@ -451,6 +359,8 @@ class Clickhouse:
             restrict_clause = "and id not in (select id from results)"
         else:
             restrict_clause = ""
+        if packet_id is not None:
+            restrict_clause += f"and packet_id = {packet_id}"
         return _query_df(
             self.client,
             f"""
@@ -458,7 +368,6 @@ class Clickhouse:
                 where
                     zone_id = {zone_id}
                     and step_id = {step_id}
-                    and packet_id = {packet_id}
                     {restrict_clause}
             """,
         )
@@ -493,7 +402,7 @@ class Clickhouse:
             select * from results
                 where
                     active=true
-                    and id not in (select id from inactive)
+                    and id not in (select id from done where active=false)
                     {zone_id_clause}
             order by {orderer} limit 1
         """,
@@ -517,7 +426,7 @@ class Clickhouse:
             f"""
             select {cols} from results where
                 active=true
-                and id not in (select id from inactive)
+                and id not in (select id from done where active=false)
                 {zone_id_clause}
         """,
         ).result_set[0]
@@ -536,7 +445,8 @@ class Clickhouse:
             ALTER TABLE results
             UPDATE
                 eligible = and(eligible=true, id not in (select id from done)),
-                active = and(active=true, id not in (select id from inactive))
+                active = and(active=true, 
+                    id not in (select id from done where active=false))
             WHERE
                 eligible = 1
                 and active = 1
@@ -560,7 +470,6 @@ class Clickhouse:
             WHERE eligible = 1
                 and id not in (select id from done)
                 and active = 1
-                and id not in (select id from inactive)
             ORDER BY {ordering}
             """,
         )
@@ -573,7 +482,6 @@ class Clickhouse:
             DELETE WHERE eligible = 1
                     and id not in (select id from done)
                     and active = 1
-                    and id not in (select id from inactive)
                     and coordination_id = {old_coordination_id}
             """,
             settings=self.alter_settings,
@@ -603,7 +511,7 @@ class Clickhouse:
         create table if not exists results ({",".join(results_cols)})
             engine = MergeTree() order by ({orderer})
         """
-        _command(self.client, cmd)
+        _command(self.client, cmd, settings=default_insert_settings)
 
     async def verify(self):
         async def duplicate_tiles():
@@ -681,7 +589,8 @@ class Clickhouse:
                 select parent_id, id from tiles
                     where parent_id in (
                         select id from results 
-                            where (active=true and id not in (select id from inactive))
+                            where (active=true and id not in 
+                                    (select id from done where active=false))
                                 or (eligible=true and id not in (select id from done))
                     )
                 """,
@@ -697,7 +606,8 @@ class Clickhouse:
                 select id from tiles
                 -- packet_id >= 0 excludes tiles that were split or pruned
                     where packet_id >= 0
-                        and (active=false or id in (select id from inactive))
+                        and (active=false 
+                            or id in (select id from done where active=false))
                         and id not in (select parent_id from tiles)
                 """,
             )
@@ -754,18 +664,43 @@ class Clickhouse:
             deepened_tiles_with_incorrect_child_count(),
         )
 
-    def insert_logs(self, df):
-        # TODO: the async_insert here is suboptimal... try to just move to
-        # another thread.
-        return _insert_df(self.client, "logs", df, settings=self.async_insert_settings)
+    def create_logs_table(self):
+        _command(
+            self.client,
+            """
+            create table if not exists logs (
+                worker_id Int32,
+                t DateTime64(6),
+                name String,
+                pathname String,
+                lineno UInt32,
+                levelno UInt32,
+                levelname String,
+                message String)
+            engine = MergeTree() 
+            order by (worker_id, t)
+            """,
+        )
 
-    def get_logs(self):
-        return _query_df(self.client, "select * from logs")
+    def insert_logs(self, df):
+        return _insert_df(self.client, "logs", df)
 
     def close(self):
         self.client.close()
 
-    async def init_tiles(self, tiles_df):
+    def get_logs(self):
+        return _query_df(self.client, "select * from logs")
+
+    def get_null_hypos(self):
+        return _query_df(self.client, "select * from null_hypos")
+
+    def get_config(self):
+        return _query_df(self.client, "select * from config")
+
+    def insert_config(self, cfg_df):
+        return _insert_df(self.client, "config", cfg_df)
+
+    async def init_grid(self, tiles_df, null_hypos_df, cfg_df):
         # tables:
         # - tiles: id, lots of other stuff...
         # - packet: id
@@ -773,8 +708,35 @@ class Clickhouse:
         # - done: id, active
         # - inactive: materialized view based on done
         tiles_cols = get_create_table_cols(tiles_df)
+        cfg_cols = get_create_table_cols(cfg_df)
 
         id_type = type_map[tiles_df["id"].dtype.name]
+
+        create_null_hypos = asyncio.create_task(
+            asyncio.to_thread(
+                _command,
+                self.client,
+                """
+                create table null_hypos (
+                        description String,
+                        serialized String)
+                    engine = MergeTree()
+                    order by ()
+                """,
+            )
+        )
+
+        create_config = asyncio.create_task(
+            asyncio.to_thread(
+                _command,
+                self.client,
+                f"""
+                create table config ({','.join(cfg_cols)})
+                    engine = MergeTree()
+                    order by ()
+                """,
+            )
+        )
 
         create_done = asyncio.create_task(
             asyncio.to_thread(
@@ -820,42 +782,6 @@ class Clickhouse:
             )
         )
 
-        create_logs = asyncio.create_task(
-            asyncio.to_thread(
-                _command,
-                self.client,
-                """
-                create table logs (
-                    worker_id Int32,
-                    t DateTime64(6),
-                    name String,
-                    pathname String,
-                    lineno UInt32,
-                    levelno UInt32,
-                    levelname String,
-                    message String)
-                engine = MergeTree() 
-                order by (worker_id, t)
-                """,
-            )
-        )
-
-        async def _create_inactive():
-            await create_done
-            await asyncio.to_thread(
-                _command,
-                self.client,
-                """
-                create materialized view inactive
-                    engine = MergeTree()
-                    order by (zone_id, step_id, id)
-                    as select zone_id, step_id, id from done 
-                    where active=false
-                """,
-            )
-
-        create_inactive = asyncio.create_task(_create_inactive())
-
         async def _insert_tiles():
             await create_tiles
             await asyncio.to_thread(self.insert_tiles, tiles_df)
@@ -871,14 +797,26 @@ class Clickhouse:
 
         insert_done_task = asyncio.create_task(_insert_done())
 
+        async def _insert_null_hypos():
+            await create_null_hypos
+            await asyncio.to_thread(
+                _insert_df, self.client, "null_hypos", null_hypos_df
+            )
+
+        insert_null_hypos_task = asyncio.create_task(_insert_null_hypos())
+
+        async def _insert_config():
+            await create_config
+            await asyncio.to_thread(_insert_df, self.client, "config", cfg_df)
+
+        insert_config_task = asyncio.create_task(_insert_config())
+
         await asyncio.gather(
             create_reports,
-            create_logs,
-            create_tiles,
-            create_done,
-            create_inactive,
             insert_tiles_task,
             insert_done_task,
+            insert_null_hypos_task,
+            insert_config_task,
         )
 
     def connect(
@@ -914,6 +852,7 @@ class Clickhouse:
             port: The Clickhouse server port. Defaults to None.
             username: The Clickhouse username. Defaults to None.
             password: The Clickhouse password. Defaults to None.
+            no_create: If True, do not create the job_id database. Defaults to False.
 
         Returns:
             A Clickhouse tile database object.
@@ -960,7 +899,8 @@ def get_ch_client(
     clickhouse_connect.common.set_setting("autogenerate_session_id", False)
     if connection_details is None:
         connection_details = get_ch_config(host, port, username, password, database)
-    return clickhouse_connect.get_client(**connection_details)
+    pool_mgr = clickhouse_connect.driver.httputil.get_pool_manager(maxsize=16)
+    return clickhouse_connect.get_client(**connection_details, pool_mgr=pool_mgr)
 
 
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
@@ -983,7 +923,11 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
         password = os.environ["CLICKHOUSE_PASSWORD"]
     logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
-        host=host, port=port, username=username, password=password, database=database
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        database=database,
     )
 
 

@@ -60,7 +60,7 @@ def test_init_first(both_dbs):
                 assert algo.cfg[k] == kwargs[k]
 
         tiles_df = algo.db.get_tiles()
-        assert algo.db.store.get("config").shape[0] == 1
+        assert algo.db.get_config().shape[0] == 1
         assert algo.cfg["worker_id"] == 1
         assert tiles_df.shape[0] == 5
         assert (tiles_df["step_id"] == 0).all()
@@ -133,19 +133,21 @@ def test_new_step(both_dbs):
         algo, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
         await process_packet_set(algo, [(0, 0, i) for i in range(3)])
 
-        status, n_packets, report_task = await new_step(algo, 0, 1)
+        status, tiles_df, before_tasks, report_task = await new_step(algo, 0, 1)
+        await asyncio.gather(*before_tasks)
+
         # call new_step twice to confirm idempotency
-        status2, n_packets2, report_task2 = await new_step(algo, 0, 1)
+        status2, tiles_df2, before_tasks, report_task2 = await new_step(algo, 0, 1)
         assert status == WorkerStatus.NEW_STEP
         assert status2 == WorkerStatus.ALREADY_EXISTS
 
-        assert n_packets == 3
-        assert n_packets2 == 3
+        assert tiles_df["packet_id"].nunique() == 3
+        assert tiles_df2["packet_id"].nunique() == 3
 
-        tiles_df = algo.db.get_tiles()
+        all_tiles_df = algo.db.get_tiles()
         results_df = algo.db.get_results()
 
-        assert tiles_df.shape[0] == 11
+        assert all_tiles_df.shape[0] == 11
         assert results_df.shape[0] == 5
 
         new_tiles = tiles_df[tiles_df["step_id"] == 1]
@@ -160,7 +162,7 @@ def test_new_step(both_dbs):
         assert (done["active"] == 0).all()
         assert (done["step_id"] == 0).all()
 
-        report = await report_task[0]
+        report = await report_task[2]
         assert report["status"] == "NEW_STEP"
         assert report["n_refine"] == 3
 
@@ -174,7 +176,8 @@ def test_reload_zone_info(both_dbs):
     async def _test():
         algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
         await process_packet_set(algo, incomplete)
-        _, n_packets, _ = await new_step(algo, 0, 1)
+        _, _, before_tasks, _ = await new_step(algo, 0, 1)
+        await asyncio.gather(*before_tasks)
 
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
