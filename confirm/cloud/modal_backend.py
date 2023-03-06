@@ -66,7 +66,7 @@ class ModalBackend(Backend):
             # w = workers[i % len(workers)]
             # coros.append(await w.process_packet.call(packet))
             print("launching", i, packet)
-            coros.append(self.w.process_packet.call(self.worker_data, packet))
+            coros.append(self.w.process_packet.call(self.worker_data, packet, None))
         await asyncio.gather(*coros)
 
     async def run_zones(self, zone_steps, start_step, end_step):

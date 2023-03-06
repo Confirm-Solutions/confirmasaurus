@@ -42,12 +42,15 @@ class ModalWorker:
                 self.initialized = True
 
     @stub.function(**modal_config)
-    async def process_packet(self, worker_cfg, packet_df):
+    async def process_packet(self, worker_cfg, packet, packet_df):
         await self.setup(**worker_cfg)
         with DatabaseLogging(db=self.algo.db):
-            zone_id = packet_df.iloc[0]["zone_id"]
-            step_id = packet_df.iloc[0]["step_id"]
-            packet_id = packet_df.iloc[0]["packet_id"]
+            if packet is None:
+                zone_id = packet_df.iloc[0]["zone_id"]
+                step_id = packet_df.iloc[0]["step_id"]
+                packet_id = packet_df.iloc[0]["packet_id"]
+            else:
+                zone_id, step_id, packet_id = packet
             insert_task, report_task = await process_packet(
                 self.algo, zone_id, step_id, packet_id, packet_df=packet_df
             )
@@ -70,10 +73,13 @@ class ModalWorker:
                     self.algo, zone_id, step_id
                 )
                 lazy_tasks.extend(lazy_tasks)
-                coros = []
-                for _, packet_df in tiles_df.groupby("packet_id"):
-                    coros.append(self.process_packet.call(worker_cfg, packet_df))
-                await asyncio.gather(*coros)
+                if tiles_df is not None and tiles_df.shape[0] > 0:
+                    coros = []
+                    for _, packet_df in tiles_df.groupby("packet_id"):
+                        coros.append(
+                            self.process_packet.call(worker_cfg, None, packet_df)
+                        )
+                    await asyncio.gather(*coros)
                 await asyncio.gather(*before_next_step_tasks)
                 if status.done():
                     logger.debug(f"Zone {zone_id} finished with status {status}.")
