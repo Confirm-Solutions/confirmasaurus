@@ -240,7 +240,13 @@ async def _new_step(algo, zone_id, new_step_id):
             f"Step {new_step_id} already exists with"
             f" {n_existing_packets} packets. Skipping."
         )
-        return WorkerStatus.ALREADY_EXISTS, None, report, [], []
+        return (
+            WorkerStatus.ALREADY_EXISTS,
+            algo.db.get_packet(zone_id, new_step_id),
+            report,
+            [],
+            [],
+        )
 
     before_next_step_tasks = [
         await _launch_task(algo.db, algo.db.insert_done, done_df),

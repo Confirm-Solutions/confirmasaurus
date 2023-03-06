@@ -77,7 +77,7 @@ class DBTester:
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
     def test_insert_report(self):
-        db = self.connect(no_async=True)
+        db = self.connect()
         self.init_grid(db, example_grid(-1, 1))
         R = dict(zone_id=1, step_id=2, packet_id=3, testA="testB")
         db.insert_report(R)
@@ -235,7 +235,7 @@ class DBTester:
         )
 
     def test_db_logging(self):
-        db = self.connect(no_async=True)
+        db = self.connect()
         self.init_grid(db, example_grid(-1, 1))
         with DatabaseLogging(db=db):
             logger.debug("informative")

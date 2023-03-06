@@ -31,7 +31,7 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     if g is not None and not tiles_exists:
         cfg, null_hypos = first(kwargs)
     else:
-        cfg, null_hypos = join(db, kwargs)
+        cfg, null_hypos = await join(db, kwargs)
 
     cfg["worker_id"] = worker_id
 
@@ -52,8 +52,8 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
                     "Ignoring grid because tiles already exist "
                     "in the provided database."
                 )
-            incomplete_packets_task = _launch_task(db, db.get_incomplete_packets)
-            zone_steps_task = _launch_task(db, db.get_zone_steps)
+            incomplete_packets_task = await _launch_task(db, db.get_incomplete_packets)
+            zone_steps_task = await _launch_task(db, db.get_zone_steps)
             db_load_incompletes = True
         else:
             incomplete_packets = None
@@ -113,7 +113,8 @@ def first(kwargs):
     return cfg, kwargs["g"].null_hypos
 
 
-def join(db, kwargs):
+async def join(db, kwargs):
+    get_null_hypos_task = await _launch_task(db, db.get_null_hypos)
     # If we are resuming a job, we need to load the config from the database.
     load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
@@ -138,7 +139,7 @@ def join(db, kwargs):
         ]:
             raise ValueError(f"Parameter {k} cannot be overridden.")
         cfg[k] = overrides[k]
-    return cfg, _load_null_hypos(db)
+    return cfg, _deserialize_null_hypos(await get_null_hypos_task)
 
 
 def add_system_cfg(cfg):
@@ -239,9 +240,7 @@ def _serialize_null_hypos(null_hypos):
     return pd.DataFrame({"serialized": serialized, "description": desc})
 
 
-def _load_null_hypos(db, df=None):
-    if df is None:
-        df = db.get_null_hypos()
+def _deserialize_null_hypos(df):
     null_hypos = []
     for i in range(df.shape[0]):
         row = df.iloc[i]

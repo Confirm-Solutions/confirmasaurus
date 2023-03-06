@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class ModalWorker:
+    """
+    See ModalBackend for an explanation of why this is in a separate module.
+
+    This class has the various functions that can run in the cloud by Modal.
+    """
+
     def __init__(self):
         self.initialized = False
 

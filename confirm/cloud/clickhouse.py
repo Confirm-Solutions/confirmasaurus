@@ -11,7 +11,6 @@ import asyncio
 import os
 import uuid
 from dataclasses import dataclass
-from dataclasses import field
 from typing import Dict
 from typing import List
 from typing import TYPE_CHECKING
@@ -110,7 +109,7 @@ def _query_df(client, query):
 default_insert_settings = dict(
     insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
 )
-default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+# default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
 
 
 def _insert_df(client, table, df, settings=None):
@@ -187,9 +186,6 @@ class Clickhouse:
     _results_table_exists: bool = False
     is_distributed: bool = True
     supports_threads: bool = True
-    async_insert_settings: Dict[str, str] = field(
-        default_factory=lambda: default_async_insert_settings
-    )
 
     def dimension(self):
         if self._d is None:
@@ -332,11 +328,7 @@ class Clickhouse:
             return rows[0][0] + 1
 
     def insert_report(self, report):
-        _command(
-            self.client,
-            f"insert into reports values ('{json.dumps(report)}')",
-            settings=self.async_insert_settings,
-        )
+        _command(self.client, f"insert into reports values ('{json.dumps(report)}')")
         return report
 
     def insert_tiles(self, df: pd.DataFrame):
@@ -353,7 +345,7 @@ class Clickhouse:
         logger.debug(f"finishing {which.shape[0]} tiles")
         _insert_df(self.client, "done", which)
 
-    def get_packet(self, zone_id, step_id, packet_id):
+    def get_packet(self, zone_id: int, step_id: int, packet_id: int = None):
         """
         `get_packet` is used to select tiles for processing/simulation.
         """
@@ -361,6 +353,8 @@ class Clickhouse:
             restrict_clause = "and id not in (select id from results)"
         else:
             restrict_clause = ""
+        if packet_id is not None:
+            restrict_clause += f"and packet_id = {packet_id}"
         return _query_df(
             self.client,
             f"""
@@ -368,7 +362,6 @@ class Clickhouse:
                 where
                     zone_id = {zone_id}
                     and step_id = {step_id}
-                    and packet_id = {packet_id}
                     {restrict_clause}
             """,
         )
@@ -668,7 +661,7 @@ class Clickhouse:
         _command(
             self.client,
             """
-            create table logs (
+            create table if not exists logs (
                 worker_id Int32,
                 t DateTime64(6),
                 name String,

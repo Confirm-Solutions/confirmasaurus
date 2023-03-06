@@ -407,19 +407,20 @@ class DuckDBTiles:
             """
         )
 
-    def get_packet(self, zone_id: int, step_id: int, packet_id: int):
+    def get_packet(self, zone_id: int, step_id: int, packet_id: int = None):
         if self.does_table_exist("results"):
-            restrict_results = "and id not in (select id from results)"
+            restrict_clause = "and id not in (select id from results)"
         else:
-            restrict_results = ""
+            restrict_clause = ""
+        if packet_id is not None:
+            restrict_clause += f"and packet_id = {packet_id}"
         return self.con.execute(
             f"""
             select * from tiles
                 where
                     zone_id = {zone_id}
                     and step_id = {step_id}
-                    and packet_id = {packet_id}
-                    {restrict_results}
+                    {restrict_clause}
             """,
         ).df()
 
