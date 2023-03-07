@@ -165,10 +165,7 @@ class WD41(ip.Model):
         denominatortotallypooled = jnp.sqrt(
             totally_pooledaverage
             * (1 - totally_pooledaverage)
-            * (
-                2
-                / (self.n_tnbc_first_stage_per_arm + self.n_hrplus_first_stage_per_arm)
-            )
+            * (1 / (self.n_first_stage))
         )
         tnbc_effect = phattnbctreat - phattnbccontrol
         hrplus_effect = phathrplustreat - phathrpluscontrol
@@ -288,31 +285,33 @@ class WD41(ip.Model):
         hyptnbc_zstat = (ztnbc_stage1 + ztnbc_stage2) * invsqrt2
         hypfull_zstat = (zfull_stage1 + zfull_stage2) * invsqrt2
 
-        # Now doing the combination rule for the intersection test
-        # we multiply the p-value by two by analogy to bonferroni
-        HI_pfirst = 2 * (
-            1 - jax.scipy.stats.norm.cdf(jnp.maximum(ztnbc_stage1, zfull_stage1))
-        )
-        HI_zfirst = jax.scipy.stats.norm.ppf(1 - HI_pfirst)
-        HI_zsecond = jnp.where(
-            hypofull_live & hypotnbc_live,
-            jax.scipy.stats.norm.ppf(
-                1
-                - 2
-                * (
-                    1
-                    - jax.scipy.stats.norm.cdf(jnp.maximum(ztnbc_stage2, zfull_stage2))
-                )
-            ),
-            jnp.where(hypotnbc_live, ztnbc_stage2, zfull_stage2),
-        )
-
-        HI_zcombined = (HI_zfirst + HI_zsecond) * invsqrt2
-
         if self.ignore_intersection:
             tnbc_stat = jax.scipy.stats.norm.cdf(-hyptnbc_zstat)
             full_stat = jax.scipy.stats.norm.cdf(-hypfull_zstat)
         else:
+            # Now doing the combination rule for the intersection test
+            # we multiply the p-value by two by analogy to bonferroni
+            HI_pfirst = 2 * (
+                1 - jax.scipy.stats.norm.cdf(jnp.maximum(ztnbc_stage1, zfull_stage1))
+            )
+            HI_zfirst = jax.scipy.stats.norm.ppf(1 - HI_pfirst)
+            HI_zsecond = jnp.where(
+                hypofull_live & hypotnbc_live,
+                jax.scipy.stats.norm.ppf(
+                    1
+                    - 2
+                    * (
+                        1
+                        - jax.scipy.stats.norm.cdf(
+                            jnp.maximum(ztnbc_stage2, zfull_stage2)
+                        )
+                    )
+                ),
+                jnp.where(hypotnbc_live, ztnbc_stage2, zfull_stage2),
+            )
+
+            HI_zcombined = (HI_zfirst + HI_zsecond) * invsqrt2
+
             tnbc_stat = jax.scipy.stats.norm.cdf(
                 -jnp.minimum(hyptnbc_zstat, HI_zcombined)
             )
