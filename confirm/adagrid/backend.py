@@ -145,20 +145,25 @@ async def async_entrypoint(backend, algo_type, kwargs):
         algo, incomplete_packets, zone_steps = await init(
             algo_type, True, 1, kwargs["n_zones"], kwargs
         )
+        logger.debug("init took %s", time.time() - start)
 
         incomplete_packets = np.array(incomplete_packets)
         min_step_completed = min(zone_steps.values())
         max_step_completed = max(zone_steps.values())
         every = algo.cfg["coordinate_every"]
-
-        def get_next_coord(step_id, every):
-            return step_id + every - (step_id % every)
-
-        next_coord = get_next_coord(min_step_completed, every)
-        assert next_coord == get_next_coord(max_step_completed, every)
-        start_step = min_step_completed + 1
+        initial_coordinations = []
         n_zones = algo.cfg["n_zones"]
-        logger.debug("init took %s", time.time() - start)
+
+        def get_next_coord(step_id):
+            next_every = step_id + every - (step_id % every)
+            if len(initial_coordinations) == 0:
+                return next_every
+            next_initial = min([i for i in initial_coordinations if i > step_id])
+            return min(next_initial, next_every)
+
+        next_coord = get_next_coord(min_step_completed)
+        assert next_coord == get_next_coord(max_step_completed)
+        start_step = min_step_completed + 1
 
         start = time.time()
         async with backend.setup(algo_type, algo, kwargs):
@@ -169,9 +174,29 @@ async def async_entrypoint(backend, algo_type, kwargs):
             logger.debug("process_initial_incompletes took %s", time.time() - start)
 
             while start_step < algo.cfg["n_steps"]:
+                if next_coord == start_step:
+                    if n_zones > 1:
+                        # If there's more than one zone, then we need to coordinate.
+                        # NOTE: coordinations happen *before* the same-named step.
+                        # e.g. a coordination at step 5 happens before new_step and
+                        # process_packets for 5.
+                        start = time.time()
+                        coord_status, lazy_tasks, zone_steps = await coordinate(
+                            algo, next_coord, n_zones
+                        )
+                        backend.lazy_tasks.extend(lazy_tasks)
+                        logger.debug("coordinate took %s", time.time() - start)
+                        if coord_status.done():
+                            break
+
+                    next_coord = get_next_coord(next_coord)
+                assert next_coord > start_step
+
                 start = time.time()
-                end_step = min(next_coord, algo.cfg["n_steps"]) + 1
+                end_step = min(next_coord, algo.cfg["n_steps"] + 1)
                 statuses = await backend.run_zones(zone_steps, start_step, end_step)
+                start_step = end_step
+                assert len(statuses) == len(zone_steps)
                 logger.debug("run_zones took %s", time.time() - start)
 
                 # If there's only one zone and that zone is done, then we're
@@ -179,23 +204,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 if len(statuses) == 1:
                     if statuses[0].done():
                         break
-
-                if n_zones > 1:
-                    # If there's more than one zone, then we need to coordinate.
-                    # NOTE: coordinations happen *before* the same-named step.
-                    # e.g. a coordination at step 5 happens before new_step and
-                    # process_packets for 5.
-                    start = time.time()
-                    coord_status, lazy_tasks, zone_steps = await coordinate(
-                        algo, end_step, n_zones
-                    )
-                    backend.lazy_tasks.extend(lazy_tasks)
-                    logger.debug("coordinate took %s", time.time() - start)
-                    if coord_status.done():
-                        break
-
-                start_step = end_step
-                next_coord += every
 
         start = time.time()
         # TODO: currently we only verify at the end, should we do it more often?

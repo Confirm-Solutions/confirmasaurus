@@ -9,17 +9,23 @@ from . import modal_util
 from confirm.adagrid.backend import Backend
 
 logger = logging.getLogger(__name__)
-stub = modal.aio.AioStub()
-modal_config = modal_util.get_defaults()
+name = "modal_adagrid"
+stub = modal.aio.AioStub(name)
+process_packet_config = modal_util.get_defaults()
+del process_packet_config["retries"]
+run_zone_config = modal_util.get_defaults()
 
 
 class ModalBackend(Backend):
-    def __init__(self, n_zones=1, coordinate_every=5, gpu="any"):
+    def __init__(self, n_zones=1, n_workers=None, coordinate_every=5, gpu="any"):
+        if n_workers is None:
+            n_workers = n_zones
         super().__init__()
         self.lazy_tasks = []
         self.input_cfg = {
             "coordinate_every": coordinate_every,
             "n_zones": n_zones,
+            "n_workers": n_workers,
             "gpu": gpu,
         }
 
@@ -39,11 +45,11 @@ class ModalBackend(Backend):
         #   this
         global stub
         global modal_config
-        stub = modal.aio.AioStub()
+        stub = modal.aio.AioStub(name)
         stub.worker_id_queue = modal.aio.AioQueue()
-        modal_config["gpu"] = self.input_cfg["gpu"]
-        modal_config["keep_warm"] = True
-        modal_config["concurrency_limit"] = self.input_cfg["n_zones"]
+        process_packet_config["gpu"] = self.input_cfg["gpu"]
+        process_packet_config["keep_warm"] = self.input_cfg["n_workers"]
+        process_packet_config["concurrency_limit"] = self.input_cfg["n_workers"]
         from .modal_worker import ModalWorker
 
         self.w = ModalWorker()
@@ -57,7 +63,6 @@ class ModalBackend(Backend):
                 "algo_type": algo_type,
                 "job_id": algo.db.job_id,
                 "kwargs": worker_kwargs,
-                "worker_id_queue": app.worker_id_queue,
             }
             yield
         del sys.modules["confirm.cloud.modal_worker"]
@@ -66,8 +71,6 @@ class ModalBackend(Backend):
         coros = []
         for i in range(incomplete_packets.shape[0]):
             packet = incomplete_packets[i]
-            # w = workers[i % len(workers)]
-            # coros.append(await w.process_packet.call(packet))
             print("launching", i, packet)
             coros.append(self.w.process_packet.call(self.worker_data, packet, None))
         await asyncio.gather(*coros)
