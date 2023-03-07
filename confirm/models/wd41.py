@@ -53,7 +53,6 @@ class WD41(ip.Model):
         n_requested_first_stage=150,
         n_requested_second_stage=150,
         frac_tnbc=default_frac_tnbc,
-        dtype=jnp.float32,
         ignore_intersection=False,
     ):
         self.ignore_intersection = ignore_intersection
@@ -90,20 +89,12 @@ class WD41(ip.Model):
 
         key = jax.random.PRNGKey(0)
         self.unifs = jax.random.uniform(
-            key, (max_K, self.n_first_stage + self.n_second_stage), dtype=dtype
+            key, (max_K, self.n_first_stage + self.n_second_stage), dtype=jnp.float32
         )
 
-        def sim_wrapper(unifs, theta, detailed):
-            p = jax.scipy.special.expit(theta)
-            return self.sim(
-                unifs, p[..., 0], p[..., 1], p[..., 2], p[..., 3], detailed=detailed
-            )
-
-        self.sim_jit = jax.vmap(
-            jax.vmap(
-                jax.jit(sim_wrapper, static_argnums=(2,)), in_axes=(0, None, None)
-            ),
-            in_axes=(None, 0, None),
+        self.sim_stat_jit = jax.vmap(
+            jax.vmap(jax.jit(self.sim_stat), in_axes=(0, None, None)),
+            in_axes=(None, 0, 0),
         )
 
         self.null_hypos = [
@@ -128,30 +119,33 @@ class WD41(ip.Model):
             )
         }
 
-    def sample(self, unifs, start, end, p):
-        return jnp.sum(unifs[start:end] < p) / (end - start)
+    def sample(self, unifs, n, p):
+        return jnp.sum(unifs < p) / n
 
     def sample_all_arms(
         self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
     ):
         unifs_tnbc = unifs[: self.n_tnbc_second_stage_total]
+        unifs_tnbc_control = unifs_tnbc[: self.n_tnbc_second_stage_per_arm]
+        unifs_tnbc_treat = unifs_tnbc[self.n_tnbc_second_stage_per_arm :]
+        unifs_hrplus = unifs[self.n_tnbc_second_stage_total :]
+        unifs_hrplus_control = unifs_hrplus[: self.n_hrplus_second_stage_per_arm]
+        unifs_hrplus_treat = unifs_hrplus[self.n_hrplus_second_stage_per_arm :]
+
         phattnbccontrol = self.sample(
-            unifs_tnbc, 0, self.n_tnbc_second_stage_per_arm, pcontrol_tnbc
+            unifs_tnbc_control, self.n_tnbc_second_stage_per_arm, pcontrol_tnbc
         )
         phattnbctreat = self.sample(
-            unifs_tnbc,
+            unifs_tnbc_treat,
             self.n_tnbc_second_stage_per_arm,
-            self.n_tnbc_second_stage_total,
             ptreat_tnbc,
         )
-        unifs_hrplus = unifs[self.n_tnbc_second_stage_total :]
         phathrpluscontrol = self.sample(
-            unifs_hrplus, 0, self.n_hrplus_second_stage_per_arm, pcontrol_hrplus
+            unifs_hrplus_control, self.n_hrplus_second_stage_per_arm, pcontrol_hrplus
         )
         phathrplustreat = self.sample(
-            unifs_hrplus,
+            unifs_hrplus_treat,
             self.n_hrplus_second_stage_per_arm,
-            self.n_hrplus_second_stage_total,
             ptreat_hrplus,
         )
         return phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
@@ -165,10 +159,9 @@ class WD41(ip.Model):
 
     def zfull(self, phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat):
         totally_pooledaverage = (
-            phattnbctreat + phattnbccontrol
-        ) * self.n_tnbc_first_stage_per_arm / self.n_first_stage + (
-            phathrplustreat + phathrpluscontrol
-        ) * self.n_hrplus_first_stage_per_arm / self.n_first_stage
+            (phattnbctreat + phattnbccontrol) * self.n_tnbc_first_stage_per_arm
+            + (phathrplustreat + phathrpluscontrol) * self.n_hrplus_first_stage_per_arm
+        ) / self.n_first_stage
         denominatortotallypooled = jnp.sqrt(
             totally_pooledaverage
             * (1 - totally_pooledaverage)
@@ -180,9 +173,9 @@ class WD41(ip.Model):
         tnbc_effect = phattnbctreat - phattnbccontrol
         hrplus_effect = phathrplustreat - phathrpluscontrol
         return (
-            (tnbc_effect * self.n_tnbc_first_stage_total / self.n_first_stage)
-            + (hrplus_effect * self.n_hrplus_first_stage_total / self.n_first_stage)
-        ) / denominatortotallypooled
+            (tnbc_effect * self.n_tnbc_first_stage_total)
+            + (hrplus_effect * self.n_hrplus_first_stage_total)
+        ) / (denominatortotallypooled * self.n_first_stage)
 
     def stage1(self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus):
         (
@@ -219,13 +212,14 @@ class WD41(ip.Model):
     def stage2_tnbc(self, unifs, pcontrol_tnbc, ptreat_tnbc):
         # Here, we ignored n_hrplus_second_stage_per_arm patients because the
         # hrplus arm has been dropped.
+        unifs_control = unifs[: self.n_tnbc_only_second_stage]
+        unifs_treat = unifs[self.n_tnbc_only_second_stage :]
         phattnbccontrol = self.sample(
-            unifs, 0, self.n_tnbc_only_second_stage, pcontrol_tnbc
+            unifs_control, self.n_tnbc_only_second_stage, pcontrol_tnbc
         )
         phattnbctreat = self.sample(
-            unifs,
+            unifs_treat,
             self.n_tnbc_only_second_stage,
-            self.n_tnbc_only_second_stage * 2,
             ptreat_tnbc,
         )
         return (
@@ -290,8 +284,9 @@ class WD41(ip.Model):
 
         # now combine test statistics
         # Now we go through the 3 intersection tests:
-        hyptnbc_zstat = (ztnbc_stage1 + ztnbc_stage2) / jnp.sqrt(2)
-        hypfull_zstat = (zfull_stage1 + zfull_stage2) / jnp.sqrt(2)
+        invsqrt2 = 1.0 / jnp.sqrt(2)
+        hyptnbc_zstat = (ztnbc_stage1 + ztnbc_stage2) * invsqrt2
+        hypfull_zstat = (zfull_stage1 + zfull_stage2) * invsqrt2
 
         # Now doing the combination rule for the intersection test
         # we multiply the p-value by two by analogy to bonferroni
@@ -312,7 +307,7 @@ class WD41(ip.Model):
             jnp.where(hypotnbc_live, ztnbc_stage2, zfull_stage2),
         )
 
-        HI_zcombined = (HI_zfirst + HI_zsecond) / jnp.sqrt(2)
+        HI_zcombined = (HI_zfirst + HI_zsecond) * invsqrt2
 
         if self.ignore_intersection:
             tnbc_stat = jax.scipy.stats.norm.cdf(-hyptnbc_zstat)
@@ -358,6 +353,15 @@ class WD41(ip.Model):
         else:
             return tnbc_stat, full_stat
 
+    def sim_stat(self, unifs, theta, null_truth):
+        p = jax.scipy.special.expit(theta)
+        tnbc_stat, full_stat = self.sim(
+            unifs, p[..., 0], p[..., 1], p[..., 2], p[..., 3], detailed=False
+        )
+        rejected = jnp.array((tnbc_stat, full_stat))
+        stat = jnp.min(jnp.where(null_truth, rejected, 1e9))
+        return stat
+
     def sim_batch(
         self,
         begin_sim: int,
@@ -366,9 +370,10 @@ class WD41(ip.Model):
         null_truth: jnp.ndarray,
         detailed: bool = False,
     ):
-        tnbc_stat, full_stat = self.sim_jit(
-            self.unifs[begin_sim:end_sim], theta, detailed
+        out = self.sim_stat_jit(
+            self.unifs[begin_sim:end_sim],
+            theta.astype(jnp.float32),
+            null_truth.astype(jnp.float32),
         )
-        rejected = np.stack((tnbc_stat, full_stat), axis=-1)
-        stat = jnp.min(jnp.where(null_truth[:, None], rejected, 1e9), axis=-1)
-        return stat
+        assert out.dtype == jnp.float32
+        return out
