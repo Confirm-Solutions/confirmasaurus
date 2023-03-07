@@ -54,7 +54,9 @@ class WD41(ip.Model):
         n_requested_second_stage=150,
         frac_tnbc=default_frac_tnbc,
         ignore_intersection=False,
+        dtype=jnp.float32,
     ):
+        self.dtype = dtype
         self.ignore_intersection = ignore_intersection
 
         def split(n_stage):
@@ -89,8 +91,8 @@ class WD41(ip.Model):
 
         key = jax.random.PRNGKey(0)
         self.unifs = jax.random.uniform(
-            key, (max_K, self.n_first_stage + self.n_second_stage), dtype=jnp.float32
-        )
+            key, (max_K, self.n_first_stage + self.n_second_stage)
+        ).astype(self.dtype)
 
         self.sim_stat_jit = jax.vmap(
             jax.vmap(jax.jit(self.sim_stat), in_axes=(0, None, None)),
@@ -120,7 +122,7 @@ class WD41(ip.Model):
         }
 
     def sample(self, unifs, n, p):
-        return jnp.sum(unifs < p) / n
+        return jnp.sum(unifs < p, dtype=self.dtype) / n
 
     def sample_all_arms(
         self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
@@ -151,7 +153,7 @@ class WD41(ip.Model):
         return phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
 
     def ztnbc(self, phattnbccontrol, phattnbctreat, n_per_arm):
-        tnbc_pooledaverage = (phattnbctreat + phattnbccontrol) * 0.5
+        tnbc_pooledaverage = (phattnbctreat + phattnbccontrol) * self.dtype(0.5)
         denominatortnbc = jnp.sqrt(
             tnbc_pooledaverage * (1 - tnbc_pooledaverage) * (2 / n_per_arm)
         )
@@ -221,7 +223,7 @@ class WD41(ip.Model):
         )
         return (
             self.ztnbc(phattnbccontrol, phattnbctreat, self.n_tnbc_only_second_stage),
-            -np.inf,
+            -self.dtype(jnp.inf),
         )
 
     def stage2_full(
@@ -260,7 +262,6 @@ class WD41(ip.Model):
     ):
         unifs_stage1 = unifs[: self.n_first_stage]
         unifs_stage2 = unifs[self.n_first_stage :]
-
         ztnbc_stage1, zfull_stage1, hypofull_live, hypotnbc_live = self.stage1(
             unifs_stage1, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
         )
@@ -288,6 +289,19 @@ class WD41(ip.Model):
         if self.ignore_intersection:
             tnbc_stat = jax.scipy.stats.norm.cdf(-hyptnbc_zstat)
             full_stat = jax.scipy.stats.norm.cdf(-hypfull_zstat)
+            if detailed:
+                return dict(
+                    hypotnbc_live=hypotnbc_live,
+                    hypofull_live=hypofull_live,
+                    hyptnbc_zstat=hyptnbc_zstat,
+                    hypfull_zstat=hypfull_zstat,
+                    tnbc_stat=tnbc_stat,
+                    full_stat=full_stat,
+                    ztnbc_stage1=ztnbc_stage1,
+                    ztnbc_stage2=ztnbc_stage2,
+                    zfull_stage1=zfull_stage1,
+                    zfull_stage2=zfull_stage2,
+                )
         else:
             # Now doing the combination rule for the intersection test
             # we multiply the p-value by two by analogy to bonferroni
@@ -318,6 +332,22 @@ class WD41(ip.Model):
             full_stat = jax.scipy.stats.norm.cdf(
                 -jnp.minimum(hypfull_zstat, HI_zcombined)
             )
+            if detailed:
+                return dict(
+                    hypotnbc_live=hypotnbc_live,
+                    hypofull_live=hypofull_live,
+                    hyptnbc_zstat=hyptnbc_zstat,
+                    hypfull_zstat=hypfull_zstat,
+                    HI_zcombined=HI_zcombined,
+                    tnbc_stat=tnbc_stat,
+                    full_stat=full_stat,
+                    ztnbc_stage1=ztnbc_stage1,
+                    ztnbc_stage2=ztnbc_stage2,
+                    zfull_stage1=zfull_stage1,
+                    zfull_stage2=zfull_stage2,
+                )
+
+        return tnbc_stat, full_stat
 
         # # Now we resolve which elementary statistics actually reject the null
         # hypothesis
@@ -331,26 +361,6 @@ class WD41(ip.Model):
         # rejectfull_final = (
         #     rejectfull_elementary & rejectintersection
         # )  # we use this for actual hypothesis rejections!
-
-        if detailed:
-            return dict(
-                hypotnbc_live=hypotnbc_live,
-                hypofull_live=hypofull_live,
-                hyptnbc_zstat=hyptnbc_zstat,
-                hypfull_zstat=hypfull_zstat,
-                HI_zcombined=HI_zcombined,
-                tnbc_stat=tnbc_stat,
-                full_stat=full_stat,
-                ztnbc_stage1=ztnbc_stage1,
-                ztnbc_stage2=ztnbc_stage2,
-                zfull_stage1=zfull_stage1,
-                zfull_stage2=zfull_stage2,
-                # HI_pfirst=HI_pfirst,
-                # HI_zfirst=HI_zfirst,
-                # HI_zsecond=HI_zsecond,
-            )
-        else:
-            return tnbc_stat, full_stat
 
     def sim_stat(self, unifs, theta, null_truth):
         p = jax.scipy.special.expit(theta)
@@ -371,8 +381,8 @@ class WD41(ip.Model):
     ):
         out = self.sim_stat_jit(
             self.unifs[begin_sim:end_sim],
-            theta.astype(jnp.float32),
-            null_truth.astype(jnp.float32),
+            theta.astype(self.dtype),
+            null_truth.astype(self.dtype),
         )
-        assert out.dtype == jnp.float32
+        assert out.dtype == self.dtype
         return out
