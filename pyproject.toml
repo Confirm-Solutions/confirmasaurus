@@ -64,8 +64,9 @@ tomli-w = "^1.0.0"
 optional = true
 
 [tool.poetry.group.cloud_dev.dependencies]
-aws-cdk-lib = "^2.66.1"
 modal-client = "^0.46.1403"
+coiled = "^0.5.2"
+dask = {extras = ["complete"], version = "^2023.3.0"}
 
 [tool.isort]
 profile = "black"
