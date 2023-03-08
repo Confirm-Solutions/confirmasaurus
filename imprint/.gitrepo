@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/Confirm-Solutions/imprint.git
 	branch = main
-	commit = 0bea0bb30ef1acbd3c953ef43aafc99ca43f9e9e
+	commit = 3d1276de7504cb42880d7491ecc389c3d18a244d
 	method = merge
 	cmdver = 0.4.5
-	parent = 03f4938e4f4544e71058b8ceb96a39fb7aa6ca75
+	parent = 7175beef2602c0028b0ea127a0b2b2185d31032c
