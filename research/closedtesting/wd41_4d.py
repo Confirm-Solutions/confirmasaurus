@@ -41,7 +41,7 @@ stub = modal.Stub("WD41")
 
 # running in detached mode:
 # modal run --detach research/closedtesting/wd41_4d.py::main
-@stub.function(**modal_util.get_defaults())
+@stub.function(**modal_util.get_defaults(), timeout=3600)
 def main():
     import imprint as ip
     import confirm.cloud.clickhouse as ch
@@ -68,15 +68,14 @@ def main():
         g=grid,
         db=db,
         alpha=0.025,
-        bias_target=0.005,
-        grid_target=0.005,
-        std_target=0.01,
+        bias_target=0.0025,
+        grid_target=0.0025,
+        std_target=0.005,
         n_K_double=6,
-        calibration_min_idx=80,
-        step_size=2**16,
-        packet_size=2**13,
+        calibration_min_idx=100,
+        step_size=2**18,
+        packet_size=2**15,
         model_kwargs={"ignore_intersection": True},
-        n_steps=3,
         backend=ModalBackend(n_zones=4, n_workers=10, coordinate_every=1, gpu="T4"),
     )
     print(db.job_id)

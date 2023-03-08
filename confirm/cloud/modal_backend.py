@@ -12,8 +12,10 @@ logger = logging.getLogger(__name__)
 name = "modal_adagrid"
 stub = modal.aio.AioStub(name)
 process_packet_config = modal_util.get_defaults()
+process_packet_config["timeout"] = 60 * 60 * 1
 del process_packet_config["retries"]
 run_zone_config = modal_util.get_defaults()
+run_zone_config["timeout"] = 60 * 60 * 2
 
 
 class ModalBackend(Backend):
