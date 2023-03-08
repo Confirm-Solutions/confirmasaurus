@@ -2,9 +2,12 @@ import asyncio
 import logging
 from contextlib import ExitStack
 
+import modal
+
 import imprint as ip
 from . import modal_util
-from .modal_backend import modal_config
+from .modal_backend import process_packet_config
+from .modal_backend import run_zone_config
 from .modal_backend import stub
 from confirm.adagrid.db import DatabaseLogging
 from confirm.adagrid.init import init
@@ -24,32 +27,34 @@ class ModalWorker:
     def __init__(self):
         self.initialized = False
 
+    def __enter__(self):
+        self.worker_id = modal.container_app.worker_id_queue.get(block=False)
+        if self.worker_id is None:
+            raise RuntimeError("No worker ID available")
+        ip.log.worker_id.set(self.worker_id)
+        modal_util.setup_env()
+
     def __exit__(self, *args):
         if hasattr(self, "_stack"):
             self._stack.__exit__(*args)
 
-    async def setup(self, *, algo_type, job_id, kwargs, worker_id_queue):
+    async def setup(self, *, algo_type, job_id, kwargs):
         if not self.initialized:
             from . import clickhouse as ch
 
-            modal_util.setup_env()
-            ip.configure_logging()
             db = ch.Clickhouse.connect(job_id, no_create=True)
             worker_kwargs = kwargs.copy()
             worker_kwargs["db"] = db
             self.db_logging = DatabaseLogging(db=db)
             with ExitStack() as stack:
                 stack.enter_context(self.db_logging)
-                worker_id = await worker_id_queue.get(block=False)
-                if worker_id is None:
-                    raise RuntimeError("No worker ID available")
                 self.algo, _, _ = await init(
-                    algo_type, False, worker_id, None, worker_kwargs
+                    algo_type, False, self.worker_id, None, worker_kwargs
                 )
                 self.initialized = True
                 self._stack = stack.pop_all()
 
-    @stub.function(**modal_config)
+    @stub.function(**process_packet_config)
     async def process_packet(self, worker_cfg, packet, packet_df):
         await self.setup(**worker_cfg)
         if packet is None:
@@ -65,7 +70,7 @@ class ModalWorker:
         # TODO: can we make this lazy
         await report_task
 
-    @stub.function(**modal_config)
+    @stub.function(**run_zone_config)
     async def run_zone(self, worker_cfg, zone_id, start_step, end_step):
         await self.setup(**worker_cfg)
         if start_step >= end_step:
@@ -82,6 +87,10 @@ class ModalWorker:
             if tiles_df is not None and tiles_df.shape[0] > 0:
                 coros = []
                 for _, packet_df in tiles_df.groupby("packet_id"):
+                    logger.debug(
+                        f"Zone {zone_id} launching the processing of packet "
+                        f"{packet_df.iloc[0]['packet_id']}."
+                    )
                     coros.append(self.process_packet.call(worker_cfg, None, packet_df))
                 await asyncio.gather(*coros)
             await asyncio.gather(*before_next_step_tasks)

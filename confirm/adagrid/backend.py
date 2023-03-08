@@ -1,93 +1,3 @@
-"""
-# Running non-adagrid jobs using the adagrid code.
-
-It is possible to run calibration or validation *without adagrid* using the
-interface provided by ada_validate and ada_calibrate! In order to do these,
-follow the examples given in test_calibration_nonadagrid_using_adagrid and
-test_validation_nonadagrid_using_adagrid. This is useful for several reasons:
-- we can use the database backend.
-- we can run distributed non-adagrid jobs. 
-  
-# Distributed adagrid and database backend
-
-## Design Principles and goals:
-- Simplicity.
-- Append-only and no updates to the extent possible. This makes the "story" of
-  an adagrid run very clear after the fact which is useful both for
-  replicability and debugging.
-- Results are written to DB ASAP. This avoids data loss.
-- Minimize communication overhead, maximize performance! Keep communication
-  isolated to the coordination stage.
-- Assume that the DB does not lose inserts
-- Good to separate computation from communications.
-- Idempotency is the most important property of each stage in the pipeline. -->
-  we should be able to kill any stage at any point and then re-run it and get
-  the same answer.
-- Define properties that the system should have at each stage and verify those
-  properties as much as possible.
-
-## Databases for Adagrid
-
-Adagrid depends heavily on a database backend.
-
-### Database tables
-- tiles: The tiles table contains all the tiles that have been created. These
-  tiles may not necessarily have been simulated yet.
-- results: Simulation results plus all columns from `tiles` are duplicated. For
-  example, in calibration, this will contain lambda* values for each tiles. We
-  duplicate columns in `tiles` so that after a run is complete, the `results`
-  table can be used as a single source of information about what happened in a
-  run.
-- done: After a tile has been refined or deepened, information about the event
-  is described in the `done` table. Presence in the `done` table indicates that
-  the tile is no longer active.
-- config: Columns for arguments to the `ada_validate` and `ada_calibrate`
-  functions plus other system configuration information.
-- the different database backends use other tables when needed. Planar null
-  hypotheses are stored in the database.
-
-### Worker ID
-
-Every worker that joins an adagrid job receives a sequential worker ID. 
-- worker_id=0 is reserved and should not be used
-- worker_id=1 is the default used for non-adagrid, non-distributed jobs
-  (e.g. ip.validate, ip.calibrate). It is also used for the initializing worker
-  in distributed adagrid jobs.
-- worker_id>=2 are workers that join the adagrid job.
-
-### DuckDB
-
-DuckDB is an embedded database used as the default single process backend for
-the adagrid code. It feels a lot like SQLite but is much faster for our use case.
-
-### Clickhouse
-
-Clickhouse is a distributed database that is used as the distributed backend. It's 
-a bit slower than DuckDB. We run a Clickhouse server on Clickhouse Cloud. 
-
-### Upstash Redis
-
-Clickhouse does not support locking or transactions. We use Upstash, a
-serverless Redis provider, for distributed locks that allow us to avoid data
-races and other parallelization problems.
-
-Medis and RedisInsight are Mac GUIs for Redis. Useful for debugging!
-
-## Adagrid algorithm high-level overview.
-
-The adagrid algorithm proceeds in a "steps" which each consist of:
-1. Convergence criterion. 
-2. Tile selection: which tiles will be used during this step.
-3. Tile creation: for each tile, will we refine or deepen? Then, create the new
-    tiles. When deepening a tile, we actually create a new tile and
-    deactivate the old tile.
-4. Simulation: for each tile, simulate the model and then 
-
-The first three of these steps must be done in serial to preserve replicability
-and correctness. We effectively put these steps inside a "critical" code region
-using a distributed lock. The simulation step is parallelized across all
-workers.
-"""
 import abc
 import asyncio
 import contextlib
@@ -145,20 +55,25 @@ async def async_entrypoint(backend, algo_type, kwargs):
         algo, incomplete_packets, zone_steps = await init(
             algo_type, True, 1, kwargs["n_zones"], kwargs
         )
+        logger.debug("init took %s", time.time() - start)
 
         incomplete_packets = np.array(incomplete_packets)
         min_step_completed = min(zone_steps.values())
         max_step_completed = max(zone_steps.values())
         every = algo.cfg["coordinate_every"]
-
-        def get_next_coord(step_id, every):
-            return step_id + every - (step_id % every)
-
-        next_coord = get_next_coord(min_step_completed, every)
-        assert next_coord == get_next_coord(max_step_completed, every)
-        start_step = min_step_completed + 1
+        initial_coordinations = []
         n_zones = algo.cfg["n_zones"]
-        logger.debug("init took %s", time.time() - start)
+
+        def get_next_coord(step_id):
+            next_every = step_id + every - (step_id % every)
+            if len(initial_coordinations) == 0:
+                return next_every
+            next_initial = min([i for i in initial_coordinations if i > step_id])
+            return min(next_initial, next_every)
+
+        next_coord = get_next_coord(min_step_completed)
+        assert next_coord == get_next_coord(max_step_completed)
+        start_step = min_step_completed + 1
 
         start = time.time()
         async with backend.setup(algo_type, algo, kwargs):
@@ -169,9 +84,29 @@ async def async_entrypoint(backend, algo_type, kwargs):
             logger.debug("process_initial_incompletes took %s", time.time() - start)
 
             while start_step < algo.cfg["n_steps"]:
+                if next_coord == start_step:
+                    if n_zones > 1:
+                        # If there's more than one zone, then we need to coordinate.
+                        # NOTE: coordinations happen *before* the same-named step.
+                        # e.g. a coordination at step 5 happens before new_step and
+                        # process_packets for 5.
+                        start = time.time()
+                        coord_status, lazy_tasks, zone_steps = await coordinate(
+                            algo, next_coord, n_zones
+                        )
+                        backend.lazy_tasks.extend(lazy_tasks)
+                        logger.debug("coordinate took %s", time.time() - start)
+                        if coord_status.done():
+                            break
+
+                    next_coord = get_next_coord(next_coord)
+                assert next_coord > start_step
+
                 start = time.time()
-                end_step = min(next_coord, algo.cfg["n_steps"]) + 1
+                end_step = min(next_coord, algo.cfg["n_steps"] + 1)
                 statuses = await backend.run_zones(zone_steps, start_step, end_step)
+                start_step = end_step
+                assert len(statuses) == len(zone_steps)
                 logger.debug("run_zones took %s", time.time() - start)
 
                 # If there's only one zone and that zone is done, then we're
@@ -179,23 +114,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 if len(statuses) == 1:
                     if statuses[0].done():
                         break
-
-                if n_zones > 1:
-                    # If there's more than one zone, then we need to coordinate.
-                    # NOTE: coordinations happen *before* the same-named step.
-                    # e.g. a coordination at step 5 happens before new_step and
-                    # process_packets for 5.
-                    start = time.time()
-                    coord_status, lazy_tasks, zone_steps = await coordinate(
-                        algo, end_step, n_zones
-                    )
-                    backend.lazy_tasks.extend(lazy_tasks)
-                    logger.debug("coordinate took %s", time.time() - start)
-                    if coord_status.done():
-                        break
-
-                start_step = end_step
-                next_coord += every
 
         start = time.time()
         # TODO: currently we only verify at the end, should we do it more often?

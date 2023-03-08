@@ -1,4 +1,5 @@
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -58,7 +59,10 @@ def get_defaults():
     return dict(
         image=get_image(dependency_groups=["test", "cloud"]),
         retries=0,
-        mounts=(modal.create_package_mounts(["confirm", "imprint"])),
+        mounts=[
+            *modal.create_package_mounts(["confirm", "imprint"]),
+            modal.Mount.from_local_dir("./", remote_path="/root", recursive=False),
+        ],
         secret=modal.Secret.from_name("kms-sops"),
     )
 
@@ -77,6 +81,9 @@ def modalize(stub, **kwargs):
 
 
 def run_on_modal(f, **kwargs):
+    if "MODAL_TOKEN_ID" not in os.environ:
+        decrypt_secrets()
+        dotenv.load_dotenv()
     stub = modal.Stub("arbitrary_runner")
     wrapper = modalize(stub, **kwargs)(f)
     with stub.run():
@@ -84,19 +91,24 @@ def run_on_modal(f, **kwargs):
 
 
 def setup_env(sops_binary="/go/bin/sops"):
-    p = subprocess.run(
-        [sops_binary, "-d", "--output", "/root/.env", "/root/test_secrets.enc.env"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=True,
-    )
-    logger.debug("Decrypting secrets. stdout from sops:\n %s", p.stdout.decode("utf-8"))
-    env_file = "/root/.env"
-    env = dotenv.dotenv_values(env_file)
-    logger.debug("Environment variables loaded from %s: %s", env_file, list(env.keys()))
-    dotenv.load_dotenv(env_file)
+    import imprint as ip
 
-    logger.debug("Enabling 64-bit floats in JAX.")
-    from jax.config import config
+    ip.package_settings()
 
-    config.update("jax_enable_x64", True)
+    decrypt_secrets(sops_binary=sops_binary)
+    env = dotenv.dotenv_values(None)
+    logger.debug("Environment variables loaded: %s", list(env.keys()))
+    dotenv.load_dotenv(None)
+
+
+def decrypt_secrets(sops_binary="/go/bin/sops"):
+    if not os.path.exists(".env"):
+        p = subprocess.run(
+            [sops_binary, "-d", "--output", "./.env", "./test_secrets.enc.env"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=True,
+        )
+        logger.debug(
+            "Decrypting secrets. stdout from sops:\n %s", p.stdout.decode("utf-8")
+        )

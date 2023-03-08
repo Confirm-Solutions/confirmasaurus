@@ -91,6 +91,7 @@ async def _process(algo, zone_id, step_id, packet_id, report, packet_df=None):
         return WorkerStatus.EMPTY_PACKET, asyncio.sleep(0)
 
     report["n_tiles"] = work.shape[0]
+    report["n_total_sims"] = work["K"].sum()
 
     start = time.time()
     logger.debug("Processing %d tiles.", work.shape[0])
