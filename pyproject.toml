@@ -44,11 +44,16 @@ cloudpickle = [
     { version = ">=2.2.0,<2.3.0", python = ">=3.11" },
 ]
 clickhouse-connect = "^0.5.13"
+coiled = "^0.5.2"
+dask = {extras = ["complete"], version = "^2023.3.0"}
+modal-client = "^0.46.1403"
+pynvml = "^11.5.0"
 
 [tool.poetry.group.dev]
 optional = true
 
 [tool.poetry.group.dev.dependencies]
+poetry = "1.4.0"
 black = {extras = ["jupyter"], version = "^23.1.0"}
 line-profiler = "^3.5.1"
 jupytext = "^1.14.5"
@@ -59,13 +64,6 @@ jupyter = "^1.0.0"
 rich = "^13.3.1"
 ipdb = "^0.13.11"
 tomli-w = "^1.0.0"
-
-[tool.poetry.group.cloud_dev]
-optional = true
-
-[tool.poetry.group.cloud_dev.dependencies]
-aws-cdk-lib = "^2.66.1"
-modal-client = "^0.46.1403"
 
 [tool.isort]
 profile = "black"
