@@ -27,24 +27,16 @@ def entrypoint(algo_type, kwargs):
         raise RuntimeError("An adagrid backend can only be used once.")
     backend.already_run = True
     kwargs.update(backend.input_cfg)
-    coro = async_entrypoint(backend, algo_type, kwargs)
 
-    # Check if an event loop is already running. If we're running through
-    # Jupyter, then an event loop will already be running and we're not allowed
-    # to start a new event loop inside of the existing one.
-    try:
-        loop = asyncio.get_running_loop()
-        existing_loop = True
-    except RuntimeError:
-        existing_loop = False
+    # If we're running through Jupyter, then an event loop will already be
+    # running and we're not allowed to start a new event loop inside of the
+    # existing one. So we need to run the async entrypoint in a separate
+    # thread. synchronicity is a library that makes this easy.
+    import synchronicity
 
-    # We run here instead of under the except statement so that any
-    # exceptions are not prefixed with "During handling of the above
-    # exception..." messages.
-    if existing_loop:
-        return asyncio.run_coroutine_threadsafe(coro, loop).result()
-    else:
-        return asyncio.run(coro)
+    synchronizer = synchronicity.Synchronizer()
+    sync_entry = synchronizer.create(async_entrypoint)[synchronicity.Interface.BLOCKING]
+    return sync_entry(backend, algo_type, kwargs)
 
 
 async def async_entrypoint(backend, algo_type, kwargs):
@@ -163,9 +155,7 @@ class LocalBackend(Backend):
 
     @contextlib.asynccontextmanager
     async def setup(self, algo_type, algo, kwargs):
-        self.algo_type = algo_type
         self.algo = algo
-        self.kwargs = kwargs
         yield
 
     async def process_initial_incompletes(self, incomplete_packets):

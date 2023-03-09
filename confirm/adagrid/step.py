@@ -95,7 +95,7 @@ async def _process(algo, zone_id, step_id, packet_id, report, packet_df=None):
 
     start = time.time()
     logger.debug("Processing %d tiles.", work.shape[0])
-    results_df = algo.process_tiles(tiles_df=work, report=report)
+    results_df = await algo.process_tiles(tiles_df=work)
     report["runtime_process_tiles"] = time.time() - start
 
     insert_results = await _launch_task(

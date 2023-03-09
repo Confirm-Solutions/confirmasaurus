@@ -131,7 +131,8 @@ def test_new_step(both_dbs):
 
     async def _test():
         algo, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
-        await process_packet_set(algo, [(0, 0, i) for i in range(3)])
+        for i in range(3):
+            await process_packet(algo, [(0, 0, i) for i in range(3)])
 
         status, tiles_df, before_tasks, report_task = await new_step(algo, 0, 1)
         await asyncio.gather(*before_tasks)

@@ -27,7 +27,7 @@ class AdaValidate:
     def get_orderer(self):
         return "total_cost_order, tie_bound_order"
 
-    def process_tiles(self, *, tiles_df, report):
+    async def process_tiles(self, *, tiles_df):
         # TODO: bring back transformations?? in a more general way?
         # if transformation is None:
         #     computational_df = g.df

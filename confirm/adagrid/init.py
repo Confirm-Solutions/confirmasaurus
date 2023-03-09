@@ -59,11 +59,11 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
             incomplete_packets = None
             zone_steps = None
 
-    model_kwargs = json.loads(cfg["model_kwargs_json"])
+    cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](
         seed=cfg["model_seed"],
         max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
-        **model_kwargs,
+        **cfg["model_kwargs"],
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
 

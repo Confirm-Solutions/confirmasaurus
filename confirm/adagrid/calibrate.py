@@ -81,7 +81,7 @@ class AdaCalibrate:
     def get_orderer(self):
         return "orderer"
 
-    def process_tiles(self, *, tiles_df, report):
+    async def process_tiles(self, *, tiles_df):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
