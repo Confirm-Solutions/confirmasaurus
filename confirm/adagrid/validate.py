@@ -164,7 +164,10 @@ def ada_validate(
     global_target=0.005,
     n_steps: int = 100,
     step_size=2**10,
+    timeout: int = 60 * 60 * 12,
     packet_size: int = None,
+    coordinate_every: int = 1,
+    n_zones: int = 1,
     prod: bool = True,
     overrides: dict = None,
     callback=print_report,
@@ -202,6 +205,7 @@ def ada_validate(
             Error surface throughout parameter space regardless of the value of the
             Type I Error. Defaults to 0.005.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
+        timeout: The maximum number of seconds to run for. Defaults to 12 hours.
         step_size: The number of tiles in an Adagrid step produced by a single
            Adagrid tile selection step. This is different from
            packet_size because we select tiles once and then run many
@@ -209,6 +213,10 @@ def ada_validate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        coordinate_every: The number of steps to run before re-dividing tiles
+            into zones. If n_zones==1, no coordination will be performed. Defaults
+            to 1.
+        n_zones: The number of zones to divide the tiles into. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. Defaults to True.

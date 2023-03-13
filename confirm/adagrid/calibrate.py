@@ -247,8 +247,11 @@ def ada_calibrate(
     std_target: float = 0.002,
     calibration_min_idx: int = 40,
     n_steps: int = 100,
+    timeout: int = 60 * 60 * 12,
     step_size: int = 2**10,
     packet_size: int = None,
+    coordinate_every: int = 1,
+    n_zones: int = 1,
     prod: bool = True,
     overrides: dict = None,
     callback=print_report,
@@ -285,6 +288,7 @@ def ada_calibrate(
             will require more computational effort because K and/or
             alpha0 will need to be larger. Defaults to 40.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
+        timeout: The maximum number of seconds to run for. Defaults to 12 hours.
         step_size: The number of tiles in an Adagrid step produced by a single
            Adagrid tile selection step. This is different from
            packet_size because we select tiles once and then run many
@@ -292,6 +296,10 @@ def ada_calibrate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        coordinate_every: The number of steps to run before re-dividing tiles
+            into zones. If n_zones==1, no coordination will be performed. Defaults
+            to 1.
+        n_zones: The number of zones to divide the tiles into. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. Defaults to True.

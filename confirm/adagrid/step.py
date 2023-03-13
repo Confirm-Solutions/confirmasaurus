@@ -12,20 +12,13 @@ from .init import _launch_task
 logger = logging.getLogger(__name__)
 
 
-async def process_packet_set(algo, packets):
+async def process_packet_set(backend, algo, packets):
     tasks = [
-        await process_packet(algo, zone_id, step_id, packet_id)
+        await process_packet(backend, algo, zone_id, step_id, packet_id)
         for zone_id, step_id, packet_id in packets
     ]
     if len(tasks) == 0:
         return []
-    # coros = [
-    #     process_packet(algo, zone_id, step_id, packet_id)
-    #     for zone_id, step_id, packet_id in packets
-    # ]
-    # if len(coros) == 0:
-    #     return []
-    # tasks = await asyncio.gather(*coros)
     insert_tasks, report_tasks = zip(*tasks)
     start = time.time()
     await asyncio.gather(*insert_tasks)
@@ -33,7 +26,7 @@ async def process_packet_set(algo, packets):
     return report_tasks
 
 
-async def process_packet_df(algo, tiles_df):
+async def process_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
         return []
     tasks = []
@@ -41,7 +34,9 @@ async def process_packet_df(algo, tiles_df):
         zone_id = packet_df.iloc[0]["zone_id"]
         step_id = packet_df.iloc[0]["zone_id"]
         tasks.append(
-            await process_packet(algo, zone_id, step_id, packet_id, packet_df=packet_df)
+            await process_packet(
+                backend, algo, zone_id, step_id, packet_id, packet_df=packet_df
+            )
         )
     insert_tasks, report_tasks = zip(*tasks)
     start = time.time()
@@ -50,11 +45,11 @@ async def process_packet_df(algo, tiles_df):
     return report_tasks
 
 
-async def process_packet(algo, zone_id, step_id, packet_id, packet_df=None):
+async def process_packet(backend, algo, zone_id, step_id, packet_id, packet_df=None):
     start = time.time()
     report = dict()
     status, insert_results = await _process(
-        algo, zone_id, step_id, packet_id, report, packet_df=packet_df
+        backend, algo, zone_id, step_id, packet_id, report, packet_df=packet_df
     )
     report["status"] = status.name
     report["runtime_total"] = time.time() - start
@@ -63,7 +58,7 @@ async def process_packet(algo, zone_id, step_id, packet_id, packet_df=None):
     return insert_results, insert_report
 
 
-async def _process(algo, zone_id, step_id, packet_id, report, packet_df=None):
+async def _process(backend, algo, zone_id, step_id, packet_id, report, packet_df=None):
     report["worker_id"] = algo.cfg["worker_id"]
     report["zone_id"] = zone_id
     report["step_id"] = step_id
@@ -95,7 +90,7 @@ async def _process(algo, zone_id, step_id, packet_id, report, packet_df=None):
 
     start = time.time()
     logger.debug("Processing %d tiles.", work.shape[0])
-    results_df = await algo.process_tiles(tiles_df=work)
+    results_df = await backend.process_tiles(work)
     report["runtime_process_tiles"] = time.time() - start
 
     insert_results = await _launch_task(
