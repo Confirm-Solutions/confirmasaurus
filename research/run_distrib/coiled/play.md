@@ -4,21 +4,6 @@ setup_nb()
 ```
 
 ```python
-
-import numpy as np
-import imprint as ip
-from imprint.models.ztest import ZTest1D
-import confirm.adagrid as ada
-d = 2
-g = ip.cartesian_grid(
-    theta_min=np.full(d, -1),
-    theta_max=np.full(d, 0),
-    null_hypos=[ip.hypo("theta0 > theta1")],
-)
-db = ada.ada_validate(ZTest1D, g=g, lam=-1.96, prod=False, tile_batch_size=1)
-```
-
-```python
 import os
 import coiled
 import imprint 
@@ -39,24 +24,6 @@ client = cluster.get_client()
 ```
 
 ```python
-import dask
-@dask.delayed
-def check_nvidia_jax():
-    import jax
-    import subprocess
-    result = subprocess.run(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    nvidia_smi = result.stdout.decode('ascii')
-    jax_platform = jax.lib.xla_bridge.get_backend().platform
-    key = jax.random.PRNGKey(0)
-    means = jax.random.uniform(key, (10000, 2)).mean(axis=0)
-    return nvidia_smi, jax_platform, means
-
-nvidia_smi, jax_platform, means = check_nvidia_jax().compute()
-print(nvidia_smi)
-jax_platform, means
-```
-
-```python
 def upload_pkg(client, module, restart=False):
     from pathlib import Path
 
@@ -72,44 +39,35 @@ upload_pkg(client, imprint, restart=True)
 ```
 
 ```python
+
 import dask
+@dask.delayed
+def check_nvidia_jax():
+    import jax
+    import subprocess
+    result = subprocess.run(['nvidia-smi'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    nvidia_smi = result.stdout.decode('ascii')
+    jax_platform = jax.lib.xla_bridge.get_backend().platform
+    key = jax.random.PRNGKey(0)
+    means = jax.random.uniform(key, (10000, 2)).mean(axis=0)
+    return nvidia_smi, jax_platform, means
+
+nvidia_smi, jax_platform, means = check_nvidia_jax().compute()
+print(nvidia_smi)
+print(jax_platform, means)
 
 @dask.delayed
-def run_ada():
-    import synchronicity
-    import numpy as np
-    import imprint as ip
-    from imprint.models.ztest import ZTest1D
-    import confirm.adagrid as ada
-    ip.package_settings()
-    d = 2
-    g = ip.cartesian_grid(
-        theta_min=np.full(d, -1),
-        theta_max=np.full(d, 0),
-        null_hypos=[ip.hypo("theta0 > theta1")],
-    )
-    db = ada.ada_validate(
-        ZTest1D,
-        g=g,
-        lam=-1.96,
-        prod=False
-    )
-    return ip.Grid(db.get_results(), 1).prune_inactive().n_tiles
-
-NN = run_ada().compute()
-NN
+def check_confirm_imprint():
+    import confirm
+    import imprint
+check_confirm_imprint().compute()
 ```
 
 ```python
-import time
-import jax
-import numpy as np
-import imprint as ip
-from confirm.adagrid.validate import AdaValidate
-from confirm.models.wd41 import WD41
-from distributed import get_worker
-    
-def setup_worker_algo(worker_args):
+def setup_worker(worker_args):
+    import imprint as ip
+    from distributed import get_worker
+    ip.package_settings()
     worker = get_worker()
     (model_type, model_args, model_kwargs, algo_type, cfg) = worker_args
     hash_args = hash((
@@ -135,42 +93,109 @@ def setup_worker_algo(worker_args):
 
 @dask.delayed
 def dask_process_packet(worker_args, packet_df):
-    process_tiles = setup_worker_algo(worker_args)
+    import jax
+    import time
+    start = time.time()
+    process_tiles = setup_worker(worker_args)
     jax_platform = jax.lib.xla_bridge.get_backend().platform
     assert jax_platform == 'gpu'
+    runtime_non_process = time.time() - start
+    start = time.time()
     out = process_tiles(packet_df)
-    return out
+    runtime = time.time() - start
+    return out, runtime, runtime_non_process
 
+import time
+import imprint as ip
+import dask
+import numpy as np
+from confirm.adagrid.calibrate import AdaCalibrate
+from confirm.models.wd41 import WD41
+from imprint.models.ztest import ZTest1D
+NN = 6
 g = ip.cartesian_grid(
     theta_min=np.full(4, -1),
     theta_max=np.full(4, 0),
-    n=[1, 10, 10, 10],
+    n=np.full(4, NN),
     null_hypos=[ip.hypo("theta0 > theta1")],
 )
-K = 2**13
-g.df['K'] = K
+init_K = 2**13
+K = init_K * 16
+g.df['K'] = init_K
 cfg = dict(
-    init_K = K,
-    n_K_double = 3,
+    init_K = 2**13,
+    n_K_double = 4,
     tile_batch_size = 64,
-    lam = -1.96, 
-    delta = 0.01,
-    global_target = 0.001,
-    max_target = 0.01,
+    # lam = -1.96, 
+    # delta = 0.01,
+    # global_target = 0.001,
+    # max_target = 0.01,
+    bootstrap_seed=0,
+    nB=50,
+    alpha=0.025,
+    calibration_min_idx=40
 )
-
-worker_args = (WD41, (0, K), dict(ignore_intersection=True), AdaValidate, cfg)
-worker_args_future = client.scatter(worker_args, broadcast=True)
-start = time.time()
-out = dask_process_packet(worker_args_future, g.df).compute()
-runtime1 = time.time() - start
-start = time.time()
-out = dask_process_packet(worker_args_future, g.df).compute()
-runtime2 = time.time() - start
-print(runtime1, runtime2)
 ```
 
 ```python
+# worker_args = (WD41, (0, K), dict(ignore_intersection=True), AdaCalibrate, cfg)
+worker_args = (ZTest1D, (0, K), dict(), AdaCalibrate, cfg)
+worker_args_future = client.scatter(worker_args, broadcast=True)
+start = time.time()
+out, inner_runtime, ir = dask_process_packet(worker_args_future, g.df).compute()
+runtime1 = time.time() - start
+start = time.time()
+out, inner_runtime2, ir2 = dask_process_packet(worker_args_future, g.df).compute()
+runtime2 = time.time() - start
+print(runtime1, inner_runtime, ir)
+print(runtime2, inner_runtime2, ir2)
+```
+
+```python
+12.3 / 200.
+```
+
+```python
+import asyncio
+def dpp():
+    out, inner_runtime2, ir2 = dask_process_packet(worker_args_future, g.df).compute()
+    return inner_runtime2
+
+async def lots_test():
+    ts = [
+        asyncio.create_task(asyncio.to_thread(dpp))
+        for i in range(1000)
+    ]
+    return await asyncio.gather(*ts)
+    
+start = time.time()
+await lots_test()
+print(time.time() - start)
+```
+
+```python
+dpp()
+```
+
+```python
+2.21 / (g.df.shape[0] * K) * 1e9
+```
+
+```python
+import cloudpickle
+```
+
+```python
+abcdef = cloudpickle.dumps(g.df)
+```
+
+```python
+g.df.memory_usage().sum() / 1e6, out.memory_usage().sum() / 1e6
+```
+
+```python
+import logging
+logger = logging.getLogger('confirm.cloud.coiled')
 class CoiledAlgo:
     def __init__(self, client, worker_args_future, wrapped):
         super().__init__()
@@ -190,7 +215,17 @@ class CoiledAlgo:
         return self.wrapped.get_orderer()
         
     async def process_tiles(self, *, tiles_df):
-        return dask_process_packet(self.worker_args_future, tiles_df).compute()
+        start = time.time()
+        relevant_cols = [
+            c for c in tiles_df.columns if c.startswith('theta') or c.startswith('K')
+        ]
+        out, compute_runtime = dask_process_packet(self.worker_args_future, tiles_df).compute()
+        total_runtime = time.time() - start
+        # logger.debug('Compute runtime: %s', compute_runtime)
+        # logger.debug('Total runtime: %s', total_runtime)
+        print('Compute runtime: %s', compute_runtime)
+        print('Total runtime: %s', total_runtime)
+        return out
         
     async def convergence_criterion(self, zone_id, report):
         return await self.wrapped.convergence_criterion(zone_id, report)
@@ -254,7 +289,7 @@ grid = ip.cartesian_grid(
     n=[10, 10, 10, 10],
     null_hypos=model.null_hypos,
 )
-db = ada.DuckDBTiles.connect('./wd41-3.db')
+db = ada.DuckDBTiles.connect('./wd41-4.db')
 ada.ada_calibrate(
     wd41.WD41,
     g=grid,
@@ -275,4 +310,32 @@ ada.ada_calibrate(
 ```python
 client.close()
 cluster.close()
+```
+
+```python
+import dask
+
+@dask.delayed
+def run_ada():
+    import numpy as np
+    import imprint as ip
+    from imprint.models.ztest import ZTest1D
+    import confirm.adagrid as ada
+    ip.package_settings()
+    d = 2
+    g = ip.cartesian_grid(
+        theta_min=np.full(d, -1),
+        theta_max=np.full(d, 0),
+        null_hypos=[ip.hypo("theta0 > theta1")],
+    )
+    db = ada.ada_validate(
+        ZTest1D,
+        g=g,
+        lam=-1.96,
+        prod=False
+    )
+    return ip.Grid(db.get_results(), 1).prune_inactive().n_tiles
+
+NN = run_ada().compute()
+NN
 ```
