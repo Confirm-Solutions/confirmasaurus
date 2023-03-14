@@ -87,19 +87,17 @@ class AdaCalibrate:
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.cfg["alpha"])
+        lams_df = self.driver.bootstrap_calibrate(
+            tiles_df,
+            self.cfg["alpha"],
+            calibration_min_idx=self.cfg["calibration_min_idx"],
+        )
         lams_df.insert(0, "processor_id", self.cfg["worker_id"])
         lams_df.insert(1, "processing_time", ip.timer.simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data
         lams_df.insert(3, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
-        lams_df.insert(
-            4,
-            "impossible",
-            lams_df["alpha0"]
-            < (self.cfg["calibration_min_idx"] + 1) / (tiles_df["K"] + 1),
-        )
 
         lams_df.insert(
             5,
@@ -112,7 +110,7 @@ class AdaCalibrate:
                 np.where(lams_df["impossible"], -np.inf, np.inf),
             ),
         )
-        return pd.concat((tiles_df.drop("K", axis=1), lams_df), axis=1)
+        return pd.concat((tiles_df, lams_df), axis=1)
 
     async def convergence_criterion(self, zone_id, report):
         ########################################
@@ -208,7 +206,10 @@ class AdaCalibrate:
                 twb_worst_tile[col] = 1e-6
         twb_worst_tile["K"] = self.max_K
         twb_worst_tile_lams = self.driver.bootstrap_calibrate(
-            twb_worst_tile, self.cfg["alpha"], tile_batch_size=1
+            twb_worst_tile,
+            self.cfg["alpha"],
+            calibration_min_idx=self.cfg["calibration_min_idx"],
+            tile_batch_size=1,
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams

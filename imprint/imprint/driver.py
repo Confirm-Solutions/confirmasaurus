@@ -47,12 +47,12 @@ def clopper_pearson(tie_sum, K, delta):
 
 
 def calc_calibration_threshold(sorted_stats, sorted_order, alpha):
-    idx = _calibration_index(sorted_stats.shape[0], alpha)
+    idx = calibration_index(sorted_stats.shape[0], alpha)
     # indexing a sorted array with sorted indices results in a sorted array!!
     return sorted_stats[sorted_order[idx]]
 
 
-def _calibration_index(K, alpha):
+def calibration_index(K, alpha):
     return jnp.maximum(jnp.floor((K + 1) * jnp.maximum(alpha, 0)).astype(int) - 1, 0)
 
 
@@ -172,7 +172,7 @@ class Driver:
             return out
 
         out = _groupby_apply_K(df, f)
-        out["idx"] = _calibration_index(df["K"].to_numpy(), out["alpha0"].to_numpy())
+        out["idx"] = calibration_index(df["K"].to_numpy(), out["alpha0"].to_numpy())
         out["K"] = df["K"]
         return out
 

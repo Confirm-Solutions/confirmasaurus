@@ -60,6 +60,7 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
             zone_steps = None
 
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
+
     model = kwargs["model_type"](
         seed=cfg["model_seed"],
         max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
