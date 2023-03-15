@@ -160,7 +160,7 @@ async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10
             return
         import confirm.cloud.clickhouse as ch
 
-        ch_db = ch.Clickhouse.connect(job_name)
+        ch_db = ch.connect(job_name)
         ch.backup(db, ch_db)
         logger.info("Backup complete")
 
@@ -198,13 +198,28 @@ async def lazy_handler():
 
 
 class Backend(abc.ABC):
-    @abc.abstractmethod
-    @contextlib.asynccontextmanager
-    async def setup(self, algo_type, algo, kwargs):
-        pass
+    algo_cfg_entries = [
+        "init_K",
+        "n_K_double",
+        "tile_batch_size",
+        "lam",
+        "delta",
+        "worker_id",
+        "global_target",
+        "max_target",
+        "bootstrap_seed",
+        "nB",
+        "alpha",
+        "calibration_min_idx",
+    ]
 
     @abc.abstractmethod
     def get_cfg(self):
+        pass
+
+    @abc.abstractmethod
+    @contextlib.asynccontextmanager
+    async def setup(self, algo_type, algo, kwargs):
         pass
 
     @abc.abstractmethod
@@ -213,13 +228,13 @@ class Backend(abc.ABC):
 
 
 class LocalBackend(Backend):
+    def get_cfg(self):
+        return {}
+
     @contextlib.asynccontextmanager
     async def setup(self, algo_type, algo, kwargs):
         self.algo = algo
         yield
-
-    def get_cfg(self):
-        return {}
 
     async def process_tiles(self, tiles_df):
         tbs = self.algo.cfg["tile_batch_size"]

@@ -219,7 +219,7 @@ def bootstrap_calibrate(
     """
     model, g = driver._setup(model_type, g, model_seed, K, model_kwargs)
     Ks = np.sort(g.df["K"].unique())
-    cal_df = BootstrapCalibrate(
-        model, bootstrap_seed, nB, Ks, tile_batch_size
-    ).bootstrap_calibrate(g.df, alpha)
+    cal_df = BootstrapCalibrate(model, bootstrap_seed, nB, Ks).bootstrap_calibrate(
+        g.df, alpha, np.inf, tile_batch_size
+    )
     return cal_df

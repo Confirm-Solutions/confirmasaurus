@@ -34,6 +34,7 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
         cfg, null_hypos = await join(db, kwargs)
 
     cfg["worker_id"] = worker_id
+    logger.info("Config (minus system info): \n%s", cfg)
 
     add_system_cfg(cfg)
 
@@ -60,10 +61,6 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
             zone_steps = None
 
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
-    cfg_minus_diff = cfg.copy()
-    del cfg_minus_diff["git_diff"]
-    logger.info("Config (except `git_diff`): \n%s", cfg_minus_diff)
-
     model = kwargs["model_type"](
         seed=cfg["model_seed"],
         max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
@@ -122,6 +119,8 @@ async def join(db, kwargs):
     # If we are resuming a job, we need to load the config from the database.
     load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
+    if np.isnan(cfg["tile_batch_size"]):
+        cfg["tile_batch_size"] = None
 
     # IMPORTANT: Except for overrides, entries in kwargs will be ignored!
     overrides = kwargs["overrides"]

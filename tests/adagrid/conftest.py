@@ -28,8 +28,9 @@ def ch_db(request):
 
     import confirm.cloud.clickhouse as ch
 
-    db = ch.Clickhouse.connect()
+    db = ch.connect()
     yield db
+    job_id = db.database
 
     if not hasattr(request.node, "rep_call"):
         should_cleanup = True
@@ -39,14 +40,14 @@ def ch_db(request):
     if should_cleanup:
         db.close()
         if not request.config.option.keep_clickhouse:
-            ch.clear_dbs(ch.get_ch_client(), names=[db.job_id], yes=True)
+            ch.clear_dbs(ch.get_ch_client(), names=[job_id], yes=True)
         else:
             print(
-                f"Keeping Clickhouse database {db.job_id}"
+                f"Keeping Clickhouse database {job_id}"
                 " because --keep-clickhouse was specified."
             )
     else:
-        print(f"Keeping Clickhouse database {db.job_id} because test failed")
+        print(f"Keeping Clickhouse database {job_id} because test failed")
 
 
 @pytest.fixture

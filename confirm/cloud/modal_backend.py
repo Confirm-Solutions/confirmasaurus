@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import logging
 import sys
@@ -11,25 +10,20 @@ from confirm.adagrid.backend import Backend
 logger = logging.getLogger(__name__)
 name = "modal_adagrid"
 stub = modal.aio.AioStub(name)
-process_packet_config = modal_util.get_defaults()
-process_packet_config["timeout"] = 60 * 60 * 1
-del process_packet_config["retries"]
-run_zone_config = modal_util.get_defaults()
-run_zone_config["timeout"] = 60 * 60 * 2
+process_tiles_config = modal_util.get_defaults()
+process_tiles_config["timeout"] = 60 * 60 * 1
+del process_tiles_config["retries"]
 
 
 class ModalBackend(Backend):
-    def __init__(self, n_zones=1, n_workers=None, coordinate_every=5, gpu="any"):
-        if n_workers is None:
-            n_workers = n_zones
+    def __init__(self, n_workers=1, gpu="any"):
         super().__init__()
         self.lazy_tasks = []
-        self.input_cfg = {
-            "coordinate_every": coordinate_every,
-            "n_zones": n_zones,
-            "n_workers": n_workers,
-            "gpu": gpu,
-        }
+        self.n_workers = n_workers
+        self.gpu = gpu
+
+    def get_cfg(self):
+        return {"n_workers": self.n_workers, "gpu": self.gpu}
 
     @contextlib.asynccontextmanager
     async def setup(self, algo_type, algo, kwargs):
@@ -48,39 +42,25 @@ class ModalBackend(Backend):
         global stub
         global modal_config
         stub = modal.aio.AioStub(name)
-        stub.worker_id_queue = modal.aio.AioQueue()
-        process_packet_config["gpu"] = self.input_cfg["gpu"]
-        process_packet_config["keep_warm"] = self.input_cfg["n_workers"]
-        process_packet_config["concurrency_limit"] = self.input_cfg["n_workers"]
+        process_tiles_config["gpu"] = self.gpu
+        process_tiles_config["keep_warm"] = self.n_workers
+        process_tiles_config["concurrency_limit"] = self.n_workers
         from .modal_worker import ModalWorker
 
         self.w = ModalWorker()
-        async with stub.run() as app:
-            await app.worker_id_queue.put_many(list(range(2, 1000)))
-
-            worker_kwargs = kwargs.copy()
-            for k in ["db", "g", "backend"]:
-                del worker_kwargs[k]
-            self.worker_data = {
-                "algo_type": algo_type,
-                "job_id": algo.db.job_id,
-                "kwargs": worker_kwargs,
+        async with stub.run():
+            filtered_cfg = {
+                k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
             }
+            self.worker_args = (
+                type(algo.driver.model),
+                (algo.cfg["model_seed"], algo.max_K),
+                algo.cfg["model_kwargs"],
+                algo_type,
+                filtered_cfg,
+            )
             yield
         del sys.modules["confirm.cloud.modal_worker"]
 
-    async def process_initial_incompletes(self, incomplete_packets):
-        coros = []
-        for i in range(incomplete_packets.shape[0]):
-            packet = incomplete_packets[i]
-            print("launching", i, packet)
-            coros.append(self.w.process_packet.call(self.worker_data, packet, None))
-        await asyncio.gather(*coros)
-
-    async def run_zones(self, zone_steps, start_step, end_step):
-        return await asyncio.gather(
-            *[
-                self.w.run_zone.call(self.worker_data, zone_id, start_step, end_step)
-                for _, zone_id in enumerate(zone_steps)
-            ]
-        )
+    async def process_tiles(self, tiles_df):
+        return await self.w.process_tiles.call(self.worker_args, tiles_df)

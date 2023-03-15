@@ -247,8 +247,8 @@ def validate(
         - tie_bound: The bound on the Type I error over the whole tile.
     """
     model, g = _setup(model_type, g, model_seed, K, model_kwargs)
-    driver = Driver(model, tile_batch_size=tile_batch_size)
-    rej_df = driver.validate(g.df, lam, delta=delta)
+    driver = Driver(model)
+    rej_df = driver.validate(g.df, lam, delta=delta, tile_batch_size=tile_batch_size)
     return rej_df
 
 
@@ -282,6 +282,6 @@ def calibrate(
         column, which contains lambda* for each tile.
     """
     model, g = _setup(model_type, g, model_seed, K, model_kwargs)
-    driver = Driver(model, tile_batch_size=tile_batch_size)
-    calibrate_df = driver.calibrate(g.df, alpha)
+    driver = Driver(model)
+    calibrate_df = driver.calibrate(g.df, alpha, tile_batch_size=tile_batch_size)
     return calibrate_df
