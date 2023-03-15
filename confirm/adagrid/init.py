@@ -60,6 +60,9 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
             zone_steps = None
 
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
+    cfg_minus_diff = cfg.copy()
+    del cfg_minus_diff["git_diff"]
+    logger.info("Config (except `git_diff`): \n%s", cfg_minus_diff)
 
     model = kwargs["model_type"](
         seed=cfg["model_seed"],
@@ -145,11 +148,6 @@ async def join(db, kwargs):
 
 def add_system_cfg(cfg):
     cfg["jax_platform"] = jax.lib.xla_bridge.get_backend().platform
-    default_tile_batch_size = dict(gpu=64, cpu=4)
-    cfg["tile_batch_size"] = cfg["tile_batch_size"] or (
-        default_tile_batch_size[cfg["jax_platform"]]
-    )
-
     if cfg["packet_size"] is None:
         cfg["packet_size"] = cfg["step_size"]
 

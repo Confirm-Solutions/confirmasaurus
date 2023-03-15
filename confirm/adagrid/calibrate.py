@@ -74,14 +74,13 @@ class AdaCalibrate:
             self.cfg["bootstrap_seed"],
             self.cfg["nB"],
             self.Ks,
-            tile_batch_size=self.cfg["tile_batch_size"],
             worker_id=self.cfg["worker_id"],
         )
 
     def get_orderer(self):
         return "orderer"
 
-    async def process_tiles(self, *, tiles_df):
+    async def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
@@ -91,6 +90,7 @@ class AdaCalibrate:
             tiles_df,
             self.cfg["alpha"],
             calibration_min_idx=self.cfg["calibration_min_idx"],
+            tile_batch_size=tile_batch_size,
         )
         lams_df.insert(0, "processor_id", self.cfg["worker_id"])
         lams_df.insert(1, "processing_time", ip.timer.simple_timer())

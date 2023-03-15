@@ -222,7 +222,10 @@ class LocalBackend(Backend):
         return {}
 
     async def process_tiles(self, tiles_df):
-        return await self.algo.process_tiles(tiles_df=tiles_df)
+        tbs = self.algo.cfg["tile_batch_size"]
+        if tbs is None:
+            tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
+        return await self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
 
 
 def print_report(report, _db):

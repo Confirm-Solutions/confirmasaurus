@@ -87,9 +87,8 @@ def _check_stats(stats, K, theta):
 
 
 class Driver:
-    def __init__(self, model, *, tile_batch_size):
+    def __init__(self, model):
         self.model = model
-        self.tile_batch_size = tile_batch_size
         self.forward_boundv, self.backward_boundv = get_bound(
             model.family, model.family_params if hasattr(model, "family_params") else {}
         )
@@ -113,7 +112,7 @@ class Driver:
 
         return _groupby_apply_K(df, f)
 
-    def validate(self, df, lam, *, delta=0.01):
+    def validate(self, df, lam, delta, tile_batch_size):
         def _batched(K, theta, vertices, null_truth):
             stats = self.model.sim_batch(0, K, theta.copy(), null_truth.copy())
             _check_stats(stats, K, theta)
@@ -129,7 +128,7 @@ class Driver:
 
             tie_sum, tie_est, tie_cp_bound, tie_bound = batching.batch(
                 _batched,
-                self.tile_batch_size,
+                tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
 
@@ -147,7 +146,7 @@ class Driver:
         out["K"] = df["K"]
         return out
 
-    def calibrate(self, df, alpha):
+    def calibrate(self, df, alpha, tile_batch_size):
         def _batched(K, theta, vertices, null_truth):
             stats = self.model.sim_batch(0, K, theta, null_truth)
             _check_stats(stats, K, theta)
@@ -163,7 +162,7 @@ class Driver:
             theta, vertices = K_g.get_theta_and_vertices()
             lams, alpha0 = batching.batch(
                 _batched,
-                self.tile_batch_size,
+                tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
             out = pd.DataFrame(index=K_df.index)

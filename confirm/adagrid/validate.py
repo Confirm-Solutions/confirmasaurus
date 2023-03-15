@@ -20,14 +20,12 @@ class AdaValidate:
 
         self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
-        self.driver = ip.driver.Driver(
-            model, tile_batch_size=self.cfg["tile_batch_size"]
-        )
+        self.driver = ip.driver.Driver(model)
 
     def get_orderer(self):
         return "total_cost_order, tie_bound_order"
 
-    async def process_tiles(self, *, tiles_df):
+    async def process_tiles(self, *, tiles_df, tile_batch_size):
         # TODO: bring back transformations?? in a more general way?
         # if transformation is None:
         #     computational_df = g.df
@@ -47,7 +45,10 @@ class AdaValidate:
         #     computational_df = pd.DataFrame(indict)
 
         rej_df = self.driver.validate(
-            tiles_df, self.cfg["lam"], delta=self.cfg["delta"]
+            tiles_df,
+            self.cfg["lam"],
+            delta=self.cfg["delta"],
+            tile_batch_size=tile_batch_size,
         )
         rej_df.insert(0, "processor_id", self.cfg["worker_id"])
         rej_df.insert(1, "processing_time", ip.timer.simple_timer())

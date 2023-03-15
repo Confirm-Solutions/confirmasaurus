@@ -24,9 +24,7 @@ class BootstrapCalibrate:
     For the basic `validate` and `calibrate` drivers, see `imprint.driver`.
     """
 
-    def __init__(
-        self, model, bootstrap_seed, nB, Ks, tile_batch_size=64, worker_id=None
-    ):
+    def __init__(self, model, bootstrap_seed, nB, Ks, worker_id=None):
         self.model = model
         self.worker_id = worker_id
         self.forward_boundv, self.backward_boundv = driver.get_bound(
@@ -38,8 +36,6 @@ class BootstrapCalibrate:
                 in_axes=(0, None, 0),
             )
         )
-
-        self.tile_batch_size = tile_batch_size
 
         self.Ks = Ks
         self.nB = nB
@@ -82,9 +78,7 @@ class BootstrapCalibrate:
         #     for K in Ks
         # }
 
-    def bootstrap_calibrate(self, df, alpha, calibration_min_idx, tile_batch_size=None):
-        tile_batch_size = tile_batch_size or self.tile_batch_size
-
+    def bootstrap_calibrate(self, df, alpha, calibration_min_idx, tile_batch_size):
         def _cal(K, theta, null_truth, alpha0):
             stats = self.model.sim_batch(0, K, theta, null_truth)
             driver._check_stats(stats, K, theta)
@@ -119,7 +113,7 @@ class BootstrapCalibrate:
             theta, vertices = K_g.get_theta_and_vertices()
             bootstrap_lams, impossible, alpha0 = batching.batch(
                 _batched,
-                self.tile_batch_size,
+                tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
 
