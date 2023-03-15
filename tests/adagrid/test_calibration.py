@@ -46,7 +46,9 @@ def cal_tester(db, snapshot, ignore_story=True, **kwargs):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db = ada.ada_calibrate(ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, **kwargs)
+        db = ada.ada_calibrate(
+            ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, prod=False, **kwargs
+        )
 
     ip.testing.check_imprint_results(
         ip.Grid(db.get_results(), None).prune_inactive(),

@@ -47,7 +47,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
     async with AsyncExitStack() as stack:
         all_lazy_tasks = await stack.enter_async_context(lazy_handler())
         stack.enter_context(DatabaseLogging(db))
-        await stack.enter_async_context(backup_daemon(db))
 
         with timer("init"):
             algo, incomplete_packets, zone_steps = await init(
@@ -55,6 +54,10 @@ async def async_entrypoint(backend, algo_type, kwargs):
             )
             every = algo.cfg["coordinate_every"]
             n_zones = algo.cfg["n_zones"]
+
+        await stack.enter_async_context(
+            backup_daemon(db, algo.cfg["prod"], algo.cfg["job_name"])
+        )
 
         with timer("setup"):
             await stack.enter_async_context(backend.setup(algo_type, algo, kwargs))
@@ -148,10 +151,17 @@ async def run_zone(backend, algo, zone_id, start_step, end_step):
 
 
 @contextlib.asynccontextmanager
-async def backup_daemon(db, backup_interval=10 * 60):
+async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10 * 60):
     def backup():
         logger.info("Backing up database")
-        # db.backup()
+        if job_name is False:
+            return
+        if job_name is None and not prod:
+            return
+        import confirm.cloud.clickhouse as ch
+
+        ch_db = ch.Clickhouse.connect(job_name)
+        ch.backup(db, ch_db)
         logger.info("Backup complete")
 
     async def backup_repeater():

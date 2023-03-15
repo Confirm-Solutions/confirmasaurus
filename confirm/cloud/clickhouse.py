@@ -20,6 +20,65 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+all_tables = [
+    "results",
+    "tiles",
+    "done",
+    "config",
+    "logs",
+    "reports",
+    "null_hypos",
+    "zone_mapping",
+]
+
+
+def backup(duck, ch_db):
+    for name in all_tables:
+        backup_table(duck, ch_db, name)
+
+
+def restore(duck, ch_db):
+    for name in all_tables:
+        restore_table(duck, ch_db, name)
+
+
+def backup_table(duck, ch_db, name):
+    if not duck.does_table_exist(name):
+        logger.info(
+            f"Backup skipping table {name} because it"
+            " doesn't exist in the source db."
+        )
+        return
+    df = duck.con.query(f"select * from {name}").df()
+    cols = get_create_table_cols(df)
+    if ch_db.does_table_exist(name):
+        _command(ch_db.client, f"DROP TABLE {name}")
+    _command(
+        ch_db.client,
+        f"""
+        CREATE TABLE {name} ({",".join(cols)})
+        ENGINE = MergeTree()
+        ORDER BY ()
+        """,
+    )
+    _insert_df(ch_db.client, name, df)
+
+
+def restore_table(duck, ch_db, name):
+    if not ch_db.does_table_exist(name):
+        logger.info(
+            f"Restore skipping table {name} because it"
+            " doesn't exist in the source db."
+        )
+        return
+    df = _query_df(ch_db.client, f"select * from {name}")
+    if name == "logs":
+        df["t"] = df["t"].dt.tz_localize(None)
+    if duck.does_table_exist(name):
+        duck.con.execute(f"drop table {name}")
+    duck.con.execute(f"create table {name} as select * from df")
+
+
 type_map = {
     "uint8": "UInt8",
     "uint32": "UInt32",
@@ -31,6 +90,7 @@ type_map = {
     "bool": "Boolean",
     "string": "String",
     "object": "String",
+    "datetime64[ns]": "DateTime64(9)",
 }
 
 
@@ -44,7 +104,9 @@ def get_create_table_cols(df):
     Returns:
         A list of strings of the form "column_name type"
     """
-    return [f"{c} {type_map[dt.name]}" for c, dt in zip(df.columns, df.dtypes)]
+    return [
+        f"{c} Nullable({type_map[dt.name]})" for c, dt in zip(df.columns, df.dtypes)
+    ]
 
 
 def retry_ch_action(method, *args, retries=2, is_retry=False, **kwargs):
@@ -867,7 +929,7 @@ class Clickhouse:
                 raise RuntimeError(
                     "To run a production job, please choose an explicit unique job_id."
                 )
-            job_id = uuid.uuid4().hex
+            job_id = "unnamed_" + uuid.uuid4().hex
 
         client = get_ch_client(connection_details=connection_details)
         if not no_create:

@@ -169,6 +169,7 @@ def ada_validate(
     coordinate_every: int = 1,
     n_zones: int = 1,
     prod: bool = True,
+    job_name: str = None,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -220,6 +221,8 @@ def ada_validate(
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. Defaults to True.
+        job_name: The job name is used for storing long-term backups in
+            Clickhouse. By default (None) a random UUID is chosen.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

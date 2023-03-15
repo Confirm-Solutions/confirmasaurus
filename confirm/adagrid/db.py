@@ -505,7 +505,6 @@ class DuckDBTiles:
         ).df()
 
     def delete_previous_coordination(self, old_coordination_id):
-        # TODO: ...
         self.con.execute(
             f"""
             DELETE FROM results 

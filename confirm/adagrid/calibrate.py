@@ -254,6 +254,7 @@ def ada_calibrate(
     coordinate_every: int = 1,
     n_zones: int = 1,
     prod: bool = True,
+    job_name: str = None,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -304,6 +305,10 @@ def ada_calibrate(
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. Defaults to True.
+        job_name: The job name is used for storing long-term backups in
+            Clickhouse. If job_name is None and prod is True, a random name is
+            chosen. If job_name is None and prod is False, no backups are
+            stored. If job_name is False, no backups are stored.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.
