@@ -171,7 +171,7 @@ class AdaCalibrate:
         )
         return report["converged"], None
 
-    async def select_tiles(self, zone_id, new_step_id, report, convergence_task):
+    async def select_tiles(self, zone_id, new_step_id, report, _):
         tiles_df = self.db.next(zone_id, new_step_id, self.cfg["step_size"], "orderer")
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:

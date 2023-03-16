@@ -1,5 +1,4 @@
 import logging.handlers
-import queue
 import time
 from dataclasses import dataclass
 from dataclasses import field
@@ -11,7 +10,6 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-import imprint.log
 
 
 if TYPE_CHECKING:
@@ -20,25 +18,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DBQueueListener(logging.handlers.QueueListener):
-    def __init__(self, db, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.db = db
-        self.worker_id = imprint.log.worker_id.get()
-
-    def _monitor(self):
-        self.db.create_logs_table()
-        imprint.log.worker_id.set(self.worker_id)
-        super()._monitor()
-
-
 class DatabaseLogging(logging.handlers.BufferingHandler):
     """
     A logging handler context manager that buffers log record writes to a
     database.
-    - a queue handler is added to the root logger when entering the context.
-    - the queue handler is removed from the root logger when exiting the context.
-    - a queue listener in a separate thread is started when entering the context.
     - whenever `capacity` log records are buffered, they flushed to the database.
     - whenever a log is `flushLevel` or higher, all buffered log records are flushed.
     - whenever more than `interval` seconds have elapsed since the last flush,
@@ -57,27 +40,15 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
         self.flushLevel = flushLevel
         self.interval = interval
         self.lastFlush = time.time()
-        self.queue = queue.Queue(-1)
-        self.queue_handler = logging.handlers.QueueHandler(self.queue)
-        self.listener = DBQueueListener(db, self.queue, self)
         super().__init__(self.capacity)
 
     def __enter__(self):
         self.lastFlush = time.time()
-        if self.db.supports_threads:
-            logging.getLogger().addHandler(self.queue_handler)
-            self.listener.start()
-        else:
-            logging.getLogger().addHandler(self)
+        logging.getLogger().addHandler(self)
 
     def __exit__(self, *_):
-        if self.db.supports_threads:
-            self.listener.stop()
-            self.close()
-            logging.getLogger().removeHandler(self.queue_handler)
-        else:
-            self.close()
-            logging.getLogger().removeHandler(self)
+        self.close()
+        logging.getLogger().removeHandler(self)
 
     def shouldFlush(self, record):
         """
@@ -117,9 +88,6 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
                     for record in self.buffer
                 ]
             )
-            # TODO: make this run lazily!
-            # slightly tricky because this isn't an async function and we don't
-            # have access to backend.lazy_tasks
             self.db.insert_logs(df)
             self.buffer = []
         finally:
@@ -142,8 +110,6 @@ class PandasTiles:
     done: pd.DataFrame = None
     reports: List[Dict] = field(default_factory=list)
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
-    is_distributed: bool = False
-    supports_threads: bool = False
 
     def dimension(self) -> int:
         return (
@@ -282,8 +248,6 @@ class DuckDBTiles:
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
     _d: int = None
-    is_distributed: bool = False
-    supports_threads: bool = False
 
     def __post_init__(self):
         self.con.execute(

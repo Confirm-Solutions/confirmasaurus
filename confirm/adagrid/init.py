@@ -1,4 +1,3 @@
-import asyncio
 import codecs
 import copy
 import json
@@ -37,24 +36,18 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
 
     add_system_cfg(cfg)
 
-    wait_for = []
-    db_load_incompletes = False
     if g is not None and not tiles_exists and is_leader:
-        wait_for_grid, incomplete_packets, zone_steps = await init_grid(
-            g, db, cfg, n_zones
-        )
-        wait_for.extend(wait_for_grid)
+        incomplete_packets, zone_steps = await init_grid(g, db, cfg, n_zones)
     else:
-        wait_for.append(_launch_task(db, db.insert_config, pd.DataFrame([cfg])))
+        db.insert_config(pd.DataFrame([cfg]))
         if is_leader:
             if g is not None:
                 logger.warning(
                     "Ignoring grid because tiles already exist "
                     "in the provided database."
                 )
-            incomplete_packets_task = await _launch_task(db, db.get_incomplete_packets)
-            zone_steps_task = await _launch_task(db, db.get_zone_steps)
-            db_load_incompletes = True
+            incomplete_packets = db.get_incomplete_packets()
+            zone_steps = db.get_zone_steps()
         else:
             incomplete_packets = None
             zone_steps = None
@@ -73,15 +66,6 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
         **cfg["model_kwargs"],
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
-
-    # wait for DB calls down here so that the Model can initialize random
-    # variates and bootstrap samples and such while the DB calls are running
-    if db_load_incompletes:
-        incomplete_packets, zone_steps = await asyncio.gather(
-            incomplete_packets_task, zone_steps_task
-        )
-
-    await asyncio.gather(*wait_for)
 
     return algo, incomplete_packets, zone_steps
 
@@ -121,7 +105,6 @@ def first(kwargs):
 
 
 async def join(db, kwargs):
-    get_null_hypos_task = await _launch_task(db, db.get_null_hypos)
     # If we are resuming a job, we need to load the config from the database.
     load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
@@ -150,7 +133,8 @@ async def join(db, kwargs):
         ]:
             raise ValueError(f"Parameter {k} cannot be overridden.")
         cfg[k] = overrides[k]
-    return cfg, _deserialize_null_hypos(await get_null_hypos_task)
+    null_hypos = _deserialize_null_hypos(db.get_null_hypos())
+    return cfg, null_hypos
 
 
 def add_system_cfg(cfg):
@@ -193,11 +177,8 @@ async def init_grid(g, db, cfg, n_zones):
     df["creation_time"] = ip.timer.simple_timer()
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
-    wait_for = [
-        await _launch_task(
-            db, db.init_grid, df, null_hypos_df, pd.DataFrame([cfg]), in_thread=False
-        ),
-    ]
+
+    await db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
 
     logger.debug(
         "Initialized database with %d tiles and %d null hypos."
@@ -214,7 +195,7 @@ async def init_grid(g, db, cfg, n_zones):
             [(zone_id, 0, p) for p in range(zone["packet_id"].max() + 1)]
         )
     zone_steps = {zone_id: 0 for zone_id, zone in df.groupby("zone_id")}
-    return wait_for, incomplete_packets, zone_steps
+    return incomplete_packets, zone_steps
 
 
 def assign_tiles(n_tiles, n_zones):
@@ -265,21 +246,3 @@ def _run(cmd):
         )
     except subprocess.CalledProcessError as exc:
         return f"ERROR: {exc.returncode} {exc.output}"
-
-
-async def _launch_task(db, f, *args, in_thread=True, **kwargs):
-    if in_thread and db.supports_threads:
-        coro = asyncio.to_thread(f, *args, **kwargs)
-    elif in_thread and not db.supports_threads:
-        out = f(*args, **kwargs)
-
-        async def _coro():
-            return out
-
-        coro = _coro()
-    else:
-        coro = f(*args, **kwargs)
-    task = asyncio.create_task(coro)
-    # Sleep immediately to allow the task to start.
-    await asyncio.sleep(0)
-    return task

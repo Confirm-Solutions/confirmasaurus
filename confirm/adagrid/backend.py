@@ -86,10 +86,9 @@ async def async_entrypoint(backend, algo_type, kwargs):
                     # e.g. a coordination at step 5 happens before new_step and
                     # process_packets for 5.
                     with timer("coordinate"):
-                        coord_status, lazy_tasks, zone_steps = await coordinate(
+                        coord_status, zone_steps = await coordinate(
                             algo, next_coord, n_zones
                         )
-                        all_lazy_tasks.extend(lazy_tasks)
 
                     if coord_status.done():
                         break
@@ -138,12 +137,8 @@ async def run_zone(backend, algo, zone_id, start_step, end_step):
         )
         for step_id in range(start_step, end_step):
             logger.debug(f"Zone {zone_id} beginning step {step_id}")
-            status, tiles_df, before_next_step_tasks, lazy_tasks = await new_step(
-                algo, zone_id, step_id
-            )
-            all_lazy_tasks.extend(lazy_tasks)
-            all_lazy_tasks.extend(await process_packet_df(backend, algo, tiles_df))
-            await asyncio.gather(*before_next_step_tasks)
+            status, tiles_df = await new_step(algo, zone_id, step_id)
+            await process_packet_df(backend, algo, tiles_df)
             if status.done():
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
                 break
@@ -153,16 +148,16 @@ async def run_zone(backend, algo, zone_id, start_step, end_step):
 @contextlib.asynccontextmanager
 async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10 * 60):
     def backup():
-        logger.info("Backing up database")
         if job_name is False:
             return
         if job_name is None and not prod:
             return
         import confirm.cloud.clickhouse as ch
 
+        logger.info("Backing up database")
         ch_db = ch.connect(job_name)
         ch.backup(db, ch_db)
-        logger.info("Backup complete")
+        logger.info(f"Backup complete to {ch_db.database}")
 
     async def backup_repeater():
         # We want to backup once no matter what. This is so that we always
