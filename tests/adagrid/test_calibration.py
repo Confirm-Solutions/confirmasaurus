@@ -96,7 +96,9 @@ def test_four_zones_distributed(duckdb, snapshot):
     cal_tester(
         duckdb,
         snapshot,
-        backend=ModalBackend(n_zones=4, coordinate_every=1, gpu=False),
+        n_zones=4,
+        coordinate_every=1,
+        backend=ModalBackend(n_workers=4, gpu=False),
     )
 
 

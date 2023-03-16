@@ -105,7 +105,7 @@ def test_process():
 
     async def _test():
         algo, incomplete, zone_info = await init(AdaValidate, True, 1, 1, kwargs)
-        async with backend.setup(AdaValidate, algo, kwargs):
+        async with backend.setup(algo):
             await asyncio.gather(*await process_packet(backend, algo, 0, 0, 0))
             results_df = algo.db.get_results()
             assert results_df.shape[0] == 2
@@ -135,7 +135,7 @@ def test_new_step():
 
     async def _test():
         algo, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
-        async with backend.setup(AdaValidate, algo, kwargs):
+        async with backend.setup(algo):
             for i in range(3):
                 await process_packet_set(backend, algo, [(0, 0, i) for i in range(3)])
 
@@ -182,7 +182,7 @@ def test_reload_zone_info():
 
     async def _test():
         algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
-        async with backend.setup(AdaValidate, algo, kwargs):
+        async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
         _, _, before_tasks, _ = await new_step(algo, 0, 1)
         await asyncio.gather(*before_tasks)
@@ -205,7 +205,7 @@ def test_coordinate():
 
     async def _test():
         algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
-        async with backend.setup(AdaValidate, algo, kwargs):
+        async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
         pre_df = db.get_results()
         assert pre_df["zone_id"].unique() == [0]

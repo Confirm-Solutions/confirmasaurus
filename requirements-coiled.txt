@@ -1,0 +1,4 @@
+--find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+jax[cuda11_cudnn82]==0.4.5
+dask[complete]==2023.3.0
+pynvml==11.5.0
