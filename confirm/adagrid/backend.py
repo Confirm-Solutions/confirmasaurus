@@ -60,7 +60,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
         )
 
         with timer("setup"):
-            await stack.enter_async_context(backend.setup(algo_type, algo, kwargs))
+            await stack.enter_async_context(backend.setup(algo))
 
         def get_next_coord(step_id):
             return step_id + every - (step_id % every)
@@ -219,7 +219,7 @@ class Backend(abc.ABC):
 
     @abc.abstractmethod
     @contextlib.asynccontextmanager
-    async def setup(self, algo_type, algo, kwargs):
+    async def setup(self, algo):
         pass
 
     @abc.abstractmethod
@@ -232,7 +232,7 @@ class LocalBackend(Backend):
         return {}
 
     @contextlib.asynccontextmanager
-    async def setup(self, algo_type, algo, kwargs):
+    async def setup(self, algo):
         self.algo = algo
         yield
 

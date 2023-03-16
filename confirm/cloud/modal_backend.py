@@ -26,7 +26,7 @@ class ModalBackend(Backend):
         return {"n_workers": self.n_workers, "gpu": self.gpu}
 
     @contextlib.asynccontextmanager
-    async def setup(self, algo_type, algo, kwargs):
+    async def setup(self, algo):
         # The lazy import below is an insane hack that allows us to set modal
         # configuration at runtime:
         # - Modal needs to use decorators for stub.function.
@@ -56,7 +56,7 @@ class ModalBackend(Backend):
                 type(algo.driver.model),
                 (algo.cfg["model_seed"], algo.max_K),
                 algo.cfg["model_kwargs"],
-                algo_type,
+                type(algo),
                 filtered_cfg,
             )
             yield
