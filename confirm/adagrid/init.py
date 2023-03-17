@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     db = kwargs["db"]
     g = kwargs.get("g", None)
-    ip.log.worker_id.set(worker_id)
 
     tiles_exists = db.does_table_exist("tiles")
     if g is None and not tiles_exists:
@@ -31,8 +30,6 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
         cfg, null_hypos = first(kwargs)
     else:
         cfg, null_hypos = await join(db, kwargs)
-
-    cfg["worker_id"] = worker_id
 
     add_system_cfg(cfg)
 
@@ -122,11 +119,13 @@ async def join(db, kwargs):
         # Some parameters cannot be overridden because the job just wouldn't
         # make sense anymore.
         if k in [
+            "lam",
             "model_seed",
             "model_kwargs",
-            "alpha",
+            "delta",
             "init_K",
             "n_K_double",
+            "alpha",
             "bootstrap_seed",
             "nB",
             "model_name",

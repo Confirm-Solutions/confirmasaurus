@@ -146,7 +146,7 @@ class AdaValidate:
 def ada_validate(
     model_type,
     *,
-    lam,
+    lam=None,
     g=None,
     db=None,
     model_seed=0,

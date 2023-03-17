@@ -70,11 +70,7 @@ class AdaCalibrate:
         self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
         self.driver = bootstrap.BootstrapCalibrate(
-            model,
-            self.cfg["bootstrap_seed"],
-            self.cfg["nB"],
-            self.Ks,
-            worker_id=self.cfg["worker_id"],
+            model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks, worker_id=1
         )
 
     def get_orderer(self):

@@ -74,7 +74,6 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
                     # See here for a list of record attributes:
                     # https://docs.python.org/3/library/logging.html#logrecord-attributes
                     dict(
-                        worker_id=record.worker_id if record.worker_id else -1,
                         t=datetime.fromtimestamp(record.created).strftime(
                             "%Y-%m-%d %H:%M:%S.%f"
                         ),
@@ -253,7 +252,6 @@ class DuckDBTiles:
         self.con.execute(
             """
             create table if not exists logs (
-                worker_id INTEGER,
                 t TIMESTAMP,
                 name TEXT,
                 pathname TEXT,
@@ -312,13 +310,14 @@ class DuckDBTiles:
 
     def get_incomplete_packets(self):
         if self.does_table_exist("results"):
-            restrict = "where id not in (select id from results)"
+            restrict = "and id not in (select id from results)"
         else:
             restrict = ""
         return self.con.query(
             f"""
             select zone_id, step_id, packet_id
-                from tiles {restrict}
+                from tiles
+                where active=true {restrict}
                 group by zone_id, step_id, packet_id
                 order by zone_id, step_id, packet_id
             """
@@ -387,6 +386,7 @@ class DuckDBTiles:
                 where
                     zone_id = {zone_id}
                     and step_id = {step_id}
+                    and active=true
                     {restrict_clause}
             """,
         ).df()

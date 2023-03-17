@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 
@@ -11,22 +12,37 @@ logger = logging.getLogger(__name__)
 
 
 async def process_packet_set(backend, algo, packets):
+    coros = []
     for zone_id, step_id, packet_id in packets:
-        await process_packet(backend, algo, zone_id, step_id, packet_id)
+        logger.debug(
+            "waiting for work: (zone_id=%s, step_id=%s, packet_id=%s)",
+            zone_id,
+            step_id,
+            packet_id,
+        )
+        packet_df = algo.db.get_packet(zone_id, step_id, packet_id)
+        coros.append(
+            process_packet(backend, algo, zone_id, step_id, packet_id, packet_df)
+        )
+    await asyncio.gather(*coros)
 
 
 async def process_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
         return
+    coros = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
         zone_id = packet_df.iloc[0]["zone_id"]
         step_id = packet_df.iloc[0]["zone_id"]
-        await process_packet(
-            backend, algo, zone_id, step_id, packet_id, packet_df=packet_df
+        coros.append(
+            process_packet(
+                backend, algo, zone_id, step_id, packet_id, packet_df=packet_df
+            )
         )
+    await asyncio.gather(*coros)
 
 
-async def process_packet(backend, algo, zone_id, step_id, packet_id, packet_df=None):
+async def process_packet(backend, algo, zone_id, step_id, packet_id, packet_df):
     start = time.time()
     report = dict()
     status = await _process(
@@ -38,42 +54,31 @@ async def process_packet(backend, algo, zone_id, step_id, packet_id, packet_df=N
     algo.db.insert_report(report)
 
 
-async def _process(backend, algo, zone_id, step_id, packet_id, report, packet_df=None):
+async def _process(backend, algo, zone_id, step_id, packet_id, report, packet_df):
     report["worker_id"] = algo.cfg["worker_id"]
     report["zone_id"] = zone_id
     report["step_id"] = step_id
     report["packet_id"] = packet_id
 
-    if packet_df is None:
-        logger.debug(
-            "waiting for work: (zone_id=%s, step_id=%s, packet_id=%s)",
-            zone_id,
-            step_id,
-            packet_id,
-        )
-        work = algo.db.get_packet(zone_id, step_id, packet_id)
-    else:
-        work = packet_df
-
-    if work.shape[0] == 0:
+    if packet_df.shape[0] == 0:
         logger.warning(
             f"Packet is empty or already processed. (zone_id={zone_id}, "
             f"step_id={step_id}, packet_id={packet_id})"
         )
         return WorkerStatus.EMPTY_PACKET
 
-    report["n_tiles"] = work.shape[0]
-    report["n_total_sims"] = work["K"].sum()
+    report["n_tiles"] = packet_df.shape[0]
+    report["n_total_sims"] = packet_df["K"].sum()
 
     start = time.time()
-    logger.debug("Processing %d tiles.", work.shape[0])
-    results_df = await backend.process_tiles(work)
+    logger.debug("Processing %d tiles.", packet_df.shape[0])
+    results_df = await backend.process_tiles(packet_df)
     report["runtime_process_tiles"] = time.time() - start
 
     algo.db.insert_results(results_df, algo.get_orderer())
     logger.debug(
         "Processed %d tiles in %0.2f seconds.",
-        work.shape[0],
+        packet_df.shape[0],
         report["runtime_process_tiles"],
     )
     return WorkerStatus.WORKING
@@ -155,6 +160,7 @@ async def _new_step(algo, zone_id, new_step_id):
         "split",
     ]
     done_df = selection_df[done_cols]
+    algo.db.insert_done(done_df)
 
     n_refine = (selection_df["refine"] > 0).sum()
     n_deepen = (selection_df["deepen"] > 0).sum()
@@ -193,6 +199,8 @@ async def _new_step(algo, zone_id, new_step_id):
     inactive_done["split"] = True
     inactive_done["finisher_id"] = algo.cfg["worker_id"]
     inactive_done = inactive_done[done_cols].copy()
+    algo.db.insert_tiles(inactive_df)
+    algo.db.insert_done(inactive_done)
 
     # Assign tiles to packets and then insert them into the database for
     # processing.
@@ -205,11 +213,7 @@ async def _new_step(algo, zone_id, new_step_id):
         )
 
     g_active.df["packet_id"] = assign_packets(g_active.df)
-
-    algo.db.insert_done(done_df)
     algo.db.insert_tiles(g_active.df)
-    algo.db.insert_tiles(inactive_df)
-    algo.db.insert_done(inactive_done)
 
     logger.debug(
         f"For zone {zone_id}, starting step {new_step_id}"

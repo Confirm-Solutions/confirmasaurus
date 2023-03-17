@@ -235,6 +235,7 @@ class LocalBackend(Backend):
         tbs = self.algo.cfg["tile_batch_size"]
         if tbs is None:
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
+        logger.debug("Processing tiles using tile batch size %s", tbs)
         return await self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
 
 

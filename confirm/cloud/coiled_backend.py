@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 import os
@@ -73,7 +74,7 @@ def upload_pkg(client, module, restart=False):
     )
 
 
-def setup_cluster(n_workers=1):
+def setup_cluster(n_workers=1, idle_timeout="20 minutes"):
     create_software_env()
     import coiled
 
@@ -85,11 +86,17 @@ def setup_cluster(n_workers=1):
         worker_gpu=1,
         compute_purchase_option="spot_with_fallback",
         shutdown_on_close=False,
+        scheduler_options={"idle_timeout": idle_timeout},
     )
+    cluster.scale(n_workers)
     client = cluster.get_client()
+    reset_confirm_imprint(client)
+    return cluster
+
+
+def reset_confirm_imprint(client):
     upload_pkg(client, confirm)
     upload_pkg(client, ip, restart=True)
-    return cluster, client
 
 
 @dask.delayed
@@ -118,7 +125,6 @@ def check():
 
 
 def setup_worker(worker_args):
-    ip.package_settings()
     worker = get_worker()
 
     (model_type, model_args, model_kwargs, algo_type, cfg) = worker_args
@@ -140,26 +146,27 @@ def setup_worker(worker_args):
     has_hash = hasattr(worker, "algo_hash")
     has_algo = hasattr(worker, "algo")
     if not (has_algo and has_hash) or (has_hash and hash_args != worker.algo_hash):
+        ip.package_settings()
+        print(*model_args, **model_kwargs)
         model = model_type(*model_args, **model_kwargs)
         cfg["worker_id"] = 2
         worker.algo = algo_type(model, None, None, cfg, None)
         worker.algo_hash = hash_args
 
-    async def async_process_tiles(tiles_df):
-        lb = LocalBackend()
-        async with lb.setup(worker.algo):
-            return await lb.process_tiles(tiles_df)
+        async def async_process_tiles(tiles_df):
+            lb = LocalBackend()
+            async with lb.setup(worker.algo):
+                return await lb.process_tiles(tiles_df)
 
-    import synchronicity
+        import synchronicity
 
-    synchronizer = synchronicity.Synchronizer()
-    process_tiles = synchronizer.create(async_process_tiles)[
-        synchronicity.Interface.BLOCKING
-    ]
-    return process_tiles
+        synchronizer = synchronicity.Synchronizer()
+        worker.process_tiles = synchronizer.create(async_process_tiles)[
+            synchronicity.Interface.BLOCKING
+        ]
+    return worker.process_tiles
 
 
-@dask.delayed
 def dask_process_tiles(worker_args, packet_df):
     start = time.time()
     process_tiles = setup_worker(worker_args)
@@ -173,8 +180,10 @@ def dask_process_tiles(worker_args, packet_df):
 
 
 class CoiledBackend(Backend):
-    def __init__(self, n_workers: int = 1):
-        self.cluster, self.client = setup_cluster(n_workers)
+    def __init__(self, detach: bool = False, n_workers: int = 1, cluster=None):
+        self.detach = detach
+        self.n_workers = n_workers
+        self.cluster = cluster
 
     def check(self):
         return check().compute()
@@ -184,6 +193,9 @@ class CoiledBackend(Backend):
 
     @contextlib.asynccontextmanager
     async def setup(self, algo):
+        if self.cluster is None:
+            self.cluster = setup_cluster(self.n_workers)
+        self.client = self.cluster.get_client()
         algo_entries = [
             "init_K",
             "n_K_double",
@@ -210,5 +222,10 @@ class CoiledBackend(Backend):
         yield
 
     async def process_tiles(self, tiles_df):
-        out, _, _ = dask_process_tiles(self.worker_args_future, tiles_df).compute()
+        fut = self.client.submit(dask_process_tiles, self.worker_args_future, tiles_df)
+        out, runtime_processing, runtime_setup = await asyncio.to_thread(fut.result)
+        logger.debug(
+            "CoiledBackend.process_tiles::runtime_processing: %s", runtime_processing
+        )
+        logger.debug("CoiledBackend.process_tiles::runtime_setup: %s", runtime_setup)
         return out
