@@ -21,9 +21,13 @@ async def process_packet_set(backend, algo, packets):
             packet_id,
         )
         packet_df = algo.db.get_packet(zone_id, step_id, packet_id)
-        coros.append(
-            process_packet(backend, algo, zone_id, step_id, packet_id, packet_df)
-        )
+        if packet_df.shape[0] == 0:
+            logger.warning(
+                f"Packet is empty or already processed. (zone_id={zone_id}, "
+                f"step_id={step_id}, packet_id={packet_id})"
+            )
+        else:
+            coros.append(process_packet(backend, algo, packet_df))
     await asyncio.gather(*coros)
 
 
@@ -32,56 +36,33 @@ async def process_packet_df(backend, algo, tiles_df):
         return
     coros = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        zone_id = packet_df.iloc[0]["zone_id"]
-        step_id = packet_df.iloc[0]["zone_id"]
-        coros.append(
-            process_packet(
-                backend, algo, zone_id, step_id, packet_id, packet_df=packet_df
-            )
-        )
+        coros.append(process_packet(backend, algo, packet_df=packet_df))
     await asyncio.gather(*coros)
 
 
-async def process_packet(backend, algo, zone_id, step_id, packet_id, packet_df):
+async def process_packet(backend, algo, packet_df):
     start = time.time()
     report = dict()
-    status = await _process(
-        backend, algo, zone_id, step_id, packet_id, report, packet_df=packet_df
-    )
-    report["status"] = status.name
-    report["runtime_total"] = time.time() - start
-    algo.callback(report, algo.db)
-    algo.db.insert_report(report)
-
-
-async def _process(backend, algo, zone_id, step_id, packet_id, report, packet_df):
     report["worker_id"] = algo.cfg["worker_id"]
-    report["zone_id"] = zone_id
-    report["step_id"] = step_id
-    report["packet_id"] = packet_id
-
-    if packet_df.shape[0] == 0:
-        logger.warning(
-            f"Packet is empty or already processed. (zone_id={zone_id}, "
-            f"step_id={step_id}, packet_id={packet_id})"
-        )
-        return WorkerStatus.EMPTY_PACKET
-
+    report["zone_id"] = packet_df.iloc[0]["zone_id"]
+    report["step_id"] = packet_df.iloc[0]["step_id"]
+    report["packet_id"] = packet_df.iloc[0]["packet_id"]
     report["n_tiles"] = packet_df.shape[0]
     report["n_total_sims"] = packet_df["K"].sum()
 
     start = time.time()
     logger.debug("Processing %d tiles.", packet_df.shape[0])
-    results_df = await backend.process_tiles(packet_df)
-    report["runtime_process_tiles"] = time.time() - start
+    results_df, runtime_simulating = await backend.process_tiles(packet_df)
 
+    report["runtime_simulating"] = runtime_simulating
+    report["time"] = time.time()
+    report["runtime_process_tiles"] = time.time() - start
     algo.db.insert_results(results_df, algo.get_orderer())
-    logger.debug(
-        "Processed %d tiles in %0.2f seconds.",
-        packet_df.shape[0],
-        report["runtime_process_tiles"],
-    )
-    return WorkerStatus.WORKING
+    status = WorkerStatus.WORKING
+    report["status"] = status.name
+    report["runtime_total"] = time.time() - start
+    algo.callback(report, algo.db)
+    algo.db.insert_report(report)
 
 
 async def new_step(algo, zone_id, new_step_id):
@@ -214,6 +195,7 @@ async def _new_step(algo, zone_id, new_step_id):
 
     g_active.df["packet_id"] = assign_packets(g_active.df)
     algo.db.insert_tiles(g_active.df)
+    report["time"] = time.time()
 
     logger.debug(
         f"For zone {zone_id}, starting step {new_step_id}"
@@ -250,3 +232,34 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     out = g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols)
     out.df.loc[out._which_alternative(), "active"] = False
     return out
+
+
+async def coordinate(algo, step_id, n_zones):
+    start = time.time()
+    report = dict()
+    status, zone_steps = await _coordinate(algo, step_id, n_zones, report)
+    report["status"] = status.name
+    report["runtime_total"] = time.time() - start
+    algo.callback(report, algo.db)
+    algo.db.insert_report(report)
+    return status, zone_steps
+
+
+async def _coordinate(algo, step_id, n_zones, report):
+    # This function should only ever run for the clickhouse database. So,
+    # rather than abstracting the various database calls, we just write
+    # them in here directly.
+    report["step_id"] = step_id
+    report["worker_id"] = algo.cfg["worker_id"]
+    report["n_zones"] = n_zones
+
+    converged, _ = await algo.convergence_criterion(None, report)
+    if converged:
+        return WorkerStatus.CONVERGED, None
+
+    report["n_tiles"], zone_steps = algo.db.coordinate(step_id, n_zones)
+    if report["n_tiles"] == 0:
+        return WorkerStatus.EMPTY_STEP, None
+
+    report["time"] = time.time()
+    return WorkerStatus.COORDINATED, zone_steps

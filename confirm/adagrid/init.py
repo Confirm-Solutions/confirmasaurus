@@ -16,7 +16,7 @@ import imprint as ip
 logger = logging.getLogger(__name__)
 
 
-async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
+async def init(algo_type, worker_id, n_zones, kwargs):
     db = kwargs["db"]
     g = kwargs.get("g", None)
 
@@ -31,23 +31,19 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
     else:
         cfg, null_hypos = await join(db, kwargs)
 
+    cfg["worker_id"] = worker_id
     add_system_cfg(cfg)
 
-    if g is not None and not tiles_exists and is_leader:
+    if g is not None and not tiles_exists:
         incomplete_packets, zone_steps = await init_grid(g, db, cfg, n_zones)
     else:
         db.insert_config(pd.DataFrame([cfg]))
-        if is_leader:
-            if g is not None:
-                logger.warning(
-                    "Ignoring grid because tiles already exist "
-                    "in the provided database."
-                )
-            incomplete_packets = db.get_incomplete_packets()
-            zone_steps = db.get_zone_steps()
-        else:
-            incomplete_packets = None
-            zone_steps = None
+        if g is not None:
+            logger.warning(
+                "Ignoring grid because tiles already exist " "in the provided database."
+            )
+        incomplete_packets = db.get_incomplete_packets()
+        zone_steps = db.get_zone_steps()
 
     cfg_copy = copy.copy(cfg)
     del cfg_copy["git_diff"]
@@ -198,7 +194,8 @@ async def init_grid(g, db, cfg, n_zones):
 
 
 def assign_tiles(n_tiles, n_zones):
-    splits = np.array_split(np.arange(n_tiles), n_zones)
+    tile_range = np.arange(n_tiles)
+    splits = [tile_range[i::n_zones] for i in range(n_zones)]
     assignment = np.empty(n_tiles, dtype=np.uint32)
     for i in range(n_zones):
         assignment[splits[i]] = i

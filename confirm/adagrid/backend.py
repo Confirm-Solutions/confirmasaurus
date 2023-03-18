@@ -9,10 +9,10 @@ import jax
 import numpy as np
 
 from .convergence import WorkerStatus
-from .coordinate import coordinate
 from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
+from .step import coordinate
 from .step import new_step
 from .step import process_packet_df
 from .step import process_packet_set
@@ -45,12 +45,11 @@ async def async_entrypoint(backend, algo_type, kwargs):
     from contextlib import AsyncExitStack
 
     async with AsyncExitStack() as stack:
-        all_lazy_tasks = await stack.enter_async_context(lazy_handler())
         stack.enter_context(DatabaseLogging(db))
 
         with timer("init"):
             algo, incomplete_packets, zone_steps = await init(
-                algo_type, True, 1, kwargs["n_zones"], kwargs
+                algo_type, 1, kwargs["n_zones"], kwargs
             )
             every = algo.cfg["coordinate_every"]
             n_zones = algo.cfg["n_zones"]
@@ -100,14 +99,12 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 end_step = algo.cfg["n_steps"] + 1
 
             with timer("run_zones"):
-                out = await asyncio.gather(
+                statuses = await asyncio.gather(
                     *[
                         run_zone(backend, algo, zone_id, start_step, end_step)
                         for zone_id in zone_steps
                     ]
                 )
-                statuses, lazy_tasks = zip(*out)
-                all_lazy_tasks.extend(sum(lazy_tasks, []))
                 start_step = end_step
                 assert len(statuses) == len(zone_steps)
 
@@ -117,7 +114,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 if statuses[0].done():
                     break
 
-        with timer("verify and lazy_tasks"):
+        with timer("verify"):
             # TODO: currently we only verify at the end, should we do it more often?
             verify_task = asyncio.create_task(algo.db.verify())
             await verify_task
@@ -128,7 +125,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
 async def run_zone(backend, algo, zone_id, start_step, end_step):
     if start_step >= end_step:
         return WorkerStatus.REACHED_N_STEPS, []
-    all_lazy_tasks = []
 
     with timer("run_zone(%s, %s, %s)" % (zone_id, start_step, end_step)):
         logger.debug(
@@ -142,7 +138,7 @@ async def run_zone(backend, algo, zone_id, start_step, end_step):
             if status.done():
                 logger.debug(f"Zone {zone_id} finished with status {status}.")
                 break
-    return status, all_lazy_tasks
+    return status
 
 
 @contextlib.asynccontextmanager
@@ -159,10 +155,12 @@ async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10
         ch.backup(db, ch_db)
         logger.info(f"Backup complete to {ch_db.database}")
 
+    repeat = True
+
     async def backup_repeater():
         # We want to backup once no matter what. This is so that we always
         # backup a job that finishes in less time than `backup_interval`.
-        while True:
+        while repeat:
             await asyncio.sleep(backup_interval)
             backup()
 
@@ -171,6 +169,7 @@ async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10
     # It's okay to cancel here because the backup task is in the same
     # thread as this code and therefore we will never interrupt a backup by
     # canceling.
+    repeat = False
     task.cancel()
     # We always want to backup before exiting.
     backup()
@@ -181,15 +180,6 @@ def timer(name):
     start = time.time()
     yield
     logger.debug(f"{name} took {time.time() - start:.3f} seconds")
-
-
-@contextlib.asynccontextmanager
-async def lazy_handler():
-    all_lazy_tasks = []
-    yield all_lazy_tasks
-    for task in all_lazy_tasks:
-        assert isinstance(task, asyncio.Task)
-    await asyncio.gather(*all_lazy_tasks)
 
 
 class Backend(abc.ABC):
@@ -236,7 +226,9 @@ class LocalBackend(Backend):
         if tbs is None:
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
         logger.debug("Processing tiles using tile batch size %s", tbs)
-        return await self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+        start = time.time()
+        out = await self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+        return out, time.time() - start
 
 
 def print_report(report, _db):

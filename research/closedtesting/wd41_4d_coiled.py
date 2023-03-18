@@ -48,20 +48,21 @@ def main():
         n=[10, 10, 10, 10],
         null_hypos=model.null_hypos,
     )
-    ada.ada_calibrate(
+    db = ada.ada_calibrate(  # noqa
         wd41.WD41,
         g=grid,
         alpha=0.025,
-        bias_target=0.0025,
-        grid_target=0.0025,
-        std_target=0.005,
+        bias_target=0.001,
+        grid_target=0.001,
+        std_target=0.002,
         n_K_double=6,
         calibration_min_idx=80,
-        step_size=2**16,
-        packet_size=2**13,
+        step_size=2**18,
+        packet_size=2**14,
         model_kwargs={"ignore_intersection": True},
-        backend=coiled_backend.CoiledBackend(n_workers=4),
-        job_name="wd41_4d",
+        n_zones=4,
+        backend=coiled_backend.CoiledBackend(n_workers=16),
+        job_name="wd41_4d_v3",
     )
 
 

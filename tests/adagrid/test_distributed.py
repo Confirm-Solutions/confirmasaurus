@@ -8,9 +8,9 @@ import imprint as ip
 from confirm.adagrid.backend import entrypoint
 from confirm.adagrid.backend import LocalBackend
 from confirm.adagrid.convergence import WorkerStatus
-from confirm.adagrid.coordinate import coordinate
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.init import init
+from confirm.adagrid.step import coordinate
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet
 from confirm.adagrid.step import process_packet_set
@@ -44,9 +44,7 @@ def test_init_first():
     kwargs["db"] = DuckDBTiles.connect()
 
     async def _test():
-        algo, incomplete_packets, zone_info = await init(
-            AdaValidate, True, 1, 1, kwargs
-        )
+        algo, incomplete_packets, zone_info = await init(AdaValidate, 1, 1, kwargs)
         assert incomplete_packets == [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
         assert len(zone_info) == 1
         assert zone_info[0] == 0
@@ -75,13 +73,13 @@ def test_init_join():
     kwargs["db"] = DuckDBTiles.connect()
 
     async def _test():
-        algo1, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
+        algo1, _, _ = await init(AdaValidate, 1, 1, kwargs)
 
         kwargs2 = copy.copy(kwargs)
         kwargs2["g"] = None
         kwargs2["lam"] = -4
         kwargs2["overrides"] = dict(packet_size=3)
-        algo, incomplete2, zone_info2 = await init(AdaValidate, True, 1, 1, kwargs2)
+        algo, incomplete2, zone_info2 = await init(AdaValidate, 1, 1, kwargs2)
         assert incomplete2 == [(0, 0, 0), (0, 0, 1), (0, 0, 2)]
         assert len(zone_info2) == 1
         assert zone_info2[0] == 0
@@ -104,7 +102,7 @@ def test_process():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, zone_info = await init(AdaValidate, True, 1, 1, kwargs)
+        algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs)
         async with backend.setup(algo):
             await asyncio.gather(*await process_packet(backend, algo, 0, 0, 0))
             results_df = algo.db.get_results()
@@ -134,7 +132,7 @@ def test_new_step():
     backend = LocalBackend()
 
     async def _test():
-        algo, _, _ = await init(AdaValidate, True, 1, 1, kwargs)
+        algo, _, _ = await init(AdaValidate, 1, 1, kwargs)
         async with backend.setup(algo):
             for i in range(3):
                 await process_packet_set(backend, algo, [(0, 0, i) for i in range(3)])
@@ -181,7 +179,7 @@ def test_reload_zone_info():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
+        algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
         _, _, before_tasks, _ = await new_step(algo, 0, 1)
@@ -190,7 +188,7 @@ def test_reload_zone_info():
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
         kwargs2["g"] = None
-        algo, incomplete, zone_info = await init(AdaValidate, True, 1, 1, kwargs2)
+        algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs2)
         assert incomplete == [(0, 1, 0), (0, 1, 1), (0, 1, 2)]
         assert zone_info[0] == 1
 
@@ -204,7 +202,7 @@ def test_coordinate():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, _ = await init(AdaValidate, True, 1, 1, kwargs)
+        algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
         pre_df = db.get_results()

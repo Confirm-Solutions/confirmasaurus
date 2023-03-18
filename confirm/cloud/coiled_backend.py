@@ -4,7 +4,6 @@ import logging
 import os
 import subprocess
 import tempfile
-import time
 
 import dask
 import jax
@@ -147,7 +146,6 @@ def setup_worker(worker_args):
     has_algo = hasattr(worker, "algo")
     if not (has_algo and has_hash) or (has_hash and hash_args != worker.algo_hash):
         ip.package_settings()
-        print(*model_args, **model_kwargs)
         model = model_type(*model_args, **model_kwargs)
         cfg["worker_id"] = 2
         worker.algo = algo_type(model, None, None, cfg, None)
@@ -168,15 +166,11 @@ def setup_worker(worker_args):
 
 
 def dask_process_tiles(worker_args, packet_df):
-    start = time.time()
     process_tiles = setup_worker(worker_args)
     jax_platform = jax.lib.xla_bridge.get_backend().platform
     assert jax_platform == "gpu"
-    runtime_non_process = time.time() - start
-    start = time.time()
-    out = process_tiles(packet_df)
-    runtime = time.time() - start
-    return out, runtime, runtime_non_process
+    out, runtime_simulating = process_tiles(packet_df)
+    return out, runtime_simulating
 
 
 class CoiledBackend(Backend):
@@ -223,9 +217,5 @@ class CoiledBackend(Backend):
 
     async def process_tiles(self, tiles_df):
         fut = self.client.submit(dask_process_tiles, self.worker_args_future, tiles_df)
-        out, runtime_processing, runtime_setup = await asyncio.to_thread(fut.result)
-        logger.debug(
-            "CoiledBackend.process_tiles::runtime_processing: %s", runtime_processing
-        )
-        logger.debug("CoiledBackend.process_tiles::runtime_setup: %s", runtime_setup)
-        return out
+        out, runtime_simulating = await asyncio.to_thread(fut.result)
+        return out, runtime_simulating

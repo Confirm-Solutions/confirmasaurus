@@ -329,6 +329,7 @@ class DuckDBTiles:
                 """
             select zone_id, max(step_id)
                 from tiles
+                    where coordination_id = (select max(coordination_id) from tiles)
                 group by zone_id
                 order by zone_id
             """
@@ -446,47 +447,70 @@ class DuckDBTiles:
             """
         ).df()
 
-    def update_active_eligible(self):
-        # Null op because duckdb updates during `finish`
-        pass
+    def coordinate(self, step_id: int, n_zones: int):
+        if not self.does_table_exist("zone_mapping"):
+            self.con.execute(
+                """
+                create table zone_mapping (
+                    id ubigint,
+                    coordination_id int,
+                    old_zone_id int,
+                    new_zone_id int,
+                    before_step_id int
+                )"""
+            )
 
-    def get_active_eligible(self):
-        # We need a unique and deterministic ordering for the tiles returned
-        # herer. Since we are filtering to active/eligible tiles, there can be
-        # no duplicates when sorted by
-        # (theta0,...,thetan, null_truth0, ..., null_truthn)
+        coordination_id = self.con.query(
+            """
+            select max(coordination_id) + 1 from results
+        """
+        ).fetchone()[0]
+
         ordering = ",".join(
             [f"theta{i}" for i in range(self.dimension())]
             + [c for c in self._results_columns() if c.startswith("null_truth")]
         )
-        return self.con.execute(
-            f"""
-            SELECT * FROM results
-            WHERE eligible = 1
-                and active = 1
-            ORDER BY {ordering}
-            """,
-        ).df()
-
-    def delete_previous_coordination(self, old_coordination_id):
         self.con.execute(
             f"""
-            DELETE FROM results 
-                WHERE eligible = 1
-                    and active = 1
-                    and coordination_id = {old_coordination_id}
-            """
+            insert into zone_mapping 
+                select id, {coordination_id}, zone_id,
+                        (row_number() OVER ())%{n_zones},
+                        {step_id}
+                    from results
+                        where eligible=true
+                            and active=true
+                    order by {ordering}
+        """
         )
-
-    def insert_mapping(self, mapping_df):
-        if not self.does_table_exist("zone_mapping"):
-            self.con.execute("create table zone_mapping as select * from mapping_df")
-        else:
-            cols = self.con.execute("select * from zone_mapping limit 0").df().columns
-            col_order = ",".join(cols)
-            self.con.execute(
-                f"insert into zone_mapping select {col_order} from mapping_df"
-            )
+        self.con.execute(
+            f"""
+            update results set 
+                    zone_id=(
+                        select new_zone_id from zone_mapping
+                            where zone_mapping.id=results.id
+                            and zone_mapping.coordination_id={coordination_id}
+                    ),
+                    coordination_id={coordination_id}
+                where eligible=true
+                    and active=true
+        """
+        )
+        n_results = self.con.query(
+            f""" 
+            select count(*) from results where coordination_id={coordination_id}
+        """
+        ).fetchone()[0]
+        zone_steps = dict(
+            self.con.query(
+                f"""
+            select zone_id, max(step_id) from results
+                    where coordination_id={coordination_id}
+                group by zone_id
+                order by zone_id
+        """
+            ).fetchall()
+        )
+        return n_results, zone_steps
 
     def get_zone_mapping(self):
         return self.con.execute("select * from zone_mapping").df()

@@ -1,18 +1,74 @@
 ```python
+import duckdb
+con = duckdb.connect()
+```
+
+```python
+import pandas as pd
+import numpy as np
+df = pd.DataFrame({
+    "id": np.arange(25),
+    "coordination_id": np.zeros(25, dtype=np.int32),
+    "step_id": np.zeros(25, dtype=np.int32),
+    "zone_id": np.arange(25)
+})
+con.execute("CREATE OR REPLACE TABLE test as select * from df")
+```
+
+```python
+con.execute('create or replace table mapping (id int, coordination_id int, old_zone_id int, new_zone_id int, before_step_id int)')
+```
+
+```python
+coordination_id = 1
+step_id = 5
+n_zones = 4
+con.execute(f"""
+insert into mapping 
+    select id, {coordination_id}, zone_id,
+        (row_number() OVER ())%{n_zones},
+        {step_id}
+        from test
+"""
+)   
+con.execute(f"""
+update test set 
+    zone_id=(
+        select new_zone_id from mapping
+            where mapping.id=test.id
+            and mapping.coordination_id={coordination_id}
+    ),
+    coordination_id={coordination_id}
+""")
+```
+
+```python
+con.query('select * from mapping')
+```
+
+```python
+con.query('select * from test')
+```
+
+```python
 import imprint as ip
 ip.setup_nb()
 ```
 
 ```python
-from confirm.cloud.coiled_backend import CoiledBackend, setup_cluster
+import confirm.cloud.coiled_backend as coiled_backend
 import confirm.adagrid as ada
 from imprint.models.ztest import ZTest1D
 
-cluster = setup_cluster(idle_timeout="2 hours")
+cluster = coiled_backend.setup_cluster(idle_timeout="2 hours")
+client = cluster.get_client()
 ```
 
 ```python
-backend = CoiledBackend(cluster=cluster)
+coiled_backend.reset_confirm_imprint(client)
+```
+
+```python
 g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
 db = ada.ada_calibrate(
     ZTest1D,
@@ -20,7 +76,7 @@ db = ada.ada_calibrate(
     nB=5,
     prod=True,
     n_zones=1,
-    backend=CoiledBackend(cluster=cluster),
+    backend=coiled_backend.CoiledBackend(cluster=cluster),
 )
 
 ```

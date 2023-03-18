@@ -18,7 +18,6 @@ del process_tiles_config["retries"]
 class ModalBackend(Backend):
     def __init__(self, n_workers=1, gpu="any"):
         super().__init__()
-        self.lazy_tasks = []
         self.n_workers = n_workers
         self.gpu = gpu
 
