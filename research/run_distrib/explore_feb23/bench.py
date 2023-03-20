@@ -92,5 +92,5 @@ def parallel(n_workers=6):
 
 if __name__ == "__main__":
     for i in range(1):
-        serial()
+        serial(db="ddb")
         # parallel()

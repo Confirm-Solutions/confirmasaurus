@@ -24,9 +24,7 @@ class BootstrapCalibrate:
     For the basic `validate` and `calibrate` drivers, see `imprint.driver`.
     """
 
-    def __init__(
-        self, model, bootstrap_seed, nB, Ks, tile_batch_size=64, worker_id=None
-    ):
+    def __init__(self, model, bootstrap_seed, nB, Ks, worker_id=None):
         self.model = model
         self.worker_id = worker_id
         self.forward_boundv, self.backward_boundv = driver.get_bound(
@@ -38,8 +36,6 @@ class BootstrapCalibrate:
                 in_axes=(0, None, 0),
             )
         )
-
-        self.tile_batch_size = tile_batch_size
 
         self.Ks = Ks
         self.nB = nB
@@ -82,32 +78,42 @@ class BootstrapCalibrate:
         #     for K in Ks
         # }
 
-    def bootstrap_calibrate(self, df, alpha, tile_batch_size=None):
-        tile_batch_size = tile_batch_size or self.tile_batch_size
+    def bootstrap_calibrate(self, df, alpha, calibration_min_idx, tile_batch_size):
+        def _cal(K, theta, null_truth, alpha0):
+            stats = self.model.sim_batch(0, K, theta, null_truth)
+            driver._check_stats(stats, K, theta)
+            sorted_stats = jnp.sort(stats, axis=-1)
+            return self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0)
 
         def _batched(K, theta, vertices, null_truth):
             # NOTE: sort of a todo. having the simulations loop as the outer batch
             # is faster than the other way around. But, we need all simulations in
             # order to calibrate. So, the likely fastest solution is to have multiple
             # layers of batching. This is not currently implemented.
-            stats = self.model.sim_batch(0, K, theta, null_truth)
-            driver._check_stats(stats, K, theta)
-            sorted_stats = jnp.sort(stats, axis=-1)
             alpha0 = self.backward_boundv(
                 np.full(theta.shape[0], alpha), theta, vertices
             )
-            return (
-                self.calibratevv(sorted_stats, self.bootstrap_idxs[K], alpha0),
-                alpha0,
-            )
+
+            possible = alpha0 >= (calibration_min_idx + 1) / (K + 1)
+            impossible = ~possible
+            if impossible.any():
+                lams = np.full(
+                    (theta.shape[0], self.bootstrap_idxs[K].shape[0]), np.nan
+                )
+                lams[possible] = _cal(
+                    K, theta[possible], null_truth[possible], alpha0[possible]
+                )
+            else:
+                lams = _cal(K, theta, null_truth, alpha0)
+            return lams, impossible, alpha0
 
         def f(K, K_df):
             K_g = grid.Grid(K_df, self.worker_id)
 
             theta, vertices = K_g.get_theta_and_vertices()
-            bootstrap_lams, alpha0 = batching.batch(
+            bootstrap_lams, impossible, alpha0 = batching.batch(
                 _batched,
-                self.tile_batch_size,
+                tile_batch_size,
                 in_axes=(None, 0, 0, 0),
             )(K, theta, vertices, K_g.get_null_truth())
 
@@ -127,9 +133,9 @@ class BootstrapCalibrate:
             lams_df.insert(
                 0, "twb_max_lams", bootstrap_lams[:, 1 + self.nB :].max(axis=1)
             )
-            lams_df.insert(0, "idx", driver._calibration_index(K, alpha0))
+            lams_df.insert(0, "idx", driver.calibration_index(K, alpha0))
             lams_df.insert(0, "alpha0", alpha0)
-            lams_df.insert(0, "K", K)
+            lams_df.insert(0, "impossible", impossible)
 
             return lams_df
 
@@ -213,7 +219,7 @@ def bootstrap_calibrate(
     """
     model, g = driver._setup(model_type, g, model_seed, K, model_kwargs)
     Ks = np.sort(g.df["K"].unique())
-    cal_df = BootstrapCalibrate(
-        model, bootstrap_seed, nB, Ks, tile_batch_size
-    ).bootstrap_calibrate(g.df, alpha)
+    cal_df = BootstrapCalibrate(model, bootstrap_seed, nB, Ks).bootstrap_calibrate(
+        g.df, alpha, np.inf, tile_batch_size
+    )
     return cal_df

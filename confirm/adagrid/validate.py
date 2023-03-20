@@ -6,7 +6,6 @@ import pandas as pd
 import imprint as ip
 from .backend import entrypoint
 from .backend import print_report
-from .init import _launch_task
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +19,12 @@ class AdaValidate:
 
         self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
-        self.driver = ip.driver.Driver(
-            model, tile_batch_size=self.cfg["tile_batch_size"]
-        )
+        self.driver = ip.driver.Driver(model)
 
     def get_orderer(self):
         return "total_cost_order, tie_bound_order"
 
-    def process_tiles(self, *, tiles_df, report):
+    async def process_tiles(self, *, tiles_df, tile_batch_size):
         # TODO: bring back transformations?? in a more general way?
         # if transformation is None:
         #     computational_df = g.df
@@ -47,7 +44,10 @@ class AdaValidate:
         #     computational_df = pd.DataFrame(indict)
 
         rej_df = self.driver.validate(
-            tiles_df, self.cfg["lam"], delta=self.cfg["delta"]
+            tiles_df,
+            self.cfg["lam"],
+            delta=self.cfg["delta"],
+            tile_batch_size=tile_batch_size,
         )
         rej_df.insert(0, "processor_id", self.cfg["worker_id"])
         rej_df.insert(1, "processing_time", ip.timer.simple_timer())
@@ -82,14 +82,10 @@ class AdaValidate:
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
     async def convergence_criterion(self, zone_id, report):
-        max_tie_task = await _launch_task(
-            self.db, self.db.worst_tile, zone_id, "tie_est desc"
-        )
-        next_tile_task = await _launch_task(
-            self.db, self.db.worst_tile, zone_id, "total_cost_order, tie_bound_order"
-        )
-        max_tie_est = (await max_tie_task)["tie_est"].iloc[0]
-        next_tile = (await next_tile_task).iloc[0]
+        max_tie_est = self.db.worst_tile(zone_id, "tie_est desc")["tie_est"].iloc[0]
+        next_tile = self.db.worst_tile(
+            zone_id, "total_cost_order, tie_bound_order"
+        ).iloc[0]
         report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
         report.update(
             dict(
@@ -111,7 +107,7 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    async def select_tiles(self, zone_id, new_step_id, report, convergence_task):
+    async def select_tiles(self, zone_id, new_step_id, report, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
             zone_id,
@@ -119,7 +115,6 @@ class AdaValidate:
             self.cfg["step_size"],
             "total_cost_order, tie_bound_order",
         )
-        _, max_tie_est = await convergence_task
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
         tiles_df = raw_tiles[include].copy()
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
@@ -151,7 +146,7 @@ class AdaValidate:
 def ada_validate(
     model_type,
     *,
-    lam,
+    lam=None,
     g=None,
     db=None,
     model_seed=0,
@@ -164,8 +159,13 @@ def ada_validate(
     global_target=0.005,
     n_steps: int = 100,
     step_size=2**10,
+    timeout: int = 60 * 60 * 12,
     packet_size: int = None,
+    coordinate_every: int = 1,
+    n_zones: int = 1,
     prod: bool = True,
+    job_name: str = None,
+    backup_interval: int = 10 * 60,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -202,6 +202,7 @@ def ada_validate(
             Error surface throughout parameter space regardless of the value of the
             Type I Error. Defaults to 0.005.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
+        timeout: The maximum number of seconds to run for. Defaults to 12 hours.
         step_size: The number of tiles in an Adagrid step produced by a single
            Adagrid tile selection step. This is different from
            packet_size because we select tiles once and then run many
@@ -209,9 +210,20 @@ def ada_validate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        coordinate_every: The number of steps to run before re-dividing tiles
+            into zones. If n_zones==1, no coordination will be performed. Defaults
+            to 1.
+        n_zones: The number of zones to divide the tiles into. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
-            a bit faster. Defaults to True.
+            a bit faster. If prod is False, we also skip database backups
+            unless job_name is specified. Defaults to True.
+        job_name: The job name is used for the database file used by DuckDB and
+            for storing long-term backups in Clickhouse. By default (None), an
+            in-memory DuckDB is used and a random UUID is chosen for
+            Clickhouse.
+        backup_interval: The number of seconds between backups. Defaults to 10 minutes.
+            If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

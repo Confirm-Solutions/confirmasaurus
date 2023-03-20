@@ -2,7 +2,6 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
-import pytest
 
 import confirm.adagrid as ada
 import imprint as ip
@@ -54,7 +53,7 @@ def test_validation(snapshot):
     check(db, snapshot)
 
 
-def test_validation2d(snapshot):
+def test_validation2d():
     g = ip.cartesian_grid(
         theta_min=[-1, -1], theta_max=[0, 0], null_hypos=[ip.hypo("theta0 > theta1")]
     )
@@ -64,17 +63,17 @@ def test_validation2d(snapshot):
     assert g.n_tiles == 355
 
 
-@pytest.mark.slow
-def test_validation_clickhouse(snapshot, ch_db):
-    with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
-        g = ip.cartesian_grid(
-            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
-        )
-        db = ada.ada_validate(
-            ZTest1D, g=g, db=ch_db, lam=-1.96, packet_size=1, tile_batch_size=1
-        )
-
-    check(db, snapshot)
+def test_validation2d_restart():
+    g = ip.cartesian_grid(
+        theta_min=[-1, -1], theta_max=[0, 0], null_hypos=[ip.hypo("theta0 > theta1")]
+    )
+    db = ada.ada_validate(
+        ZTest1D, g=g, lam=-1.96, prod=False, n_steps=4, tile_batch_size=1
+    )
+    ada.ada_validate(ZTest1D, db=db, overrides=dict(n_steps=20))
+    g = ip.Grid(db.get_results(), None).prune_inactive()
+    assert g.df["tie_bound"].max() <= 0.0265
+    assert g.n_tiles == 355
 
 
 def test_validation_nonadagrid_using_adagrid():

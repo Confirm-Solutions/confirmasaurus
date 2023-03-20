@@ -1,5 +1,4 @@
 import logging.handlers
-import queue
 import time
 from dataclasses import dataclass
 from dataclasses import field
@@ -11,7 +10,6 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-import imprint.log
 
 
 if TYPE_CHECKING:
@@ -20,25 +18,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DBQueueListener(logging.handlers.QueueListener):
-    def __init__(self, db, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.db = db
-        self.worker_id = imprint.log.worker_id.get()
-
-    def _monitor(self):
-        self.db.create_logs_table()
-        imprint.log.worker_id.set(self.worker_id)
-        super()._monitor()
-
-
 class DatabaseLogging(logging.handlers.BufferingHandler):
     """
     A logging handler context manager that buffers log record writes to a
     database.
-    - a queue handler is added to the root logger when entering the context.
-    - the queue handler is removed from the root logger when exiting the context.
-    - a queue listener in a separate thread is started when entering the context.
     - whenever `capacity` log records are buffered, they flushed to the database.
     - whenever a log is `flushLevel` or higher, all buffered log records are flushed.
     - whenever more than `interval` seconds have elapsed since the last flush,
@@ -57,27 +40,15 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
         self.flushLevel = flushLevel
         self.interval = interval
         self.lastFlush = time.time()
-        self.queue = queue.Queue(-1)
-        self.queue_handler = logging.handlers.QueueHandler(self.queue)
-        self.listener = DBQueueListener(db, self.queue, self)
         super().__init__(self.capacity)
 
     def __enter__(self):
         self.lastFlush = time.time()
-        if self.db.supports_threads:
-            logging.getLogger().addHandler(self.queue_handler)
-            self.listener.start()
-        else:
-            logging.getLogger().addHandler(self)
+        logging.getLogger().addHandler(self)
 
     def __exit__(self, *_):
-        if self.db.supports_threads:
-            self.listener.stop()
-            self.close()
-            logging.getLogger().removeHandler(self.queue_handler)
-        else:
-            self.close()
-            logging.getLogger().removeHandler(self)
+        self.close()
+        logging.getLogger().removeHandler(self)
 
     def shouldFlush(self, record):
         """
@@ -103,7 +74,6 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
                     # See here for a list of record attributes:
                     # https://docs.python.org/3/library/logging.html#logrecord-attributes
                     dict(
-                        worker_id=record.worker_id if record.worker_id else -1,
                         t=datetime.fromtimestamp(record.created).strftime(
                             "%Y-%m-%d %H:%M:%S.%f"
                         ),
@@ -117,9 +87,6 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
                     for record in self.buffer
                 ]
             )
-            # TODO: make this run lazily!
-            # slightly tricky because this isn't an async function and we don't
-            # have access to backend.lazy_tasks
             self.db.insert_logs(df)
             self.buffer = []
         finally:
@@ -142,8 +109,6 @@ class PandasTiles:
     done: pd.DataFrame = None
     reports: List[Dict] = field(default_factory=list)
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
-    is_distributed: bool = False
-    supports_threads: bool = False
 
     def dimension(self) -> int:
         return (
@@ -282,14 +247,11 @@ class DuckDBTiles:
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
     _d: int = None
-    is_distributed: bool = False
-    supports_threads: bool = False
 
     def __post_init__(self):
         self.con.execute(
             """
             create table if not exists logs (
-                worker_id INTEGER,
                 t TIMESTAMP,
                 name TEXT,
                 pathname TEXT,
@@ -348,13 +310,14 @@ class DuckDBTiles:
 
     def get_incomplete_packets(self):
         if self.does_table_exist("results"):
-            restrict = "where id not in (select id from results)"
+            restrict = "and id not in (select id from results)"
         else:
             restrict = ""
         return self.con.query(
             f"""
             select zone_id, step_id, packet_id
-                from tiles {restrict}
+                from tiles
+                where active=true {restrict}
                 group by zone_id, step_id, packet_id
                 order by zone_id, step_id, packet_id
             """
@@ -366,6 +329,7 @@ class DuckDBTiles:
                 """
             select zone_id, max(step_id)
                 from tiles
+                    where coordination_id = (select max(coordination_id) from tiles)
                 group by zone_id
                 order by zone_id
             """
@@ -423,6 +387,7 @@ class DuckDBTiles:
                 where
                     zone_id = {zone_id}
                     and step_id = {step_id}
+                    and active=true
                     {restrict_clause}
             """,
         ).df()
@@ -482,48 +447,70 @@ class DuckDBTiles:
             """
         ).df()
 
-    def update_active_eligible(self):
-        # Null op because duckdb updates during `finish`
-        pass
+    def coordinate(self, step_id: int, n_zones: int):
+        if not self.does_table_exist("zone_mapping"):
+            self.con.execute(
+                """
+                create table zone_mapping (
+                    id ubigint,
+                    coordination_id int,
+                    old_zone_id int,
+                    new_zone_id int,
+                    before_step_id int
+                )"""
+            )
 
-    def get_active_eligible(self):
-        # We need a unique and deterministic ordering for the tiles returned
-        # herer. Since we are filtering to active/eligible tiles, there can be
-        # no duplicates when sorted by
-        # (theta0,...,thetan, null_truth0, ..., null_truthn)
+        coordination_id = self.con.query(
+            """
+            select max(coordination_id) + 1 from results
+        """
+        ).fetchone()[0]
+
         ordering = ",".join(
             [f"theta{i}" for i in range(self.dimension())]
             + [c for c in self._results_columns() if c.startswith("null_truth")]
         )
-        return self.con.execute(
-            f"""
-            SELECT * FROM results
-            WHERE eligible = 1
-                and active = 1
-            ORDER BY {ordering}
-            """,
-        ).df()
-
-    def delete_previous_coordination(self, old_coordination_id):
-        # TODO: ...
         self.con.execute(
             f"""
-            DELETE FROM results 
-                WHERE eligible = 1
-                    and active = 1
-                    and coordination_id = {old_coordination_id}
-            """
+            insert into zone_mapping 
+                select id, {coordination_id}, zone_id,
+                        (row_number() OVER (order by {ordering}))%{n_zones},
+                        {step_id}
+                    from results
+                        where eligible=true
+                            and active=true
+                    order by {ordering}
+        """
         )
-
-    def insert_mapping(self, mapping_df):
-        if not self.does_table_exist("zone_mapping"):
-            self.con.execute("create table zone_mapping as select * from mapping_df")
-        else:
-            cols = self.con.execute("select * from zone_mapping limit 0").df().columns
-            col_order = ",".join(cols)
-            self.con.execute(
-                f"insert into zone_mapping select {col_order} from mapping_df"
-            )
+        self.con.execute(
+            f"""
+            update results set 
+                    zone_id=(
+                        select new_zone_id from zone_mapping
+                            where zone_mapping.id=results.id
+                            and zone_mapping.coordination_id={coordination_id}
+                    ),
+                    coordination_id={coordination_id}
+                where eligible=true
+                    and active=true
+        """
+        )
+        n_results = self.con.query(
+            f""" 
+            select count(*) from results where coordination_id={coordination_id}
+        """
+        ).fetchone()[0]
+        zone_steps = dict(
+            self.con.query(
+                f"""
+            select zone_id, max(step_id) from results
+                    where coordination_id={coordination_id}
+                group by zone_id
+                order by zone_id
+        """
+            ).fetchall()
+        )
+        return n_results, zone_steps
 
     def get_zone_mapping(self):
         return self.con.execute("select * from zone_mapping").df()

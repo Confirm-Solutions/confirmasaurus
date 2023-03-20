@@ -70,36 +70,30 @@ class AdaCalibrate:
         self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = self.Ks[-1]
         self.driver = bootstrap.BootstrapCalibrate(
-            model,
-            self.cfg["bootstrap_seed"],
-            self.cfg["nB"],
-            self.Ks,
-            tile_batch_size=self.cfg["tile_batch_size"],
-            worker_id=self.cfg["worker_id"],
+            model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks, worker_id=1
         )
 
     def get_orderer(self):
         return "orderer"
 
-    def process_tiles(self, *, tiles_df, report):
+    async def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
         # selecting the next iteration's tiles: impossible and orderer
 
-        lams_df = self.driver.bootstrap_calibrate(tiles_df, self.cfg["alpha"])
+        lams_df = self.driver.bootstrap_calibrate(
+            tiles_df,
+            self.cfg["alpha"],
+            calibration_min_idx=self.cfg["calibration_min_idx"],
+            tile_batch_size=tile_batch_size,
+        )
         lams_df.insert(0, "processor_id", self.cfg["worker_id"])
         lams_df.insert(1, "processing_time", ip.timer.simple_timer())
         lams_df.insert(2, "eligible", True)
 
         # we use insert here to order columns nicely for reading raw data
         lams_df.insert(3, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
-        lams_df.insert(
-            4,
-            "impossible",
-            lams_df["alpha0"]
-            < (self.cfg["calibration_min_idx"] + 1) / (tiles_df["K"] + 1),
-        )
 
         lams_df.insert(
             5,
@@ -112,7 +106,7 @@ class AdaCalibrate:
                 np.where(lams_df["impossible"], -np.inf, np.inf),
             ),
         )
-        return pd.concat((tiles_df.drop("K", axis=1), lams_df), axis=1)
+        return pd.concat((tiles_df, lams_df), axis=1)
 
     async def convergence_criterion(self, zone_id, report):
         ########################################
@@ -173,7 +167,7 @@ class AdaCalibrate:
         )
         return report["converged"], None
 
-    async def select_tiles(self, zone_id, new_step_id, report, convergence_task):
+    async def select_tiles(self, zone_id, new_step_id, report, _):
         tiles_df = self.db.next(zone_id, new_step_id, self.cfg["step_size"], "orderer")
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
@@ -208,7 +202,10 @@ class AdaCalibrate:
                 twb_worst_tile[col] = 1e-6
         twb_worst_tile["K"] = self.max_K
         twb_worst_tile_lams = self.driver.bootstrap_calibrate(
-            twb_worst_tile, self.cfg["alpha"], tile_batch_size=1
+            twb_worst_tile,
+            self.cfg["alpha"],
+            calibration_min_idx=self.cfg["calibration_min_idx"],
+            tile_batch_size=1,
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
@@ -247,9 +244,14 @@ def ada_calibrate(
     std_target: float = 0.002,
     calibration_min_idx: int = 40,
     n_steps: int = 100,
+    timeout: int = 60 * 60 * 12,
     step_size: int = 2**10,
     packet_size: int = None,
+    coordinate_every: int = 1,
+    n_zones: int = 1,
     prod: bool = True,
+    job_name: str = None,
+    backup_interval: int = 10 * 60,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -285,6 +287,7 @@ def ada_calibrate(
             will require more computational effort because K and/or
             alpha0 will need to be larger. Defaults to 40.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
+        timeout: The maximum number of seconds to run for. Defaults to 12 hours.
         step_size: The number of tiles in an Adagrid step produced by a single
            Adagrid tile selection step. This is different from
            packet_size because we select tiles once and then run many
@@ -292,9 +295,20 @@ def ada_calibrate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        coordinate_every: The number of steps to run before re-dividing tiles
+            into zones. If n_zones==1, no coordination will be performed. Defaults
+            to 1.
+        n_zones: The number of zones to divide the tiles into. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
-            a bit faster. Defaults to True.
+            a bit faster. If prod is False, we also skip database backups
+            unless job_name is specified. Defaults to True.
+        job_name: The job name is used for the database file used by DuckDB and
+            for storing long-term backups in Clickhouse. By default (None), an
+            in-memory DuckDB is used and a random UUID is chosen for
+            Clickhouse.
+        backup_interval: The number of seconds between backups. Defaults to 10 minutes.
+            If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

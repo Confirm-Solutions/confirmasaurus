@@ -41,12 +41,14 @@ def test_calibration_cheap(snapshot):
     )
 
 
-def cal_tester(db, snapshot, ignore_story=True, **kwargs):
+def cal_tester(db, snapshot, ignore_story=True, prod=False, **kwargs):
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db = ada.ada_calibrate(ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, **kwargs)
+        db = ada.ada_calibrate(
+            ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, prod=prod, **kwargs
+        )
 
     ip.testing.check_imprint_results(
         ip.Grid(db.get_results(), None).prune_inactive(),
@@ -67,41 +69,37 @@ def test_calibration_packetsize1(snapshot):
 
 
 @pytest.mark.slow
-def test_calibration_clickhouse(snapshot, ch_db):
-    snapshot.set_test_name("test_calibration")
-    cal_tester(ch_db, snapshot)
-
-
-@pytest.mark.slow
-def test_one_zone_distributed(snapshot, ch_db):
+def test_one_zone_distributed(duckdb, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_calibration")
-    cal_tester(ch_db, snapshot, backend=ModalBackend(n_zones=1, gpu=False))
+    cal_tester(duckdb, snapshot, backend=ModalBackend(gpu=False))
 
 
 @pytest.mark.slow
-def test_four_zones(duckdb, snapshot):
+def test_four_zones(duckdb, ch_db, snapshot):
     cal_tester(
-        duckdb, snapshot, backend=ada.LocalBackend(n_zones=4, coordinate_every=1)
+        duckdb,
+        snapshot,
+        prod=True,
+        backup_interval=1,
+        job_name=ch_db.database,
+        n_zones=4,
+        coordinate_every=1,
     )
 
 
 @pytest.mark.slow
-def test_four_zones_ch(ch_db, snapshot):
-    snapshot.set_test_name("test_four_zones")
-    cal_tester(ch_db, snapshot, backend=ada.LocalBackend(n_zones=4, coordinate_every=1))
-
-
-@pytest.mark.slow
-def test_four_zones_distributed(snapshot, ch_db):
+def test_four_zones_distributed(duckdb, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_four_zones")
     cal_tester(
-        ch_db,
+        duckdb,
         snapshot,
-        backend=ModalBackend(n_zones=4, coordinate_every=1, gpu=False),
+        n_zones=4,
+        coordinate_every=1,
+        backend=ModalBackend(n_workers=4, gpu=False),
     )
 
 
@@ -112,7 +110,9 @@ def test_calibration_checkpointing():
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
         db = ada.db.DuckDBTiles.connect()
-        _ = ada.ada_calibrate(ZTest1D, g=g, db=db, nB=3, init_K=4, n_steps=2)
+        _ = ada.ada_calibrate(
+            ZTest1D, g=g, db=db, nB=3, init_K=4, n_steps=2, prod=False
+        )
 
         db_two2 = ada.ada_calibrate(ZTest1D, db=db, overrides=dict(n_steps=3))
         reports_two = db_two2.get_reports()
@@ -121,7 +121,7 @@ def test_calibration_checkpointing():
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], n=[3], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db_once = ada.ada_calibrate(ZTest1D, g=g, nB=3, init_K=4, n_steps=3)
+        db_once = ada.ada_calibrate(ZTest1D, g=g, nB=3, init_K=4, n_steps=3, prod=False)
         reports_once = db_once.get_reports()
 
     assert len(reports_two) == len(reports_once) + 1
@@ -165,28 +165,3 @@ def test_calibration_nonadagrid_using_adagrid():
     pd.testing.assert_frame_equal(
         results_df_ada[results_df_nonada.columns], results_df_nonada
     )
-
-
-def main():
-    pass
-    # import confirm.cloud.clickhouse as ch
-
-    # pd.testing.assert_frame_equal(subset, snapshot(subset))
-
-    # g = ip.cartesian_grid(theta_min=[-1], theta_max=[1],
-    # null_hypos=[ip.hypo("x0 < 0")])
-    # db = ch.Clickhouse.connect()
-    # # db = ch.Clickhouse.connect(
-    # #     host='localhost', port='8123', username='default', password='')
-    # db = ada.ada_calibrate(
-    #     ZTest1D, db=db, g=g, nB=5, tile_batch_size=1, n_iter=8
-    # )
-    # g = ip.cartesian_grid(
-    #     theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
-    # )
-    # db = ada.ada_calibrate(ZTest1D, g=g, nB=2, prod=False,
-    # tile_batch_size=1)
-
-
-if __name__ == "__main__":
-    main()

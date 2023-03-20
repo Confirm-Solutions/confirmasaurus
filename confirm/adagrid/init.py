@@ -1,4 +1,3 @@
-import asyncio
 import codecs
 import copy
 import json
@@ -17,10 +16,9 @@ import imprint as ip
 logger = logging.getLogger(__name__)
 
 
-async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
+async def init(algo_type, worker_id, n_zones, kwargs):
     db = kwargs["db"]
     g = kwargs.get("g", None)
-    ip.log.worker_id.set(worker_id)
 
     tiles_exists = db.does_table_exist("tiles")
     if g is None and not tiles_exists:
@@ -34,47 +32,33 @@ async def init(algo_type, is_leader, worker_id, n_zones, kwargs):
         cfg, null_hypos = await join(db, kwargs)
 
     cfg["worker_id"] = worker_id
-
     add_system_cfg(cfg)
 
-    wait_for = []
-    db_load_incompletes = False
-    if g is not None and not tiles_exists and is_leader:
-        wait_for_grid, incomplete_packets, zone_steps = await init_grid(
-            g, db, cfg, n_zones
-        )
-        wait_for.extend(wait_for_grid)
+    if g is not None and not tiles_exists:
+        incomplete_packets, zone_steps = await init_grid(g, db, cfg, n_zones)
     else:
-        wait_for.append(_launch_task(db, db.insert_config, pd.DataFrame([cfg])))
-        if is_leader:
-            if g is not None:
-                logger.warning(
-                    "Ignoring grid because tiles already exist "
-                    "in the provided database."
-                )
-            incomplete_packets_task = await _launch_task(db, db.get_incomplete_packets)
-            zone_steps_task = await _launch_task(db, db.get_zone_steps)
-            db_load_incompletes = True
-        else:
-            incomplete_packets = None
-            zone_steps = None
+        db.insert_config(pd.DataFrame([cfg]))
+        if g is not None:
+            logger.warning(
+                "Ignoring grid because tiles already exist " "in the provided database."
+            )
+        incomplete_packets = db.get_incomplete_packets()
+        zone_steps = db.get_zone_steps()
 
-    model_kwargs = json.loads(cfg["model_kwargs_json"])
+    cfg_copy = copy.copy(cfg)
+    del cfg_copy["git_diff"]
+    del cfg_copy["conda_list"]
+    del cfg_copy["nvidia_smi"]
+    del cfg_copy["pip_freeze"]
+    logger.info("Config (minus system info): \n%s", cfg_copy)
+
+    cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](
         seed=cfg["model_seed"],
         max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
-        **model_kwargs,
+        **cfg["model_kwargs"],
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
-
-    # wait for DB calls down here so that the Model can initialize random
-    # variates and bootstrap samples and such while the DB calls are running
-    if db_load_incompletes:
-        incomplete_packets, zone_steps = await asyncio.gather(
-            incomplete_packets_task, zone_steps_task
-        )
-
-    await asyncio.gather(*wait_for)
 
     return algo, incomplete_packets, zone_steps
 
@@ -114,10 +98,13 @@ def first(kwargs):
 
 
 async def join(db, kwargs):
-    get_null_hypos_task = await _launch_task(db, db.get_null_hypos)
     # If we are resuming a job, we need to load the config from the database.
     load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
+
+    for k in ["tile_batch_size", "job_name"]:
+        if np.isnan(cfg[k]):
+            cfg[k] = None
 
     # IMPORTANT: Except for overrides, entries in kwargs will be ignored!
     overrides = kwargs["overrides"]
@@ -128,27 +115,25 @@ async def join(db, kwargs):
         # Some parameters cannot be overridden because the job just wouldn't
         # make sense anymore.
         if k in [
+            "lam",
             "model_seed",
             "model_kwargs",
-            "alpha",
+            "delta",
             "init_K",
             "n_K_double",
+            "alpha",
             "bootstrap_seed",
             "nB",
             "model_name",
         ]:
             raise ValueError(f"Parameter {k} cannot be overridden.")
         cfg[k] = overrides[k]
-    return cfg, _deserialize_null_hypos(await get_null_hypos_task)
+    null_hypos = _deserialize_null_hypos(db.get_null_hypos())
+    return cfg, null_hypos
 
 
 def add_system_cfg(cfg):
     cfg["jax_platform"] = jax.lib.xla_bridge.get_backend().platform
-    default_tile_batch_size = dict(gpu=64, cpu=4)
-    cfg["tile_batch_size"] = cfg["tile_batch_size"] or (
-        default_tile_batch_size[cfg["jax_platform"]]
-    )
-
     if cfg["packet_size"] is None:
         cfg["packet_size"] = cfg["step_size"]
 
@@ -187,11 +172,8 @@ async def init_grid(g, db, cfg, n_zones):
     df["creation_time"] = ip.timer.simple_timer()
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
-    wait_for = [
-        await _launch_task(
-            db, db.init_grid, df, null_hypos_df, pd.DataFrame([cfg]), in_thread=False
-        ),
-    ]
+
+    await db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
 
     logger.debug(
         "Initialized database with %d tiles and %d null hypos."
@@ -208,11 +190,12 @@ async def init_grid(g, db, cfg, n_zones):
             [(zone_id, 0, p) for p in range(zone["packet_id"].max() + 1)]
         )
     zone_steps = {zone_id: 0 for zone_id, zone in df.groupby("zone_id")}
-    return wait_for, incomplete_packets, zone_steps
+    return incomplete_packets, zone_steps
 
 
 def assign_tiles(n_tiles, n_zones):
-    splits = np.array_split(np.arange(n_tiles), n_zones)
+    tile_range = np.arange(n_tiles)
+    splits = [tile_range[i::n_zones] for i in range(n_zones)]
     assignment = np.empty(n_tiles, dtype=np.uint32)
     for i in range(n_zones):
         assignment[splits[i]] = i
@@ -259,21 +242,3 @@ def _run(cmd):
         )
     except subprocess.CalledProcessError as exc:
         return f"ERROR: {exc.returncode} {exc.output}"
-
-
-async def _launch_task(db, f, *args, in_thread=True, **kwargs):
-    if in_thread and db.supports_threads:
-        coro = asyncio.to_thread(f, *args, **kwargs)
-    elif in_thread and not db.supports_threads:
-        out = f(*args, **kwargs)
-
-        async def _coro():
-            return out
-
-        coro = _coro()
-    else:
-        coro = f(*args, **kwargs)
-    task = asyncio.create_task(coro)
-    # Sleep immediately to allow the task to start.
-    await asyncio.sleep(0)
-    return task

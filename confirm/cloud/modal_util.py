@@ -29,11 +29,6 @@ def get_image(dependency_groups=["cloud"]):
             export GOPATH=/go && \\
             go install go.mozilla.org/sops/cmd/sops@latest
         """,
-        # Modal doesn't support ENV yet so we COPY sops. Might be nice to
-        # replace the COPY with this once it is supported.
-        # "ENV PATH=/go/bin:$PATH",
-        # "COPY /go/bin/sops /usr/bin/sops",
-        "COPY /.test_secrets.enc.env /root/test_secrets.enc.env",
         "RUN python -m pip install poetry",
         "COPY /.poetry.lock /tmp/poetry/poetry.lock",
         "COPY /.pyproject.toml /tmp/poetry/pyproject.toml",
@@ -61,9 +56,14 @@ def get_defaults():
         retries=0,
         mounts=[
             *modal.create_package_mounts(["confirm", "imprint"]),
-            modal.Mount.from_local_dir("./", remote_path="/root", recursive=False),
+            modal.Mount.from_local_dir(
+                "./",
+                remote_path="/root",
+                condition=lambda fn: fn != ".env",  # exclude unencrypted secrets
+                recursive=False,
+            ),
         ],
-        secret=modal.Secret.from_name("kms-sops"),
+        secrets=[modal.Secret.from_name("kms-sops")],
     )
 
 
@@ -112,3 +112,8 @@ def decrypt_secrets(sops_binary="/go/bin/sops"):
         logger.debug(
             "Decrypting secrets. stdout from sops:\n %s", p.stdout.decode("utf-8")
         )
+
+
+def coiled_login():
+    token = os.environ["COILED_TOKEN"]
+    print(subprocess.check_output(["coiled", "login", "-t", token]).decode("utf-8"))
