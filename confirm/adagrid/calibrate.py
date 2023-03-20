@@ -301,11 +301,12 @@ def ada_calibrate(
         n_zones: The number of zones to divide the tiles into. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
-            a bit faster. Defaults to True.
-        job_name: The job name is used for storing long-term backups in
-            Clickhouse. If job_name is None and prod is True, a random name is
-            chosen. If job_name is None and prod is False, no backups are
-            stored. If job_name is False, no backups are stored.
+            a bit faster. If prod is False, we also skip database backups
+            unless job_name is specified. Defaults to True.
+        job_name: The job name is used for the database file used by DuckDB and
+            for storing long-term backups in Clickhouse. By default (None), an
+            in-memory DuckDB is used and a random UUID is chosen for
+            Clickhouse.
         backup_interval: The number of seconds between backups. Defaults to 10 minutes.
             If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing

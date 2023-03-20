@@ -31,7 +31,11 @@ def entrypoint(algo_type, kwargs):
 async def async_entrypoint(backend, algo_type, kwargs):
     entry_time = time.time()
     if kwargs.get("db", None) is None:
-        kwargs["db"] = DuckDBTiles.connect()
+        if kwargs["job_name"] is None:
+            db_filepath = None
+        else:
+            db_filepath = f"{kwargs['job_name']}.db"
+        kwargs["db"] = DuckDBTiles.connect(db_filepath)
     db = kwargs["db"]
     from contextlib import AsyncExitStack
 
@@ -139,16 +143,11 @@ async def run_zone(backend, algo, zone_id, start_step, end_step):
 
 @contextlib.asynccontextmanager
 async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int):
-    if backup_interval is None:
+    if backup_interval is None or job_name is False or (job_name is None and not prod):
         yield
         return
 
     async def backup():
-        if job_name is False:
-            return
-        if job_name is None and not prod:
-            return
-
         try:
             import confirm.cloud.clickhouse as ch
 

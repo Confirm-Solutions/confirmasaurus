@@ -78,6 +78,16 @@ async def restore_table(duck, ch_client, name):
     duck.con.execute(f"create table {name} as select * from df")
 
 
+def list_tables(client):
+    return query(
+        client,
+        f"""
+        select * from information_schema.tables
+            where table_schema = '{client.database}'
+        """,
+    ).result_set
+
+
 def does_table_exist(client, table_name: str) -> bool:
     return (
         len(

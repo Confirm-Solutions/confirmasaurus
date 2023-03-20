@@ -1,7 +1,7 @@
 ```python
 import confirm.cloud.clickhouse as ch
-client = ch.connect('wd41_4d_v3')
-client
+client = ch.connect('wd41_4d_v0')
+ch.list_tables(client)
 ```
 
 ```python
