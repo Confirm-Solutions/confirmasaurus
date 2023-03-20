@@ -25,16 +25,7 @@ def entrypoint(algo_type, kwargs):
     if backend is None:
         backend = LocalBackend()
     kwargs.update(backend.get_cfg())
-
-    # If we're running through Jupyter, then an event loop will already be
-    # running and we're not allowed to start a new event loop inside of the
-    # existing one. So we need to run the async entrypoint in a separate
-    # thread. synchronicity is a library that makes this easy.
-    import synchronicity
-
-    synchronizer = synchronicity.Synchronizer()
-    sync_entry = synchronizer.create(async_entrypoint)[synchronicity.Interface.BLOCKING]
-    return sync_entry(backend, algo_type, kwargs)
+    return backend.entrypoint(algo_type, kwargs)
 
 
 async def async_entrypoint(backend, algo_type, kwargs):
@@ -55,7 +46,9 @@ async def async_entrypoint(backend, algo_type, kwargs):
             n_zones = algo.cfg["n_zones"]
 
         await stack.enter_async_context(
-            backup_daemon(db, algo.cfg["prod"], algo.cfg["job_name"])
+            backup_daemon(
+                db, algo.cfg["prod"], algo.cfg["job_name"], algo.cfg["backup_interval"]
+            )
         )
 
         with timer("setup"):
@@ -108,6 +101,10 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 start_step = end_step
                 assert len(statuses) == len(zone_steps)
 
+            with timer("verify"):
+                verify_task = asyncio.create_task(algo.db.verify())
+                await verify_task
+
             # If there's only one zone and that zone is done, then we're
             # totally done.
             if len(statuses) == 1:
@@ -115,7 +112,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
                     break
 
         with timer("verify"):
-            # TODO: currently we only verify at the end, should we do it more often?
             verify_task = asyncio.create_task(algo.db.verify())
             await verify_task
 
@@ -142,27 +138,35 @@ async def run_zone(backend, algo, zone_id, start_step, end_step):
 
 
 @contextlib.asynccontextmanager
-async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10 * 60):
-    def backup():
+async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int):
+    if backup_interval is None:
+        yield
+        return
+
+    async def backup():
         if job_name is False:
             return
         if job_name is None and not prod:
             return
-        import confirm.cloud.clickhouse as ch
 
-        logger.info("Backing up database")
-        ch_db = ch.connect(job_name)
-        ch.backup(db, ch_db)
-        logger.info(f"Backup complete to {ch_db.database}")
+        try:
+            import confirm.cloud.clickhouse as ch
+
+            logger.info("Backing up database")
+            ch_db = ch.connect(job_name)
+            await ch.backup(ch_db, db)
+            logger.info(f"Backup complete to {ch_db.database}")
+        except Exception:
+            # If one backup fails for some reason, we don't want that to stop
+            # the backup daemon or to kill the job.
+            logger.exception("Error backing up database")
 
     repeat = True
 
     async def backup_repeater():
-        # We want to backup once no matter what. This is so that we always
-        # backup a job that finishes in less time than `backup_interval`.
         while repeat:
             await asyncio.sleep(backup_interval)
-            backup()
+            await backup()
 
     task = asyncio.create_task(backup_repeater())
     yield
@@ -172,7 +176,7 @@ async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int = 10
     repeat = False
     task.cancel()
     # We always want to backup before exiting.
-    backup()
+    await backup()
 
 
 @contextlib.contextmanager
@@ -197,6 +201,25 @@ class Backend(abc.ABC):
         "alpha",
         "calibration_min_idx",
     ]
+
+    def entrypoint(self, algo_type, kwargs):
+        """
+        Passing control of the entrypoint to the backend allows executing the
+        leader somewhere besides the launching machine.
+
+        The default behavior is to just run the leader locally.
+        """
+        # If we're running through Jupyter, then an event loop will already be
+        # running and we're not allowed to start a new event loop inside of the
+        # existing one. So we need to run the async entrypoint in a separate
+        # thread. synchronicity is a library that makes this easy.
+        import synchronicity
+
+        synchronizer = synchronicity.Synchronizer()
+        sync_entry = synchronizer.create(async_entrypoint)[
+            synchronicity.Interface.BLOCKING
+        ]
+        return sync_entry(self, algo_type, kwargs)
 
     @abc.abstractmethod
     def get_cfg(self):

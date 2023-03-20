@@ -1,3 +1,5 @@
+import asyncio
+
 import pandas as pd
 import pytest
 
@@ -46,12 +48,14 @@ def test_backup(ch_db):
         n_zones=2,
     )
 
-    ch.backup(db, ch_db)
-    db2 = ada.DuckDBTiles.connect()
-    ch.restore(db2, ch_db)
-    for table in ch.all_tables:
-        if not db.does_table_exist(table):
-            continue
-        orig = db.con.query(f"select * from {table}").df()
-        restored = db2.con.query(f"select * from {table}").df()
-        pd.testing.assert_frame_equal(orig, restored)
+    async def _test():
+        await ch.backup(ch_db, db)
+        db2 = await ch.restore(ch_db)
+        for table in ch.all_tables:
+            if not db.does_table_exist(table):
+                continue
+            orig = db.con.query(f"select * from {table}").df()
+            restored = db2.con.query(f"select * from {table}").df()
+            pd.testing.assert_frame_equal(orig, restored)
+
+    asyncio.run(_test())

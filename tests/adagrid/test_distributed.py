@@ -12,7 +12,6 @@ from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.init import init
 from confirm.adagrid.step import coordinate
 from confirm.adagrid.step import new_step
-from confirm.adagrid.step import process_packet
 from confirm.adagrid.step import process_packet_set
 from confirm.adagrid.validate import ada_validate
 from confirm.adagrid.validate import AdaValidate
@@ -104,19 +103,19 @@ def test_process():
     async def _test():
         algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs)
         async with backend.setup(algo):
-            await asyncio.gather(*await process_packet(backend, algo, 0, 0, 0))
+            await process_packet_set(backend, algo, [(0, 0, 0)])
             results_df = algo.db.get_results()
             assert results_df.shape[0] == 2
             assert (results_df["packet_id"] == 0).all()
 
             # Check that process is idempotent
-            await asyncio.gather(*await process_packet(backend, algo, 0, 0, 0))
+            await process_packet_set(backend, algo, [(0, 0, 0)])
             results_df = algo.db.get_results()
             assert results_df.shape[0] == 2
             assert (results_df["packet_id"] == 0).all()
 
-            await asyncio.gather(*await process_packet(backend, algo, 0, 0, 1))
-            await asyncio.gather(*await process_packet(backend, algo, 0, 0, 2))
+            await process_packet_set(backend, algo, [(0, 0, 1)])
+            await process_packet_set(backend, algo, [(0, 0, 2)])
         results_df = algo.db.get_results()
         assert results_df.shape[0] == 5
 
@@ -137,11 +136,10 @@ def test_new_step():
             for i in range(3):
                 await process_packet_set(backend, algo, [(0, 0, i) for i in range(3)])
 
-        status, tiles_df, before_tasks, report_task = await new_step(algo, 0, 1)
-        await asyncio.gather(*before_tasks)
+        status, tiles_df = await new_step(algo, 0, 1)
 
         # call new_step twice to confirm idempotency
-        status2, tiles_df2, before_tasks, report_task2 = await new_step(algo, 0, 1)
+        status2, tiles_df2 = await new_step(algo, 0, 1)
         assert status == WorkerStatus.NEW_STEP
         assert status2 == WorkerStatus.ALREADY_EXISTS
 
@@ -166,7 +164,7 @@ def test_new_step():
         assert (done["active"] == 0).all()
         assert (done["step_id"] == 0).all()
 
-        report = await report_task[2]
+        report = algo.db.get_reports().iloc[-2]
         assert report["status"] == "NEW_STEP"
         assert report["n_refine"] == 3
 
@@ -182,8 +180,7 @@ def test_reload_zone_info():
         algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
-        _, _, before_tasks, _ = await new_step(algo, 0, 1)
-        await asyncio.gather(*before_tasks)
+        _, _ = await new_step(algo, 0, 1)
 
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
@@ -209,7 +206,7 @@ def test_coordinate():
         assert pre_df["zone_id"].unique() == [0]
         assert (pre_df["coordination_id"] == 0).all()
 
-        status, lazy_tasks, zone_steps = await coordinate(algo, 0, 2)
+        status, zone_steps = await coordinate(algo, 0, 2)
         assert zone_steps == {0: 0, 1: 0}
         assert status == WorkerStatus.COORDINATED
         post_df = db.get_results()
@@ -217,19 +214,18 @@ def test_coordinate():
         assert (post_df["coordination_id"] == 1).all()
         assert post_df.shape[0] == pre_df.shape[0]
 
-        await asyncio.gather(*lazy_tasks)
         zone_map_df = db.get_zone_mapping()
         assert (zone_map_df["coordination_id"] == 1).all()
         assert (zone_map_df["old_zone_id"] == 0).all()
         assert (zone_map_df["id"].isin(pre_df["id"])).all()
         assert (zone_map_df["id"].isin(post_df["id"])).all()
         assert (
-            zone_map_df.set_index("id").loc[post_df["id"], "zone_id"].values
+            zone_map_df.set_index("id").loc[post_df["id"], "new_zone_id"].values
             == post_df["zone_id"]
         ).all()
 
         # Coordinate again to check idempotency
-        status2, _, _ = await coordinate(algo, 0, 2)
+        status2, _ = await coordinate(algo, 0, 2)
         assert status == status2
         idem_df = db.get_results()
         pd.testing.assert_frame_equal(

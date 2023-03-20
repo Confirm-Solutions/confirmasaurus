@@ -1,9 +1,12 @@
+import asyncio
 import logging
 import os
 import time
 import uuid
 
 import pyarrow
+
+from ..adagrid.db import DuckDBTiles
 
 logger = logging.getLogger(__name__)
 
@@ -19,17 +22,18 @@ all_tables = [
 ]
 
 
-def backup(duck, ch_db):
-    for name in all_tables:
-        backup_table(duck, ch_db, name)
+async def backup(ch_db, duck):
+    await asyncio.gather(*[backup_table(duck, ch_db, name) for name in all_tables])
 
 
-def restore(duck, ch_db):
-    for name in all_tables:
-        restore_table(duck, ch_db, name)
+async def restore(ch_db, duck=None):
+    if duck is None:
+        duck = DuckDBTiles.connect()
+    await asyncio.gather(*[restore_table(duck, ch_db, name) for name in all_tables])
+    return duck
 
 
-def backup_table(duck, ch_client, name):
+async def backup_table(duck, ch_client, name):
     if not duck.does_table_exist(name):
         logger.info(
             f"Backup skipping table {name} because it"
@@ -37,30 +41,38 @@ def backup_table(duck, ch_client, name):
         )
         return
     df = duck.con.query(f"select * from {name}").df()
-    cols = get_create_table_cols(df)
-    if does_table_exist(ch_client, name):
-        command(ch_client, f"DROP TABLE {name}")
-    command(
-        ch_client,
-        f"""
-        CREATE TABLE {name} ({",".join(cols)})
-        ENGINE = MergeTree()
-        ORDER BY ()
-        """,
-    )
-    insert_df(ch_client, name, df)
 
-
-def restore_table(duck, ch_client, name):
-    if not does_table_exist(ch_client, name):
-        logger.info(
-            f"Restore skipping table {name} because it"
-            " doesn't exist in the source db."
+    def move_table_to_ch():
+        cols = get_create_table_cols(df)
+        if does_table_exist(ch_client, name):
+            command(ch_client, f"DROP TABLE {name}")
+        command(
+            ch_client,
+            f"""
+            CREATE TABLE {name} ({",".join(cols)})
+            ENGINE = MergeTree()
+            ORDER BY ()
+            """,
         )
-        return
-    df = query_df(ch_client, f"select * from {name}")
-    if name == "logs":
-        df["t"] = df["t"].dt.tz_localize(None)
+        insert_df(ch_client, name, df)
+
+    await asyncio.to_thread(move_table_to_ch)
+
+
+async def restore_table(duck, ch_client, name):
+    def get_table_from_ch():
+        if not does_table_exist(ch_client, name):
+            logger.info(
+                f"Restore skipping table {name} because it"
+                " doesn't exist in the source db."
+            )
+            return
+        df = query_df(ch_client, f"select * from {name}")
+        if name == "logs":
+            df["t"] = df["t"].dt.tz_localize(None)
+        return df
+
+    df = await asyncio.to_thread(get_table_from_ch)  # noqa
     if duck.does_table_exist(name):
         duck.con.execute(f"drop table {name}")
     duck.con.execute(f"create table {name} as select * from df")

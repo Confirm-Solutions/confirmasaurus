@@ -86,6 +86,7 @@ def setup_cluster(n_workers=1, idle_timeout="20 minutes"):
         compute_purchase_option="spot_with_fallback",
         shutdown_on_close=False,
         scheduler_options={"idle_timeout": idle_timeout},
+        allow_ssh=True,
     )
     cluster.scale(n_workers)
     client = cluster.get_client()

@@ -165,6 +165,7 @@ def ada_validate(
     n_zones: int = 1,
     prod: bool = True,
     job_name: str = None,
+    backup_interval: int = 10 * 60,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -218,6 +219,8 @@ def ada_validate(
             a bit faster. Defaults to True.
         job_name: The job name is used for storing long-term backups in
             Clickhouse. By default (None) a random UUID is chosen.
+        backup_interval: The number of seconds between backups. Defaults to 10 minutes.
+            If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

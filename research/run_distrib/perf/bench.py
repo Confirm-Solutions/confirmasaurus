@@ -27,9 +27,9 @@ def main():
         n_K_double=7,
         max_target=0.001,
         global_target=0.002,
-        step_size=2**14,
-        packet_size=2**10,
-        n_steps=7,
+        step_size=2**17,
+        packet_size=2**13,
+        n_steps=15,
         n_zones=4,
         # backend=CoiledBackend()
         backend=ModalBackend(n_workers=1, gpu="any"),

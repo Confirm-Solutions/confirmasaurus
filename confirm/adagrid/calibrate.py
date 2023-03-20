@@ -251,6 +251,7 @@ def ada_calibrate(
     n_zones: int = 1,
     prod: bool = True,
     job_name: str = None,
+    backup_interval: int = 10 * 60,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -305,6 +306,8 @@ def ada_calibrate(
             Clickhouse. If job_name is None and prod is True, a random name is
             chosen. If job_name is None and prod is False, no backups are
             stored. If job_name is False, no backups are stored.
+        backup_interval: The number of seconds between backups. Defaults to 10 minutes.
+            If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

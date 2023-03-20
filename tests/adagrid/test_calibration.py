@@ -82,6 +82,7 @@ def test_four_zones(duckdb, ch_db, snapshot):
         duckdb,
         snapshot,
         prod=True,
+        backup_interval=1,
         job_name=ch_db.database,
         n_zones=4,
         coordinate_every=1,

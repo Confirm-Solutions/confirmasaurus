@@ -55,6 +55,9 @@ async def process_packet(backend, algo, packet_df):
     results_df, runtime_simulating = await backend.process_tiles(packet_df)
 
     report["runtime_simulating"] = runtime_simulating
+    report["runtime_per_sim_ns"] = (
+        report["runtime_simulating"] / report["n_total_sims"] * 1e9
+    )
     report["time"] = time.time()
     report["runtime_process_tiles"] = time.time() - start
     algo.db.insert_results(results_df, algo.get_orderer())
@@ -103,8 +106,6 @@ async def _new_step(algo, zone_id, new_step_id):
             WorkerStatus.ALREADY_EXISTS,
             algo.db.get_packet(zone_id, new_step_id),
             report,
-            [],
-            [],
         )
 
     # If we haven't converged, we create a new step.
@@ -159,7 +160,7 @@ async def _new_step(algo, zone_id, new_step_id):
             "No tiles are refined or deepened in this step."
             " Marking these parent tiles as finished and trying again."
         )
-        return WorkerStatus.NO_NEW_TILES, None, report, [], []
+        return WorkerStatus.NO_NEW_TILES, None, report
 
     # Actually deepen and refine!
     g_new = refine_and_deepen(
@@ -201,7 +202,7 @@ async def _new_step(algo, zone_id, new_step_id):
         f"For zone {zone_id}, starting step {new_step_id}"
         f" with {g_active.n_tiles} tiles to simulate."
     )
-    return (WorkerStatus.NEW_STEP, g_active.df, report)
+    return WorkerStatus.NEW_STEP, g_active.df, report
 
 
 def refine_and_deepen(df, null_hypos, max_K, worker_id):

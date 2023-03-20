@@ -474,7 +474,7 @@ class DuckDBTiles:
             f"""
             insert into zone_mapping 
                 select id, {coordination_id}, zone_id,
-                        (row_number() OVER ())%{n_zones},
+                        (row_number() OVER (order by {ordering}))%{n_zones},
                         {step_id}
                     from results
                         where eligible=true
