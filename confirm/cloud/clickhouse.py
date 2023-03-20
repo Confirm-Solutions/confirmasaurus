@@ -45,7 +45,7 @@ async def backup_table(duck, ch_client, name):
     def move_table_to_ch():
         cols = get_create_table_cols(df)
         if does_table_exist(ch_client, name):
-            command(ch_client, f"DROP TABLE {name}")
+            command(ch_client, f"DROP TABLE {name}", settings=default_insert_settings)
         command(
             ch_client,
             f"""
@@ -53,6 +53,7 @@ async def backup_table(duck, ch_client, name):
             ENGINE = MergeTree()
             ORDER BY ()
             """,
+            settings=default_insert_settings,
         )
         insert_df(ch_client, name, df)
 

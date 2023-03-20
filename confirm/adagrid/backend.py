@@ -32,7 +32,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
     entry_time = time.time()
     if kwargs.get("db", None) is None:
         if kwargs["job_name"] is None:
-            db_filepath = None
+            db_filepath = ":memory:"
         else:
             db_filepath = f"{kwargs['job_name']}.db"
         kwargs["db"] = DuckDBTiles.connect(db_filepath)
