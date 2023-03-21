@@ -5,6 +5,7 @@ from dataclasses import field
 from datetime import datetime
 from typing import Dict
 from typing import List
+from typing import Optional
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -241,6 +242,7 @@ class DuckDBTiles:
     https://github.com/Confirm-Solutions/confirmasaurus/issues/95
     """
 
+    job_name: str
     con: "duckdb.DuckDBPyConnection"
     _tiles_columns_cache: List[str] = None
     _results_columns_cache: List[str] = None
@@ -583,7 +585,7 @@ class DuckDBTiles:
         self.con.execute("create table config as select * from cfg_df")
 
     @staticmethod
-    def connect(path=":memory:"):
+    def connect(job_name: Optional[str] = None):
         """
         Load a tile database from a file.
 
@@ -595,7 +597,12 @@ class DuckDBTiles:
         """
         import duckdb
 
-        return DuckDBTiles(duckdb.connect(path))
+        if job_name is None:
+            db_filepath = ":memory:"
+        else:
+            db_filepath = f"{job_name}.db"
+
+        return DuckDBTiles(job_name, duckdb.connect(db_filepath))
 
 
 done_cols = [

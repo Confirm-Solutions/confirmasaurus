@@ -12,8 +12,8 @@ from distributed.diagnostics.plugin import UploadDirectory
 
 import confirm
 import imprint as ip
-from ..adagrid.backend import Backend
-from ..adagrid.backend import LocalBackend
+from ..adagrid.adagrid import Backend
+from ..adagrid.adagrid import LocalBackend
 
 logger = logging.getLogger(__name__)
 

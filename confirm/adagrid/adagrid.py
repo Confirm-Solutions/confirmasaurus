@@ -29,13 +29,8 @@ def entrypoint(algo_type, kwargs):
 
 async def async_entrypoint(backend, algo_type, kwargs):
     entry_time = time.time()
-
     if kwargs.get("db", None) is None:
-        if kwargs["job_name"] is None:
-            db_filepath = ":memory:"
-        else:
-            db_filepath = f"{kwargs['job_name']}.db"
-        kwargs["db"] = DuckDBTiles.connect(db_filepath)
+        kwargs["db"] = DuckDBTiles.connect(kwargs["job_name"])
     db = kwargs["db"]
 
     async with contextlib.AsyncExitStack() as stack:
@@ -67,15 +62,10 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 await process_packet_df(backend, algo, tiles_df)
 
             with timer("backup"):
-                if (
-                    algo.cfg["backup_interval"] is not None
-                    and algo.cfg["job_name"] is not False
-                    and (algo.cfg["job_name"] is not None or algo.cfg["prod"])
-                    and step_id % algo.cfg["backup_interval"] == 0
+                if (algo.cfg["backup_interval"] is not None) and (
+                    step_id % algo.cfg["backup_interval"] == 0
                 ):
-                    import confirm.cloud.clickhouse as ch
-
-                    ch.backup(algo.cfg["job_name"], db)
+                    await backup(db, algo.cfg)
 
             if status == WorkerStatus.REACHED_N_STEPS:
                 logger.debug(f"Reached n_steps={algo.cfg['n_steps']}. Stopping.")
@@ -91,7 +81,23 @@ async def async_entrypoint(backend, algo_type, kwargs):
             verify_task = asyncio.create_task(db.verify())
             await verify_task
 
-        return db
+    # run a final backup after the job is done and all logging to the DB is
+    # complete.
+    with timer("backup"):
+        await backup(db, algo.cfg)
+    return db
+
+
+async def backup(db, cfg):
+    if (cfg["job_name"] is not False) and (cfg["job_name"] is not None or cfg["prod"]):
+        try:
+            import confirm.cloud.clickhouse as ch
+
+            await ch.backup(cfg["job_name"], db)
+        except Exception:
+            # If a backup fails for some reason, we don't want that
+            # to kill the job.
+            logger.exception("Error backing up database", exc_info=True)
 
 
 def get_basal_step(step_id, n_parallel_steps):

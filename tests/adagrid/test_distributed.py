@@ -4,8 +4,8 @@ import copy
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid.backend import entrypoint
-from confirm.adagrid.backend import LocalBackend
+from confirm.adagrid.adagrid import entrypoint
+from confirm.adagrid.adagrid import LocalBackend
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step

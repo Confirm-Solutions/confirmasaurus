@@ -1,4 +1,4 @@
-from ..adagrid.backend import LocalBackend
+from ..adagrid.adagrid import LocalBackend
 from .modal_backend import process_tiles_config
 from .modal_backend import stub
 

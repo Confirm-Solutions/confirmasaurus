@@ -54,8 +54,8 @@ import pandas as pd
 
 import imprint as ip
 from . import bootstrap
-from .backend import entrypoint
-from .backend import print_report
+from .adagrid import entrypoint
+from .adagrid import print_report
 
 logger = logging.getLogger(__name__)
 

@@ -20,65 +20,61 @@ all_tables = [
     "logs",
     "reports",
     "null_hypos",
-    "zone_mapping",
 ]
 
 
 async def backup(job_name, duck):
-    try:
-        logger.info("Backing up database")
-        ch_client = connect(job_name)
-        if not duck.does_table_exist("backup_status"):
-            backup_df = pd.DataFrame(  # noqa
-                {  # noqa
-                    "table": all_tables,
-                    "next_rowid": np.array([0] * len(all_tables), dtype=np.uint64),
-                }
-            )
-            duck.con.execute(
-                """
-                create table backup_status as select * from backup_df
-            """
-            )
-        await asyncio.gather(
-            *[backup_table(duck, ch_client, name) for name in all_tables]
+    logger.info("Backing up database")
+    ch_client = connect(job_name)
+    if not duck.does_table_exist("backup_status"):
+        backup_df = pd.DataFrame(  # noqa
+            {  # noqa
+                "table_name": all_tables,
+                "next_rowid": np.array([0] * len(all_tables), dtype=np.uint64),
+            }
         )
-        await asyncio.to_thread(
-            command,
-            ch_client,
+        duck.con.execute(
             """
-            ALTER TABLE results
-            UPDATE
-                eligible = and(eligible=true, id not in (select id from done)),
-                active = and(active=true, 
-                    id not in (select id from done where active=false))
-            WHERE
-                eligible = 1
-                and active = 1
-            """,
-            settings=default_insert_settings,
+            create table backup_status as select * from backup_df
+        """
         )
-        logger.info(f"Backup complete to {job_name}")
-    except Exception:
-        # If a backup fails for some reason, we don't want that
-        # to kill the job.
-        logger.exception("Error backing up database", exc_info=True)
+    await asyncio.gather(*[backup_table(duck, ch_client, name) for name in all_tables])
+    logger.info(f"Backup complete to {job_name}")
 
 
-async def restore(ch_db, duck=None):
+async def restore(job_name, duck=None):
+    ch_client = connect(job_name)
     if duck is None:
         duck = DuckDBTiles.connect()
-    await asyncio.gather(*[restore_table(duck, ch_db, name) for name in all_tables])
+    await asyncio.gather(*[restore_table(duck, ch_client, name) for name in all_tables])
+    duck.con.execute(
+        """
+        update results set
+            eligible = (id not in (select id from done)),
+            active = (id not in (select id from done where active=false))
+        where eligible = true and active = true
+        """
+    )
+    duck.con.execute(
+        """
+        update tiles set
+            active = (id not in (select id from done where active=false))
+        where active = true
+        """
+    )
     return duck
 
 
 async def backup_table(duck, ch_client, name):
     # Using rowid to do incremental backups is very simple because no rows are
     # ever deleted in the DB.
-    next_rowid = duck.con.execute(
-        f"select next_rowid from backup_status where table = {name}"
-    )
-    max_rowid = duck.con.execute(f"select max(rowid) from {name}")
+    next_rowid = duck.con.query(
+        f"select next_rowid from backup_status where table_name = '{name}'"
+    ).fetchone()[0]
+    max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
+    if max_rowid is None:
+        # table is empty
+        return
     df = duck.con.query(f"select rowid, * from {name} where rowid >= {next_rowid}").df()
 
     def move_table_to_ch():
@@ -99,7 +95,7 @@ async def backup_table(duck, ch_client, name):
         f"""
         update backup_status 
             set next_rowid = {max_rowid + 1} 
-            where table = {name}
+            where table_name = '{name}'
         """
     )
 
@@ -107,16 +103,12 @@ async def backup_table(duck, ch_client, name):
 async def restore_table(duck, ch_client, name):
     # TODO: might need offset/limit and iteration here.
     def get_table_from_ch():
-        if not does_table_exist(ch_client, name):
-            logger.info(
-                f"Restore skipping table {name} because it"
-                " doesn't exist in the source db."
-            )
-            return
         df = query_df(ch_client, f"select * from {name}")
         if name == "logs":
             df["t"] = df["t"].dt.tz_localize(None)
-        return df.drop(columns=["rowid"])
+        return (
+            df.sort_values(by=["rowid"]).drop(columns=["rowid"]).reset_index(drop=True)
+        )
 
     df = await asyncio.to_thread(get_table_from_ch)  # noqa
     if duck.does_table_exist(name):
@@ -322,11 +314,7 @@ def connect(
     client = get_ch_client(connection_details=connection_details)
     if not no_create:
         # Create job_id database if it doesn't exist
-        command(
-            client,
-            f"create database if not exists {job_id}",
-            settings=default_insert_settings,
-        )
+        command(client, f"create database if not exists {job_id}")
 
     # NOTE: client.database is invading private API, but based on reading
     # the clickhouse_connect code, this is unlikely to break

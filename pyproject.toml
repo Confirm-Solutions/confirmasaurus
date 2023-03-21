@@ -72,6 +72,7 @@ profile = "black"
 [tool.pytest.ini_options]
 addopts = "-p imprint.testing --capture=no --show-capture=no --tb=short --strict-markers --doctest-modules"
 testpaths = ["tests", "imprint/tests"]
+filterwarnings = ["ignore:Deprecated call to `pkg_resources.declare_namespace:DeprecationWarning", "ignore:pkg_resources is deprecated as an API:DeprecationWarning"]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"

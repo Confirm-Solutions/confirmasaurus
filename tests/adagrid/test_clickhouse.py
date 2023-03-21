@@ -44,16 +44,14 @@ def test_backup(ch_db):
         std_target=0.005,
         prod=False,
         tile_batch_size=1,
+        backup_interval=1,
+        job_name=ch_db.database,
     )
 
-    async def _test():
-        await ch.backup(ch_db, db)
-        db2 = await ch.restore(ch_db)
-        for table in ch.all_tables:
-            if not db.does_table_exist(table):
-                continue
-            orig = db.con.query(f"select * from {table}").df()
-            restored = db2.con.query(f"select * from {table}").df()
-            pd.testing.assert_frame_equal(orig, restored)
+    db2 = asyncio.run(ch.restore(ch_db.database))
 
-    asyncio.run(_test())
+    for table in ch.all_tables:
+        print(table)
+        orig = db.con.query(f"select * from {table}").df()
+        restored = db2.con.query(f"select * from {table}").df()
+        pd.testing.assert_frame_equal(orig, restored)
