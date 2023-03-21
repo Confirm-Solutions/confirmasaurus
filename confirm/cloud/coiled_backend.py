@@ -175,7 +175,14 @@ def dask_process_tiles(worker_args, packet_df):
 
 
 class CoiledBackend(Backend):
-    def __init__(self, detach: bool = False, n_workers: int = 1, cluster=None):
+    def __init__(
+        self,
+        restart_workers: bool = False,
+        detach: bool = False,
+        n_workers: int = 1,
+        cluster=None,
+    ):
+        self.restart_workers = restart_workers
         self.detach = detach
         self.n_workers = n_workers
         self.cluster = cluster
@@ -191,6 +198,8 @@ class CoiledBackend(Backend):
         if self.cluster is None:
             self.cluster = setup_cluster(self.n_workers)
         self.client = self.cluster.get_client()
+        if self.restart_workers:
+            self.client.restart()
         algo_entries = [
             "init_K",
             "n_K_double",

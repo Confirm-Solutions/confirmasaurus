@@ -463,7 +463,7 @@ class DuckDBTiles:
         coordination_id = self.con.query(
             """
             select max(coordination_id) + 1 from results
-        """
+            """
         ).fetchone()[0]
 
         ordering = ",".join(

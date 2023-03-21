@@ -152,7 +152,7 @@ async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int):
             import confirm.cloud.clickhouse as ch
 
             logger.info("Backing up database")
-            ch_db = ch.connect(job_name)
+            ch_db = await asyncio.to_thread(ch.connect, job_name)
             await ch.backup(ch_db, db)
             logger.info(f"Backup complete to {ch_db.database}")
         except Exception:
