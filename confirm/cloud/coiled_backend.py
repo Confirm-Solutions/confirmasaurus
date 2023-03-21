@@ -20,14 +20,19 @@ logger = logging.getLogger(__name__)
 
 def create_software_env():
     reqs = subprocess.run(
-        "poetry export --without-hashes", stdout=subprocess.PIPE, shell=True
+        "poetry export --with=cloud --without-hashes",
+        stdout=subprocess.PIPE,
+        shell=True,
     ).stdout.decode("utf-8")
     reqs = reqs.split("\n")
+
+    req_jax = [r.split(";")[0][:-1] for r in reqs if "jax==" in r][0].split("==")[1]
     reqs = [r.split(";")[0][:-1] for r in reqs if "jax" not in r]
-    confirm_dir = os.path.dirname(os.path.dirname(confirm.__file__))
-    with open(os.path.join(confirm_dir, "requirements-coiled.txt"), "r") as f:
-        reqs.extend([L.strip() for L in f.readlines()])
-    reqs = [r for r in reqs if len(r) > 0]
+    reqs.append(
+        "--find-links "
+        "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+    )
+    reqs.append(f"jax[cuda11_cudnn82]=={req_jax}")
     pip_installs = "\n".join([f"    - {r}" for r in reqs])
     environment_yml = f"""
 name: confirm

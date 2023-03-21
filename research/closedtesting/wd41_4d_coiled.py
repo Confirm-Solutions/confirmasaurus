@@ -13,7 +13,6 @@ modal_cfg["timeout"] = 60 * 60 * 24
 
 @stub.function(**modal_cfg)
 def main():
-    import coiled
     import confirm.adagrid as ada
     import confirm.cloud.coiled_backend as coiled_backend
     import confirm.models.wd41 as wd41
@@ -41,7 +40,7 @@ def main():
     )
     db = ada.ada_calibrate(  # noqa
         wd41.WD41,
-        job_name="wd41_4d_v7",
+        job_name="wd41_4d_v10",
         g=grid,
         alpha=0.025,
         bias_target=0.001,
@@ -49,15 +48,11 @@ def main():
         std_target=0.002,
         n_K_double=6,
         calibration_min_idx=70,
-        step_size=2**18,
-        packet_size=2**14,
+        step_size=2**16,
+        packet_size=2**13,
         model_kwargs={"ignore_intersection": True},
-        n_zones=4,
-        backend=coiled_backend.CoiledBackend(
-            restart_workers=True,
-            n_workers=16,
-            cluster=coiled.Cluster(name="confirm-coiled"),
-        ),
+        n_parallel_steps=4,
+        backend=coiled_backend.CoiledBackend(restart_workers=True, n_workers=16),
         n_steps=3,
     )
 

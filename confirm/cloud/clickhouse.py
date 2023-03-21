@@ -369,7 +369,16 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
     )
 
 
-def clear_dbs(ch_client=None, names=None, yes=False):
+def list_dbs(ch_client):
+    return [
+        row["name"]
+        for i, row in retry_ch_action(ch_client.query_df, "show databases").iterrows()
+        if row["name"]
+        not in ["system", "default", "information_schema", "INFORMATION_SCHEMA"]
+    ]
+
+
+def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -395,12 +404,11 @@ def clear_dbs(ch_client=None, names=None, yes=False):
         raise RuntimeError("This function is only for localhost or test databases.")
 
     if names is None:
-        to_drop = []
-        all_dbs = retry_ch_action(ch_client.query_df, "show databases")
-        for db in all_dbs["name"]:
-            if db.startswith("unnamed_"):
-                to_drop.append(db)
+        print('dropping all databases starting with "{}"'.format(prefix))
+        all_dbs = list_dbs(ch_client)
+        to_drop = [db for db in all_dbs if db.startswith(prefix)]
     else:
+        print("dropping specified databases: {}".format(names))
         to_drop = names
 
     if len(to_drop) == 0:
@@ -409,7 +417,7 @@ def clear_dbs(ch_client=None, names=None, yes=False):
         print("Dropping the following databases:")
         print(to_drop)
         if not yes:
-            print("Are you sure? [yN]", flush=True)
+            print("Are you sure? [yN]\nResponse: ", flush=True, end="")
             yes = input() == "y"
 
         if yes:
