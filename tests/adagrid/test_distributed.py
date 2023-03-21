@@ -1,18 +1,16 @@
 import asyncio
 import copy
 
-import numpy as np
 import pandas as pd
 
 import imprint as ip
 from confirm.adagrid.backend import entrypoint
 from confirm.adagrid.backend import LocalBackend
-from confirm.adagrid.convergence import WorkerStatus
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.init import init
-from confirm.adagrid.step import coordinate
 from confirm.adagrid.step import new_step
 from confirm.adagrid.step import process_packet_set
+from confirm.adagrid.step import WorkerStatus
 from confirm.adagrid.validate import ada_validate
 from confirm.adagrid.validate import AdaValidate
 from imprint.models.ztest import ZTest1D
@@ -188,51 +186,6 @@ def test_reload_zone_info():
         algo, incomplete, zone_info = await init(AdaValidate, 1, 1, kwargs2)
         assert incomplete == [(0, 1, 0), (0, 1, 1), (0, 1, 2)]
         assert zone_info[0] == 1
-
-    asyncio.run(_test())
-
-
-def test_coordinate():
-    kwargs = get_test_defaults(ada_validate)
-    db = DuckDBTiles.connect()
-    kwargs["db"] = db
-    backend = LocalBackend()
-
-    async def _test():
-        algo, incomplete, _ = await init(AdaValidate, 1, 1, kwargs)
-        async with backend.setup(algo):
-            await process_packet_set(backend, algo, incomplete)
-        pre_df = db.get_results()
-        assert pre_df["zone_id"].unique() == [0]
-        assert (pre_df["coordination_id"] == 0).all()
-
-        status, zone_steps = await coordinate(algo, 0, 2)
-        assert zone_steps == {0: 0, 1: 0}
-        assert status == WorkerStatus.COORDINATED
-        post_df = db.get_results()
-        assert (np.sort(post_df["zone_id"].unique()) == [0, 1]).all()
-        assert (post_df["coordination_id"] == 1).all()
-        assert post_df.shape[0] == pre_df.shape[0]
-
-        zone_map_df = db.get_zone_mapping()
-        assert (zone_map_df["coordination_id"] == 1).all()
-        assert (zone_map_df["old_zone_id"] == 0).all()
-        assert (zone_map_df["id"].isin(pre_df["id"])).all()
-        assert (zone_map_df["id"].isin(post_df["id"])).all()
-        assert (
-            zone_map_df.set_index("id").loc[post_df["id"], "new_zone_id"].values
-            == post_df["zone_id"]
-        ).all()
-
-        # Coordinate again to check idempotency
-        status2, _ = await coordinate(algo, 0, 2)
-        assert status == status2
-        idem_df = db.get_results()
-        pd.testing.assert_frame_equal(
-            idem_df.drop("coordination_id", axis=1),
-            post_df.drop("coordination_id", axis=1),
-        )
-        assert (idem_df["coordination_id"] == 2).all()
 
     asyncio.run(_test())
 

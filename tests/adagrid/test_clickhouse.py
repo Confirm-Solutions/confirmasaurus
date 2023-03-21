@@ -44,8 +44,6 @@ def test_backup(ch_db):
         std_target=0.005,
         prod=False,
         tile_batch_size=1,
-        coordinate_every=1,
-        n_zones=2,
     )
 
     async def _test():

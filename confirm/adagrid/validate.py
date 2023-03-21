@@ -81,10 +81,12 @@ class AdaValidate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    async def convergence_criterion(self, zone_id, report):
-        max_tie_est = self.db.worst_tile(zone_id, "tie_est desc")["tie_est"].iloc[0]
+    async def convergence_criterion(self, basal_step_id, report):
+        max_tie_est = self.db.worst_tile(basal_step_id, "tie_est desc")["tie_est"].iloc[
+            0
+        ]
         next_tile = self.db.worst_tile(
-            zone_id, "total_cost_order, tie_bound_order"
+            basal_step_id, "total_cost_order, tie_bound_order"
         ).iloc[0]
         report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
         report.update(
@@ -107,10 +109,10 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    async def select_tiles(self, zone_id, new_step_id, report, max_tie_est):
+    async def select_tiles(self, basal_step_id, new_step_id, report, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
-            zone_id,
+            basal_step_id,
             new_step_id,
             self.cfg["step_size"],
             "total_cost_order, tie_bound_order",
@@ -161,11 +163,10 @@ def ada_validate(
     step_size=2**10,
     timeout: int = 60 * 60 * 12,
     packet_size: int = None,
-    coordinate_every: int = 1,
-    n_zones: int = 1,
+    n_parallel_steps: int = 1,
     prod: bool = True,
     job_name: str = None,
-    backup_interval: int = 10 * 60,
+    backup_interval: int = 5,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -210,10 +211,10 @@ def ada_validate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
-        coordinate_every: The number of steps to run before re-dividing tiles
-            into zones. If n_zones==1, no coordination will be performed. Defaults
-            to 1.
-        n_zones: The number of zones to divide the tiles into. Defaults to 1.
+        n_parallel_steps: The number of adagrid steps to run in parallel.
+            Default to 1. This is useful for maintaining a continuous flow of tiles
+            for simulation even while the leader node is preparing a new step. See
+            `get_basal_step` for details on the precise behavior.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. If prod is False, we also skip database backups
@@ -222,8 +223,8 @@ def ada_validate(
             for storing long-term backups in Clickhouse. By default (None), an
             in-memory DuckDB is used and a random UUID is chosen for
             Clickhouse.
-        backup_interval: The number of seconds between backups. Defaults to 10 minutes.
-            If None, no backups will be performed.
+        backup_interval: The number of steps between backups. Defaults to 5
+            steps. If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

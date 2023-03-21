@@ -4,6 +4,8 @@ import os
 import time
 import uuid
 
+import numpy as np
+import pandas as pd
 import pyarrow
 
 from ..adagrid.db import DuckDBTiles
@@ -22,8 +24,45 @@ all_tables = [
 ]
 
 
-async def backup(ch_db, duck):
-    await asyncio.gather(*[backup_table(duck, ch_db, name) for name in all_tables])
+async def backup(job_name, duck):
+    try:
+        logger.info("Backing up database")
+        ch_client = connect(job_name)
+        if not duck.does_table_exist("backup_status"):
+            backup_df = pd.DataFrame(  # noqa
+                {  # noqa
+                    "table": all_tables,
+                    "next_rowid": np.array([0] * len(all_tables), dtype=np.uint64),
+                }
+            )
+            duck.con.execute(
+                """
+                create table backup_status as select * from backup_df
+            """
+            )
+        await asyncio.gather(
+            *[backup_table(duck, ch_client, name) for name in all_tables]
+        )
+        await asyncio.to_thread(
+            command,
+            ch_client,
+            """
+            ALTER TABLE results
+            UPDATE
+                eligible = and(eligible=true, id not in (select id from done)),
+                active = and(active=true, 
+                    id not in (select id from done where active=false))
+            WHERE
+                eligible = 1
+                and active = 1
+            """,
+            settings=default_insert_settings,
+        )
+        logger.info(f"Backup complete to {job_name}")
+    except Exception:
+        # If a backup fails for some reason, we don't want that
+        # to kill the job.
+        logger.exception("Error backing up database", exc_info=True)
 
 
 async def restore(ch_db, duck=None):
@@ -34,33 +73,39 @@ async def restore(ch_db, duck=None):
 
 
 async def backup_table(duck, ch_client, name):
-    if not duck.does_table_exist(name):
-        logger.info(
-            f"Backup skipping table {name} because it"
-            " doesn't exist in the source db."
-        )
-        return
-    df = duck.con.query(f"select * from {name}").df()
+    # Using rowid to do incremental backups is very simple because no rows are
+    # ever deleted in the DB.
+    next_rowid = duck.con.execute(
+        f"select next_rowid from backup_status where table = {name}"
+    )
+    max_rowid = duck.con.execute(f"select max(rowid) from {name}")
+    df = duck.con.query(f"select rowid, * from {name} where rowid >= {next_rowid}").df()
 
     def move_table_to_ch():
         cols = get_create_table_cols(df)
-        if does_table_exist(ch_client, name):
-            command(ch_client, f"DROP TABLE {name}", settings=default_insert_settings)
         command(
             ch_client,
             f"""
-            CREATE TABLE {name} ({",".join(cols)})
+            CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
             ENGINE = MergeTree()
             ORDER BY ()
             """,
             settings=default_insert_settings,
         )
-        insert_df(ch_client, name, df)
+        insert_df(ch_client, name, df, settings=default_insert_settings)
 
     await asyncio.to_thread(move_table_to_ch)
+    duck.con.execute(
+        f"""
+        update backup_status 
+            set next_rowid = {max_rowid + 1} 
+            where table = {name}
+        """
+    )
 
 
 async def restore_table(duck, ch_client, name):
+    # TODO: might need offset/limit and iteration here.
     def get_table_from_ch():
         if not does_table_exist(ch_client, name):
             logger.info(
@@ -71,7 +116,7 @@ async def restore_table(duck, ch_client, name):
         df = query_df(ch_client, f"select * from {name}")
         if name == "logs":
             df["t"] = df["t"].dt.tz_localize(None)
-        return df
+        return df.drop(columns=["rowid"])
 
     df = await asyncio.to_thread(get_table_from_ch)  # noqa
     if duck.does_table_exist(name):
@@ -192,7 +237,7 @@ def query_df(client, query):
 default_insert_settings = dict(
     insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
 )
-# default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
 
 
 def insert_df(client, table, df, settings=None):

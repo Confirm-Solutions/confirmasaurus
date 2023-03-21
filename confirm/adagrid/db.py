@@ -154,23 +154,15 @@ class PandasTiles:
         return list(
             map(
                 tuple,
-                not_yet_simulated_df[["zone_id", "step_id", "packet_id"]]
+                not_yet_simulated_df[["step_id", "packet_id"]]
                 .drop_duplicates()
-                .sort_values(by=["zone_id", "step_id", "packet_id"])
+                .sort_values(by=["step_id", "packet_id"])
                 .values,
             )
         )
 
-    def get_zone_steps(self):
-        return self.tiles.groupby("zone_id")["step_id"].max().to_dict()
-
-    def n_existing_packets(self, zone_id, step_id):
-        return (
-            self.tiles[
-                (self.tiles["zone_id"] == zone_id) & (self.tiles["step_id"] == step_id)
-            ]["packet_id"].max()
-            + 1
-        )
+    def n_existing_packets(self, step_id):
+        return self.tiles[self.tiles["step_id"] == step_id]["packet_id"].max() + 1
 
     def insert_report(self, report):
         self.reports.append(report)
@@ -200,28 +192,34 @@ class PandasTiles:
         self.results.loc[df["id"], "eligible"] = False
         self.results.loc[df["id"], "active"] = df["active"]
 
-    def get_packet(self, zone_id: int, step_id: int, packet_id: int) -> pd.DataFrame:
+    def get_packet(self, step_id: int, packet_id: int) -> pd.DataFrame:
         where = (self.tiles["step_id"] == step_id) & (
             self.tiles["packet_id"] == packet_id
         )
         return self.tiles.loc[where]
 
     def next(
-        self, zone_id: int, new_step_id: int, n: int, order_col: str
+        self, basal_step_id: int, new_step_id: int, n: int, order_col: str
     ) -> pd.DataFrame:
-        out = self.results.loc[self.results["eligible"]].nsmallest(n, order_col)
+        out = self.results.loc[
+            (self.results["step_id"] <= basal_step_id) & self.results["eligible"]
+        ].nsmallest(n, order_col)
         return out
 
-    def bootstrap_lamss(self, zone_id: int) -> pd.Series:
+    def bootstrap_lamss(self, basal_step_id: int) -> pd.Series:
         nB = (
             max([int(c[6:]) for c in self.results.columns if c.startswith("B_lams")])
             + 1
         )
-        active_tiles = self.results.loc[self.results["active"]]
+        active_tiles = self.results.loc[
+            (self.results["step_id"] <= basal_step_id) & self.results["active"]
+        ]
         return active_tiles[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0)
 
-    def worst_tile(self, zone_id: int, orderer: str) -> pd.DataFrame:
-        active_tiles = self.results.loc[self.results["active"]]
+    def worst_tile(self, basal_step_id: int, orderer: str) -> pd.DataFrame:
+        active_tiles = self.results.loc[
+            (self.results["step_id"] <= basal_step_id) & self.results["active"]
+        ]
         return active_tiles.loc[[active_tiles[orderer].idxmin()]]
 
     async def verify(self):
@@ -315,32 +313,19 @@ class DuckDBTiles:
             restrict = ""
         return self.con.query(
             f"""
-            select zone_id, step_id, packet_id
+            select step_id, packet_id
                 from tiles
                 where active=true {restrict}
-                group by zone_id, step_id, packet_id
-                order by zone_id, step_id, packet_id
+                group by step_id, packet_id
+                order by step_id, packet_id
             """
         ).fetchall()
 
-    def get_zone_steps(self):
-        return dict(
-            self.con.query(
-                """
-            select zone_id, max(step_id)
-                from tiles
-                    where coordination_id = (select max(coordination_id) from tiles)
-                group by zone_id
-                order by zone_id
-            """
-            ).fetchall()
-        )
-
-    def n_existing_packets(self, zone_id, step_id):
+    def n_existing_packets(self, step_id):
         return self.con.query(
             f"""
             select max(packet_id) + 1 from tiles
-                where zone_id = {zone_id} and step_id = {step_id}
+                where step_id = {step_id}
             """
         ).fetchone()[0]
 
@@ -363,6 +348,9 @@ class DuckDBTiles:
         logger.debug(f"finish: {which.head()}")
         column_order = ",".join(which.columns)
         self.con.execute(f"insert into done select {column_order} from which")
+        # Updating active/eligible is not strictly necessary since it can be
+        # inferred from the info in the done table. But, updating the flags on
+        # the tiles/results tables is more efficient for future queries.
         self.con.execute(
             "update tiles set active=w.active from which w where tiles.id=w.id"
         )
@@ -374,7 +362,7 @@ class DuckDBTiles:
             """
         )
 
-    def get_packet(self, zone_id: int, step_id: int, packet_id: int = None):
+    def get_packet(self, step_id: int, packet_id: int = None):
         if self.does_table_exist("results"):
             restrict_clause = "and id not in (select id from results)"
         else:
@@ -385,15 +373,14 @@ class DuckDBTiles:
             f"""
             select * from tiles
                 where
-                    zone_id = {zone_id}
-                    and step_id = {step_id}
+                    step_id = {step_id}
                     and active=true
                     {restrict_clause}
             """,
         ).df()
 
     def next(
-        self, zone_id: int, new_step_id: int, n: int, orderer: str
+        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
     ) -> pd.DataFrame:
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
@@ -402,15 +389,14 @@ class DuckDBTiles:
             f"""
             select * from results 
                 where eligible=true
-                    and zone_id = {zone_id}
-                    and step_id < {new_step_id}
+                    and step_id <= {basal_step_id}
             order by {orderer} limit {n}
             """
         ).df()
         t.commit()
         return out
 
-    def bootstrap_lamss(self, zone_id: int) -> List[float]:
+    def bootstrap_lamss(self, basal_step_id: int) -> List[float]:
         # Get the number of bootstrap lambda* columns
         nB = (
             max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
@@ -419,101 +405,28 @@ class DuckDBTiles:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        if zone_id is None:
-            zone_id_clause = ""
-        else:
-            zone_id_clause = f"and zone_id = {zone_id}"
         lamss = self.con.execute(
             f"""
             select {cols} from results 
                 where active=true
-                    {zone_id_clause}
+                    and step_id <= {basal_step_id}
             """
         ).fetchall()[0]
 
         return lamss
 
-    def worst_tile(self, zone_id, order_col):
-        if zone_id is None:
-            zone_id_clause = ""
-        else:
-            zone_id_clause = f"and zone_id = {zone_id}"
+    def worst_tile(self, basal_step_id, order_col):
         return self.con.execute(
             f"""
             select * from results
                 where active=true
-                    {zone_id_clause}
+                    and step_id <= {basal_step_id}
                 order by {order_col} limit 1
             """
         ).df()
 
-    def coordinate(self, step_id: int, n_zones: int):
-        if not self.does_table_exist("zone_mapping"):
-            self.con.execute(
-                """
-                create table zone_mapping (
-                    id ubigint,
-                    coordination_id int,
-                    old_zone_id int,
-                    new_zone_id int,
-                    before_step_id int
-                )"""
-            )
-
-        coordination_id = self.con.query(
-            """
-            select max(coordination_id) + 1 from results
-            """
-        ).fetchone()[0]
-
-        ordering = ",".join(
-            [f"theta{i}" for i in range(self.dimension())]
-            + [c for c in self._results_columns() if c.startswith("null_truth")]
-        )
-        self.con.execute(
-            f"""
-            insert into zone_mapping 
-                select id, {coordination_id}, zone_id,
-                        (row_number() OVER (order by {ordering}))%{n_zones},
-                        {step_id}
-                    from results
-                        where eligible=true
-                            and active=true
-                    order by {ordering}
-        """
-        )
-        self.con.execute(
-            f"""
-            update results set 
-                    zone_id=(
-                        select new_zone_id from zone_mapping
-                            where zone_mapping.id=results.id
-                            and zone_mapping.coordination_id={coordination_id}
-                    ),
-                    coordination_id={coordination_id}
-                where eligible=true
-                    and active=true
-        """
-        )
-        n_results = self.con.query(
-            f""" 
-            select count(*) from results where coordination_id={coordination_id}
-        """
-        ).fetchone()[0]
-        zone_steps = dict(
-            self.con.query(
-                f"""
-            select zone_id, max(step_id) from results
-                    where coordination_id={coordination_id}
-                group by zone_id
-                order by zone_id
-        """
-            ).fetchall()
-        )
-        return n_results, zone_steps
-
-    def get_zone_mapping(self):
-        return self.con.execute("select * from zone_mapping").df()
+    def get_next_step(self):
+        return self.con.query("select max(step_id) + 1 from results").fetchone()[0]
 
     async def verify(db):
         duplicate_tiles = db.con.query(
@@ -653,7 +566,6 @@ class DuckDBTiles:
         self.con.execute(
             """
             create table done (
-                    zone_id UINTEGER,
                     step_id UINTEGER,
                     packet_id INTEGER,
                     id UBIGINT,
@@ -687,7 +599,6 @@ class DuckDBTiles:
 
 
 done_cols = [
-    "zone_id",
     "step_id",
     "packet_id",
     "id",

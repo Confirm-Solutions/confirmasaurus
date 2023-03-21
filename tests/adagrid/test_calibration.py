@@ -77,28 +77,27 @@ def test_one_zone_distributed(duckdb, snapshot):
 
 
 @pytest.mark.slow
-def test_four_zones(duckdb, ch_db, snapshot):
+def test_parallel_steps(duckdb, ch_db, snapshot):
     cal_tester(
         duckdb,
         snapshot,
         prod=True,
         backup_interval=1,
         job_name=ch_db.database,
-        n_zones=4,
-        coordinate_every=1,
+        step_size=3,
+        n_parallel_steps=4,
     )
 
 
 @pytest.mark.slow
-def test_four_zones_distributed(duckdb, snapshot):
+def test_parallel_steps_distributed(duckdb, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_four_zones")
     cal_tester(
         duckdb,
         snapshot,
-        n_zones=4,
-        coordinate_every=1,
+        n_parallel_steps=4,
         backend=ModalBackend(n_workers=4, gpu=False),
     )
 

@@ -8,14 +8,13 @@ from pprint import pformat
 import jax
 import numpy as np
 
-from .convergence import WorkerStatus
 from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
-from .step import coordinate
 from .step import new_step
 from .step import process_packet_df
 from .step import process_packet_set
+from .step import WorkerStatus
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +29,7 @@ def entrypoint(algo_type, kwargs):
 
 async def async_entrypoint(backend, algo_type, kwargs):
     entry_time = time.time()
+
     if kwargs.get("db", None) is None:
         if kwargs["job_name"] is None:
             db_filepath = ":memory:"
@@ -37,145 +37,79 @@ async def async_entrypoint(backend, algo_type, kwargs):
             db_filepath = f"{kwargs['job_name']}.db"
         kwargs["db"] = DuckDBTiles.connect(db_filepath)
     db = kwargs["db"]
-    from contextlib import AsyncExitStack
 
-    async with AsyncExitStack() as stack:
-        stack.enter_context(DatabaseLogging(db))
-
+    async with contextlib.AsyncExitStack() as stack:
         with timer("init"):
-            algo, incomplete_packets, zone_steps = await init(
-                algo_type, 1, kwargs["n_zones"], kwargs
-            )
-            every = algo.cfg["coordinate_every"]
-            n_zones = algo.cfg["n_zones"]
+            stack.enter_context(DatabaseLogging(db))
+            algo, incomplete_packets, next_step = await init(algo_type, 1, kwargs)
 
-        await stack.enter_async_context(
-            backup_daemon(
-                db, algo.cfg["prod"], algo.cfg["job_name"], algo.cfg["backup_interval"]
-            )
-        )
-
-        with timer("setup"):
+        with timer("backend.setup"):
             await stack.enter_async_context(backend.setup(algo))
-
-        def get_next_coord(step_id):
-            return step_id + every - (step_id % every)
-
-        min_step_completed = min(zone_steps.values())
-        max_step_completed = max(zone_steps.values())
-        next_coord = get_next_coord(min_step_completed)
-        assert next_coord == get_next_coord(max_step_completed)
-        start_step = min_step_completed + 1
 
         with timer("process_initial_incompletes"):
             await process_packet_set(backend, algo, np.array(incomplete_packets))
 
-        while start_step < algo.cfg["n_steps"]:
+        for step_id in range(next_step, algo.cfg["n_steps"]):
+            with timer("verify"):
+                verify_task = asyncio.create_task(db.verify())
+                await verify_task
+
             if time.time() - entry_time > kwargs["timeout"]:
                 logger.info("Job timeout reached, stopping.")
                 pass
 
-            if n_zones > 1:
-                if next_coord == start_step:
-                    # If there's more than one zone, then we need to coordinate.
-                    # NOTE: coordinations happen *before* the same-named step.
-                    # e.g. a coordination at step 5 happens before new_step and
-                    # process_packets for 5.
-                    with timer("coordinate"):
-                        coord_status, zone_steps = await coordinate(
-                            algo, next_coord, n_zones
-                        )
+            with timer("new step"):
+                logger.debug(f"Beginning step {step_id}")
+                basal_step_id = get_basal_step(step_id, algo.cfg["n_parallel_steps"])
+                status, tiles_df = await new_step(algo, basal_step_id, step_id)
 
-                    if coord_status.done():
-                        break
+            with timer("process packets"):
+                await process_packet_df(backend, algo, tiles_df)
 
-                    next_coord = get_next_coord(next_coord)
-                    assert next_coord > start_step
-                end_step = min(next_coord, algo.cfg["n_steps"] + 1)
-            else:
-                end_step = algo.cfg["n_steps"] + 1
+            with timer("backup"):
+                if (
+                    algo.cfg["backup_interval"] is not None
+                    and algo.cfg["job_name"] is not False
+                    and (algo.cfg["job_name"] is not None or algo.cfg["prod"])
+                    and step_id % algo.cfg["backup_interval"] == 0
+                ):
+                    import confirm.cloud.clickhouse as ch
 
-            with timer("run_zones"):
-                statuses = await asyncio.gather(
-                    *[
-                        run_zone(backend, algo, zone_id, start_step, end_step)
-                        for zone_id in zone_steps
-                    ]
-                )
-                start_step = end_step
-                assert len(statuses) == len(zone_steps)
+                    ch.backup(algo.cfg["job_name"], db)
 
-            with timer("verify"):
-                verify_task = asyncio.create_task(algo.db.verify())
-                await verify_task
-
-            # If there's only one zone and that zone is done, then we're
-            # totally done.
-            if len(statuses) == 1:
-                if statuses[0].done():
-                    break
+            if status == WorkerStatus.REACHED_N_STEPS:
+                logger.debug(f"Reached n_steps={algo.cfg['n_steps']}. Stopping.")
+                break
+            elif status == WorkerStatus.CONVERGED and step_id == basal_step_id + 1:
+                logger.debug("Converged. Stopping.")
+                break
+            elif status == WorkerStatus.EMPTY_STEP and step_id == basal_step_id + 1:
+                logger.debug("Empty step. Stopping.")
+                break
 
         with timer("verify"):
-            verify_task = asyncio.create_task(algo.db.verify())
+            verify_task = asyncio.create_task(db.verify())
             await verify_task
 
-        return algo.db
+        return db
 
 
-async def run_zone(backend, algo, zone_id, start_step, end_step):
-    if start_step >= end_step:
-        return WorkerStatus.REACHED_N_STEPS, []
-
-    with timer("run_zone(%s, %s, %s)" % (zone_id, start_step, end_step)):
-        logger.debug(
-            f"Zone {zone_id} running from step {start_step} "
-            f"through step {end_step - 1}."
-        )
-        for step_id in range(start_step, end_step):
-            logger.debug(f"Zone {zone_id} beginning step {step_id}")
-            status, tiles_df = await new_step(algo, zone_id, step_id)
-            await process_packet_df(backend, algo, tiles_df)
-            if status.done():
-                logger.debug(f"Zone {zone_id} finished with status {status}.")
-                break
-    return status
-
-
-@contextlib.asynccontextmanager
-async def backup_daemon(db, prod: bool, job_name: str, backup_interval: int):
-    if backup_interval is None or job_name is False or (job_name is None and not prod):
-        yield
-        return
-
-    async def backup():
-        try:
-            import confirm.cloud.clickhouse as ch
-
-            logger.info("Backing up database")
-            ch_db = await asyncio.to_thread(ch.connect, job_name)
-            await ch.backup(ch_db, db)
-            logger.info(f"Backup complete to {ch_db.database}")
-        except Exception:
-            # If one backup fails for some reason, we don't want that to stop
-            # the backup daemon or to kill the job.
-            logger.exception("Error backing up database")
-
-    repeat = True
-
-    async def backup_repeater():
-        while repeat:
-            await asyncio.sleep(backup_interval)
-            await backup()
-
-    task = asyncio.create_task(backup_repeater())
-    yield
-    # It's okay to cancel here because the backup task is in the same
-    # thread as this code and therefore we will never interrupt a backup by
-    # canceling.
-    repeat = False
-    task.cancel()
-    # We always want to backup before exiting.
-    await backup()
+def get_basal_step(step_id, n_parallel_steps):
+    """
+    >>> id = np.arange(1, 10)
+    >>> basal = np.maximum(3 * (np.arange(1, 10) // 3) - 1, 0)
+    >>> np.stack((id, basal), axis=-1)
+    array([[1, 0],
+           [2, 0],
+           [3, 2],
+           [4, 2],
+           [5, 2],
+           [6, 5],
+           [7, 5],
+           [8, 5],
+           [9, 8]])
+    """
+    return max(n_parallel_steps * (step_id // n_parallel_steps) - 1, 0)
 
 
 @contextlib.contextmanager

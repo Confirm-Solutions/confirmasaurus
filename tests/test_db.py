@@ -20,8 +20,6 @@ def example_grid(x1, x2):
     H = ip.planar_null.HyperPlane(np.array([-1]), 0)
     g = ip.create_grid(theta, radii=radii, null_hypos=[H])
     # Typically these fields would be set by the adagrid code.
-    g.df["coordination_id"] = 0
-    g.df["zone_id"] = 0
     g.df["step_id"] = 17
     g.df["packet_id"] = np.arange(g.df.shape[0])
     return g
@@ -36,7 +34,6 @@ def assert_frame_equal_special(pd_df, db_df):
     pd.testing.assert_frame_equal(
         pd_df.sort_values("theta0").reset_index(drop=True),
         compare_df.sort_values("theta0").reset_index(drop=True),
-        # TODO: remove
         check_dtype=False,
         check_like=True,
     )
