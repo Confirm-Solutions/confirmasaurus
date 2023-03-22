@@ -223,10 +223,10 @@ class PandasTiles:
         ]
         return active_tiles.loc[[active_tiles[orderer].idxmin()]]
 
-    async def verify(self):
+    def verify(self):
         pass
 
-    async def init_grid(self, df: pd.DataFrame) -> None:
+    def init_grid(self, df: pd.DataFrame) -> None:
         df = df.set_index("id")
         df.insert(0, "id", df.index)
         self.tiles = df
@@ -344,7 +344,12 @@ class DuckDBTiles:
             self.con.execute("create table if not exists results as select * from df")
             return
         column_order = ",".join(self._results_columns())
+        start = time.time()
         self.con.execute(f"insert into results select {column_order} from df")
+        logger.debug(
+            f"Inserting {df.shape[0]} rows into"
+            f" results took {time.time() - start:.2f} seconds."
+        )
 
     def insert_done(self, which):
         logger.debug(f"finish: {which.head()}")
@@ -430,7 +435,7 @@ class DuckDBTiles:
     def get_next_step(self):
         return self.con.query("select max(step_id) + 1 from tiles").fetchone()[0]
 
-    async def verify(db):
+    def verify(db):
         duplicate_tiles = db.con.query(
             "select id from tiles group by id having count(*) > 1"
         ).df()
@@ -561,7 +566,7 @@ class DuckDBTiles:
     def insert_config(self, cfg_df):
         return self.con.execute("insert into config select * from cfg_df")
 
-    async def init_grid(
+    def init_grid(
         self, tiles_df: pd.DataFrame, null_hypos_df: pd.DataFrame, cfg_df: pd.DataFrame
     ) -> None:
         self.con.execute("create table tiles as select * from tiles_df")

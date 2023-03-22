@@ -76,7 +76,7 @@ class AdaCalibrate:
     def get_orderer(self):
         return "orderer"
 
-    async def process_tiles(self, *, tiles_df, tile_batch_size):
+    def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
@@ -108,7 +108,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df, lams_df), axis=1)
 
-    async def convergence_criterion(self, basal_step_id, report):
+    def convergence_criterion(self, basal_step_id, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -132,6 +132,7 @@ class AdaCalibrate:
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
+        logger.debug("Computing bias and standard deviation of lambda**")
         B_lamss = self.db.bootstrap_lamss(basal_step_id)
         worst_tile_tie_sum = self.driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
@@ -167,7 +168,7 @@ class AdaCalibrate:
         )
         return report["converged"], None
 
-    async def select_tiles(self, basal_step_id, new_step_id, report, _):
+    def select_tiles(self, basal_step_id, new_step_id, report, _):
         tiles_df = self.db.next(
             basal_step_id, new_step_id, self.cfg["step_size"], "orderer"
         )
@@ -191,25 +192,12 @@ class AdaCalibrate:
         # To answer whether a tile might ever be the worst tile, we compare the
         # given tile's bootstrapped mean lambda* against the bootstrapped mean
         # lambda* of the tile with the lowest mean lambda*
-        # - recomputed with zero grid_cost (that is: alpha = alpha0)
-        #   by specifying a tiny radius
-        # - recomputed with the maximum allowed K
         #
-        # If the tile's mean lambda* is less the mean lambda* of this modified
+        # If the tile's mean lambda* is less the mean lambda* of this worst
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
         twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
-        for col in twb_worst_tile.columns:
-            if col.startswith("radii"):
-                twb_worst_tile[col] = 1e-6
-        twb_worst_tile["K"] = self.max_K
-        twb_worst_tile_lams = self.driver.bootstrap_calibrate(
-            twb_worst_tile,
-            self.cfg["alpha"],
-            calibration_min_idx=self.cfg["calibration_min_idx"],
-            tile_batch_size=1,
-        )
-        twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
+        twb_worst_tile_mean_lams = twb_worst_tile["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
 
         ########################################

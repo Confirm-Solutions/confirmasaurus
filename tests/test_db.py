@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from pathlib import Path
 
@@ -45,17 +44,15 @@ class DBTester:
         g.df.index = g.df.index.astype(np.uint64)
         pd_tiles = PandasTiles()
 
-        asyncio.run(pd_tiles.init_grid(g.df))
+        pd_tiles.init_grid(g.df)
 
         db_tiles = self.connect()
         self.init_grid(db_tiles, g)
         return g, pd_tiles, db_tiles
 
     def init_grid(self, db, g):
-        asyncio.run(
-            db.init_grid(
-                g.df, _serialize_null_hypos(g.null_hypos), pd.DataFrame([dict(a=1)])
-            )
+        db.init_grid(
+            g.df, _serialize_null_hypos(g.null_hypos), pd.DataFrame([dict(a=1)])
         )
 
     def insert_fake_results(self, db, zone_id=0):
@@ -154,14 +151,13 @@ class DBTester:
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
 
-        pd_work = pd_tiles.next(0, 18, 3, "theta0")
-        db_work = db_tiles.next(0, 18, 3, "theta0")
+        pd_work = pd_tiles.next(17, 18, 3, "theta0")
+        db_work = db_tiles.next(17, 18, 3, "theta0")
         assert_frame_equal_special(pd_work, db_work)
         assert_frame_equal_special(pd_tiles.get_results(), db_tiles.get_results())
 
         def insert_done(db_work, pd_work):
             cols = [
-                "zone_id",
                 "step_id",
                 "packet_id",
                 "id",
@@ -183,8 +179,8 @@ class DBTester:
         insert_done(db_work, pd_work)
         assert_frame_equal_special(pd_tiles.get_tiles(), db_tiles.get_tiles())
 
-        pd_work = pd_tiles.next(0, 18, 7, "theta0")
-        db_work = db_tiles.next(0, 18, 7, "theta0")
+        pd_work = pd_tiles.next(17, 18, 7, "theta0")
+        db_work = db_tiles.next(17, 18, 7, "theta0")
         assert pd_work.shape[0] == 2
         assert db_work.shape[0] == 2
         assert_frame_equal_special(pd_work, db_work)
@@ -196,17 +192,11 @@ class DBTester:
         assert not pd_tiles.get_tiles()["active"].any()
         assert not db_tiles.get_tiles()["active"].any()
 
-    def test_next_two_zones(self):
-        g, pd_tiles, db_tiles = self.prepped_dbs()
-        self.insert_fake_results(db_tiles, zone_id=0)
-        self.insert_fake_results(db_tiles, zone_id=1)
-        assert db_tiles.next(1, 18, 15, "theta0").shape[0] == 5
-
     def test_get_packet(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
 
-        pd_work = pd_tiles.get_packet(0, 17, 5)
-        db_work = db_tiles.get_packet(0, 17, 5)
+        pd_work = pd_tiles.get_packet(17, 5)
+        db_work = db_tiles.get_packet(17, 5)
         assert_frame_equal_special(pd_work, db_work)
 
     def test_bootstrap_lamss(self):
@@ -219,14 +209,14 @@ class DBTester:
         g.df["orderer"] = np.linspace(-1, 1, g.n_tiles)
 
         pd_tiles = PandasTiles()
-        asyncio.run(pd_tiles.init_grid(g.df))
+        pd_tiles.init_grid(g.df)
         pd_tiles.insert_results(g.df, "orderer")
         db_tiles = self.connect()
         self.init_grid(db_tiles, g)
         db_tiles.insert_results(g.df, "orderer")
 
         np.testing.assert_allclose(
-            pd_tiles.bootstrap_lamss(None), db_tiles.bootstrap_lamss(None)
+            pd_tiles.bootstrap_lamss(17), db_tiles.bootstrap_lamss(17)
         )
 
     def test_db_logging(self):
@@ -251,9 +241,9 @@ class TestDuckDB(DBTester):
         g = example_grid(-1, 1)
         p = Path("test.db")
         p.unlink(missing_ok=True)
-        db_tiles = DuckDBTiles.connect(path=str(p))
+        db_tiles = DuckDBTiles.connect(job_name="test")
         self.init_grid(db_tiles, g)
         db_tiles.close()
 
-        db_tiles2 = DuckDBTiles.connect(path=str(p))
+        db_tiles2 = DuckDBTiles.connect(job_name="test")
         assert_frame_equal_special(g.df, db_tiles2.get_tiles())

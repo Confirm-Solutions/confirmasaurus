@@ -16,7 +16,7 @@ import imprint as ip
 logger = logging.getLogger(__name__)
 
 
-async def init(algo_type, worker_id, kwargs):
+def init(algo_type, worker_id, kwargs):
     db = kwargs["db"]
     g = kwargs.get("g", None)
 
@@ -29,13 +29,13 @@ async def init(algo_type, worker_id, kwargs):
     if g is not None and not tiles_exists:
         cfg, null_hypos = first(kwargs)
     else:
-        cfg, null_hypos = await join(db, kwargs)
+        cfg, null_hypos = join(db, kwargs)
 
     cfg["worker_id"] = worker_id
     add_system_cfg(cfg)
 
     if g is not None and not tiles_exists:
-        incomplete_packets = await init_grid(g, db, cfg)
+        incomplete_packets = init_grid(g, db, cfg)
         next_step = 1
     else:
         db.insert_config(pd.DataFrame([cfg]))
@@ -98,7 +98,7 @@ def first(kwargs):
     return cfg, kwargs["g"].null_hypos
 
 
-async def join(db, kwargs):
+def join(db, kwargs):
     # If we are resuming a job, we need to load the config from the database.
     load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
@@ -160,7 +160,7 @@ def add_system_cfg(cfg):
     cfg["max_K"] = cfg["init_K"] * 2 ** cfg["n_K_double"]
 
 
-async def init_grid(g, db, cfg):
+def init_grid(g, db, cfg):
     # Copy the input grid so that the caller is not surprised by any changes.
     df = copy.deepcopy(g.df)
     df["K"] = cfg["init_K"]
@@ -172,7 +172,7 @@ async def init_grid(g, db, cfg):
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
 
-    await db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
+    db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
 
     n_packets = df["packet_id"].nunique()
     logger.debug(

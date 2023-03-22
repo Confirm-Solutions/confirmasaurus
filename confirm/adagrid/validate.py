@@ -24,7 +24,7 @@ class AdaValidate:
     def get_orderer(self):
         return "total_cost_order, tie_bound_order"
 
-    async def process_tiles(self, *, tiles_df, tile_batch_size):
+    def process_tiles(self, *, tiles_df, tile_batch_size):
         # TODO: bring back transformations?? in a more general way?
         # if transformation is None:
         #     computational_df = g.df
@@ -81,7 +81,7 @@ class AdaValidate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    async def convergence_criterion(self, basal_step_id, report):
+    def convergence_criterion(self, basal_step_id, report):
         max_tie_est = self.db.worst_tile(basal_step_id, "tie_est desc")["tie_est"].iloc[
             0
         ]
@@ -109,7 +109,7 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    async def select_tiles(self, basal_step_id, new_step_id, report, max_tie_est):
+    def select_tiles(self, basal_step_id, new_step_id, report, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
             basal_step_id,

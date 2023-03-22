@@ -83,7 +83,7 @@ def upload_pkg(client, module, restart=False):
     )
 
 
-def setup_cluster(n_workers=1, idle_timeout="20 minutes"):
+def setup_cluster(n_workers=1, idle_timeout="2 hours"):
     create_software_env()
     import coiled
 
@@ -97,6 +97,8 @@ def setup_cluster(n_workers=1, idle_timeout="20 minutes"):
         shutdown_on_close=False,
         scheduler_options={"idle_timeout": idle_timeout},
         allow_ssh=True,
+        wait_for_workers=1,
+        worker_options={"nthreads": 2},
     )
     cluster.scale(n_workers)
     client = cluster.get_client()

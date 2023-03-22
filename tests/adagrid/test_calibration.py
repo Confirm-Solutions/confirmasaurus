@@ -69,7 +69,7 @@ def test_calibration_packetsize1(snapshot):
 
 
 @pytest.mark.slow
-def test_one_zone_distributed(duckdb, ch_db, snapshot):
+def test_distributed(duckdb, ch_db, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_calibration")

@@ -33,10 +33,12 @@ async def process_packet_set(backend, algo, packets):
 async def process_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
         return
-    coros = []
+    tasks = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        coros.append(process_packet(backend, algo, packet_df=packet_df))
-    await asyncio.gather(*coros)
+        tasks.append(
+            asyncio.create_task(process_packet(backend, algo, packet_df=packet_df))
+        )
+    await asyncio.gather(*tasks)
 
 
 async def process_packet(backend, algo, packet_df):
@@ -66,9 +68,9 @@ async def process_packet(backend, algo, packet_df):
     algo.db.insert_report(report)
 
 
-async def new_step(algo, basal_step_id, new_step_id):
+def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
-    status, tiles_df, report = await _new_step(algo, basal_step_id, new_step_id)
+    status, tiles_df, report = _new_step(algo, basal_step_id, new_step_id)
     report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
     report["basal_step_id"] = basal_step_id
@@ -80,12 +82,10 @@ async def new_step(algo, basal_step_id, new_step_id):
     return status, tiles_df
 
 
-async def _new_step(algo, basal_step_id, new_step_id):
+def _new_step(algo, basal_step_id, new_step_id):
     report = dict()
 
-    converged, convergence_data = await algo.convergence_criterion(
-        basal_step_id, report
-    )
+    converged, convergence_data = algo.convergence_criterion(basal_step_id, report)
 
     start = time.time()
     report["runtime_convergence_criterion"] = time.time() - start
@@ -112,7 +112,7 @@ async def _new_step(algo, basal_step_id, new_step_id):
         )
 
     # If we haven't converged, we create a new step.
-    selection_df = await algo.select_tiles(
+    selection_df = algo.select_tiles(
         basal_step_id, new_step_id, report, convergence_data
     )
 

@@ -1,5 +1,4 @@
 import asyncio
-import concurrent.futures
 import logging
 import os
 import time
@@ -24,9 +23,8 @@ all_tables = [
 ]
 
 
-async def backup(job_name, duck):
+async def backup(ch_client, duck, first_time):
     logger.info("Backing up database")
-    ch_client = await asyncio.to_thread(connect, job_name)
     if not duck.does_table_exist("backup_status"):
         backup_df = pd.DataFrame(  # noqa
             {  # noqa
@@ -39,59 +37,79 @@ async def backup(job_name, duck):
             create table backup_status as select * from backup_df
         """
         )
-    threadpool = concurrent.futures.ThreadPoolExecutor(max_workers=16)
     tasks = [
-        asyncio.create_task(backup_table(threadpool, duck, ch_client, name))
+        asyncio.create_task(backup_table(duck, ch_client, name, first_time))
         for name in all_tables
     ]
     await asyncio.gather(*tasks)
-    logger.info(f"Backup complete to {job_name}")
+    logger.info(f"Backup complete to {ch_client.database}")
 
 
-async def backup_table(threadpool, duck, ch_client, name):
+async def backup_table(duck, ch_client, name, first_time):
     if not duck.does_table_exist(name):
         return
 
     # Using rowid to do incremental backups is very simple because no rows are
     # ever deleted in the DB.
-    next_rowid = duck.con.query(
-        f"select next_rowid from backup_status where table_name = '{name}'"
-    ).fetchone()[0]
-    max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
-    if max_rowid is None:
-        # table is empty
-        return
-    df = duck.con.query(f"select rowid, * from {name} where rowid >= {next_rowid}").df()
-
-    cols = get_create_table_cols(df)
-    await asyncio.to_thread(
-        command,
-        ch_client,
-        f"""
-        CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
-        ENGINE = MergeTree()
-        ORDER BY ()
-        """,
-        default_insert_settings,
-    )
-    chunk_size = 10000
-    chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
-    wait_for = []
-    for c_df in chunks:
-        wait_for.append(
-            asyncio.get_event_loop().run_in_executor(
-                threadpool, insert_df, ch_client, name, c_df, default_insert_settings
-            )
-        )
-    await asyncio.gather(*wait_for)
-
-    duck.con.execute(
-        f"""
-        update backup_status 
-            set next_rowid = {max_rowid + 1} 
-            where table_name = '{name}'
+    while True:
+        next_rowid = duck.con.query(
+            f"select next_rowid from backup_status where table_name = '{name}'"
+        ).fetchone()[0]
+        max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
+        if max_rowid is None:
+            # table is empty
+            return
+        if max_rowid < next_rowid:
+            # table has not changed
+            return
+        max_rowid = min(max_rowid, next_rowid + int(1e5))
+        start = time.time()
+        df = duck.con.query(
+            f"""
+            select rowid, * from {name} 
+                where rowid >= {next_rowid} 
+                and rowid <= {max_rowid}
         """
-    )
+        ).df()
+        logger.debug(
+            f"Collecting backup data for"
+            f" table={name} took {time.time() - start:.2f} seconds"
+        )
+
+        cols = get_create_table_cols(df)
+        if first_time[name]:
+            await asyncio.to_thread(
+                command,
+                ch_client,
+                f"""
+                CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
+                ENGINE = MergeTree()
+                ORDER BY ()
+                """,
+                default_insert_settings,
+            )
+            first_time[name] = False
+        chunk_size = int(1e4)
+        chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
+        wait_for = []
+        for c_df in chunks:
+            wait_for.append(
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        insert_df, ch_client, name, c_df, default_insert_settings
+                    )
+                )
+            )
+        await asyncio.gather(*wait_for)
+        logger.debug(f"Incremental backup complete for table={name}.")
+
+        duck.con.execute(
+            f"""
+            update backup_status 
+                set next_rowid = {max_rowid + 1} 
+                where table_name = '{name}'
+            """
+        )
 
 
 async def restore(job_name, duck=None):

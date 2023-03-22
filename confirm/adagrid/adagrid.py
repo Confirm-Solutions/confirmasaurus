@@ -37,7 +37,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
         async with contextlib.AsyncExitStack() as stack:
             with timer("init"):
                 stack.enter_context(DatabaseLogging(db))
-                algo, incomplete_packets, next_step = await init(algo_type, 1, kwargs)
+                algo, incomplete_packets, next_step = init(algo_type, 1, kwargs)
 
             last_backup = asyncio.Event()
             backup_task = asyncio.create_task(backup(last_backup, db, algo.cfg))
@@ -49,8 +49,17 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 await process_packet_set(backend, algo, np.array(incomplete_packets))
 
             for step_id in range(next_step, algo.cfg["n_steps"]):
+                try:
+                    # by checking for a result, we can cause exception to be raised
+                    # now instead of waiting for the whole job to be done.
+                    backup_task.result()
+                except asyncio.InvalidStateError:
+                    # if the backup_task is still running, that's great and we can
+                    # ignore this!
+                    pass
+
                 with timer("verify"):
-                    await db.verify()
+                    db.verify()
 
                 if time.time() - entry_time > kwargs["timeout"]:
                     logger.info("Job timeout reached, stopping.")
@@ -58,7 +67,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
 
                 with timer("new step"):
                     logger.info(f"Beginning step {step_id}")
-                    status, tiles_df = await new_step(algo, step_id, step_id)
+                    status, tiles_df = new_step(algo, step_id, step_id)
 
                 if status == WorkerStatus.CONVERGED:
                     logger.info("Converged. Stopping.")
@@ -68,15 +77,17 @@ async def async_entrypoint(backend, algo_type, kwargs):
                     break
 
                 with timer("process packets"):
+                    logger.info("Processing packets for step %d", step_id)
                     await process_packet_df(backend, algo, tiles_df)
     finally:
         if "backup_task" in locals():
             last_backup.set()
             await backup_task
 
+    if db.does_table_exist("results"):
         with timer("verify"):
-            await db.verify()
-        return db
+            db.verify()
+    return db
 
 
 async def backup(last_backup, db, cfg):
@@ -85,7 +96,11 @@ async def backup(last_backup, db, cfg):
     if cfg["job_name"] is None and not cfg["prod"]:
         return
 
+    import confirm.cloud.clickhouse as ch
+
+    ch_client = await asyncio.to_thread(ch.connect, cfg["job_name"])
     done = False
+    first_time = {k: True for k in ch.all_tables}
     while not done:
         await asyncio.sleep(0.1)
         if last_backup.is_set():
@@ -93,9 +108,7 @@ async def backup(last_backup, db, cfg):
             done = True
         with timer("backup"):
             try:
-                import confirm.cloud.clickhouse as ch
-
-                await ch.backup(cfg["job_name"], db)
+                await ch.backup(ch_client, db, first_time)
             except Exception:
                 # If a backup fails for some reason, we don't want that
                 # to kill the job.
@@ -134,7 +147,15 @@ class Backend(abc.ABC):
         """
         try:
             asyncio.get_running_loop()
+            run_directly = False
+        except RuntimeError:
+            run_directly = True
 
+        if run_directly:
+            # If we're not running through Jupyter, then we can just run the
+            # async entrypoint directly.
+            return asyncio.run(async_entrypoint(self, algo_type, kwargs))
+        else:
             # If we're running through Jupyter, then an event loop will already be
             # running and we're not allowed to start a new event loop inside of the
             # existing one. So we need to run the async entrypoint in a separate
@@ -146,12 +167,6 @@ class Backend(abc.ABC):
                 synchronicity.Interface.BLOCKING
             ]
             return sync_entry(self, algo_type, kwargs)
-        except RuntimeError:
-            pass
-
-        # If we're not running through Jupyter, then we can just run the
-        # async entrypoint directly.
-        return asyncio.run(async_entrypoint(self, algo_type, kwargs))
 
     @abc.abstractmethod
     def get_cfg(self):
@@ -182,7 +197,7 @@ class LocalBackend(Backend):
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
         logger.debug("Processing tiles using tile batch size %s", tbs)
         start = time.time()
-        out = await self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+        out = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
         return out, time.time() - start
 
 
