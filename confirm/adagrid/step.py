@@ -93,8 +93,11 @@ async def _new_step(algo, basal_step_id, new_step_id):
         logger.debug("Convergence!!")
         return WorkerStatus.CONVERGED, None, report
     elif new_step_id >= algo.cfg["n_steps"]:
-        logger.debug("Reached maximum number of steps. Terminating.")
-        return WorkerStatus.REACHED_N_STEPS, None, report
+        logger.error(
+            "Reached maximum number of steps. Terminating."
+            " This should've been prevented in the outer loop."
+        )
+        assert False
 
     n_existing_packets = algo.db.n_existing_packets(new_step_id)
     if n_existing_packets is not None and n_existing_packets > 0:
@@ -234,7 +237,6 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
 class WorkerStatus(Enum):
     # Statuses which terminate the worker.
     CONVERGED = 0
-    REACHED_N_STEPS = 1
     # Statuses which end the self-help stage.
     EMPTY_STEP = 2
     NO_NEW_TILES = 3
@@ -243,10 +245,3 @@ class WorkerStatus(Enum):
     WORKING = 5
     ALREADY_EXISTS = 6
     EMPTY_PACKET = 7
-
-    def done(self):
-        return (
-            (self == WorkerStatus.REACHED_N_STEPS)
-            or (self == WorkerStatus.CONVERGED)
-            or (self == WorkerStatus.EMPTY_STEP)
-        )

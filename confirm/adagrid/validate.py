@@ -163,7 +163,6 @@ def ada_validate(
     step_size=2**10,
     timeout: int = 60 * 60 * 12,
     packet_size: int = None,
-    n_parallel_steps: int = 1,
     prod: bool = True,
     job_name: str = None,
     backup_interval: int = 5,
@@ -211,10 +210,6 @@ def ada_validate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
-        n_parallel_steps: The number of adagrid steps to run in parallel.
-            Default to 1. This is useful for maintaining a continuous flow of tiles
-            for simulation even while the leader node is preparing a new step. See
-            `get_basal_step` for details on the precise behavior.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. If prod is False, we also skip database backups

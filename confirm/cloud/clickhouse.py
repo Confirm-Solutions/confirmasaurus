@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import logging
 import os
 import time
@@ -25,7 +26,7 @@ all_tables = [
 
 async def backup(job_name, duck):
     logger.info("Backing up database")
-    ch_client = connect(job_name)
+    ch_client = await asyncio.to_thread(connect, job_name)
     if not duck.does_table_exist("backup_status"):
         backup_df = pd.DataFrame(  # noqa
             {  # noqa
@@ -38,8 +39,56 @@ async def backup(job_name, duck):
             create table backup_status as select * from backup_df
         """
         )
-    await asyncio.gather(*[backup_table(duck, ch_client, name) for name in all_tables])
+    threadpool = concurrent.futures.ThreadPoolExecutor(max_workers=16)
+    tasks = [
+        asyncio.create_task(backup_table(threadpool, duck, ch_client, name))
+        for name in all_tables
+    ]
+    await asyncio.gather(*tasks)
     logger.info(f"Backup complete to {job_name}")
+
+
+async def backup_table(threadpool, duck, ch_client, name):
+    # Using rowid to do incremental backups is very simple because no rows are
+    # ever deleted in the DB.
+    next_rowid = duck.con.query(
+        f"select next_rowid from backup_status where table_name = '{name}'"
+    ).fetchone()[0]
+    max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
+    if max_rowid is None:
+        # table is empty
+        return
+    df = duck.con.query(f"select rowid, * from {name} where rowid >= {next_rowid}").df()
+
+    cols = get_create_table_cols(df)
+    await asyncio.to_thread(
+        command,
+        ch_client,
+        f"""
+        CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
+        ENGINE = MergeTree()
+        ORDER BY ()
+        """,
+        default_insert_settings,
+    )
+    chunk_size = 10000
+    chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
+    wait_for = []
+    for c_df in chunks:
+        wait_for.append(
+            asyncio.get_event_loop().run_in_executor(
+                threadpool, insert_df, ch_client, name, c_df, default_insert_settings
+            )
+        )
+    await asyncio.gather(*wait_for)
+
+    duck.con.execute(
+        f"""
+        update backup_status 
+            set next_rowid = {max_rowid + 1} 
+            where table_name = '{name}'
+        """
+    )
 
 
 async def restore(job_name, duck=None):
@@ -63,41 +112,6 @@ async def restore(job_name, duck=None):
         """
     )
     return duck
-
-
-async def backup_table(duck, ch_client, name):
-    # Using rowid to do incremental backups is very simple because no rows are
-    # ever deleted in the DB.
-    next_rowid = duck.con.query(
-        f"select next_rowid from backup_status where table_name = '{name}'"
-    ).fetchone()[0]
-    max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
-    if max_rowid is None:
-        # table is empty
-        return
-    df = duck.con.query(f"select rowid, * from {name} where rowid >= {next_rowid}").df()
-
-    def move_table_to_ch():
-        cols = get_create_table_cols(df)
-        command(
-            ch_client,
-            f"""
-            CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
-            ENGINE = MergeTree()
-            ORDER BY ()
-            """,
-            settings=default_insert_settings,
-        )
-        insert_df(ch_client, name, df, settings=default_insert_settings)
-
-    await asyncio.to_thread(move_table_to_ch)
-    duck.con.execute(
-        f"""
-        update backup_status 
-            set next_rowid = {max_rowid + 1} 
-            where table_name = '{name}'
-        """
-    )
 
 
 async def restore_table(duck, ch_client, name):
@@ -226,10 +240,18 @@ def query_df(client, query):
     return out
 
 
-default_insert_settings = dict(
+synchronous_insert_settings = dict(
     insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
 )
-default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+default_insert_settings = async_insert_settings
+
+
+def set_insert_settings(settings):
+    for k in list(default_insert_settings.keys()):
+        del default_insert_settings[k]
+    for k in settings:
+        default_insert_settings[k] = settings[k]
 
 
 def insert_df(client, table, df, settings=None):

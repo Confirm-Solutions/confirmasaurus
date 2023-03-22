@@ -33,6 +33,9 @@ def test_backup(ch_db):
     import confirm.cloud.clickhouse as ch
     from imprint.models.ztest import ZTest1D
 
+    # set backups to happen synchronously
+    ch.set_insert_settings(ch.synchronous_insert_settings)
+
     g = ip.cartesian_grid(theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")])
     db = ada.ada_calibrate(
         ZTest1D,

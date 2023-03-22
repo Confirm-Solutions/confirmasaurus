@@ -46,12 +46,12 @@ def cal_tester(db, snapshot, ignore_story=True, prod=False, **kwargs):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db = ada.ada_calibrate(
+        out_db = ada.ada_calibrate(
             ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, prod=prod, **kwargs
         )
 
     ip.testing.check_imprint_results(
-        ip.Grid(db.get_results(), None).prune_inactive(),
+        ip.Grid(out_db.get_results(), None).prune_inactive(),
         snapshot,
         ignore_story=ignore_story,
     )
@@ -69,36 +69,17 @@ def test_calibration_packetsize1(snapshot):
 
 
 @pytest.mark.slow
-def test_one_zone_distributed(duckdb, snapshot):
+def test_one_zone_distributed(duckdb, ch_db, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_calibration")
-    cal_tester(duckdb, snapshot, backend=ModalBackend(gpu=False))
-
-
-@pytest.mark.slow
-def test_parallel_steps(duckdb, ch_db, snapshot):
     cal_tester(
         duckdb,
         snapshot,
         prod=True,
         backup_interval=1,
         job_name=ch_db.database,
-        step_size=3,
-        n_parallel_steps=4,
-    )
-
-
-@pytest.mark.slow
-def test_parallel_steps_distributed(duckdb, snapshot):
-    from confirm.cloud.modal_backend import ModalBackend
-
-    snapshot.set_test_name("test_four_zones")
-    cal_tester(
-        duckdb,
-        snapshot,
-        n_parallel_steps=4,
-        backend=ModalBackend(n_workers=4, gpu=False),
+        backend=ModalBackend(gpu=False),
     )
 
 
@@ -123,17 +104,14 @@ def test_calibration_checkpointing():
         db_once = ada.ada_calibrate(ZTest1D, g=g, nB=3, init_K=4, n_steps=3, prod=False)
         reports_once = db_once.get_reports()
 
-    assert len(reports_two) == len(reports_once) + 1
+    assert len(reports_two) == len(reports_once)
     df_reports_one = pd.DataFrame(reports_once)
     drop_cols = ["worker_id"] + [
         c for c in df_reports_one.columns if c.startswith("runtime")
     ]
     df_reports_one = df_reports_one.drop(drop_cols, axis=1)
     df_reports_two = (
-        pd.DataFrame(reports_two)
-        .drop(3, axis=0)
-        .drop(drop_cols, axis=1)
-        .reset_index(drop=True)
+        pd.DataFrame(reports_two).drop(drop_cols, axis=1).reset_index(drop=True)
     )
     pd.testing.assert_frame_equal(df_reports_two, df_reports_one)
 

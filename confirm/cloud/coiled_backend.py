@@ -27,12 +27,17 @@ def create_software_env():
     reqs = reqs.split("\n")
 
     req_jax = [r.split(";")[0][:-1] for r in reqs if "jax==" in r][0].split("==")[1]
-    reqs = [r.split(";")[0][:-1] for r in reqs if "jax" not in r]
+    reqs = [
+        r.split(";")[0][:-1]
+        for r in reqs
+        if ("jax" not in r and 'sys_platform == "win32"' not in r)
+    ]
     reqs.append(
         "--find-links "
         "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
     )
     reqs.append(f"jax[cuda11_cudnn82]=={req_jax}")
+    reqs = [r for r in reqs if r != ""]
     pip_installs = "\n".join([f"    - {r}" for r in reqs])
     environment_yml = f"""
 name: confirm

@@ -33,89 +33,79 @@ async def async_entrypoint(backend, algo_type, kwargs):
         kwargs["db"] = DuckDBTiles.connect(kwargs["job_name"])
     db = kwargs["db"]
 
-    async with contextlib.AsyncExitStack() as stack:
-        with timer("init"):
-            stack.enter_context(DatabaseLogging(db))
-            algo, incomplete_packets, next_step = await init(algo_type, 1, kwargs)
+    try:
+        async with contextlib.AsyncExitStack() as stack:
+            with timer("init"):
+                stack.enter_context(DatabaseLogging(db))
+                algo, incomplete_packets, next_step = await init(algo_type, 1, kwargs)
 
-        with timer("backend.setup"):
-            await stack.enter_async_context(backend.setup(algo))
+            last_backup = asyncio.Event()
+            backup_task = asyncio.create_task(backup(last_backup, db, algo.cfg))
 
-        with timer("process_initial_incompletes"):
-            await process_packet_set(backend, algo, np.array(incomplete_packets))
+            with timer("backend.setup"):
+                await stack.enter_async_context(backend.setup(algo))
 
-        for step_id in range(next_step, algo.cfg["n_steps"]):
+            with timer("process_initial_incompletes"):
+                await process_packet_set(backend, algo, np.array(incomplete_packets))
+
             with timer("verify"):
-                verify_task = asyncio.create_task(db.verify())
-                await verify_task
+                await db.verify()
 
-            if time.time() - entry_time > kwargs["timeout"]:
-                logger.info("Job timeout reached, stopping.")
-                pass
+            for step_id in range(next_step, algo.cfg["n_steps"]):
+                wait_for = []
 
-            with timer("new step"):
-                logger.debug(f"Beginning step {step_id}")
-                basal_step_id = get_basal_step(step_id, algo.cfg["n_parallel_steps"])
-                status, tiles_df = await new_step(algo, basal_step_id, step_id)
+                if time.time() - entry_time > kwargs["timeout"]:
+                    logger.info("Job timeout reached, stopping.")
+                    break
 
-            with timer("process packets"):
-                await process_packet_df(backend, algo, tiles_df)
+                with timer("new step"):
+                    logger.info(f"Beginning step {step_id}")
+                    status, tiles_df = await new_step(algo, step_id, step_id)
 
-            with timer("backup"):
-                if (algo.cfg["backup_interval"] is not None) and (
-                    step_id % algo.cfg["backup_interval"] == 0
-                ):
-                    await backup(db, algo.cfg)
+                if status == WorkerStatus.CONVERGED:
+                    logger.info("Converged. Stopping.")
+                    break
+                elif status == WorkerStatus.EMPTY_STEP:
+                    logger.info("Empty step. Stopping.")
+                    break
 
-            if status == WorkerStatus.REACHED_N_STEPS:
-                logger.debug(f"Reached n_steps={algo.cfg['n_steps']}. Stopping.")
-                break
-            elif status == WorkerStatus.CONVERGED and step_id == basal_step_id + 1:
-                logger.debug("Converged. Stopping.")
-                break
-            elif status == WorkerStatus.EMPTY_STEP and step_id == basal_step_id + 1:
-                logger.debug("Empty step. Stopping.")
-                break
+                wait_for.append(
+                    asyncio.create_task(process_packet_df(backend, algo, tiles_df))
+                )
+                wait_for.append(asyncio.create_task(backup(step_id, db, algo.cfg)))
 
-        with timer("verify"):
-            verify_task = asyncio.create_task(db.verify())
-            await verify_task
+                with timer("waiting for processing and backups"):
+                    await asyncio.gather(*wait_for)
 
-    # run a final backup after the job is done and all logging to the DB is
-    # complete.
-    with timer("backup"):
-        await backup(db, algo.cfg)
-    return db
+                with timer("verify"):
+                    await db.verify()
+    finally:
+        if "backup_task" in locals():
+            last_backup.set()
+            await backup_task
+        return db
 
 
-async def backup(db, cfg):
-    if (cfg["job_name"] is not False) and (cfg["job_name"] is not None or cfg["prod"]):
-        try:
-            import confirm.cloud.clickhouse as ch
+async def backup(last_backup, db, cfg):
+    if cfg["job_name"] is False:
+        return
+    if cfg["job_name"] is None and not cfg["prod"]:
+        return
 
-            await ch.backup(cfg["job_name"], db)
-        except Exception:
-            # If a backup fails for some reason, we don't want that
-            # to kill the job.
-            logger.exception("Error backing up database", exc_info=True)
+    done = False
+    while not done:
+        if last_backup.is_set():
+            logger.info("Performing final backup.")
+            done = True
+        with timer("backup"):
+            try:
+                import confirm.cloud.clickhouse as ch
 
-
-def get_basal_step(step_id, n_parallel_steps):
-    """
-    >>> id = np.arange(1, 10)
-    >>> basal = np.maximum(3 * (np.arange(1, 10) // 3) - 1, 0)
-    >>> np.stack((id, basal), axis=-1)
-    array([[1, 0],
-           [2, 0],
-           [3, 2],
-           [4, 2],
-           [5, 2],
-           [6, 5],
-           [7, 5],
-           [8, 5],
-           [9, 8]])
-    """
-    return max(n_parallel_steps * (step_id // n_parallel_steps) - 1, 0)
+                await ch.backup(cfg["job_name"], db)
+            except Exception:
+                # If a backup fails for some reason, we don't want that
+                # to kill the job.
+                logger.exception("Error backing up database", exc_info=True)
 
 
 @contextlib.contextmanager
@@ -148,17 +138,24 @@ class Backend(abc.ABC):
 
         The default behavior is to just run the leader locally.
         """
-        # If we're running through Jupyter, then an event loop will already be
-        # running and we're not allowed to start a new event loop inside of the
-        # existing one. So we need to run the async entrypoint in a separate
-        # thread. synchronicity is a library that makes this easy.
-        import synchronicity
+        try:
+            asyncio.get_running_loop()
 
-        synchronizer = synchronicity.Synchronizer()
-        sync_entry = synchronizer.create(async_entrypoint)[
-            synchronicity.Interface.BLOCKING
-        ]
-        return sync_entry(self, algo_type, kwargs)
+            # If we're running through Jupyter, then an event loop will already be
+            # running and we're not allowed to start a new event loop inside of the
+            # existing one. So we need to run the async entrypoint in a separate
+            # thread. synchronicity is a library that makes this easy.
+            import synchronicity
+
+            synchronizer = synchronicity.Synchronizer()
+            sync_entry = synchronizer.create(async_entrypoint)[
+                synchronicity.Interface.BLOCKING
+            ]
+            return sync_entry(self, algo_type, kwargs)
+        except RuntimeError:
+            # If we're not running through Jupyter, then we can just run the
+            # async entrypoint directly.
+            return asyncio.run(async_entrypoint(self, algo_type, kwargs))
 
     @abc.abstractmethod
     def get_cfg(self):

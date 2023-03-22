@@ -428,7 +428,7 @@ class DuckDBTiles:
         ).df()
 
     def get_next_step(self):
-        return self.con.query("select max(step_id) + 1 from results").fetchone()[0]
+        return self.con.query("select max(step_id) + 1 from tiles").fetchone()[0]
 
     async def verify(db):
         duplicate_tiles = db.con.query(

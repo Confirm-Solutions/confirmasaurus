@@ -91,7 +91,7 @@ class DBTester:
 
     def test_get_incomplete_packets(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
-        incomplete = [(0, 17, i) for i in range(5)]
+        incomplete = [(17, i) for i in range(5)]
         assert pd_tiles.get_incomplete_packets() == incomplete
         assert db_tiles.get_incomplete_packets() == incomplete
 
@@ -103,17 +103,15 @@ class DBTester:
         g.df["id"] = ip.grid._gen_short_uuids(g.df.shape[0], g.worker_id)
         g.df["step_id"] = 20
         g.df["packet_id"] = 0
-        g.df["zone_id"] = 1
         pd_tiles.insert_tiles(g.df)
         db_tiles.insert_tiles(g.df)
 
-        assert pd_tiles.get_incomplete_packets() == [(1, 20, 0)]
-        assert db_tiles.get_incomplete_packets() == [(1, 20, 0)]
+        assert pd_tiles.get_incomplete_packets() == [(20, 0)]
+        assert db_tiles.get_incomplete_packets() == [(20, 0)]
 
     def test_get_zone_info(self):
-        g, pd_tiles, db_tiles = self.prepped_dbs()
-        assert pd_tiles.get_zone_steps() == {0: 17}
-        assert db_tiles.get_zone_steps() == {0: 17}
+        g, _, db_tiles = self.prepped_dbs()
+        assert db_tiles.get_next_step() == 18
 
     def test_write_results(self):
         g, pd_tiles, db_tiles = self.prepped_dbs()
@@ -142,13 +140,13 @@ class DBTester:
         self.insert_fake_results(pd_tiles)
         self.insert_fake_results(db_tiles)
         np.testing.assert_allclose(
-            pd_tiles.worst_tile(None, "orderer").iloc[0]["theta0"], -0.9
+            pd_tiles.worst_tile(20, "orderer").iloc[0]["theta0"], -0.9
         )
         np.testing.assert_allclose(
-            db_tiles.worst_tile(None, "orderer").iloc[0]["theta0"], -0.9
+            db_tiles.worst_tile(20, "orderer").iloc[0]["theta0"], -0.9
         )
         assert_frame_equal_special(
-            pd_tiles.worst_tile(None, "orderer"), db_tiles.worst_tile(None, "orderer")
+            pd_tiles.worst_tile(20, "orderer"), db_tiles.worst_tile(20, "orderer")
         )
 
     def test_next(self):
