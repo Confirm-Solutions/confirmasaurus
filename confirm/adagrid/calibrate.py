@@ -251,7 +251,6 @@ def ada_calibrate(
     packet_size: int = None,
     prod: bool = True,
     job_name: str = None,
-    backup_interval: int = 5,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -303,8 +302,6 @@ def ada_calibrate(
             for storing long-term backups in Clickhouse. By default (None), an
             in-memory DuckDB is used and a random UUID is chosen for
             Clickhouse.
-        backup_interval: The number of steps between backups. Defaults to 5
-            steps. If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

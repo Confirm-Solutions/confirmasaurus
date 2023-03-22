@@ -51,7 +51,6 @@ def main():
         step_size=2**16,
         packet_size=2**13,
         model_kwargs={"ignore_intersection": True},
-        backup_interval=1,
         backend=coiled_backend.CoiledBackend(restart_workers=True, n_workers=16),
     )
 

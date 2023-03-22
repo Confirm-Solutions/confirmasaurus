@@ -49,6 +49,9 @@ async def backup(job_name, duck):
 
 
 async def backup_table(threadpool, duck, ch_client, name):
+    if not duck.does_table_exist(name):
+        return
+
     # Using rowid to do incremental backups is very simple because no rows are
     # ever deleted in the DB.
     next_rowid = duck.con.query(

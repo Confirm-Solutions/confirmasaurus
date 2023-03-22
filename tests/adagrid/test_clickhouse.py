@@ -47,7 +47,6 @@ def test_backup(ch_db):
         std_target=0.005,
         prod=False,
         tile_batch_size=1,
-        backup_interval=1,
         job_name=ch_db.database,
     )
 

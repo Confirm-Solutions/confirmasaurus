@@ -48,11 +48,9 @@ async def async_entrypoint(backend, algo_type, kwargs):
             with timer("process_initial_incompletes"):
                 await process_packet_set(backend, algo, np.array(incomplete_packets))
 
-            with timer("verify"):
-                await db.verify()
-
             for step_id in range(next_step, algo.cfg["n_steps"]):
-                wait_for = []
+                with timer("verify"):
+                    await db.verify()
 
                 if time.time() - entry_time > kwargs["timeout"]:
                     logger.info("Job timeout reached, stopping.")
@@ -69,20 +67,15 @@ async def async_entrypoint(backend, algo_type, kwargs):
                     logger.info("Empty step. Stopping.")
                     break
 
-                wait_for.append(
-                    asyncio.create_task(process_packet_df(backend, algo, tiles_df))
-                )
-                wait_for.append(asyncio.create_task(backup(step_id, db, algo.cfg)))
-
-                with timer("waiting for processing and backups"):
-                    await asyncio.gather(*wait_for)
-
-                with timer("verify"):
-                    await db.verify()
+                with timer("process packets"):
+                    await process_packet_df(backend, algo, tiles_df)
     finally:
         if "backup_task" in locals():
             last_backup.set()
             await backup_task
+
+        with timer("verify"):
+            await db.verify()
         return db
 
 
@@ -94,6 +87,7 @@ async def backup(last_backup, db, cfg):
 
     done = False
     while not done:
+        await asyncio.sleep(0.1)
         if last_backup.is_set():
             logger.info("Performing final backup.")
             done = True
@@ -153,9 +147,11 @@ class Backend(abc.ABC):
             ]
             return sync_entry(self, algo_type, kwargs)
         except RuntimeError:
-            # If we're not running through Jupyter, then we can just run the
-            # async entrypoint directly.
-            return asyncio.run(async_entrypoint(self, algo_type, kwargs))
+            pass
+
+        # If we're not running through Jupyter, then we can just run the
+        # async entrypoint directly.
+        return asyncio.run(async_entrypoint(self, algo_type, kwargs))
 
     @abc.abstractmethod
     def get_cfg(self):

@@ -77,7 +77,6 @@ def test_one_zone_distributed(duckdb, ch_db, snapshot):
         duckdb,
         snapshot,
         prod=True,
-        backup_interval=1,
         job_name=ch_db.database,
         backend=ModalBackend(gpu=False),
     )
