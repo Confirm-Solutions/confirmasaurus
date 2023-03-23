@@ -47,7 +47,7 @@ async def backup(ch_client, duck, first_time):
 
 async def backup_table(duck, ch_client, name, first_time):
     if not duck.does_table_exist(name):
-        return
+        return 0
 
     # Using rowid to do incremental backups is very simple because no rows are
     # ever deleted in the DB.

@@ -41,7 +41,7 @@ def test_init_first():
     kwargs["db"] = DuckDBTiles.connect()
 
     async def _test():
-        algo, incomplete_packets, next_step = await init(AdaValidate, 1, kwargs)
+        algo, incomplete_packets, next_step = init(AdaValidate, 1, kwargs)
         assert incomplete_packets == [(0, 0), (0, 1), (0, 2)]
         assert next_step == 1
 
@@ -69,13 +69,13 @@ def test_init_join():
     kwargs["db"] = DuckDBTiles.connect()
 
     async def _test():
-        algo1, _, _ = await init(AdaValidate, 1, kwargs)
+        algo1, _, _ = init(AdaValidate, 1, kwargs)
 
         kwargs2 = copy.copy(kwargs)
         kwargs2["g"] = None
         kwargs2["lam"] = -4
         kwargs2["overrides"] = dict(packet_size=3)
-        algo, incomplete2, next_step2 = await init(AdaValidate, 1, kwargs2)
+        algo, incomplete2, next_step2 = init(AdaValidate, 1, kwargs2)
         assert incomplete2 == [(0, 0), (0, 1), (0, 2)]
         assert next_step2 == 1
 
@@ -97,7 +97,7 @@ def test_process():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, zone_info = await init(AdaValidate, 1, kwargs)
+        algo, incomplete, zone_info = init(AdaValidate, 1, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, [(0, 0)])
             results_df = algo.db.get_results()
@@ -127,7 +127,7 @@ def test_new_step():
     backend = LocalBackend()
 
     async def _test():
-        algo, _, _ = await init(AdaValidate, 1, kwargs)
+        algo, _, _ = init(AdaValidate, 1, kwargs)
         async with backend.setup(algo):
             for i in range(3):
                 await process_packet_set(backend, algo, [(0, i) for i in range(3)])
@@ -172,7 +172,7 @@ def test_reload_next_step():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, _ = await init(AdaValidate, 1, kwargs)
+        algo, incomplete, _ = init(AdaValidate, 1, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
         _, _ = await new_step(algo, 0, 1)
@@ -180,7 +180,7 @@ def test_reload_next_step():
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
         kwargs2["g"] = None
-        algo, incomplete, next_step = await init(AdaValidate, 1, kwargs2)
+        algo, incomplete, next_step = init(AdaValidate, 1, kwargs2)
         assert incomplete == [(1, 0), (1, 1), (1, 2)]
         assert next_step == 2
 

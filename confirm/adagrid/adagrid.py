@@ -33,86 +33,92 @@ async def async_entrypoint(backend, algo_type, kwargs):
         kwargs["db"] = DuckDBTiles.connect(kwargs["job_name"])
     db = kwargs["db"]
 
-    try:
-        async with contextlib.AsyncExitStack() as stack:
-            with timer("init"):
-                stack.enter_context(DatabaseLogging(db))
-                algo, incomplete_packets, next_step = init(algo_type, 1, kwargs)
+    async with contextlib.AsyncExitStack() as stack:
+        with timer("init"):
+            stack.enter_context(DatabaseLogging(db))
+            algo, incomplete_packets, next_step = init(algo_type, 1, kwargs)
 
-            last_backup = asyncio.Event()
-            backup_task = asyncio.create_task(backup(last_backup, db, algo.cfg))
+        with timer("backend.setup"):
+            await stack.enter_async_context(backend.setup(algo))
 
-            with timer("backend.setup"):
-                await stack.enter_async_context(backend.setup(algo))
+        check_backup = await stack.enter_async_context(backup_daemon(db, algo.cfg))
 
-            with timer("process_initial_incompletes"):
-                await process_packet_set(backend, algo, np.array(incomplete_packets))
+        with timer("process_initial_incompletes"):
+            await process_packet_set(backend, algo, np.array(incomplete_packets))
 
-            for step_id in range(next_step, algo.cfg["n_steps"]):
-                try:
-                    # by checking for a result, we can cause exception to be raised
-                    # now instead of waiting for the whole job to be done.
-                    backup_task.result()
-                except asyncio.InvalidStateError:
-                    # if the backup_task is still running, that's great and we can
-                    # ignore this!
-                    pass
+        for step_id in range(next_step, algo.cfg["n_steps"]):
+            check_backup()
 
-                with timer("verify"):
-                    db.verify()
+            with timer("verify"):
+                db.verify()
 
-                if time.time() - entry_time > kwargs["timeout"]:
-                    logger.info("Job timeout reached, stopping.")
-                    break
+            if time.time() - entry_time > kwargs["timeout"]:
+                logger.info("Job timeout reached, stopping.")
+                break
 
-                with timer("new step"):
-                    logger.info(f"Beginning step {step_id}")
-                    status, tiles_df = new_step(algo, step_id, step_id)
+            with timer("new step"):
+                logger.info(f"Beginning step {step_id}")
+                status, tiles_df = new_step(algo, step_id, step_id)
 
-                if status == WorkerStatus.CONVERGED:
-                    logger.info("Converged. Stopping.")
-                    break
-                elif status == WorkerStatus.EMPTY_STEP:
-                    logger.info("Empty step. Stopping.")
-                    break
+            if status == WorkerStatus.CONVERGED:
+                logger.info("Converged. Stopping.")
+                break
+            elif status == WorkerStatus.EMPTY_STEP:
+                logger.info("Empty step. Stopping.")
+                break
 
-                with timer("process packets"):
-                    logger.info("Processing packets for step %d", step_id)
-                    await process_packet_df(backend, algo, tiles_df)
-    finally:
-        if "backup_task" in locals():
-            last_backup.set()
-            await backup_task
+            with timer("process packets"):
+                logger.info("Processing packets for step %d", step_id)
+                await process_packet_df(backend, algo, tiles_df)
 
-    if db.does_table_exist("results"):
-        with timer("verify"):
-            db.verify()
+    with timer("verify"):
+        db.verify()
     return db
 
 
-async def backup(last_backup, db, cfg):
-    if cfg["job_name"] is False:
-        return
-    if cfg["job_name"] is None and not cfg["prod"]:
+@contextlib.asynccontextmanager
+async def backup_daemon(last_backup, db, cfg):
+    if (cfg["job_name"] is False) or (cfg["job_name"] is None and not cfg["prod"]):
+        yield lambda: None
         return
 
     import confirm.cloud.clickhouse as ch
 
-    ch_client = await asyncio.to_thread(ch.connect, cfg["job_name"])
-    done = False
-    first_time = {k: True for k in ch.all_tables}
-    while not done:
-        await asyncio.sleep(0.1)
-        if last_backup.is_set():
-            logger.info("Performing final backup.")
-            done = True
-        with timer("backup"):
-            try:
-                await ch.backup(ch_client, db, first_time)
-            except Exception:
-                # If a backup fails for some reason, we don't want that
-                # to kill the job.
-                logger.exception("Error backing up database", exc_info=True)
+    last_backup = asyncio.Event()
+
+    async def _daemon():
+        ch_client = await asyncio.to_thread(ch.connect, cfg["job_name"])
+        done = False
+        first_time = {k: True for k in ch.all_tables}
+        while not done:
+            await asyncio.sleep(0.1)
+            if last_backup.is_set():
+                logger.info("Performing final backup.")
+                done = True
+            with timer("backup"):
+                try:
+                    await ch.backup(ch_client, db, first_time)
+                except Exception:
+                    # If a backup fails for some reason, we don't want that
+                    # to kill the job.
+                    logger.exception("Error backing up database", exc_info=True)
+
+    backup_task = asyncio.create_task(_daemon())
+
+    def check_backup():
+        try:
+            # by checking for a result, we can cause exception to be raised
+            # now instead of waiting for the whole job to be done.
+            backup_task.result()
+        except asyncio.InvalidStateError:
+            # if the backup_task is still running, that's great and we can
+            # ignore this!
+            pass
+
+    yield check_backup
+
+    last_backup.set()
+    await backup_task
 
 
 @contextlib.contextmanager
