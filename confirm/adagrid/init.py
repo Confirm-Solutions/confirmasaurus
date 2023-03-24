@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
+from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ def init_grid(g, db, cfg):
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df["creator_id"] = 1
     df["creation_time"] = ip.timer.simple_timer()
-    df["inactivation_step"] = db.max_step
+    df["inactivation_step"] = MAX_STEP
     df.drop("active", axis=1, inplace=True)
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)

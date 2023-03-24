@@ -83,7 +83,7 @@ def upload_pkg(client, module, restart=False):
     )
 
 
-def setup_cluster(n_workers=1, idle_timeout="2 hours"):
+def setup_cluster(n_workers=1, idle_timeout="30 minutes"):
     create_software_env()
     import coiled
 

@@ -6,6 +6,7 @@ import pandas as pd
 import imprint as ip
 from .adagrid import entrypoint
 from .adagrid import print_report
+from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class AdaValidate:
         )
         rej_df.insert(0, "processor_id", self.cfg["worker_id"])
         rej_df.insert(1, "processing_time", ip.timer.simple_timer())
-        rej_df.insert(2, "completion_step", self.db.max_step)
+        rej_df.insert(2, "completion_step", MAX_STEP)
         rej_df.insert(3, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
         rej_df.insert(4, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
         rej_df.insert(5, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])

@@ -19,4 +19,4 @@ class ModalWorker:
         await self.setup(worker_args)
         lb = LocalBackend()
         async with lb.setup(self.algo):
-            return await lb.process_tiles(tiles_df)
+            return await lb.wait_for_results(lb.submit_tiles(tiles_df))

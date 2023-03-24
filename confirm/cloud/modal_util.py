@@ -50,6 +50,12 @@ def get_image(dependency_groups=["cloud"]):
     ).dockerfile_commands(dockerfile_commands, context_files=context_files)
 
 
+def include_file(fn):
+    return "test_secrets.enc.env" in fn
+    # exclude unencrypted secrets
+    # return (fn != ".env") and (os.path.getsize(fn) < 1e6)
+
+
 def get_defaults():
     return dict(
         image=get_image(dependency_groups=["test", "cloud"]),
@@ -59,7 +65,7 @@ def get_defaults():
             modal.Mount.from_local_dir(
                 "./",
                 remote_path="/root",
-                condition=lambda fn: fn != ".env",  # exclude unencrypted secrets
+                condition=include_file,
                 recursive=False,
             ),
         ],

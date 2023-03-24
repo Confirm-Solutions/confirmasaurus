@@ -56,6 +56,7 @@ import imprint as ip
 from . import bootstrap
 from .adagrid import entrypoint
 from .adagrid import print_report
+from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ class AdaCalibrate:
         )
         lams_df.insert(0, "processor_id", self.cfg["worker_id"])
         lams_df.insert(1, "processing_time", ip.timer.simple_timer())
-        lams_df.insert(2, "completion_step", self.db.max_step)
+        lams_df.insert(2, "completion_step", MAX_STEP)
 
         # we use insert here to order columns nicely for reading raw data
         lams_df.insert(3, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 import imprint as ip
+from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ def _new_step(algo, basal_step_id, new_step_id):
         )
 
     g_active.df["packet_id"] = assign_packets(g_active.df)
-    g_active.df["inactivation_step"] = algo.db.max_step
+    g_active.df["inactivation_step"] = MAX_STEP
     algo.db.insert_tiles(g_active.df)
     report["time"] = time.time()
     report["n_new_tiles"] = g_active.n_tiles

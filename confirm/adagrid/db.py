@@ -8,11 +8,10 @@ from typing import List
 from typing import Optional
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 
 import confirm.adagrid.json as json
-
+from .const import MAX_STEP
 
 if TYPE_CHECKING:
     import duckdb
@@ -111,7 +110,6 @@ class PandasTiles:
     done: pd.DataFrame = None
     reports: List[Dict] = field(default_factory=list)
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
-    max_step = np.iinfo(np.uint32).max
 
     def dimension(self) -> int:
         return (
@@ -212,7 +210,7 @@ class PandasTiles:
     ) -> pd.DataFrame:
         out = self.results.loc[
             (self.results["step_id"] <= basal_step_id)
-            & (self.results["completion_step"] == self.max_step)
+            & (self.results["completion_step"] == MAX_STEP)
         ].nsmallest(n, order_col)
         return out
 
@@ -223,14 +221,14 @@ class PandasTiles:
         )
         active_tiles = self.results.loc[
             (self.results["step_id"] <= basal_step_id)
-            & (self.results["inactivation_step"] == self.max_step)
+            & (self.results["inactivation_step"] == MAX_STEP)
         ]
         return active_tiles[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0)
 
     def worst_tile(self, basal_step_id: int, orderer: str) -> pd.DataFrame:
         active_tiles = self.results.loc[
             (self.results["step_id"] <= basal_step_id)
-            & (self.results["inactivation_step"] == self.max_step)
+            & (self.results["inactivation_step"] == MAX_STEP)
         ]
         return active_tiles.loc[[active_tiles[orderer].idxmin()]]
 
@@ -256,7 +254,6 @@ class DuckDBTiles:
     job_name: str
     con: "duckdb.DuckDBPyConnection"
     _d: int = None
-    max_step = np.iinfo(np.uint32).max
 
     def __post_init__(self):
         self.con.execute(
@@ -305,7 +302,7 @@ class DuckDBTiles:
 
     def get_results(self):
         out = self.con.execute("select * from results").df()
-        out.insert(0, "active", out["inactivation_step"] == self.max_step)
+        out.insert(0, "active", out["inactivation_step"] == MAX_STEP)
         return out
 
     def get_done(self):
@@ -324,7 +321,7 @@ class DuckDBTiles:
             f"""
             select step_id, packet_id
                 from tiles
-                where inactivation_step={self.max_step} {restrict}
+                where inactivation_step={MAX_STEP} {restrict}
                 group by step_id, packet_id
                 order by step_id, packet_id
             """
@@ -515,8 +512,8 @@ class DuckDBTiles:
             select parent_id, id from tiles
                 where parent_id in 
                     (select id from results 
-                         where inactivation_step={self.max_step} 
-                            or completion_step={self.max_step})
+                         where inactivation_step={MAX_STEP} 
+                            or completion_step={MAX_STEP})
             """
         ).df()
         if len(tiles_with_active_or_incomplete_parents) > 0:
@@ -529,7 +526,7 @@ class DuckDBTiles:
             select id from tiles
             -- packet_id >= 0 excludes tiles that were split or pruned
                 where packet_id >= 0
-                    and inactivation_step < {self.max_step}
+                    and inactivation_step < {MAX_STEP}
                     and id not in (select parent_id from tiles)
             """
         ).df()

@@ -82,8 +82,24 @@ def test_distributed(duckdb, ch_db, snapshot):
     )
 
 
+@pytest.mark.slow
 def test_two_parallel_steps(snapshot):
     cal_tester(None, snapshot, n_parallel_steps=2, step_size=1, packet_size=1)
+
+
+@pytest.mark.slow
+def test_two_parallel_steps_distributed(snapshot):
+    from confirm.cloud.modal_backend import ModalBackend
+
+    snapshot.set_test_name("test_two_parallel_steps")
+    cal_tester(
+        None,
+        snapshot,
+        n_parallel_steps=2,
+        step_size=1,
+        packet_size=1,
+        backend=ModalBackend(gpu=False),
+    )
 
 
 @pytest.mark.slow
