@@ -77,7 +77,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
 
 
 @contextlib.asynccontextmanager
-async def backup_daemon(last_backup, db, cfg):
+async def backup_daemon(db, cfg):
     if (cfg["job_name"] is False) or (cfg["job_name"] is None and not cfg["prod"]):
         yield lambda: None
         return

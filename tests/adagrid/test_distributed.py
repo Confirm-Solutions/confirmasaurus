@@ -132,10 +132,10 @@ def test_new_step():
             for i in range(3):
                 await process_packet_set(backend, algo, [(0, i) for i in range(3)])
 
-        status, tiles_df = await new_step(algo, 0, 1)
+        status, tiles_df = new_step(algo, 0, 1)
 
         # call new_step twice to confirm idempotency
-        status2, tiles_df2 = await new_step(algo, 0, 1)
+        status2, tiles_df2 = new_step(algo, 0, 1)
         assert status == WorkerStatus.NEW_STEP
         assert status2 == WorkerStatus.ALREADY_EXISTS
 
@@ -175,7 +175,7 @@ def test_reload_next_step():
         algo, incomplete, _ = init(AdaValidate, 1, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
-        _, _ = await new_step(algo, 0, 1)
+        _, _ = new_step(algo, 0, 1)
 
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db

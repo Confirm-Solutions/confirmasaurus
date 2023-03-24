@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 
 import dask
 import jax
@@ -238,6 +239,10 @@ class CoiledBackend(Backend):
         yield
 
     async def process_tiles(self, tiles_df):
+        start = time.time()
         fut = self.client.submit(dask_process_tiles, self.worker_args_future, tiles_df)
+        logger.debug(
+            f"Tile processing submitted to cluster in {time.time() - start:.2f} seconds"
+        )
         out, runtime_simulating = await asyncio.to_thread(fut.result)
         return out, runtime_simulating

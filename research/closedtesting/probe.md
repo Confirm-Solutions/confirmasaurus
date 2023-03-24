@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import imprint as ip
 import scipy.special
+import jax
 ```
 
 ```python
@@ -19,6 +20,8 @@ ip.setup_nb()
 
 db = ada.DuckDBTiles.connect('../../wd41_4d_v47')
 ```
+
+## Broad table exploration
 
 ```python
 n_rows_df = pd.DataFrame(
@@ -43,6 +46,10 @@ n_eligible_tiles = db.con.query(
     "select count(*) from results where eligible=true"
 ).fetchone()[0]
 n_active_tiles, n_eligible_tiles
+```
+
+```python
+db.con.query('select K, count(*) as n_tiles from tiles where active=true group by K order by K').df()
 ```
 
 ```python
@@ -71,6 +78,16 @@ lamss_tile
 ```
 
 ```python
+lams = db.con.query('select lams from results where active=true').df()
+lamss = lams['lams'].min()
+max_display = lamss * 2
+plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
+plt.show()
+```
+
+## Investigating the WD41 problem.
+
+```python
 import confirm.models.wd41 as wd41
 
 lamss_potential = lamss_tile.copy()
@@ -81,6 +98,10 @@ cal_df = ip.calibrate(
     g=ip.Grid(lamss_potential, 1),
     model_kwargs={"ignore_intersection": True, "dtype": np.float64},
 )
+```
+
+```python
+lamss_potential
 ```
 
 ```python
@@ -99,29 +120,171 @@ for d in range(db.dimension()):
     debug_df[name] = scipy.special.expit(debug_df[f"theta{d}"])
 debug_df.drop(columns=[f"theta{d}" for d in range(db.dimension())], inplace=True)
 debug_df
-
 ```
 
 ```python
-db.con.query('select K, count(*) as n_tiles from tiles where active=true group by K order by K').df()
+model = wd41.WD41(0, 10000, ignore_intersection=True)
+g_explore = ip.cartesian_grid([-0.6, -1.5875, -0.6, 0.5125], [-0.4, -1.5875, -0.4, 0.5125], n=[10, 1, 10, 1], null_hypos=model.null_hypos)
+cal_df = ip.calibrate(wd41.WD41, g=g_explore, model_kwargs={"ignore_intersection": True, "dtype": np.float64})
+cal_df = pd.concat((g_explore.df, cal_df), axis=1)
 ```
 
 ```python
-lams = db.con.query('select lams from results where active=true').df()
-lamss = lams['lams'].min()
-max_display = lamss * 2
-plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
+cal_df['lams'].min()
+```
+
+```python
+plt.subplot(2,2,1)
+plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['null_truth0'])
+plt.colorbar()
+plt.subplot(2,2,2)
+plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['null_truth1'])
+plt.colorbar()
+plt.subplot(2,2,3)
+plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['lams'])
+plt.colorbar()
 plt.show()
 ```
 
 ```python
-report_df = db.get_reports()
-working_reports = report_df[report_df['status'] == 'WORKING']
-new_step_reports = report_df[report_df['status'] == 'NEW_STEP']
+p = scipy.special.expit(g_explore.get_theta()[40])
+sim_vmap = jax.vmap(model.sim, in_axes=(0, None, None, None, None, None))
+stats = sim_vmap(model.unifs, *p, True)
+# print(np.percentile(stats, 99))
+# plt.plot(np.sort(stats[0]))
+# plt.show()
+```
+
+```python
+bad_idx = stats['full_stat'].argmin()
+model.sim(model.unifs[bad_idx], *p, True)
+```
+
+```python
+(
+    phattnbccontrol,
+    phattnbctreat,
+    phathrpluscontrol,
+    phathrplustreat,
+) = model.sample_all_arms(model.unifs[bad_idx][model.n_first_stage :], *p)
+
+```
+
+```python
+import jax.numpy as jnp
+totally_pooledaverage = (
+    (phattnbctreat + phattnbccontrol) * model.n_tnbc_first_stage_per_arm
+    + (phathrplustreat + phathrpluscontrol) * model.n_hrplus_first_stage_per_arm
+) / model.n_first_stage
+denominatortotallypooled = jnp.sqrt(
+    totally_pooledaverage
+    * (1 - totally_pooledaverage)
+    # * (1 / (model.n_first_stage))
+    * ((1 / (2 * model.n_tnbc_first_stage_per_arm)) + (1 / (2 * model.n_hrplus_first_stage_per_arm)))
+)
+tnbc_effect = phattnbctreat - phattnbccontrol
+hrplus_effect = phathrplustreat - phathrpluscontrol
+zfull = (
+    (tnbc_effect * model.n_tnbc_first_stage_total)
+    + (hrplus_effect * model.n_hrplus_first_stage_total)
+) / (denominatortotallypooled * model.n_first_stage)
+```
+
+```python
+zfull
+```
+
+```python
+((tnbc_effect * model.n_tnbc_first_stage_total)
++ (hrplus_effect * model.n_hrplus_first_stage_total)) / model.n_first_stage
+```
+
+```python
+denominatortotallypooled
+```
+
+```python
+phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
+```
+
+```python
+def sample(unifs, p):
+    return jnp.sum(unifs < p, dtype=model.dtype)
+
+def sample_all_arms(
+    self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
+):
+    unifs_tnbc = unifs[: self.n_tnbc_second_stage_total]
+    unifs_tnbc_control = unifs_tnbc[: self.n_tnbc_second_stage_per_arm]
+    unifs_tnbc_treat = unifs_tnbc[self.n_tnbc_second_stage_per_arm :]
+    unifs_hrplus = unifs[self.n_tnbc_second_stage_total :]
+    unifs_hrplus_control = unifs_hrplus[: self.n_hrplus_second_stage_per_arm]
+    unifs_hrplus_treat = unifs_hrplus[self.n_hrplus_second_stage_per_arm :]
+
+    ytnbccontrol = sample(unifs_tnbc_control, pcontrol_tnbc)
+    ytnbctreat = sample(unifs_tnbc_treat, ptreat_tnbc)
+    yhrpluscontrol = sample(unifs_hrplus_control, pcontrol_hrplus)
+    yhrplustreat = sample(unifs_hrplus_treat, ptreat_hrplus)
+    return ytnbccontrol, ytnbctreat, yhrpluscontrol, yhrplustreat
+```
+
+```python
+(
+    ytnbccontrol,
+    ytnbctreat,
+    yhrpluscontrol,
+    yhrplustreat,
+) = sample_all_arms(model, model.unifs[bad_idx][model.n_first_stage :], *p)
+```
+
+```python
+(
+    ytnbccontrol,
+    ytnbctreat,
+    yhrpluscontrol,
+    yhrplustreat,
+)
+```
+
+```python
+ycontrol = ytnbccontrol + yhrpluscontrol
+ytreat = ytnbctreat + yhrplustreat
+ncontrol = ntreat = (
+    model.n_hrplus_first_stage_per_arm + model.n_tnbc_first_stage_per_arm
+)
+phattreat = ytreat / ntreat
+phatcontrol = ycontrol / ncontrol
+full_pooledaverage = (phattreat + phatcontrol) * 0.5
+denominatorfull = jnp.sqrt(
+    full_pooledaverage * (1 - full_pooledaverage) * (2 / ncontrol)
+)
+zfull = (phattreat - phatcontrol) / denominatorfull
+zfull
 ```
 
 ```python
 
+```
+
+```python
+print(np.percentile(stats['tnbc_stat'], 1))
+print(np.percentile(stats['full_stat'], 1))
+plt.subplot(1,2,1)
+plt.plot(np.sort(stats['tnbc_stat']))
+plt.subplot(1,2,1)
+plt.plot(np.sort(stats['full_stat']))
+plt.show()
+```
+
+## Looking at the reports
+
+```python
+report_df = db.get_reports()
+working_reports = report_df[report_df['status'] == 'WORKING'].dropna(axis=1, how='all')
+new_step_reports = report_df[report_df['status'] == 'NEW_STEP'].dropna(axis=1, how='all')
+```
+
+```python
 sim_runtime = working_reports['runtime_simulating'].sum()
 total_runtime = report_df.iloc[-1]['time'] - report_df.iloc[0]['time']
 parallelism = sim_runtime / total_runtime
@@ -148,9 +311,9 @@ plt.show()
 ```
 
 ```python
-new_step_runtime = new_step_reports['runtime_total'].sum()
-new_step_runtime / total_runtime
-plt.plot(new_step_reports['runtime_total'], new_step_reports)
+plt.plot(new_step_reports[['step_id', 'lamss']].set_index('step_id'))
+plt.xlabel('step_id')
+plt.ylabel('$\lambda^{**}$')
 plt.show()
 ```
 
@@ -205,10 +368,6 @@ plt.show()
 ```
 
 ```python
-plot_df.shape
-```
-
-```python
 plt.figure(figsize=(10, 10))
 plt.subplot(2, 2, 1)
 plt.scatter(plot_df['theta1'], plot_df['theta3'], c=plot_df['K'], s=5)
@@ -223,8 +382,4 @@ plt.subplot(2, 2, 4)
 plt.scatter(plot_df['theta1'], plot_df['theta3'], c=plot_df['twb_min_lams'], s=5)
 plt.colorbar()
 plt.show()
-```
-
-```python
-reports_df = ch.query_df(client, 'select * from reports')
 ```
