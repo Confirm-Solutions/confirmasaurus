@@ -135,11 +135,11 @@ twb_worst_tile_lams = self.driver.bootstrap_calibrate(
     tile_batch_size=1,
 )
 twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
-deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
+deepen_likely_to_work = tiles_df["twb_min_lams"] > twb_worst_tile_mean_lams
 ```
 
 ```python
-twb_worst_tile_mean_lams
+np.sum(deepen_likely_to_work)
 ```
 
 ## Investigating the WD41 problem.

@@ -83,9 +83,7 @@ def new_step(algo, basal_step_id, new_step_id):
 
 
 def _new_step(algo, basal_step_id, new_step_id):
-    report = dict()
-
-    converged, convergence_data = algo.convergence_criterion(basal_step_id, report)
+    converged, convergence_data, report = algo.convergence_criterion(basal_step_id)
 
     start = time.time()
     report["runtime_convergence_criterion"] = time.time() - start
@@ -112,9 +110,10 @@ def _new_step(algo, basal_step_id, new_step_id):
         )
 
     # If we haven't converged, we create a new step.
-    selection_df = algo.select_tiles(
-        basal_step_id, new_step_id, report, convergence_data
+    selection_df, selection_report = algo.select_tiles(
+        basal_step_id, new_step_id, convergence_data
     )
+    report.update(selection_report)
 
     if selection_df is None:
         # New step is empty so we have terminated but
@@ -144,7 +143,7 @@ def _new_step(algo, basal_step_id, new_step_id):
         "split",
     ]
     done_df = selection_df[done_cols]
-    algo.db.insert_done(done_df)
+    algo.db.insert_done(new_step_id, done_df)
 
     n_refine = (selection_df["refine"] > 0).sum()
     n_deepen = (selection_df["deepen"] > 0).sum()
@@ -183,7 +182,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     inactive_done["finisher_id"] = algo.cfg["worker_id"]
     inactive_done = inactive_done[done_cols].copy()
     algo.db.insert_tiles(inactive_df)
-    algo.db.insert_done(inactive_done)
+    algo.db.insert_done(new_step_id, inactive_done)
 
     # Assign tiles to packets and then insert them into the database for
     # processing.

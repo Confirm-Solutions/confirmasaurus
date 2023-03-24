@@ -81,27 +81,25 @@ class AdaValidate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    def convergence_criterion(self, basal_step_id, report):
+    def convergence_criterion(self, basal_step_id):
         max_tie_est = self.db.worst_tile(basal_step_id, "tie_est desc")["tie_est"].iloc[
             0
         ]
         next_tile = self.db.worst_tile(
             basal_step_id, "total_cost_order, tie_bound_order"
         ).iloc[0]
-        report["converged"] = self._are_tiles_done(next_tile, max_tie_est)
-        report.update(
-            dict(
-                max_tie_est=max_tie_est,
-                next_tile_tie_est=next_tile["tie_est"],
-                next_tile_tie_bound=next_tile["tie_bound"],
-                next_tile_sim_cost=next_tile["sim_cost"],
-                next_tile_grid_cost=next_tile["grid_cost"],
-                next_tile_total_cost=next_tile["total_cost"],
-                next_tile_K=next_tile["K"],
-                next_tile_at_max_K=next_tile["K"] == self.max_K,
-            )
+        report = dict(
+            converged=self._are_tiles_done(next_tile, max_tie_est),
+            max_tie_est=max_tie_est,
+            next_tile_tie_est=next_tile["tie_est"],
+            next_tile_tie_bound=next_tile["tie_bound"],
+            next_tile_sim_cost=next_tile["sim_cost"],
+            next_tile_grid_cost=next_tile["grid_cost"],
+            next_tile_total_cost=next_tile["total_cost"],
+            next_tile_K=next_tile["K"],
+            next_tile_at_max_K=next_tile["K"] == self.max_K,
         )
-        return report["converged"], max_tie_est
+        return report["converged"], max_tie_est, report
 
     def _are_tiles_done(self, tiles, max_tie_est):
         return ~(
@@ -109,7 +107,7 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    def select_tiles(self, basal_step_id, new_step_id, report, max_tie_est):
+    def select_tiles(self, basal_step_id, new_step_id, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
             basal_step_id,
@@ -123,13 +121,11 @@ class AdaValidate:
         if tiles_df.shape[0] == 0:
             return None
 
-        report.update(
-            dict(
-                n_tiles=tiles_df.shape[0],
-                step_max_total_cost=tiles_df["total_cost"].max(),
-                step_max_grid_cost=tiles_df["grid_cost"].max(),
-                step_max_sim_cost=tiles_df["sim_cost"].max(),
-            )
+        report = dict(
+            n_tiles=tiles_df.shape[0],
+            step_max_total_cost=tiles_df["total_cost"].max(),
+            step_max_grid_cost=tiles_df["grid_cost"].max(),
+            step_max_sim_cost=tiles_df["sim_cost"].max(),
         )
 
         deepen_cheaper = tiles_df["sim_cost"] > tiles_df["grid_cost"]
@@ -142,7 +138,7 @@ class AdaValidate:
         tiles_df["refine"] |= ((~tiles_df["refine"]) & (~tiles_df["deepen"])) & (
             tiles_df["grid_cost"] > (tiles_df["sim_cost"] / 5)
         )
-        return tiles_df
+        return tiles_df, report
 
 
 def ada_validate(

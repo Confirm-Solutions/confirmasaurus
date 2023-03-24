@@ -108,7 +108,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df, lams_df), axis=1)
 
-    def convergence_criterion(self, basal_step_id, report):
+    def convergence_criterion(self, basal_step_id):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -146,14 +146,12 @@ class AdaCalibrate:
         spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
         grid_cost = worst_tile["grid_cost"].iloc[0]
 
-        report.update(
-            dict(
-                bias_tie=bias_tie,
-                std_tie=std_tie,
-                spread_tie=spread_tie,
-                grid_cost=grid_cost,
-                lamss=lamss,
-            )
+        report = dict(
+            bias_tie=bias_tie,
+            std_tie=std_tie,
+            spread_tie=spread_tie,
+            grid_cost=grid_cost,
+            lamss=lamss,
         )
         report["min(B_lamss)"] = min(B_lamss)
         report["max(B_lamss)"] = max(B_lamss)
@@ -166,15 +164,15 @@ class AdaCalibrate:
             and (std_tie < self.cfg["std_target"])
             and (grid_cost < self.cfg["grid_target"])
         )
-        return report["converged"], None
+        return report["converged"], None, report
 
-    def select_tiles(self, basal_step_id, new_step_id, report, _):
+    def select_tiles(self, basal_step_id, new_step_id, _):
         tiles_df = self.db.next(
             basal_step_id, new_step_id, self.cfg["step_size"], "orderer"
         )
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
-            return None
+            return None, {}
 
         ########################################
         # Is deepening likely to be enough?
@@ -191,15 +189,14 @@ class AdaCalibrate:
         #
         # To answer whether a tile might ever be the worst tile, we compare the
         # given tile's bootstrapped mean lambda* against the bootstrapped mean
-        # lambda* of the tile with the lowest mean lambda*
+        # lambda* of the tile with the lowest mean lambda* with two modifications:
+        # - We increase to the maximum K allowed.
+        # - We shrink the radius of the tile so that alpha0 \approx alpha.
         #
-        # If the tile's mean lambda* is less the mean lambda* of this worst
+        # If the tile's min lambda* is less the mean lambda* of this worst
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
 
-        # twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
-        # twb_worst_tile_mean_lams = twb_worst_tile["twb_mean_lams"].iloc[0]
-        # deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
         twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
@@ -226,8 +223,8 @@ class AdaCalibrate:
         )
         tiles_df["deepen"] = (~tiles_df["refine"]) & (~at_max_K)
 
-        report["n_impossible"] = tiles_df["impossible"].sum()
-        return tiles_df
+        report = dict(n_impossible=tiles_df["impossible"].sum())
+        return tiles_df, report
 
 
 def ada_calibrate(

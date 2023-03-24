@@ -338,36 +338,33 @@ class DuckDBTiles:
     def insert_tiles(self, df: pd.DataFrame):
         column_order = ",".join(self._tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
+        logger.debug("Inserted %d new tiles.", df.shape[0])
 
     def insert_results(self, df: pd.DataFrame, orderer: str):
         if not self.does_table_exist("results"):
             self.con.execute("create table if not exists results as select * from df")
             return
         column_order = ",".join(self._results_columns())
-        start = time.time()
         self.con.execute(f"insert into results select {column_order} from df")
-        logger.debug(
-            f"Inserting {df.shape[0]} rows into"
-            f" results took {time.time() - start:.2f} seconds."
-        )
+        logger.debug(f"Inserted {df.shape[0]} results.")
 
-    def insert_done(self, which):
-        logger.debug(f"finish: {which.head()}")
-        column_order = ",".join(which.columns)
-        self.con.execute(f"insert into done select {column_order} from which")
+    def insert_done(self, new_step_id: int, df: pd.DataFrame):
+        column_order = ",".join(df.columns)
+        self.con.execute(f"insert into done select {column_order} from df")
         # Updating active/eligible is not strictly necessary since it can be
         # inferred from the info in the done table. But, updating the flags on
         # the tiles/results tables is more efficient for future queries.
         self.con.execute(
-            "update tiles set active=w.active from which w where tiles.id=w.id"
+            "update tiles set active=df.active from df where tiles.id=df.id"
         )
         self.con.execute(
             """
             update results
-                set eligible=false, active=w.active
-            from which w where results.id=w.id
+                set eligible=false, active=df.active
+            from df where results.id=df.id
             """
         )
+        logger.debug(f"Finished {df.shape[0]} tiles.")
 
     def get_packet(self, step_id: int, packet_id: int = None):
         if self.does_table_exist("results"):
