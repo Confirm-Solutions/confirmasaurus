@@ -41,13 +41,13 @@ async def async_entrypoint(backend, algo_type, kwargs):
         with timer("backend.setup"):
             await stack.enter_async_context(backend.setup(algo))
 
-        check_backup = await stack.enter_async_context(backup_daemon(db, algo.cfg))
+        # check_backup = await stack.enter_async_context(backup_daemon(db, algo.cfg))
 
         with timer("process_initial_incompletes"):
             await process_packet_set(backend, algo, np.array(incomplete_packets))
 
         for step_id in range(next_step, algo.cfg["n_steps"]):
-            check_backup()
+            # check_backup()
 
             with timer("verify"):
                 db.verify()
