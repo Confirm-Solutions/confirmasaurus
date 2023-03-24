@@ -71,11 +71,14 @@ async def process_packet(backend, algo, packet_df):
 def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
     status, tiles_df, report = _new_step(algo, basal_step_id, new_step_id)
+    if tiles_df is not None:
+        report["n_packets"] = (
+            tiles_df["packet_id"].nunique() if tiles_df is not None else 0
+        )
     report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
     report["basal_step_id"] = basal_step_id
     report["step_id"] = new_step_id
-    report["n_packets"] = tiles_df["packet_id"].nunique() if tiles_df is not None else 0
     report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
     algo.db.insert_report(report)
@@ -119,7 +122,7 @@ def _new_step(algo, basal_step_id, new_step_id):
         # New step is empty so we have terminated but
         # failed to converge.
         logger.debug("New step is empty despite failure to converge.")
-        return WorkerStatus.EMPTY_STEP, None, report, [], []
+        return WorkerStatus.EMPTY_STEP, None, report
 
     selection_df["finisher_id"] = algo.cfg["worker_id"]
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
@@ -133,7 +136,6 @@ def _new_step(algo, basal_step_id, new_step_id):
     if "split" not in selection_df.columns:
         selection_df["split"] = False
     done_cols = [
-        "step_id",
         "packet_id",
         "id",
         "active",
@@ -142,8 +144,9 @@ def _new_step(algo, basal_step_id, new_step_id):
         "deepen",
         "split",
     ]
-    done_df = selection_df[done_cols]
-    algo.db.insert_done(new_step_id, done_df)
+    done_df = selection_df[done_cols].copy()
+    done_df.insert(0, "step_id", new_step_id)
+    algo.db.insert_done(done_df)
 
     n_refine = (selection_df["refine"] > 0).sum()
     n_deepen = (selection_df["deepen"] > 0).sum()
@@ -175,14 +178,15 @@ def _new_step(algo, basal_step_id, new_step_id):
     # the null hypotheses. we need to mark these tiles as finished.
     inactive_df = g_new.df[~g_new.df["active"]].copy()
     inactive_df["packet_id"] = np.int32(-1)
+    inactive_df["inactivation_step"] = new_step_id
     inactive_done = inactive_df.copy()
     inactive_done["refine"] = 0
     inactive_done["deepen"] = 0
     inactive_done["split"] = True
     inactive_done["finisher_id"] = algo.cfg["worker_id"]
-    inactive_done = inactive_done[done_cols].copy()
+    inactive_done = inactive_done[["step_id"] + done_cols].copy()
     algo.db.insert_tiles(inactive_df)
-    algo.db.insert_done(new_step_id, inactive_done)
+    algo.db.insert_done(inactive_done)
 
     # Assign tiles to packets and then insert them into the database for
     # processing.
@@ -195,6 +199,7 @@ def _new_step(algo, basal_step_id, new_step_id):
         )
 
     g_active.df["packet_id"] = assign_packets(g_active.df)
+    g_active.df["inactivation_step"] = algo.db.max_step
     algo.db.insert_tiles(g_active.df)
     report["time"] = time.time()
     report["n_new_tiles"] = g_active.n_tiles

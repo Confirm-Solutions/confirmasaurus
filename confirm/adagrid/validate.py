@@ -51,7 +51,7 @@ class AdaValidate:
         )
         rej_df.insert(0, "processor_id", self.cfg["worker_id"])
         rej_df.insert(1, "processing_time", ip.timer.simple_timer())
-        rej_df.insert(2, "eligible", True)
+        rej_df.insert(2, "completion_step", self.db.max_step)
         rej_df.insert(3, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
         rej_df.insert(4, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
         rej_df.insert(5, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])
@@ -156,9 +156,10 @@ def ada_validate(
     max_target=0.002,
     global_target=0.005,
     n_steps: int = 100,
-    step_size=2**10,
     timeout: int = 60 * 60 * 12,
+    step_size=2**10,
     packet_size: int = None,
+    n_parallel_steps: int = 1,
     prod: bool = True,
     job_name: str = None,
     overrides: dict = None,
@@ -205,6 +206,10 @@ def ada_validate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        n_parallel_steps: The number of Adagrid steps to run in parallel.
+            Setting this parameter to anything greater than 1 will cause the steps
+            to be based on lagged data. For example, with n_parallel_steps=2,
+            step K will be based on data from step K-2. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. If prod is False, we also skip database backups

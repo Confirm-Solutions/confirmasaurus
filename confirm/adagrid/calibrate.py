@@ -90,7 +90,7 @@ class AdaCalibrate:
         )
         lams_df.insert(0, "processor_id", self.cfg["worker_id"])
         lams_df.insert(1, "processing_time", ip.timer.simple_timer())
-        lams_df.insert(2, "eligible", True)
+        lams_df.insert(2, "completion_step", self.db.max_step)
 
         # we use insert here to order columns nicely for reading raw data
         lams_df.insert(3, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
@@ -121,11 +121,11 @@ class AdaCalibrate:
 
         # If there are no tiles, we are done.
         if worst_tile_impossible.shape[0] == 0:
-            return True, None
+            return True, None, {}
 
         any_impossible = worst_tile_impossible["impossible"].iloc[0]
         if any_impossible:
-            return False, None
+            return False, None, {}
 
         worst_tile = self.db.worst_tile(basal_step_id, "lams")
         lamss = worst_tile["lams"].iloc[0]
@@ -248,6 +248,7 @@ def ada_calibrate(
     timeout: int = 60 * 60 * 12,
     step_size: int = 2**10,
     packet_size: int = None,
+    n_parallel_steps: int = 1,
     prod: bool = True,
     job_name: str = None,
     overrides: dict = None,
@@ -293,6 +294,10 @@ def ada_calibrate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
+        n_parallel_steps: The number of Adagrid steps to run in parallel.
+            Setting this parameter to anything greater than 1 will cause the steps
+            to be based on lagged data. For example, with n_parallel_steps=2,
+            step K will be based on data from step K-2. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. If prod is False, we also skip database backups

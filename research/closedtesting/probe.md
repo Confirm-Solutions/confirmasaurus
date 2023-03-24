@@ -18,14 +18,14 @@ import jax
 
 ip.setup_nb()
 
-db = ada.DuckDBTiles.connect('../../wd41_4d_v52')
+self = ada.DuckDBTiles.connect('../../wd41_4d_v52')
 ```
 
 ## Broad table exploration
 
 ```python
 n_rows_df = pd.DataFrame(
-    [(table, db.con.query(f'select count(*) from {table}').fetchone()[0]) for table in ch.all_tables],
+    [(table, self.con.query(f'select count(*) from {table}').fetchone()[0]) for table in ch.all_tables],
     columns=['table', 'count']
 ).set_index('table')
 n_rows_df
@@ -33,52 +33,52 @@ n_rows_df
 ```
 
 ```python
-n_sims = db.con.query('select sum(K) from results').fetchone()[0]
-n_retained_sims = db.con.query('select sum(K) from results where active=true').fetchone()[0]
+n_sims = self.con.query('select sum(K) from results').fetchone()[0]
+n_retained_sims = self.con.query('select sum(K) from results where active=true').fetchone()[0]
 n_sims / 1e12, n_retained_sims / 1e12
 ```
 
 ```python
-n_active_tiles = db.con.query(
+n_active_tiles = self.con.query(
     "select count(*) from results where active=true"
 ).fetchone()[0]
-n_eligible_tiles = db.con.query(
+n_eligible_tiles = self.con.query(
     "select count(*) from results where eligible=true"
 ).fetchone()[0]
 n_active_tiles, n_eligible_tiles
 ```
 
 ```python
-db.con.query('select K, count(*) as n_tiles from tiles where active=true group by K order by K').df()
+self.con.query('select K, count(*) as n_tiles from tiles where active=true group by K order by K').df()
 ```
 
 ```python
 volume_sql = (
-    str(2 ** db.dimension())
+    str(2 ** self.dimension())
     + "*"
-    + ("*".join([f"radii{d}" for d in range(db.dimension())]))
+    + ("*".join([f"radii{d}" for d in range(self.dimension())]))
 )
 
-db.con.execute(f'create index if not exists volume_idx2 on results (active, ({volume_sql}))')
+self.con.execute(f'create index if not exists volume_idx2 on results (active, ({volume_sql}))')
 ```
 
 ```python
-smallest_tile = db.con.query(f'select * from results where active=true order by {volume_sql} limit 1').df()
+smallest_tile = self.con.query(f'select * from results where active=true order by {volume_sql} limit 1').df()
 smallest_tile
 ```
 
 ```python
-largest_tile = db.con.query(f'select * from results where active=true order by {volume_sql} desc limit 1').df()
+largest_tile = self.con.query(f'select * from results where active=true order by {volume_sql} desc limit 1').df()
 largest_tile
 ```
 
 ```python
-lamss_tile = db.con.query('select * from results where active=true order by lams limit 1').df()
+lamss_tile = self.con.query('select * from results where active=true order by lams limit 1').df()
 lamss_tile
 ```
 
 ```python
-lams = db.con.query('select lams from results where active=true').df()
+lams = self.con.query('select lams from results where active=true').df()
 lamss = lams['lams'].min()
 max_display = lamss * 2
 plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
@@ -88,11 +88,11 @@ plt.show()
 ## Ordering
 
 ```python
-worst5000_df = db.con.query('select * from results where active=true order by lams limit 5000').df()
+worst5000_df = self.con.query('select * from results where active=true order by lams limit 5000').df()
 ```
 
 ```python
-orderer_df = db.con.query(
+orderer_df = self.con.query(
     f"select orderer from results where active=true and orderer <= {worst5000_df['orderer'].max()} order by orderer"
 ).df()
 
@@ -104,20 +104,20 @@ wait
 ```
 
 ```python
-cfg = db.get_config().iloc[0].to_dict()
+cfg = self.get_config().iloc[0].to_dict()
 ```
 
 ```python
 import confirm.adagrid.calibrate as adacal
 import confirm.models.wd41 as wd41
 report = dict()
-algo = adacal.AdaCalibrate(wd41.WD41(0, 600000, ignore_intersection=True), None, db, cfg, None)
+algo = adacal.AdaCalibrate(wd41.WD41(0, 600000, ignore_intersection=True), None, self, cfg, None)
 
 ```
 
 ```python
-tiles_df = db.next(10, 11, 50000, 'orderer')
-twb_worst_tile = db.worst_tile(10, "twb_mean_lams")
+tiles_df = self.next(10, 11, 50000, 'orderer')
+twb_worst_tile = self.worst_tile(10, "twb_mean_lams")
 # np.sum(tiles_df['twb_min_lams'] > twb_worst_tile['twb_mean_lams'].iloc[0])
 ```
 
@@ -148,7 +148,7 @@ np.sum(deepen_likely_to_work)
 import confirm.models.wd41 as wd41
 
 lamss_potential = lamss_tile.copy()
-for d in range(db.dimension()):
+for d in range(self.dimension()):
     lamss_potential[f"radii{d}"] = 1e-7
 cal_df = ip.calibrate(
     wd41.WD41,
@@ -161,17 +161,17 @@ cal_df = ip.calibrate(
 debug_df = pd.concat(
     (
         lamss_potential[
-            [f"theta{d}" for d in range(db.dimension())]
-            + [f"radii{d}" for d in range(db.dimension())]
+            [f"theta{d}" for d in range(self.dimension())]
+            + [f"radii{d}" for d in range(self.dimension())]
         ],
         cal_df,
     ),
     axis=1,
 )
-for d in range(db.dimension()):
+for d in range(self.dimension()):
     name = ['p_{hr+, c}', 'p_{hr+, t}', 'p_{tnbc, c}', 'p_{tnbc, t}'][d]
     debug_df[name] = scipy.special.expit(debug_df[f"theta{d}"])
-debug_df.drop(columns=[f"theta{d}" for d in range(db.dimension())], inplace=True)
+debug_df.drop(columns=[f"theta{d}" for d in range(self.dimension())], inplace=True)
 debug_df
 ```
 
@@ -226,7 +226,7 @@ plt.show()
 ## Looking at the reports
 
 ```python
-report_df = db.get_reports()
+report_df = self.get_reports()
 working_reports = report_df[report_df['status'] == 'WORKING'].dropna(axis=1, how='all')
 new_step_reports = report_df[report_df['status'] == 'NEW_STEP'].dropna(axis=1, how='all')
 ```
@@ -276,7 +276,7 @@ ys = np.linspace(-2, 1, 10)
 counts = np.empty((len(xs), len(ys)))
 for i, x in enumerate(xs):
     for j, y in enumerate(ys):
-        NN = db.con.query(f'''
+        NN = self.con.query(f'''
             select count(*) 
                 from results
                 where 
@@ -303,7 +303,7 @@ plt.show()
 ```
 
 ```python
-plot_df = db.con.query('''
+plot_df = self.con.query('''
     select theta0, theta1, theta2, theta3, 
             radii0, radii1, radii2, radii3, 
             alpha0, K, lams, twb_mean_lams, twb_min_lams 

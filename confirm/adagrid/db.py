@@ -8,6 +8,7 @@ from typing import List
 from typing import Optional
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 import confirm.adagrid.json as json
@@ -110,6 +111,7 @@ class PandasTiles:
     done: pd.DataFrame = None
     reports: List[Dict] = field(default_factory=list)
     _tables: Dict[str, pd.DataFrame] = field(default_factory=dict)
+    max_step = np.iinfo(np.uint32).max
 
     def dimension(self) -> int:
         return (
@@ -189,9 +191,15 @@ class PandasTiles:
             self.done = df
         else:
             self.done = pd.concat((self.done, df), axis=0)
-        self.tiles.loc[df["id"], "active"] = df["active"]
-        self.results.loc[df["id"], "eligible"] = False
-        self.results.loc[df["id"], "active"] = df["active"]
+
+        df_inactive = df[df["active"] is False]
+        self.tiles.loc[df_inactive["id"], "inactivation_step"] = df_inactive["step_id"]
+        self.results.loc[df_inactive["id"], "inactivation_step"] = df_inactive[
+            "step_id"
+        ]
+
+        df_complete = df[df["active"] is True]
+        self.results.loc[df_complete["id"], "completion_step"] = df_complete["step_id"]
 
     def get_packet(self, step_id: int, packet_id: int) -> pd.DataFrame:
         where = (self.tiles["step_id"] == step_id) & (
@@ -203,7 +211,8 @@ class PandasTiles:
         self, basal_step_id: int, new_step_id: int, n: int, order_col: str
     ) -> pd.DataFrame:
         out = self.results.loc[
-            (self.results["step_id"] <= basal_step_id) & self.results["eligible"]
+            (self.results["step_id"] <= basal_step_id)
+            & (self.results["completion_step"] == self.max_step)
         ].nsmallest(n, order_col)
         return out
 
@@ -213,13 +222,15 @@ class PandasTiles:
             + 1
         )
         active_tiles = self.results.loc[
-            (self.results["step_id"] <= basal_step_id) & self.results["active"]
+            (self.results["step_id"] <= basal_step_id)
+            & (self.results["inactivation_step"] == self.max_step)
         ]
         return active_tiles[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0)
 
     def worst_tile(self, basal_step_id: int, orderer: str) -> pd.DataFrame:
         active_tiles = self.results.loc[
-            (self.results["step_id"] <= basal_step_id) & self.results["active"]
+            (self.results["step_id"] <= basal_step_id)
+            & (self.results["inactivation_step"] == self.max_step)
         ]
         return active_tiles.loc[[active_tiles[orderer].idxmin()]]
 
@@ -244,9 +255,8 @@ class DuckDBTiles:
 
     job_name: str
     con: "duckdb.DuckDBPyConnection"
-    _tiles_columns_cache: List[str] = None
-    _results_columns_cache: List[str] = None
     _d: int = None
+    max_step = np.iinfo(np.uint32).max
 
     def __post_init__(self):
         self.con.execute(
@@ -270,18 +280,13 @@ class DuckDBTiles:
         return self._d
 
     def _tiles_columns(self):
-        if self._tiles_columns_cache is None:
-            self._tiles_columns_cache = (
-                self.con.execute("select * from tiles limit 0").df().columns
-            )
-        return self._tiles_columns_cache
+        return self.con.execute("select * from tiles limit 0").df().columns
 
     def _results_columns(self):
-        if self._results_columns_cache is None:
-            self._results_columns_cache = (
-                self.con.execute("select * from results limit 0").df().columns
-            )
-        return self._results_columns_cache
+        return self.con.execute("select * from results limit 0").df().columns
+
+    def _done_columns(self):
+        return self.con.execute("select * from done limit 0").df().columns
 
     def does_table_exist(self, table_name):
         out = self.con.query(
@@ -299,7 +304,9 @@ class DuckDBTiles:
         return self.con.execute("select * from tiles").df()
 
     def get_results(self):
-        return self.con.execute("select * from results").df()
+        out = self.con.execute("select * from results").df()
+        out.insert(0, "active", out["inactivation_step"] == self.max_step)
+        return out
 
     def get_done(self):
         return self.con.execute("select * from done").df()
@@ -317,7 +324,7 @@ class DuckDBTiles:
             f"""
             select step_id, packet_id
                 from tiles
-                where active=true {restrict}
+                where inactivation_step={self.max_step} {restrict}
                 group by step_id, packet_id
                 order by step_id, packet_id
             """
@@ -348,20 +355,36 @@ class DuckDBTiles:
         self.con.execute(f"insert into results select {column_order} from df")
         logger.debug(f"Inserted {df.shape[0]} results.")
 
-    def insert_done(self, new_step_id: int, df: pd.DataFrame):
-        column_order = ",".join(df.columns)
+    def insert_done(self, df: pd.DataFrame):
+        column_order = ",".join(self._done_columns())
         self.con.execute(f"insert into done select {column_order} from df")
-        # Updating active/eligible is not strictly necessary since it can be
+        # Updating active/complete is not strictly necessary since it can be
         # inferred from the info in the done table. But, updating the flags on
         # the tiles/results tables is more efficient for future queries.
         self.con.execute(
-            "update tiles set active=df.active from df where tiles.id=df.id"
+            """
+            update tiles 
+                set inactivation_step=df.step_id
+            from df 
+                where tiles.id=df.id
+                    and df.active=false
+            """
         )
         self.con.execute(
             """
             update results
-                set eligible=false, active=df.active
-            from df where results.id=df.id
+                set inactivation_step=df.step_id
+            from df 
+                where results.id=df.id
+                    and df.active=false
+            """
+        )
+        self.con.execute(
+            """
+            update results
+                set completion_step=df.step_id
+            from df 
+                where results.id=df.id
             """
         )
         logger.debug(f"Finished {df.shape[0]} tiles.")
@@ -378,7 +401,7 @@ class DuckDBTiles:
             select * from tiles
                 where
                     step_id = {step_id}
-                    and active=true
+                    and inactivation_step > {step_id}
                     {restrict_clause}
             """,
         ).df()
@@ -392,7 +415,7 @@ class DuckDBTiles:
         out = t.execute(
             f"""
             select * from results 
-                where eligible=true
+                where completion_step >= {new_step_id}
                     and step_id <= {basal_step_id}
             order by {orderer} limit {n}
             """
@@ -412,7 +435,7 @@ class DuckDBTiles:
         lamss = self.con.execute(
             f"""
             select {cols} from results 
-                where active=true
+                where inactivation_step > {basal_step_id}
                     and step_id <= {basal_step_id}
             """
         ).fetchall()[0]
@@ -423,7 +446,7 @@ class DuckDBTiles:
         return self.con.execute(
             f"""
             select * from results
-                where active=true
+                where inactivation_step > {basal_step_id}
                     and step_id <= {basal_step_id}
                 order by {order_col} limit 1
             """
@@ -432,26 +455,26 @@ class DuckDBTiles:
     def get_next_step(self):
         return self.con.query("select max(step_id) + 1 from tiles").fetchone()[0]
 
-    def verify(db):
-        duplicate_tiles = db.con.query(
+    def verify(self, step_id: int):
+        duplicate_tiles = self.con.query(
             "select id from tiles group by id having count(*) > 1"
         ).df()
         if len(duplicate_tiles) > 0:
             raise ValueError(f"Duplicate tiles: {duplicate_tiles}")
 
-        duplicate_results = db.con.query(
+        duplicate_results = self.con.query(
             "select id from results group by id having count(*) > 1"
         ).df()
         if len(duplicate_results) > 0:
             raise ValueError(f"Duplicate results: {duplicate_results}")
 
-        duplicate_done = db.con.query(
+        duplicate_done = self.con.query(
             "select id from done group by id having count(*) > 1"
         ).df()
         if len(duplicate_done) > 0:
             raise ValueError(f"Duplicate done: {duplicate_done}")
 
-        results_without_tiles = db.con.query(
+        results_without_tiles = self.con.query(
             """
             select id from results
                 where id not in (select id from tiles)
@@ -463,11 +486,12 @@ class DuckDBTiles:
                 f" {results_without_tiles}"
             )
 
-        tiles_without_results = db.con.query(
-            """
+        tiles_without_results = self.con.query(
+            f"""
             select id from tiles
             -- packet_id >= 0 excludes tiles that were split or pruned
                 where packet_id >= 0
+                    and step_id <= {step_id}
                     and id not in (select id from results)
             """
         ).df()
@@ -477,7 +501,7 @@ class DuckDBTiles:
                 f" {tiles_without_results}"
             )
 
-        tiles_without_parents = db.con.query(
+        tiles_without_parents = self.con.query(
             """
             select parent_id, id from tiles
                 where parent_id not in (select id from done)
@@ -486,24 +510,26 @@ class DuckDBTiles:
         if len(tiles_without_parents) > 0:
             raise ValueError(f"tiles without parents: {tiles_without_parents}")
 
-        tiles_with_active_or_eligible_parents = db.con.query(
-            """
+        tiles_with_active_or_incomplete_parents = self.con.query(
+            f"""
             select parent_id, id from tiles
                 where parent_id in 
-                    (select id from results where active=true or eligible=true)
+                    (select id from results 
+                         where inactivation_step={self.max_step} 
+                            or completion_step={self.max_step})
             """
         ).df()
-        if len(tiles_with_active_or_eligible_parents) > 0:
+        if len(tiles_with_active_or_incomplete_parents) > 0:
             raise ValueError(
-                f"tiles with active parents: {tiles_with_active_or_eligible_parents}"
+                f"tiles with active parents: {tiles_with_active_or_incomplete_parents}"
             )
 
-        inactive_tiles_with_no_children = db.con.query(
-            """
+        inactive_tiles_with_no_children = self.con.query(
+            f"""
             select id from tiles
             -- packet_id >= 0 excludes tiles that were split or pruned
                 where packet_id >= 0
-                    and active=false
+                    and inactivation_step < {self.max_step}
                     and id not in (select parent_id from tiles)
             """
         ).df()
@@ -512,7 +538,7 @@ class DuckDBTiles:
                 f"inactive tiles with no children: {inactive_tiles_with_no_children}"
             )
 
-        refined_tiles_with_incorrect_child_count = db.con.query(
+        refined_tiles_with_incorrect_child_count = self.con.query(
             """
             select d.id, count(*) as n_children, max(refine) as n_expected
                 from done d
@@ -529,7 +555,7 @@ class DuckDBTiles:
                 f" {refined_tiles_with_incorrect_child_count}"
             )
 
-        deepened_tiles_with_incorrect_child_count = db.con.query(
+        deepened_tiles_with_incorrect_child_count = self.con.query(
             """
             select d.id, count(*) from done d
                 left join tiles t

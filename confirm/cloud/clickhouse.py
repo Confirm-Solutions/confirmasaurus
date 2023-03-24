@@ -117,19 +117,47 @@ async def restore(job_name, duck=None):
     if duck is None:
         duck = DuckDBTiles.connect()
     await asyncio.gather(*[restore_table(duck, ch_client, name) for name in all_tables])
+    # duck.con.execute(
+    #     """
+    #     update results set
+    #         eligible = (id not in (select id from done)),
+    #         active = (id not in (select id from done where active=false))
+    #     where eligible = true and active = true
+    #     """
+    # )
+    # duck.con.execute(
+    #     """
+    #     update tiles set
+    #         active = (id not in (select id from done where active=false))
+    #     where active = true
+    #     """
+    # )
+    # TODO: duplicated!!
     duck.con.execute(
         """
-        update results set
-            eligible = (id not in (select id from done)),
-            active = (id not in (select id from done where active=false))
-        where eligible = true and active = true
+        update tiles 
+            set inactivation_step=done.step_id
+        from done 
+            where tiles.id=done.id
+                and done.active=false
         """
     )
     duck.con.execute(
         """
-        update tiles set
-            active = (id not in (select id from done where active=false))
-        where active = true
+        update results
+            set inactivation_step=done.step_id
+        from done 
+            where results.id=done.id
+                and done.active=false
+        """
+    )
+    duck.con.execute(
+        """
+        update results
+            set completion_step=done.step_id
+        from done 
+            where results.id=done.id
+                and done.active=true
         """
     )
     return duck

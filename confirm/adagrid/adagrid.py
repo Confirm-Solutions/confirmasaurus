@@ -2,6 +2,7 @@ import abc
 import asyncio
 import contextlib
 import logging
+import queue
 import time
 from pprint import pformat
 
@@ -46,11 +47,15 @@ async def async_entrypoint(backend, algo_type, kwargs):
         with timer("process_initial_incompletes"):
             await process_packet_set(backend, algo, np.array(incomplete_packets))
 
+        stopping_indicator = 0
+        n_parallel_steps = algo.cfg["n_parallel_steps"]
+        processing_tasks = queue.Queue()
         for step_id in range(next_step, algo.cfg["n_steps"]):
+            basal_step_id = max(step_id - n_parallel_steps, 0)
             # check_backup()
 
             with timer("verify"):
-                db.verify()
+                db.verify(basal_step_id)
 
             if time.time() - entry_time > kwargs["timeout"]:
                 logger.info("Job timeout reached, stopping.")
@@ -58,21 +63,37 @@ async def async_entrypoint(backend, algo_type, kwargs):
 
             with timer("new step"):
                 logger.info(f"Beginning step {step_id}")
-                status, tiles_df = new_step(algo, step_id, step_id)
+                status, tiles_df = new_step(algo, basal_step_id, step_id)
 
-            if status == WorkerStatus.CONVERGED:
+            if status in [WorkerStatus.CONVERGED, WorkerStatus.EMPTY_STEP]:
+                stopping_indicator += 1
+            else:
+                stopping_indicator = 0
+
+            if (
+                status == WorkerStatus.CONVERGED
+                and stopping_indicator >= n_parallel_steps
+            ):
                 logger.info("Converged. Stopping.")
                 break
-            elif status == WorkerStatus.EMPTY_STEP:
-                logger.info("Empty step. Stopping.")
+            elif (
+                status == WorkerStatus.EMPTY_STEP
+                and stopping_indicator >= n_parallel_steps
+            ):
+                logger.info(f"{n_parallel_steps} empty step. Stopping.")
                 break
 
             with timer("process packets"):
                 logger.info("Processing packets for step %d", step_id)
-                await process_packet_df(backend, algo, tiles_df)
+                processing_tasks.put(
+                    asyncio.create_task(process_packet_df(backend, algo, tiles_df))
+                )
+                await asyncio.sleep(0)
+                if processing_tasks.qsize() > n_parallel_steps - 1:
+                    await processing_tasks.get()
 
     with timer("verify"):
-        db.verify()
+        db.verify(basal_step_id)
     return db
 
 

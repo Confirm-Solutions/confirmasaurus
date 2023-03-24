@@ -82,6 +82,10 @@ def test_distributed(duckdb, ch_db, snapshot):
     )
 
 
+def test_two_parallel_steps(snapshot):
+    cal_tester(None, snapshot, n_parallel_steps=2, step_size=1)
+
+
 @pytest.mark.slow
 def test_calibration_checkpointing():
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):

@@ -126,6 +126,7 @@ def join(db, kwargs):
             "bootstrap_seed",
             "nB",
             "model_name",
+            "n_parallel_steps",
         ]:
             raise ValueError(f"Parameter {k} cannot be overridden.")
         cfg[k] = overrides[k]
@@ -169,6 +170,8 @@ def init_grid(g, db, cfg):
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df["creator_id"] = 1
     df["creation_time"] = ip.timer.simple_timer()
+    df["inactivation_step"] = db.max_step
+    df.drop("active", axis=1, inplace=True)
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
 
