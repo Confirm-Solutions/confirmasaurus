@@ -198,6 +198,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     g_active.df["packet_id"] = assign_packets(g_active.df)
     algo.db.insert_tiles(g_active.df)
     report["time"] = time.time()
+    report["n_new_tiles"] = g_active.n_tiles
 
     logger.debug(
         f"Starting step {new_step_id}" f" with {g_active.n_tiles} tiles to simulate."

@@ -67,10 +67,10 @@ class AdaCalibrate:
         self.cfg = cfg
         self.callback = callback
 
-        self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
-        self.max_K = self.Ks[-1]
+        Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
+        self.max_K = Ks[-1]
         self.driver = bootstrap.BootstrapCalibrate(
-            model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks, worker_id=1
+            model, self.cfg["bootstrap_seed"], self.cfg["nB"], Ks, worker_id=1
         )
 
     def get_orderer(self):
@@ -196,8 +196,22 @@ class AdaCalibrate:
         # If the tile's mean lambda* is less the mean lambda* of this worst
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
+
+        # twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
+        # twb_worst_tile_mean_lams = twb_worst_tile["twb_mean_lams"].iloc[0]
+        # deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
         twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
-        twb_worst_tile_mean_lams = twb_worst_tile["twb_mean_lams"].iloc[0]
+        for col in twb_worst_tile.columns:
+            if col.startswith("radii"):
+                twb_worst_tile[col] = 1e-6
+        twb_worst_tile["K"] = self.max_K
+        twb_worst_tile_lams = self.driver.bootstrap_calibrate(
+            twb_worst_tile,
+            self.cfg["alpha"],
+            calibration_min_idx=self.cfg["calibration_min_idx"],
+            tile_batch_size=1,
+        )
+        twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
 
         ########################################

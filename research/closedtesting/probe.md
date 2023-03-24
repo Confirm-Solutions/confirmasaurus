@@ -18,7 +18,7 @@ import jax
 
 ip.setup_nb()
 
-db = ada.DuckDBTiles.connect('../../wd41_4d_v47')
+db = ada.DuckDBTiles.connect('../../wd41_4d_v52')
 ```
 
 ## Broad table exploration
@@ -85,6 +85,63 @@ plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
 plt.show()
 ```
 
+## Ordering
+
+```python
+worst5000_df = db.con.query('select * from results where active=true order by lams limit 5000').df()
+```
+
+```python
+orderer_df = db.con.query(
+    f"select orderer from results where active=true and orderer <= {worst5000_df['orderer'].max()} order by orderer"
+).df()
+
+```
+
+```python
+wait = np.searchsorted(orderer_df['orderer'], worst5000_df['orderer'])
+wait
+```
+
+```python
+cfg = db.get_config().iloc[0].to_dict()
+```
+
+```python
+import confirm.adagrid.calibrate as adacal
+import confirm.models.wd41 as wd41
+report = dict()
+algo = adacal.AdaCalibrate(wd41.WD41(0, 600000, ignore_intersection=True), None, db, cfg, None)
+
+```
+
+```python
+tiles_df = db.next(10, 11, 50000, 'orderer')
+twb_worst_tile = db.worst_tile(10, "twb_mean_lams")
+# np.sum(tiles_df['twb_min_lams'] > twb_worst_tile['twb_mean_lams'].iloc[0])
+```
+
+```python
+self = algo
+twb_worst_tile = self.db.worst_tile(10, "twb_mean_lams")
+for col in twb_worst_tile.columns:
+    if col.startswith("radii"):
+        twb_worst_tile[col] = 1e-6
+twb_worst_tile["K"] = self.max_K
+twb_worst_tile_lams = self.driver.bootstrap_calibrate(
+    twb_worst_tile,
+    self.cfg["alpha"],
+    calibration_min_idx=self.cfg["calibration_min_idx"],
+    tile_batch_size=1,
+)
+twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
+deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
+```
+
+```python
+twb_worst_tile_mean_lams
+```
+
 ## Investigating the WD41 problem.
 
 ```python
@@ -98,10 +155,6 @@ cal_df = ip.calibrate(
     g=ip.Grid(lamss_potential, 1),
     model_kwargs={"ignore_intersection": True, "dtype": np.float64},
 )
-```
-
-```python
-lamss_potential
 ```
 
 ```python
@@ -161,112 +214,6 @@ model.sim(model.unifs[bad_idx], *p, True)
 ```
 
 ```python
-(
-    phattnbccontrol,
-    phattnbctreat,
-    phathrpluscontrol,
-    phathrplustreat,
-) = model.sample_all_arms(model.unifs[bad_idx][model.n_first_stage :], *p)
-
-```
-
-```python
-import jax.numpy as jnp
-totally_pooledaverage = (
-    (phattnbctreat + phattnbccontrol) * model.n_tnbc_first_stage_per_arm
-    + (phathrplustreat + phathrpluscontrol) * model.n_hrplus_first_stage_per_arm
-) / model.n_first_stage
-denominatortotallypooled = jnp.sqrt(
-    totally_pooledaverage
-    * (1 - totally_pooledaverage)
-    # * (1 / (model.n_first_stage))
-    * ((1 / (2 * model.n_tnbc_first_stage_per_arm)) + (1 / (2 * model.n_hrplus_first_stage_per_arm)))
-)
-tnbc_effect = phattnbctreat - phattnbccontrol
-hrplus_effect = phathrplustreat - phathrpluscontrol
-zfull = (
-    (tnbc_effect * model.n_tnbc_first_stage_total)
-    + (hrplus_effect * model.n_hrplus_first_stage_total)
-) / (denominatortotallypooled * model.n_first_stage)
-```
-
-```python
-zfull
-```
-
-```python
-((tnbc_effect * model.n_tnbc_first_stage_total)
-+ (hrplus_effect * model.n_hrplus_first_stage_total)) / model.n_first_stage
-```
-
-```python
-denominatortotallypooled
-```
-
-```python
-phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
-```
-
-```python
-def sample(unifs, p):
-    return jnp.sum(unifs < p, dtype=model.dtype)
-
-def sample_all_arms(
-    self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
-):
-    unifs_tnbc = unifs[: self.n_tnbc_second_stage_total]
-    unifs_tnbc_control = unifs_tnbc[: self.n_tnbc_second_stage_per_arm]
-    unifs_tnbc_treat = unifs_tnbc[self.n_tnbc_second_stage_per_arm :]
-    unifs_hrplus = unifs[self.n_tnbc_second_stage_total :]
-    unifs_hrplus_control = unifs_hrplus[: self.n_hrplus_second_stage_per_arm]
-    unifs_hrplus_treat = unifs_hrplus[self.n_hrplus_second_stage_per_arm :]
-
-    ytnbccontrol = sample(unifs_tnbc_control, pcontrol_tnbc)
-    ytnbctreat = sample(unifs_tnbc_treat, ptreat_tnbc)
-    yhrpluscontrol = sample(unifs_hrplus_control, pcontrol_hrplus)
-    yhrplustreat = sample(unifs_hrplus_treat, ptreat_hrplus)
-    return ytnbccontrol, ytnbctreat, yhrpluscontrol, yhrplustreat
-```
-
-```python
-(
-    ytnbccontrol,
-    ytnbctreat,
-    yhrpluscontrol,
-    yhrplustreat,
-) = sample_all_arms(model, model.unifs[bad_idx][model.n_first_stage :], *p)
-```
-
-```python
-(
-    ytnbccontrol,
-    ytnbctreat,
-    yhrpluscontrol,
-    yhrplustreat,
-)
-```
-
-```python
-ycontrol = ytnbccontrol + yhrpluscontrol
-ytreat = ytnbctreat + yhrplustreat
-ncontrol = ntreat = (
-    model.n_hrplus_first_stage_per_arm + model.n_tnbc_first_stage_per_arm
-)
-phattreat = ytreat / ntreat
-phatcontrol = ycontrol / ncontrol
-full_pooledaverage = (phattreat + phatcontrol) * 0.5
-denominatorfull = jnp.sqrt(
-    full_pooledaverage * (1 - full_pooledaverage) * (2 / ncontrol)
-)
-zfull = (phattreat - phatcontrol) / denominatorfull
-zfull
-```
-
-```python
-
-```
-
-```python
 print(np.percentile(stats['tnbc_stat'], 1))
 print(np.percentile(stats['full_stat'], 1))
 plt.subplot(1,2,1)
@@ -323,18 +270,6 @@ plt.show()
 ```
 
 ```python
-plot_df = db.con.query('''
-    select theta0, theta1, theta2, theta3, 
-            radii0, radii1, radii2, radii3, 
-            alpha0, K, lams, twb_mean_lams, twb_min_lams 
-        from results
-        where 
-            abs(theta0 + 1) < 0.05
-            and abs(theta2 + 1) < 0.05
-''').df()
-```
-
-```python
 import numpy as np
 xs = np.linspace(-2, 1, 10)
 ys = np.linspace(-2, 1, 10)
@@ -365,6 +300,18 @@ plt.ylabel('$\\theta_{HR+, c}$')
 cbar = plt.colorbar()
 cbar.set_label('$N$')
 plt.show()
+```
+
+```python
+plot_df = db.con.query('''
+    select theta0, theta1, theta2, theta3, 
+            radii0, radii1, radii2, radii3, 
+            alpha0, K, lams, twb_mean_lams, twb_min_lams 
+        from results
+        where 
+            abs(theta0 + 1) < 0.05
+            and abs(theta2 + 1) < 0.05
+''').df()
 ```
 
 ```python
