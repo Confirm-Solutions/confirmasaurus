@@ -54,8 +54,8 @@ import pandas as pd
 
 import imprint as ip
 from . import bootstrap
-from .backend import entrypoint
-from .backend import print_report
+from .adagrid import entrypoint
+from .adagrid import print_report
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class AdaCalibrate:
     def get_orderer(self):
         return "orderer"
 
-    async def process_tiles(self, *, tiles_df, tile_batch_size):
+    def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
         # Several auxiliary fields are calculated because they are needed for
@@ -108,7 +108,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df, lams_df), axis=1)
 
-    async def convergence_criterion(self, zone_id, report):
+    def convergence_criterion(self, basal_step_id, report):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -117,7 +117,7 @@ class AdaCalibrate:
         #
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
-        worst_tile_impossible = self.db.worst_tile(zone_id, "impossible")
+        worst_tile_impossible = self.db.worst_tile(basal_step_id, "impossible")
 
         # If there are no tiles, we are done.
         if worst_tile_impossible.shape[0] == 0:
@@ -127,12 +127,13 @@ class AdaCalibrate:
         if any_impossible:
             return False, None
 
-        worst_tile = self.db.worst_tile(zone_id, "lams")
+        worst_tile = self.db.worst_tile(basal_step_id, "lams")
         lamss = worst_tile["lams"].iloc[0]
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
-        B_lamss = self.db.bootstrap_lamss(zone_id)
+        logger.debug("Computing bias and standard deviation of lambda**")
+        B_lamss = self.db.bootstrap_lamss(basal_step_id)
         worst_tile_tie_sum = self.driver.many_rej(
             worst_tile, np.array([lamss] + list(B_lamss))
         ).iloc[0]
@@ -167,8 +168,10 @@ class AdaCalibrate:
         )
         return report["converged"], None
 
-    async def select_tiles(self, zone_id, new_step_id, report, _):
-        tiles_df = self.db.next(zone_id, new_step_id, self.cfg["step_size"], "orderer")
+    def select_tiles(self, basal_step_id, new_step_id, report, _):
+        tiles_df = self.db.next(
+            basal_step_id, new_step_id, self.cfg["step_size"], "orderer"
+        )
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
             return None
@@ -189,25 +192,12 @@ class AdaCalibrate:
         # To answer whether a tile might ever be the worst tile, we compare the
         # given tile's bootstrapped mean lambda* against the bootstrapped mean
         # lambda* of the tile with the lowest mean lambda*
-        # - recomputed with zero grid_cost (that is: alpha = alpha0)
-        #   by specifying a tiny radius
-        # - recomputed with the maximum allowed K
         #
-        # If the tile's mean lambda* is less the mean lambda* of this modified
+        # If the tile's mean lambda* is less the mean lambda* of this worst
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
-        twb_worst_tile = self.db.worst_tile(zone_id, "twb_mean_lams")
-        for col in twb_worst_tile.columns:
-            if col.startswith("radii"):
-                twb_worst_tile[col] = 1e-6
-        twb_worst_tile["K"] = self.max_K
-        twb_worst_tile_lams = self.driver.bootstrap_calibrate(
-            twb_worst_tile,
-            self.cfg["alpha"],
-            calibration_min_idx=self.cfg["calibration_min_idx"],
-            tile_batch_size=1,
-        )
-        twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
+        twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
+        twb_worst_tile_mean_lams = twb_worst_tile["twb_mean_lams"].iloc[0]
         deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
 
         ########################################
@@ -247,11 +237,8 @@ def ada_calibrate(
     timeout: int = 60 * 60 * 12,
     step_size: int = 2**10,
     packet_size: int = None,
-    coordinate_every: int = 1,
-    n_zones: int = 1,
     prod: bool = True,
     job_name: str = None,
-    backup_interval: int = 10 * 60,
     overrides: dict = None,
     callback=print_report,
     backend=None,
@@ -295,10 +282,6 @@ def ada_calibrate(
            packet of tiles. Defaults to 2**10.
         packet_size: The number of tiles to process per iteration. Defaults to
             None. If None, we use the same value as step_size.
-        coordinate_every: The number of steps to run before re-dividing tiles
-            into zones. If n_zones==1, no coordination will be performed. Defaults
-            to 1.
-        n_zones: The number of zones to divide the tiles into. Defaults to 1.
         prod: Is this a production run? If so, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster. If prod is False, we also skip database backups
@@ -307,8 +290,6 @@ def ada_calibrate(
             for storing long-term backups in Clickhouse. By default (None), an
             in-memory DuckDB is used and a random UUID is chosen for
             Clickhouse.
-        backup_interval: The number of seconds between backups. Defaults to 10 minutes.
-            If None, no backups will be performed.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
             preset configuration settings. All other arguments will be ignored.

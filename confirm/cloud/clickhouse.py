@@ -4,6 +4,8 @@ import os
 import time
 import uuid
 
+import numpy as np
+import pandas as pd
 import pyarrow
 
 from ..adagrid.db import DuckDBTiles
@@ -18,60 +20,130 @@ all_tables = [
     "logs",
     "reports",
     "null_hypos",
-    "zone_mapping",
 ]
 
 
-async def backup(ch_db, duck):
-    await asyncio.gather(*[backup_table(duck, ch_db, name) for name in all_tables])
+async def backup(ch_client, duck, first_time):
+    logger.info("Backing up database")
+    if not duck.does_table_exist("backup_status"):
+        backup_df = pd.DataFrame(  # noqa
+            {  # noqa
+                "table_name": all_tables,
+                "next_rowid": np.array([0] * len(all_tables), dtype=np.uint64),
+            }
+        )
+        duck.con.execute(
+            """
+            create table backup_status as select * from backup_df
+        """
+        )
+    tasks = [
+        asyncio.create_task(backup_table(duck, ch_client, name, first_time))
+        for name in all_tables
+    ]
+    await asyncio.gather(*tasks)
+    logger.info(f"Backup complete to {ch_client.database}")
 
 
-async def restore(ch_db, duck=None):
+async def backup_table(duck, ch_client, name, first_time):
+    if not duck.does_table_exist(name):
+        return 0
+
+    # Using rowid to do incremental backups is very simple because no rows are
+    # ever deleted in the DB.
+    while True:
+        next_rowid = duck.con.query(
+            f"select next_rowid from backup_status where table_name = '{name}'"
+        ).fetchone()[0]
+        max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
+        if max_rowid is None:
+            # table is empty
+            return
+        if max_rowid < next_rowid:
+            # table has not changed
+            return
+        max_rowid = min(max_rowid, next_rowid + int(1e5))
+        start = time.time()
+        df = duck.con.query(
+            f"""
+            select rowid, * from {name} 
+                where rowid >= {next_rowid} 
+                and rowid <= {max_rowid}
+        """
+        ).df()
+        logger.debug(
+            f"Collecting backup data for"
+            f" table={name} took {time.time() - start:.2f} seconds"
+        )
+
+        cols = get_create_table_cols(df)
+        if first_time[name]:
+            await asyncio.to_thread(
+                command,
+                ch_client,
+                f"""
+                CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
+                ENGINE = MergeTree()
+                ORDER BY ()
+                """,
+                default_insert_settings,
+            )
+            first_time[name] = False
+        chunk_size = int(1e4)
+        chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
+        wait_for = []
+        for c_df in chunks:
+            wait_for.append(
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        insert_df, ch_client, name, c_df, default_insert_settings
+                    )
+                )
+            )
+        await asyncio.gather(*wait_for)
+        logger.debug(f"Incremental backup complete for table={name}.")
+
+        duck.con.execute(
+            f"""
+            update backup_status 
+                set next_rowid = {max_rowid + 1} 
+                where table_name = '{name}'
+            """
+        )
+
+
+async def restore(job_name, duck=None):
+    ch_client = connect(job_name)
     if duck is None:
         duck = DuckDBTiles.connect()
-    await asyncio.gather(*[restore_table(duck, ch_db, name) for name in all_tables])
+    await asyncio.gather(*[restore_table(duck, ch_client, name) for name in all_tables])
+    duck.con.execute(
+        """
+        update results set
+            eligible = (id not in (select id from done)),
+            active = (id not in (select id from done where active=false))
+        where eligible = true and active = true
+        """
+    )
+    duck.con.execute(
+        """
+        update tiles set
+            active = (id not in (select id from done where active=false))
+        where active = true
+        """
+    )
     return duck
 
 
-async def backup_table(duck, ch_client, name):
-    if not duck.does_table_exist(name):
-        logger.info(
-            f"Backup skipping table {name} because it"
-            " doesn't exist in the source db."
-        )
-        return
-    df = duck.con.query(f"select * from {name}").df()
-
-    def move_table_to_ch():
-        cols = get_create_table_cols(df)
-        if does_table_exist(ch_client, name):
-            command(ch_client, f"DROP TABLE {name}", settings=default_insert_settings)
-        command(
-            ch_client,
-            f"""
-            CREATE TABLE {name} ({",".join(cols)})
-            ENGINE = MergeTree()
-            ORDER BY ()
-            """,
-            settings=default_insert_settings,
-        )
-        insert_df(ch_client, name, df)
-
-    await asyncio.to_thread(move_table_to_ch)
-
-
 async def restore_table(duck, ch_client, name):
+    # TODO: might need offset/limit and iteration here.
     def get_table_from_ch():
-        if not does_table_exist(ch_client, name):
-            logger.info(
-                f"Restore skipping table {name} because it"
-                " doesn't exist in the source db."
-            )
-            return
         df = query_df(ch_client, f"select * from {name}")
         if name == "logs":
             df["t"] = df["t"].dt.tz_localize(None)
-        return df
+        return (
+            df.sort_values(by=["rowid"]).drop(columns=["rowid"]).reset_index(drop=True)
+        )
 
     df = await asyncio.to_thread(get_table_from_ch)  # noqa
     if duck.does_table_exist(name):
@@ -189,10 +261,18 @@ def query_df(client, query):
     return out
 
 
-default_insert_settings = dict(
+synchronous_insert_settings = dict(
     insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
 )
-# default_async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+default_insert_settings = async_insert_settings
+
+
+def set_insert_settings(settings):
+    for k in list(default_insert_settings.keys()):
+        del default_insert_settings[k]
+    for k in settings:
+        default_insert_settings[k] = settings[k]
 
 
 def insert_df(client, table, df, settings=None):
@@ -277,11 +357,7 @@ def connect(
     client = get_ch_client(connection_details=connection_details)
     if not no_create:
         # Create job_id database if it doesn't exist
-        command(
-            client,
-            f"create database if not exists {job_id}",
-            settings=default_insert_settings,
-        )
+        command(client, f"create database if not exists {job_id}")
 
     # NOTE: client.database is invading private API, but based on reading
     # the clickhouse_connect code, this is unlikely to break
@@ -336,7 +412,16 @@ def get_ch_config(host=None, port=None, username=None, password=None, database=N
     )
 
 
-def clear_dbs(ch_client=None, names=None, yes=False):
+def list_dbs(ch_client):
+    return [
+        row["name"]
+        for i, row in retry_ch_action(ch_client.query_df, "show databases").iterrows()
+        if row["name"]
+        not in ["system", "default", "information_schema", "INFORMATION_SCHEMA"]
+    ]
+
+
+def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -362,12 +447,11 @@ def clear_dbs(ch_client=None, names=None, yes=False):
         raise RuntimeError("This function is only for localhost or test databases.")
 
     if names is None:
-        to_drop = []
-        all_dbs = retry_ch_action(ch_client.query_df, "show databases")
-        for db in all_dbs["name"]:
-            if db.startswith("unnamed_"):
-                to_drop.append(db)
+        print('dropping all databases starting with "{}"'.format(prefix))
+        all_dbs = list_dbs(ch_client)
+        to_drop = [db for db in all_dbs if db.startswith(prefix)]
     else:
+        print("dropping specified databases: {}".format(names))
         to_drop = names
 
     if len(to_drop) == 0:
@@ -376,7 +460,7 @@ def clear_dbs(ch_client=None, names=None, yes=False):
         print("Dropping the following databases:")
         print(to_drop)
         if not yes:
-            print("Are you sure? [yN]", flush=True)
+            print("Are you sure? [yN]\nResponse: ", flush=True, end="")
             yes = input() == "y"
 
         if yes:

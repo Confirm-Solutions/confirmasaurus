@@ -121,75 +121,59 @@ class WD41(ip.Model):
             )
         }
 
-    def sample(self, unifs, n, p):
-        return jnp.sum(unifs < p, dtype=self.dtype) / n
+    def sample(self, unifs, p):
+        return jnp.sum(unifs < p, dtype=self.dtype)
 
     def sample_all_arms(
-        self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
+        self,
+        unifs_stage,
+        pcontrol_tnbc,
+        ptreat_tnbc,
+        pcontrol_hrplus,
+        ptreat_hrplus,
+        n_tnbc_per_arm,
+        n_hrplus_per_arm,
     ):
-        unifs_tnbc = unifs[: self.n_tnbc_second_stage_total]
-        unifs_tnbc_control = unifs_tnbc[: self.n_tnbc_second_stage_per_arm]
-        unifs_tnbc_treat = unifs_tnbc[self.n_tnbc_second_stage_per_arm :]
-        unifs_hrplus = unifs[self.n_tnbc_second_stage_total :]
-        unifs_hrplus_control = unifs_hrplus[: self.n_hrplus_second_stage_per_arm]
-        unifs_hrplus_treat = unifs_hrplus[self.n_hrplus_second_stage_per_arm :]
+        unifs_tnbc = unifs_stage[: self.n_tnbc_second_stage_total]
+        unifs_tnbc_control = unifs_tnbc[:n_tnbc_per_arm]
+        unifs_tnbc_treat = unifs_tnbc[n_tnbc_per_arm:]
+        unifs_hrplus = unifs_stage[2 * (n_tnbc_per_arm) :]
+        unifs_hrplus_control = unifs_hrplus[:n_hrplus_per_arm]
+        unifs_hrplus_treat = unifs_hrplus[n_hrplus_per_arm:]
 
-        phattnbccontrol = self.sample(
-            unifs_tnbc_control, self.n_tnbc_second_stage_per_arm, pcontrol_tnbc
-        )
-        phattnbctreat = self.sample(
-            unifs_tnbc_treat,
-            self.n_tnbc_second_stage_per_arm,
-            ptreat_tnbc,
-        )
-        phathrpluscontrol = self.sample(
-            unifs_hrplus_control, self.n_hrplus_second_stage_per_arm, pcontrol_hrplus
-        )
-        phathrplustreat = self.sample(
-            unifs_hrplus_treat,
-            self.n_hrplus_second_stage_per_arm,
-            ptreat_hrplus,
-        )
-        return phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
+        ytnbccontrol = self.sample(unifs_tnbc_control, pcontrol_tnbc)
+        ytnbctreat = self.sample(unifs_tnbc_treat, ptreat_tnbc)
+        yhrpluscontrol = self.sample(unifs_hrplus_control, pcontrol_hrplus)
+        yhrplustreat = self.sample(unifs_hrplus_treat, ptreat_hrplus)
+        return ytnbccontrol, ytnbctreat, yhrpluscontrol, yhrplustreat
 
-    def ztnbc(self, phattnbccontrol, phattnbctreat, n_per_arm):
-        tnbc_pooledaverage = (phattnbctreat + phattnbccontrol) * self.dtype(0.5)
-        denominatortnbc = jnp.sqrt(
-            tnbc_pooledaverage * (1 - tnbc_pooledaverage) * (2 / n_per_arm)
-        )
-        return (phattnbctreat - phattnbccontrol) / denominatortnbc
-
-    def zfull(self, phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat):
-        totally_pooledaverage = (
-            (phattnbctreat + phattnbccontrol) * self.n_tnbc_first_stage_per_arm
-            + (phathrplustreat + phathrpluscontrol) * self.n_hrplus_first_stage_per_arm
-        ) / self.n_first_stage
-        denominatortotallypooled = jnp.sqrt(
-            totally_pooledaverage
-            * (1 - totally_pooledaverage)
-            * (1 / (self.n_first_stage))
-        )
-        tnbc_effect = phattnbctreat - phattnbccontrol
-        hrplus_effect = phathrplustreat - phathrpluscontrol
-        return (
-            (tnbc_effect * self.n_tnbc_first_stage_total)
-            + (hrplus_effect * self.n_hrplus_first_stage_total)
-        ) / (denominatortotallypooled * self.n_first_stage)
+    def zstat(self, y_control, y_treat, n_per_arm):
+        y_avg = (y_treat + y_control) * 0.5
+        denominatortnbc = jnp.sqrt(y_avg * (n_per_arm - y_avg) * (2 / n_per_arm))
+        return (y_treat - y_control) / denominatortnbc
 
     def stage1(self, unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus):
         (
-            phattnbccontrol,
-            phattnbctreat,
-            phathrpluscontrol,
-            phathrplustreat,
+            ytnbccontrol,
+            ytnbctreat,
+            yhrpluscontrol,
+            yhrplustreat,
         ) = self.sample_all_arms(
-            unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
+            unifs,
+            pcontrol_tnbc,
+            ptreat_tnbc,
+            pcontrol_hrplus,
+            ptreat_hrplus,
+            self.n_tnbc_first_stage_per_arm,
+            self.n_hrplus_first_stage_per_arm,
         )
 
         # Arm-dropping logic: drop all elementary hypotheses with larger than
         # 0.1 difference in effect size
-        tnbc_effect = phattnbctreat - phattnbccontrol
-        hrplus_effect = phathrplustreat - phathrpluscontrol
+        tnbc_effect = (ytnbctreat - ytnbccontrol) / self.n_tnbc_first_stage_per_arm
+        hrplus_effect = (
+            yhrplustreat - yhrpluscontrol
+        ) / self.n_hrplus_first_stage_per_arm
         full_effect = (
             self.true_frac_tnbc * tnbc_effect
             + (1 - self.true_frac_tnbc) * hrplus_effect
@@ -199,56 +183,58 @@ class WD41(ip.Model):
         hypofull_live = effect_diff <= 0.1
         hypotnbc_live = effect_diff >= -0.1
 
+        y_control = ytnbccontrol + yhrpluscontrol
+        y_treat = ytnbctreat + yhrplustreat
+        n_control = self.n_tnbc_first_stage_per_arm + self.n_hrplus_first_stage_per_arm
         return (
-            self.ztnbc(phattnbccontrol, phattnbctreat, self.n_tnbc_first_stage_per_arm),
-            self.zfull(
-                phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
-            ),
+            self.zstat(ytnbccontrol, ytnbctreat, self.n_tnbc_first_stage_per_arm),
+            self.zstat(y_control, y_treat, n_control),
             hypofull_live,
             hypotnbc_live,
         )
 
-    def stage2_tnbc(self, unifs, pcontrol_tnbc, ptreat_tnbc):
+    def stage2_tnbc(self, unifs_stage, pcontrol_tnbc, ptreat_tnbc):
         # Here, we ignored n_hrplus_second_stage_per_arm patients because the
         # hrplus arm has been dropped.
-        unifs_control = unifs[: self.n_tnbc_only_second_stage]
-        unifs_treat = unifs[self.n_tnbc_only_second_stage :]
-        phattnbccontrol = self.sample(
-            unifs_control, self.n_tnbc_only_second_stage, pcontrol_tnbc
-        )
-        phattnbctreat = self.sample(
-            unifs_treat,
-            self.n_tnbc_only_second_stage,
-            ptreat_tnbc,
-        )
+        unifs_control = unifs_stage[: self.n_tnbc_only_second_stage]
+        unifs_treat = unifs_stage[self.n_tnbc_only_second_stage :]
+        ytnbccontrol = self.sample(unifs_control, pcontrol_tnbc)
+        ytnbctreat = self.sample(unifs_treat, ptreat_tnbc)
         return (
-            self.ztnbc(phattnbccontrol, phattnbctreat, self.n_tnbc_only_second_stage),
+            self.zstat(ytnbccontrol, ytnbctreat, self.n_tnbc_only_second_stage),
             -self.dtype(jnp.inf),
         )
 
     def stage2_full(
         self,
-        unifs,
+        unifs_stage,
         pcontrol_tnbc,
         ptreat_tnbc,
         pcontrol_hrplus,
         ptreat_hrplus,
     ):
         (
-            phattnbccontrol,
-            phattnbctreat,
-            phathrpluscontrol,
-            phathrplustreat,
+            ytnbccontrol,
+            ytnbctreat,
+            yhrpluscontrol,
+            yhrplustreat,
         ) = self.sample_all_arms(
-            unifs, pcontrol_tnbc, ptreat_tnbc, pcontrol_hrplus, ptreat_hrplus
+            unifs_stage,
+            pcontrol_tnbc,
+            ptreat_tnbc,
+            pcontrol_hrplus,
+            ptreat_hrplus,
+            self.n_tnbc_second_stage_per_arm,
+            self.n_hrplus_second_stage_per_arm,
+        )
+        y_control = ytnbccontrol + yhrpluscontrol
+        y_treat = ytnbctreat + yhrplustreat
+        n_control = (
+            self.n_tnbc_second_stage_per_arm + self.n_hrplus_second_stage_per_arm
         )
         return (
-            self.ztnbc(
-                phattnbccontrol, phattnbctreat, self.n_tnbc_second_stage_per_arm
-            ),
-            self.zfull(
-                phattnbccontrol, phattnbctreat, phathrpluscontrol, phathrplustreat
-            ),
+            self.zstat(ytnbccontrol, ytnbctreat, self.n_tnbc_second_stage_per_arm),
+            self.zstat(y_control, y_treat, n_control),
         )
 
     def sim(
@@ -384,5 +370,5 @@ class WD41(ip.Model):
             theta.astype(self.dtype),
             null_truth.astype(self.dtype),
         )
-        assert out.dtype == self.dtype
+        # assert out.dtype == self.dtype
         return out

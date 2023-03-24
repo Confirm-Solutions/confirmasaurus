@@ -1,30 +1,29 @@
 import asyncio
 import logging
 import time
+from enum import Enum
 
 import numpy as np
 import pandas as pd
 
 import imprint as ip
-from .convergence import WorkerStatus
 
 logger = logging.getLogger(__name__)
 
 
 async def process_packet_set(backend, algo, packets):
     coros = []
-    for zone_id, step_id, packet_id in packets:
+    for step_id, packet_id in packets:
         logger.debug(
-            "waiting for work: (zone_id=%s, step_id=%s, packet_id=%s)",
-            zone_id,
+            "waiting for work: (step_id=%s, packet_id=%s)",
             step_id,
             packet_id,
         )
-        packet_df = algo.db.get_packet(zone_id, step_id, packet_id)
+        packet_df = algo.db.get_packet(step_id, packet_id)
         if packet_df.shape[0] == 0:
             logger.warning(
-                f"Packet is empty or already processed. (zone_id={zone_id}, "
-                f"step_id={step_id}, packet_id={packet_id})"
+                f"Packet is empty or already processed."
+                f" (step_id={step_id}, packet_id={packet_id})"
             )
         else:
             coros.append(process_packet(backend, algo, packet_df))
@@ -34,17 +33,18 @@ async def process_packet_set(backend, algo, packets):
 async def process_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
         return
-    coros = []
+    tasks = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        coros.append(process_packet(backend, algo, packet_df=packet_df))
-    await asyncio.gather(*coros)
+        tasks.append(
+            asyncio.create_task(process_packet(backend, algo, packet_df=packet_df))
+        )
+    await asyncio.gather(*tasks)
 
 
 async def process_packet(backend, algo, packet_df):
     start = time.time()
     report = dict()
     report["worker_id"] = algo.cfg["worker_id"]
-    report["zone_id"] = packet_df.iloc[0]["zone_id"]
     report["step_id"] = packet_df.iloc[0]["step_id"]
     report["packet_id"] = packet_df.iloc[0]["packet_id"]
     report["n_tiles"] = packet_df.shape[0]
@@ -68,12 +68,12 @@ async def process_packet(backend, algo, packet_df):
     algo.db.insert_report(report)
 
 
-async def new_step(algo, zone_id, new_step_id):
+def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
-    status, tiles_df, report = await _new_step(algo, zone_id, new_step_id)
+    status, tiles_df, report = _new_step(algo, basal_step_id, new_step_id)
     report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
-    report["zone_id"] = zone_id
+    report["basal_step_id"] = basal_step_id
     report["step_id"] = new_step_id
     report["n_packets"] = tiles_df["packet_id"].nunique() if tiles_df is not None else 0
     report["runtime_total"] = time.time() - start
@@ -82,10 +82,10 @@ async def new_step(algo, zone_id, new_step_id):
     return status, tiles_df
 
 
-async def _new_step(algo, zone_id, new_step_id):
+def _new_step(algo, basal_step_id, new_step_id):
     report = dict()
 
-    converged, convergence_data = await algo.convergence_criterion(zone_id, report)
+    converged, convergence_data = algo.convergence_criterion(basal_step_id, report)
 
     start = time.time()
     report["runtime_convergence_criterion"] = time.time() - start
@@ -93,10 +93,13 @@ async def _new_step(algo, zone_id, new_step_id):
         logger.debug("Convergence!!")
         return WorkerStatus.CONVERGED, None, report
     elif new_step_id >= algo.cfg["n_steps"]:
-        logger.debug("Reached maximum number of steps. Terminating.")
-        return WorkerStatus.REACHED_N_STEPS, None, report
+        logger.error(
+            "Reached maximum number of steps. Terminating."
+            " This should've been prevented in the outer loop."
+        )
+        assert False
 
-    n_existing_packets = algo.db.n_existing_packets(zone_id, new_step_id)
+    n_existing_packets = algo.db.n_existing_packets(new_step_id)
     if n_existing_packets is not None and n_existing_packets > 0:
         logger.debug(
             f"Step {new_step_id} already exists with"
@@ -104,13 +107,13 @@ async def _new_step(algo, zone_id, new_step_id):
         )
         return (
             WorkerStatus.ALREADY_EXISTS,
-            algo.db.get_packet(zone_id, new_step_id),
+            algo.db.get_packet(new_step_id),
             report,
         )
 
     # If we haven't converged, we create a new step.
-    selection_df = await algo.select_tiles(
-        zone_id, new_step_id, report, convergence_data
+    selection_df = algo.select_tiles(
+        basal_step_id, new_step_id, report, convergence_data
     )
 
     if selection_df is None:
@@ -131,7 +134,6 @@ async def _new_step(algo, zone_id, new_step_id):
     if "split" not in selection_df.columns:
         selection_df["split"] = False
     done_cols = [
-        "zone_id",
         "step_id",
         "packet_id",
         "id",
@@ -166,7 +168,6 @@ async def _new_step(algo, zone_id, new_step_id):
     g_new = refine_and_deepen(
         selection_df, algo.null_hypos, algo.cfg["max_K"], algo.cfg["worker_id"]
     )
-    g_new.df["zone_id"] = np.uint32(zone_id)
     g_new.df["step_id"] = new_step_id
     g_new.df["creator_id"] = algo.cfg["worker_id"]
     g_new.df["creation_time"] = ip.timer.simple_timer()
@@ -199,8 +200,7 @@ async def _new_step(algo, zone_id, new_step_id):
     report["time"] = time.time()
 
     logger.debug(
-        f"For zone {zone_id}, starting step {new_step_id}"
-        f" with {g_active.n_tiles} tiles to simulate."
+        f"Starting step {new_step_id}" f" with {g_active.n_tiles} tiles to simulate."
     )
     return WorkerStatus.NEW_STEP, g_active.df, report
 
@@ -219,10 +219,9 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     # sometimes when a tile clearly needs *way* more sims. how to
     # determine this?
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
-    g_deepen.df["coordination_id"] = df["coordination_id"].values[0]
 
     g_refine_in = ip.grid.Grid(df.loc[df["refine"] > 0], worker_id)
-    inherit_cols = ["K", "coordination_id"]
+    inherit_cols = ["K"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.
     g_refine = g_refine_in.refine(inherit_cols)
@@ -235,32 +234,14 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     return out
 
 
-async def coordinate(algo, step_id, n_zones):
-    start = time.time()
-    report = dict()
-    status, zone_steps = await _coordinate(algo, step_id, n_zones, report)
-    report["status"] = status.name
-    report["runtime_total"] = time.time() - start
-    algo.callback(report, algo.db)
-    algo.db.insert_report(report)
-    return status, zone_steps
-
-
-async def _coordinate(algo, step_id, n_zones, report):
-    # This function should only ever run for the clickhouse database. So,
-    # rather than abstracting the various database calls, we just write
-    # them in here directly.
-    report["step_id"] = step_id
-    report["worker_id"] = algo.cfg["worker_id"]
-    report["n_zones"] = n_zones
-
-    converged, _ = await algo.convergence_criterion(None, report)
-    if converged:
-        return WorkerStatus.CONVERGED, None
-
-    report["n_tiles"], zone_steps = algo.db.coordinate(step_id, n_zones)
-    if report["n_tiles"] == 0:
-        return WorkerStatus.EMPTY_STEP, None
-
-    report["time"] = time.time()
-    return WorkerStatus.COORDINATED, zone_steps
+class WorkerStatus(Enum):
+    # Statuses which terminate the worker.
+    CONVERGED = 0
+    # Statuses which end the self-help stage.
+    EMPTY_STEP = 2
+    NO_NEW_TILES = 3
+    # Normal solo work statuses.
+    NEW_STEP = 4
+    WORKING = 5
+    ALREADY_EXISTS = 6
+    EMPTY_PACKET = 7

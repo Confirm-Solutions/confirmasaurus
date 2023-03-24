@@ -60,7 +60,7 @@ import confirm.cloud.coiled_backend as coiled_backend
 import confirm.adagrid as ada
 from imprint.models.ztest import ZTest1D
 
-cluster = coiled_backend.setup_cluster(n_workers=16, idle_timeout="2 hours")
+cluster = coiled_backend.setup_cluster(n_workers=4, idle_timeout="2 hours")
 client = cluster.get_client()
 ```
 

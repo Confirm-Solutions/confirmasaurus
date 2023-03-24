@@ -76,7 +76,7 @@ def main():
         step_size=2**18,
         packet_size=2**15,
         model_kwargs={"ignore_intersection": True},
-        backend=ModalBackend(n_zones=4, n_workers=10, coordinate_every=1, gpu="T4"),
+        backend=ModalBackend(n_zones=4, n_workers=10, gpu="T4"),
     )
     print(db.job_id)
 

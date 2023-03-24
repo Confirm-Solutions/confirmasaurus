@@ -5,7 +5,7 @@ import sys
 import modal.aio
 
 from . import modal_util
-from confirm.adagrid.backend import Backend
+from confirm.adagrid.adagrid import Backend
 
 logger = logging.getLogger(__name__)
 name = "modal_adagrid"

@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 
 import dask
 import jax
@@ -12,22 +13,32 @@ from distributed.diagnostics.plugin import UploadDirectory
 
 import confirm
 import imprint as ip
-from ..adagrid.backend import Backend
-from ..adagrid.backend import LocalBackend
+from ..adagrid.adagrid import Backend
+from ..adagrid.adagrid import LocalBackend
 
 logger = logging.getLogger(__name__)
 
 
 def create_software_env():
     reqs = subprocess.run(
-        "poetry export --without-hashes", stdout=subprocess.PIPE, shell=True
+        "poetry export --with=cloud --without-hashes",
+        stdout=subprocess.PIPE,
+        shell=True,
     ).stdout.decode("utf-8")
     reqs = reqs.split("\n")
-    reqs = [r.split(";")[0][:-1] for r in reqs if "jax" not in r]
-    confirm_dir = os.path.dirname(os.path.dirname(confirm.__file__))
-    with open(os.path.join(confirm_dir, "requirements-coiled.txt"), "r") as f:
-        reqs.extend([L.strip() for L in f.readlines()])
-    reqs = [r for r in reqs if len(r) > 0]
+
+    req_jax = [r.split(";")[0][:-1] for r in reqs if "jax==" in r][0].split("==")[1]
+    reqs = [
+        r.split(";")[0][:-1]
+        for r in reqs
+        if ("jax" not in r and 'sys_platform == "win32"' not in r)
+    ]
+    reqs.append(
+        "--find-links "
+        "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+    )
+    reqs.append(f"jax[cuda11_cudnn82]=={req_jax}")
+    reqs = [r for r in reqs if r != ""]
     pip_installs = "\n".join([f"    - {r}" for r in reqs])
     environment_yml = f"""
 name: confirm
@@ -73,7 +84,7 @@ def upload_pkg(client, module, restart=False):
     )
 
 
-def setup_cluster(n_workers=1, idle_timeout="20 minutes"):
+def setup_cluster(n_workers=1, idle_timeout="2 hours"):
     create_software_env()
     import coiled
 
@@ -87,6 +98,8 @@ def setup_cluster(n_workers=1, idle_timeout="20 minutes"):
         shutdown_on_close=False,
         scheduler_options={"idle_timeout": idle_timeout},
         allow_ssh=True,
+        wait_for_workers=1,
+        worker_options={"nthreads": 2},
     )
     cluster.scale(n_workers)
     client = cluster.get_client()
@@ -175,7 +188,14 @@ def dask_process_tiles(worker_args, packet_df):
 
 
 class CoiledBackend(Backend):
-    def __init__(self, detach: bool = False, n_workers: int = 1, cluster=None):
+    def __init__(
+        self,
+        restart_workers: bool = False,
+        detach: bool = False,
+        n_workers: int = 1,
+        cluster=None,
+    ):
+        self.restart_workers = restart_workers
         self.detach = detach
         self.n_workers = n_workers
         self.cluster = cluster
@@ -191,6 +211,8 @@ class CoiledBackend(Backend):
         if self.cluster is None:
             self.cluster = setup_cluster(self.n_workers)
         self.client = self.cluster.get_client()
+        if self.restart_workers:
+            self.client.restart()
         algo_entries = [
             "init_K",
             "n_K_double",
@@ -217,6 +239,10 @@ class CoiledBackend(Backend):
         yield
 
     async def process_tiles(self, tiles_df):
+        start = time.time()
         fut = self.client.submit(dask_process_tiles, self.worker_args_future, tiles_df)
+        logger.debug(
+            f"Tile processing submitted to cluster in {time.time() - start:.2f} seconds"
+        )
         out, runtime_simulating = await asyncio.to_thread(fut.result)
         return out, runtime_simulating

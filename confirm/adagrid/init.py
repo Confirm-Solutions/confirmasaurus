@@ -16,7 +16,7 @@ import imprint as ip
 logger = logging.getLogger(__name__)
 
 
-async def init(algo_type, worker_id, n_zones, kwargs):
+def init(algo_type, worker_id, kwargs):
     db = kwargs["db"]
     g = kwargs.get("g", None)
 
@@ -29,13 +29,14 @@ async def init(algo_type, worker_id, n_zones, kwargs):
     if g is not None and not tiles_exists:
         cfg, null_hypos = first(kwargs)
     else:
-        cfg, null_hypos = await join(db, kwargs)
+        cfg, null_hypos = join(db, kwargs)
 
     cfg["worker_id"] = worker_id
     add_system_cfg(cfg)
 
     if g is not None and not tiles_exists:
-        incomplete_packets, zone_steps = await init_grid(g, db, cfg, n_zones)
+        incomplete_packets = init_grid(g, db, cfg)
+        next_step = 1
     else:
         db.insert_config(pd.DataFrame([cfg]))
         if g is not None:
@@ -43,7 +44,7 @@ async def init(algo_type, worker_id, n_zones, kwargs):
                 "Ignoring grid because tiles already exist " "in the provided database."
             )
         incomplete_packets = db.get_incomplete_packets()
-        zone_steps = db.get_zone_steps()
+        next_step = db.get_next_step()
 
     cfg_copy = copy.copy(cfg)
     del cfg_copy["git_diff"]
@@ -60,7 +61,7 @@ async def init(algo_type, worker_id, n_zones, kwargs):
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
 
-    return algo, incomplete_packets, zone_steps
+    return algo, incomplete_packets, next_step
 
 
 def first(kwargs):
@@ -97,7 +98,7 @@ def first(kwargs):
     return cfg, kwargs["g"].null_hypos
 
 
-async def join(db, kwargs):
+def join(db, kwargs):
     # If we are resuming a job, we need to load the config from the database.
     load_cfg_df = db.get_config()
     cfg = load_cfg_df.iloc[0].to_dict()
@@ -159,57 +160,39 @@ def add_system_cfg(cfg):
     cfg["max_K"] = cfg["init_K"] * 2 ** cfg["n_K_double"]
 
 
-async def init_grid(g, db, cfg, n_zones):
+def init_grid(g, db, cfg):
     # Copy the input grid so that the caller is not surprised by any changes.
     df = copy.deepcopy(g.df)
     df["K"] = cfg["init_K"]
 
-    df["coordination_id"] = 0
     df["step_id"] = 0
-    df["zone_id"] = assign_tiles(g.n_tiles, n_zones)
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df["creator_id"] = 1
     df["creation_time"] = ip.timer.simple_timer()
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
 
-    await db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
+    db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
 
+    n_packets = df["packet_id"].nunique()
     logger.debug(
         "Initialized database with %d tiles and %d null hypos."
-        " The tiles are split between %d zones with packet_size=%s.",
+        " The tiles are split into %d packets with packet_size=%s.",
         df.shape[0],
         len(g.null_hypos),
-        n_zones,
+        n_packets,
         cfg["packet_size"],
     )
 
-    incomplete_packets = []
-    for zone_id, zone in df.groupby("zone_id"):
-        incomplete_packets.extend(
-            [(zone_id, 0, p) for p in range(zone["packet_id"].max() + 1)]
-        )
-    zone_steps = {zone_id: 0 for zone_id, zone in df.groupby("zone_id")}
-    return incomplete_packets, zone_steps
-
-
-def assign_tiles(n_tiles, n_zones):
-    tile_range = np.arange(n_tiles)
-    splits = [tile_range[i::n_zones] for i in range(n_zones)]
-    assignment = np.empty(n_tiles, dtype=np.uint32)
-    for i in range(n_zones):
-        assignment[splits[i]] = i
-    return assignment
+    incomplete_packets = [(0, i) for i in range(n_packets)]
+    return incomplete_packets
 
 
 def assign_packets(df, packet_size):
-    def f(df):
-        return pd.Series(
-            np.floor(np.arange(df.shape[0]) / packet_size).astype(int),
-            df.index,
-        )
-
-    return df.groupby("zone_id")["zone_id"].transform(f)
+    return pd.Series(
+        np.floor(np.arange(df.shape[0]) / packet_size).astype(int),
+        df.index,
+    )
 
 
 def _serialize_null_hypos(null_hypos):

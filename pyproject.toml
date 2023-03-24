@@ -16,7 +16,7 @@ numpy = "^1.24.2"
 scipy = "^1.10.1"
 sympy = "^1.11.1"
 pandas = "^1.5.3"
-jax = "^0.4.5"
+jax = "^0.4.6"
 numpyro = "^0.11.0"
 duckdb = "^0.7.1"
 tensorflow-probability = "^0.19.0"
@@ -26,12 +26,12 @@ synchronicity = "^0.2.14"
 optional = true
 
 [tool.poetry.group.test.dependencies]
-matplotlib = "^3.7.0"
-pytest = "^7.2.1"
-pre-commit = "^3.1.1"
-pytest-xdist = {extras = ["psutil"], version = "^3.2.0"}
+matplotlib = "^3.7.1"
+pytest = "^7.2.2"
+pre-commit = "^3.2.0"
+pytest-xdist = {extras = ["psutil"], version = "^3.2.1"}
 ipython = "^8.11.0"
-nbformat = "^5.7.3"
+nbformat = "^5.8.0"
 python-dotenv = "^0.21.1"
 
 [tool.poetry.group.cloud]
@@ -39,15 +39,15 @@ optional = true
 
 [tool.poetry.group.cloud.dependencies]
 pyarrow = "^10.0.1"
-boto3 = "^1.26.81"
+boto3 = "^1.26.96"
 cloudpickle = [
     { version = ">=2.0.0,<2.1.0", python = "<3.11" },
     { version = ">=2.2.0,<2.3.0", python = ">=3.11" },
 ]
-clickhouse-connect = "^0.5.13"
-coiled = "^0.5.2"
-dask = {extras = ["complete"], version = "^2023.3.0"}
-modal-client = "^0.46.1403"
+clickhouse-connect = "^0.5.16"
+coiled = "^0.5.6"
+dask = {extras = ["complete"], version = "^2023.3.1"}
+modal-client = "^0.46.1567"
 pynvml = "^11.5.0"
 
 [tool.poetry.group.dev]
@@ -62,8 +62,8 @@ reorder-python-imports = "^3.9.0"
 flake8 = "^6.0.0"
 typer = "^0.7.0"
 jupyter = "^1.0.0"
-rich = "^13.3.1"
-ipdb = "^0.13.11"
+rich = "^13.3.2"
+ipdb = "^0.13.13"
 tomli-w = "^1.0.0"
 
 [tool.isort]
@@ -72,6 +72,7 @@ profile = "black"
 [tool.pytest.ini_options]
 addopts = "-p imprint.testing --capture=no --show-capture=no --tb=short --strict-markers --doctest-modules"
 testpaths = ["tests", "imprint/tests"]
+filterwarnings = ["ignore:Deprecated call to `pkg_resources.declare_namespace:DeprecationWarning", "ignore:pkg_resources is deprecated as an API:DeprecationWarning"]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"
