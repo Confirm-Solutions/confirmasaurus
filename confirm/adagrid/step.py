@@ -26,19 +26,56 @@ async def process_packet_set(backend, algo, packets):
                 f" (step_id={step_id}, packet_id={packet_id})"
             )
         else:
-            coros.append(process_packet(backend, algo, packet_df))
+            awaitable, report = submit_packet(backend, algo, packet_df)
+            coros.append(wait_for_packet(backend, algo, awaitable, report))
     await asyncio.gather(*coros)
 
 
-async def process_packet_df(backend, algo, tiles_df):
+def submit_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
-        return
-    tasks = []
+        return []
+    packets = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        tasks.append(
-            asyncio.create_task(process_packet(backend, algo, packet_df=packet_df))
-        )
-    await asyncio.gather(*tasks)
+        packets.append(submit_packet(backend, algo, packet_df))
+    return packets
+
+
+def submit_packet(backend, algo, packet_df):
+    start = time.time()
+    report = dict()
+    report["worker_id"] = algo.cfg["worker_id"]
+    report["step_id"] = packet_df.iloc[0]["step_id"]
+    report["packet_id"] = packet_df.iloc[0]["packet_id"]
+    report["n_tiles"] = packet_df.shape[0]
+    report["n_total_sims"] = packet_df["K"].sum()
+
+    start = time.time()
+    report["start"] = start
+    logger.debug("Submitting %d tiles for processing.", packet_df.shape[0])
+    return backend.submit_tiles(packet_df), report
+
+
+async def wait_for_packets(backend, algo, packets):
+    coros = []
+    for p in packets:
+        coros.append(wait_for_packet(backend, algo, *p))
+    await asyncio.gather(*coros)
+
+
+async def wait_for_packet(backend, algo, awaitable, report):
+    results_df, runtime_simulating = await backend.wait_for_results(awaitable)
+    report["runtime_simulating"] = runtime_simulating
+    report["runtime_per_sim_ns"] = (
+        report["runtime_simulating"] / report["n_total_sims"] * 1e9
+    )
+    report["time"] = time.time()
+    algo.db.insert_results(results_df, algo.get_orderer())
+    status = WorkerStatus.WORKING
+    report["status"] = status.name
+    report["runtime_total"] = time.time() - report["start"]
+    del report["start"]
+    algo.callback(report, algo.db)
+    algo.db.insert_report(report)
 
 
 async def process_packet(backend, algo, packet_df):

@@ -83,7 +83,7 @@ def test_distributed(duckdb, ch_db, snapshot):
 
 
 def test_two_parallel_steps(snapshot):
-    cal_tester(None, snapshot, n_parallel_steps=2, step_size=1)
+    cal_tester(None, snapshot, n_parallel_steps=2, step_size=1, packet_size=1)
 
 
 @pytest.mark.slow

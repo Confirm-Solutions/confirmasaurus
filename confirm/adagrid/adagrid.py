@@ -13,8 +13,9 @@ from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
 from .step import new_step
-from .step import process_packet_df
 from .step import process_packet_set
+from .step import submit_packet_df
+from .step import wait_for_packets
 from .step import WorkerStatus
 
 logger = logging.getLogger(__name__)
@@ -85,12 +86,10 @@ async def async_entrypoint(backend, algo_type, kwargs):
 
             with timer("process packets"):
                 logger.info("Processing packets for step %d", step_id)
-                processing_tasks.put(
-                    asyncio.create_task(process_packet_df(backend, algo, tiles_df))
-                )
+                processing_tasks.put(submit_packet_df(backend, algo, tiles_df))
                 await asyncio.sleep(0)
                 if processing_tasks.qsize() > n_parallel_steps - 1:
-                    await processing_tasks.get()
+                    await wait_for_packets(backend, algo, processing_tasks.get())
 
     with timer("verify"):
         db.verify(basal_step_id)
@@ -205,7 +204,11 @@ class Backend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    async def process_tiles(self, tiles_df):
+    def submit_tiles(self, tiles_df):
+        pass
+
+    @abc.abstractmethod
+    async def wait_for_results(self, awaitable):
         pass
 
 
@@ -218,7 +221,7 @@ class LocalBackend(Backend):
         self.algo = algo
         yield
 
-    async def process_tiles(self, tiles_df):
+    def submit_tiles(self, tiles_df):
         tbs = self.algo.cfg["tile_batch_size"]
         if tbs is None:
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
@@ -226,6 +229,9 @@ class LocalBackend(Backend):
         start = time.time()
         out = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
         return out, time.time() - start
+
+    async def wait_for_results(self, awaitable):
+        return awaitable
 
 
 def print_report(report, _db):

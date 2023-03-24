@@ -40,7 +40,7 @@ def main():
     )
     db = ada.ada_calibrate(  # noqa
         wd41.WD41,
-        job_name="wd41_4d_v52",
+        job_name="wd41_4d_v53",
         g=grid,
         alpha=0.025,
         bias_target=0.001,
@@ -50,6 +50,7 @@ def main():
         calibration_min_idx=70,
         step_size=2**16,
         packet_size=2**13,
+        n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
         backend=coiled_backend.CoiledBackend(restart_workers=True, n_workers=16),
     )
