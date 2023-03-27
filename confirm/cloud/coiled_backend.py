@@ -167,7 +167,7 @@ def setup_worker(worker_args):
         async def async_process_tiles(tiles_df):
             lb = LocalBackend()
             async with lb.setup(worker.algo):
-                return await lb.process_tiles(tiles_df)
+                return await lb.wait_for_results(lb.submit_tiles(tiles_df))
 
         import synchronicity
 

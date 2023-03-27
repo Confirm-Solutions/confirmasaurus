@@ -40,7 +40,7 @@ def main():
     )
     db = ada.ada_calibrate(  # noqa
         wd41.WD41,
-        job_name="wd41_4d_v53",
+        job_name="wd41_4d_v55",
         g=grid,
         alpha=0.025,
         bias_target=0.001,

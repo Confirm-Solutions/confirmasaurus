@@ -18,7 +18,7 @@ import jax
 
 ip.setup_nb()
 
-self = ada.DuckDBTiles.connect('../../wd41_4d_v52')
+self = ada.DuckDBTiles.connect('../../wd41_4d_v55')
 ```
 
 ## Broad table exploration
@@ -33,23 +33,24 @@ n_rows_df
 ```
 
 ```python
+from confirm.adagrid.const import MAX_STEP
 n_sims = self.con.query('select sum(K) from results').fetchone()[0]
-n_retained_sims = self.con.query('select sum(K) from results where active=true').fetchone()[0]
+n_retained_sims = self.con.query(f'select sum(K) from results where inactivation_step={MAX_STEP}').fetchone()[0]
 n_sims / 1e12, n_retained_sims / 1e12
 ```
 
 ```python
 n_active_tiles = self.con.query(
-    "select count(*) from results where active=true"
+    f"select count(*) from results where inactivation_step={MAX_STEP}"
 ).fetchone()[0]
 n_eligible_tiles = self.con.query(
-    "select count(*) from results where eligible=true"
+    f"select count(*) from results where completion_step={MAX_STEP}"
 ).fetchone()[0]
 n_active_tiles, n_eligible_tiles
 ```
 
 ```python
-self.con.query('select K, count(*) as n_tiles from tiles where active=true group by K order by K').df()
+self.con.query(f'select K, count(*) as n_tiles from tiles where inactivation_step={MAX_STEP} group by K order by K').df()
 ```
 
 ```python
@@ -280,7 +281,7 @@ for i, x in enumerate(xs):
             select count(*) 
                 from results
                 where 
-                    active=true
+                    inactivation_step={MAX_STEP}
                     and abs(theta0 - {x}) < 0.167
                     and abs(theta2 - {y}) < 0.167
         ''').fetchone()[0]
