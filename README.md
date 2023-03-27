@@ -49,6 +49,9 @@ To get a fully functional development environment...
 
    # OPTIONALLY: Install a CUDA-enabled JAX build on Linux
    pip install --upgrade -r requirements-jax-cuda.txt
+   
+   # OPTIONALLY: Install other dev tools that must be done through pip
+   pip install --upgrade -r requirements-dev.txt
    ```
 
 ## Committing code
