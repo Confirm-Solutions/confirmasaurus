@@ -1,0 +1,74 @@
+mike:
+- look at the camera.
+- less umm, uhh.
+
+hi, taking notes here
+
+- taking high level minutes
+
+- opinions of the speakers, not the EMA
+- mike giong through slides...
+
+- joerg: will the methods be commercialized?
+    - mike: we will be open sourcing the code and the methods but we will have additional features and services commercialized
+- joerg: work is not published but that does not preclude regulator interest? 
+- joerg: special need for simulations to be used. the conservative position is still maintained currently. 
+    - consequence of simulations: lower interpretability of results. 
+- joerg: unplanned redesigns. assumptions that might not be fulfilled. exchangeability of patients is a prerequisite that might not be fulfilled.
+    - mike: changing the stopping criterion might be an amenable.
+    - mike: consider a survival design. there are lots where ema has written. logistical disruptions. if we're going to rescue a design, we should control type I error. 
+- anja: the difference between handling covid and handling ukraine. statistical boundaries vs interpretability. what proposing is a pre-check to check the statistical rigor. missing element of what we're proposing -> conclusion of p-value something something? not likely to get a p-value limitation.
+    - mike: what subsets of method? bayesian designs might clarify some of the interpretability. bayesian designs might help?
+    - anja: reluctant to accept bayesian designs. we accept them in cases where inferential system does not work. prior is an issue.
+    - anja: regulators are conservative. chicken and egg problem. we need to understand what would happen. we want to improve objectivity.
+    - anja: difference between war and pandemic. i'm not sure if i have to interpret the results. 
+- joerg: question to mike, methods cover statistical parameters but not design parameters. how do you cover drop outs in trials and intercurrent events with regard to the estimate framework? models should not assume missing at random. 
+    - mike: if you assume missing at random, things are easy. think of yourself as within an expanded model class. kaplan-meier approaches that handle this situation. we haven't fully solved this. nonparametrics are harder. 
+- question 2:
+    - joerg: pertaining to cases where this agreement where type i error control is agreed. the answer could be "yes" in cases where the type i erorr control process is already agreed upon. automation might be a problem. 
+    - mike: CID pilot program. small number of case studies - 5. simulation is the tool for assessment of design. price and scott 2021. 
+- question 3: 
+    - slides...
+    - joerg: mathematical validation is not yet watertight. for limited range, may be an appropriate tool. one of the features
+- question 4:
+    - joerg: software correctness. typically we approve things that are pretty narrow. lifecycle management of software. would be solvable but has challenges
+    - anja: clarity of what we can and can't validate: validating open-source package has been a challenge because the changing nature of the software. but they are more comfortable validating the technical basis and the use of the software. hard!!
+    - ehmann: context of use is important. one example: workshop on the future of validation procedure apr 17/18, 2023.
+    - joerg: we don't have experts on modeling and simulation in the meeting. we will face these problems on other software tools. they are working on solving this. there are proposals on validation of software. work in progress on EMA side.
+    - ehmann: modeling and simulaiton working party. 
+- question 1:
+    - stavros: good examples on trials conducted during the covid situation. lots of protocol amendments. lots of platform trials with arm additions and deletions. protocols are available online. recovery trial. protocol amendments online and freely available. evaluate those changes with our methods. 
+    - anja: also referring to CID protocols. EMA itself has some epedemiology studies running in the big data steering group. possibility to link us to one of these trials so that we can see and follow the technical side of their work. explaining to regulators how our methodology would address the proposed changes. first important step would be a real example on real data that we all have access to.
+    - joerg: would like to agree on an application. rare diseases and small populations where they tend to accept simulation-based designs. no good proposal based on a publically available example.
+    - ehmann: could add examples in post-meeting notes.
+- question 6: 
+    - ehmann: not possible and will not happen: direct recommendation to a specific company or software. in silico methods should be explored. after several examples really saves time, then a guidance could say something like "such tools should be explored when such trials are being explored." need lots of positive examples.
+    - joerg: ehmann already explained. conditional on acceptance as a method. rarely refer to specific methods. possibility to mention tools like we propose for exploring ranges of scenarios. sees the opportunities from a personal perspective. covers a range of scenarios that is currently not regularly explored. we can improve things in some areas.
+    - ehmann: more guidelines for more use. gained from experience. 
+    - joerg: connected question. computational costs. what is "four parameters"?
+        - mike: space that we're trying to cover. covering the space. ~100x more per parameter. log-odds for each arm is the parameter. 4-6 parameters. recovery trial might not be computationally tractable. multiplicative vs linear cost. moore's law and programming skills. 
+- question 5:
+    - joerg: volume of design space...
+    - mike: we can't game the location in parameter space. would be possible to brute force. slides...
+    - ehmann: cloud computing on behalf of regulator. data sharing on ema: cumulus, dplatform. strict data protection. need to sit on raw data. inspection of pharma-run. black-box is difficult to accept. inspection must be reproducible. inspectible.
+    - manolis: difficult to connect with cloud provider. data needs to be secure. secure services in the future. sensitivity to seed, number of simulations. increasing sample size 
+        - mike: pharma company needs to be only allowed to run once.
+    - manolis: pilot program on somehting, couldn't parse. capacity to repeat the simulation. instability would be an issue.
+    - anja: seed is simple because using same code and algo, then result is the same. whether ema needs to assess the correctness. only intervene if suspicious. 
+    - jorge: we extended the discussion too far. proposed to have sponsors doing simulation work. 
+    - benT: this section was chaos and nonsense.
+- question 7: 
+    - ehmann: chatgpt hahahaha. dumb comments about open-source stuff and needing to be behind a firewall. 
+    - anja: problem is snapshot assessment. european legal regulation of medical software. hard to assess quality.
+    - benT: wow, these people are living in 1995 when it comes to open source software.
+
+
+- bayesian design inside a frequentist box
+- separate design approval automation from drug approval automation.
+- unplanned addition to trial: real answer is the profit license. rewind to a mid-point in the trial.
+- sufficient statistics from initial part of the trial are necessary for unplanned modification to a trial.
+- open source can be snapshotted. 
+- open source software correctness tests could be automated.
+- reproduce a random one percent sample of the simulation results with snapshotted version. X percent corrupted, how large of a sample needs to be checked?
+- posit/r foundation did a project with the FDA to work on submission software. Shiny.
+- data transfer might not be too bad: 100 billion tiles in 4TB on one external hard drive.
