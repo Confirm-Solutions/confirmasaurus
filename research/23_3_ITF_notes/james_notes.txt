@@ -1,0 +1,247 @@
+Open Floor:
+
+Q1 (Joerg):
+- Quite far-reaching and interesting
+- Used by different stakeholders or sponsors?
+- Is this going to be commercialized?
+
+A:
+- Publishing our paper and software open-source.
+- Closed-source software for running in cloud at scale.
+- Service elements that we will charge for.
+- Base methodology available to everyone though.
+
+C2 (Joerg):
+- Not peer-reviewed yet and not endorsed by the scientific community yet.
+- There needs to be justification to use simulation based analysis.
+- While we are engaging in complex designs, we maintain this conservative position currently.
+- Because: consequence of complex designs is that interpretability is not preserved.
+
+Q3 (Joerg):
+- Unplanned redesigns?
+- It's a quite broad claim.
+- Are there any assumptions that must be met to allow this?
+- Exchangeability of patients is a prerequisite that might not be fulfilled and difficult to test.
+- 
+
+A:
+- I didn't understand it lol.
+
+Q4 (Anja):
+- We're proposing boundaries on what is acceptable/not acceptable.
+- Setting statistical boundaries and our abilities to still interpret the changes.
+- Your method is like a pre-check where basic statistical rigor is maintained.
+- A small change in design may be a big change in interpretation.
+- We all know the problem is a p-value.
+- But we haven't answered the core issue of how to set the boundary.
+
+A:
+- With regards to interpretability, how much of it is lifted in bayesian analysis?
+- Moderate changes to design that maintain TIE control, and have a bayesian analysis.
+
+Q5 (Anja):
+- It does not lift any problems.
+- Reluctant to accept Bayesian designs.
+- Shortcomings of the inferential framework.
+- Reluctant cuz of the prior.
+- More acceptable where we also accept Bayesian approaches.
+- Doesn't mean that in more standard situations, we don't prefer the conservative approach.
+- Only accept Bayesian when we absolutely need to and nothing is easier/nothing is more interpret.
+- You have to explain the use of the Bayesian analysis.
+- We have no full grip on your methodology.
+- Our mistakes are costly with people's lives so we remain conservative.
+- You want to make everything easier, make redesigns easier, make everything still have guarantee at an objective level.
+- All good.
+- How objective is this?
+- How to interpret it?
+- Seems futuristic.
+- Interpretation is the big question!
+
+Q6 (Joerg):
+- How do you deal with dropping arms?
+- How do you deal with missing at random?
+- Is this a design element?
+- We do care about methods that can allow for dropped arms.
+
+A:
+- Think of an extended model class with an extra statistical parameter that deal with missing at random.
+- Kaplan-Meier type approaches. (?)
+- We have not fully solved this issue of dropped arms.
+
+============================================================================================================================================
+Written Questions:
+
+Q2: 
+- Could CSE become a part of an automated process to accept minor protocol changes and resubmissions?
+
+A (Joerg):
+- This is pertaining to cases where there is an agreement on a case by case
+that the method relies on TIE control by simulation _is agreed_. 
+Then, your method is a valuable tool to cover redesigns.
+- Answer is yes, if there are such cases!
+- Regarding automation, that it is a stretch.
+- But, if the method is fully understood then this could be an option!
+
+Q (Falk):
+- How does CID think about this?
+
+A:
+- Gave a talk to CID members and statisticians.
+- Talked about earlier methods.
+- The FDA CID Pilot program was to allow for innovative bayesian designs.
+- Progress report came out discussing their case studies.
+- All 5 designs at that time were Bayesian and used simulation.
+
+Q3:
+- Could CSE allow a subset of design methods to be cleared with greatly reduced manual oversight?
+- Model acceptability.
+- Null hypothesis boundaries.
+- Is it even possible under the simplest case of binomial outcomes?
+
+A (Joerg):
+- Already stated that the mathematical validation has not yet happened.
+- Demonstrated in an acceptable way.
+- Have my doubts that this would be useful for a large range of cases.
+- For a limited range of cases, it seems like an appropriate tool.
+- The advantage of this method is that you can handle a wide range of parameter values.
+
+Q4:
+- How would experts like to see proof-by-simulation/CSE software validated for correctness?
+- How should do that?
+- What would be considered acceptable?
+
+A (Joerg):
+- The mathematical validation already discussed.
+- Software part: poses some challenges to the regulators.
+- We would qualify like snapshots and a process that is precisely described.
+- Life-cycle management because this tool will be constantly updated.
+
+A (Anja):
+- Be clear on what can be validated.
+- The proposal is vague about that.
+- Validating open-source packages has been a challenge because that can be changed any time.
+- The extent of how this tool can relieve our manual labor is something that needs more time to think.
+- Beyond mathematical theory and some parts of software implementation, hard to say.
+
+A (Falk):
+- Our website has some discussion about this. 
+- Talks about the future of simulation based analysis.
+- Experts are not on call but would be interested in further discussion.
+
+A (Joerg):
+- Also a work in progress on our side.
+
+Q1: 
+- Are there designs that you care about?
+
+A (Stavros):
+- Find a good situation during covid?
+- Lot of protocol ammendments.
+- Lot of platform trials where arms were added and removed.
+- These protocols are all online.
+- Evaluate these changes and how our software would do.
+
+A (Anja):
+- CID programs for example. 
+- Explain to regulators how we would've addressed some problems in pre-explored analyses.
+- Some exercise with something everyone has access to and see how our methods do.
+
+A (Joerg):
+- Rare diseases where we accept bayesian designs.
+
+Q6:
+- What guidance should be provided to applicants concerning the use of CSE software?
+
+A (Falk):
+- What is not possible: direct recommendations to specific to software to specific company.
+- If we can show through _many examples_ that we can save time.
+
+A (Joerg):
+- Conditional on the fact that this is accepted as a method.
+- Very rarely refer to specific methods.
+- Maybe see the possibility the use of your tools.
+- I see the opportunities here.
+- This tool can cover the ranges of cases that are not regularly explored.
+
+Q (Joerg):
+- Computational costs.
+- Number of parameters in the parameter space. 
+
+A:
+- Size of unknown parameter space.
+- Need a grid. The larger the more costly.
+- Cost number of simulations by a certain factor with a new statistical parameter.
+- For binomials, we work in natural parameter exponential family (so logit parameter is the statistical parameter).
+- For gamma, there would be 2 parameters per arm.
+- 4-6 parameters.
+- Issues: recovery trial with 8 different trials and all having possibly different treatment effects.
+- Simple: treatment vs control with 2-d params per each arm, totally fine.
+- Simple: 4 arms with binomial outcome, totally fine.
+- How complicated is the algorithm = linear cost.
+- Many parameters makes this more multiplicatively challenging.
+- Moore's Law.
+
+Q5:
+- How to share large-scale simulation results available?
+
+Q (Joerg):
+- How to deal with seeding?
+- What is the proposal here?
+
+A:
+- Input seed is an issue.
+- From cloud provider, give regulators access to see what is going on.
+- Visibility of the output.
+- But still: how is seed determined?
+- User pre-registers the code.
+- Regulator sends back a random seed.
+- Maybe even do an autoreply.
+- Not sure what EMA does usually with cloud provider and random seeding.
+
+A (Falk):
+- There are models that offer space of data sharing and computing. 
+- Cumulos? D-platform?
+- Status quo: all data must be in the hands of the regulators.
+- Cannot even be in a server.
+- Very strict!
+- I'd rather see the raw data.
+- This needs to be verified by EMA.
+- If you partner with a pharma company, requires inspection and reproducible. 
+
+A (Efthymios)
+- Cloud provider needs to be very secured.
+- For the time being this is not possible.
+- Seed/number of simulations is this a matter of price?
+- Need reproducibility and change seeds. Need to check instability via seed changes.
+
+A:
+- Our guarantees account for this and we expect that this would only be run once. 
+
+A (Anja):
+- EMA must know when to intervene if results look gamed.
+- Safety mechanism?
+
+A (Joerg):
+- You propose sponsors doing simulations.
+- That is always the case that EMA wants some supervisory role.
+
+Q7:
+- Are regulators facing any related problems? 
+- We may be able to coordinate other projects.
+
+A (Falk):
+- Open-source software?
+- Chat-gpt lol
+- Data is regarded as something extremely protective esp with patient data.
+- European GPTR.
+- Open-source software fantastic for development.
+- But at some point, it needs to be integrated in EMA system with firewall.
+
+A (Anja):
+- The flexibility of open-source is nice but it's a problem.
+- Snapshot assessment.
+- If we agree on something, it has to be about the code at a certain point in time.
+- European legal regulations of medical software (potentially).
+- If company uses it, EMA cannot do anything about it.
+- There is nothing that they regulate use of open-source for their analysis.
+
