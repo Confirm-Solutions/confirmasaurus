@@ -43,7 +43,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
         with timer("backend.setup"):
             await stack.enter_async_context(backend.setup(algo))
 
-        # check_backup = await stack.enter_async_context(backup_daemon(db, algo.cfg))
+        check_backup = await stack.enter_async_context(backup_daemon(db, algo.cfg))
 
         with timer("process_initial_incompletes"):
             await process_packet_set(backend, algo, np.array(incomplete_packets))
@@ -52,8 +52,9 @@ async def async_entrypoint(backend, algo_type, kwargs):
         n_parallel_steps = algo.cfg["n_parallel_steps"]
         processing_tasks = queue.Queue()
         for step_id in range(next_step, algo.cfg["n_steps"]):
+            check_backup()
+
             basal_step_id = max(step_id - n_parallel_steps, 0)
-            # check_backup()
 
             with timer("verify"):
                 db.verify(basal_step_id)

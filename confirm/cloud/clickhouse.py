@@ -339,6 +339,7 @@ def connect(
     username=None,
     password=None,
     no_create=False,
+    **kwargs,
 ):
     """
     Connect to a Clickhouse server
@@ -382,7 +383,7 @@ def connect(
             )
         job_id = "unnamed_" + uuid.uuid4().hex
 
-    client = get_ch_client(connection_details=connection_details)
+    client = get_ch_client(connection_details=connection_details, **kwargs)
     if not no_create:
         # Create job_id database if it doesn't exist
         command(client, f"create database if not exists {job_id}")
@@ -402,14 +403,19 @@ def get_ch_client(
     username=None,
     password=None,
     database=None,
+    **kwargs,
 ):
     import clickhouse_connect
 
     clickhouse_connect.common.set_setting("autogenerate_session_id", False)
     if connection_details is None:
         connection_details = get_ch_config(host, port, username, password, database)
-    pool_mgr = clickhouse_connect.driver.httputil.get_pool_manager(maxsize=16)
-    return clickhouse_connect.get_client(**connection_details, pool_mgr=pool_mgr)
+    # NOTE: this is a way to run more than the default 8 queries at once.
+    # if 'pool_mgr' not in kwargs:
+    #     kwargs['pool_mgr'] = clickhouse_connect.driver.httputil.get_pool_manager(
+    #         maxsize=16
+    #     )
+    return clickhouse_connect.get_client(**connection_details, **kwargs)
 
 
 def get_ch_config(host=None, port=None, username=None, password=None, database=None):
@@ -449,7 +455,9 @@ def list_dbs(ch_client):
     ]
 
 
-def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
+def clear_dbs(
+    ch_client=None, prefix="unnamed", names=None, yes=False, allow_prod=False
+):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -468,11 +476,12 @@ def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
         ch_client = get_ch_client()
 
     test_host = os.environ["CLICKHOUSE_TEST_HOST"]
-    if not (
-        (test_host is not None and test_host in ch_client.url)
-        or "localhost" in ch_client.url
-    ):
-        raise RuntimeError("This function is only for localhost or test databases.")
+    if not allow_prod:
+        if not (
+            (test_host is not None and test_host in ch_client.url)
+            or "localhost" in ch_client.url
+        ):
+            raise RuntimeError("This function is only for localhost or test databases.")
 
     if names is None:
         print('dropping all databases starting with "{}"'.format(prefix))

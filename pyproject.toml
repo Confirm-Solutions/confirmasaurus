@@ -16,11 +16,11 @@ numpy = "^1.24.2"
 scipy = "^1.10.1"
 sympy = "^1.11.1"
 pandas = "^1.5.3"
-jax = "^0.4.6"
+jax = "^0.4.7"
 numpyro = "^0.11.0"
 duckdb = "^0.7.1"
 tensorflow-probability = "^0.19.0"
-synchronicity = "^0.2.14"
+synchronicity = "^0.3.1"
 
 [tool.poetry.group.test]
 optional = true
@@ -28,26 +28,26 @@ optional = true
 [tool.poetry.group.test.dependencies]
 matplotlib = "^3.7.1"
 pytest = "^7.2.2"
-pre-commit = "^3.2.0"
+pre-commit = "^3.2.1"
 pytest-xdist = {extras = ["psutil"], version = "^3.2.1"}
 ipython = "^8.11.0"
 nbformat = "^5.8.0"
-python-dotenv = "^0.21.1"
+python-dotenv = "^1.0.0"
 
 [tool.poetry.group.cloud]
 optional = true
 
 [tool.poetry.group.cloud.dependencies]
-pyarrow = "^10.0.1"
-boto3 = "^1.26.96"
+pyarrow = "^11.0.0"
+boto3 = "^1.26.100"
 cloudpickle = [
     { version = ">=2.0.0,<2.1.0", python = "<3.11" },
     { version = ">=2.2.0,<2.3.0", python = ">=3.11" },
 ]
-clickhouse-connect = "^0.5.16"
-coiled = "^0.5.6"
-dask = {extras = ["complete"], version = "^2023.3.1"}
-modal-client = "^0.46.1567"
+clickhouse-connect = "^0.5.17"
+coiled = "^0.5.7"
+dask = {extras = ["complete"], version = "^2023.3.2"}
+modal-client = "^0.48.1702"
 pynvml = "^11.5.0"
 
 [tool.poetry.group.dev]
@@ -56,13 +56,13 @@ optional = true
 [tool.poetry.group.dev.dependencies]
 poetry = "1.4.0"
 black = {extras = ["jupyter"], version = "^23.1.0"}
-line-profiler = "^3.5.1"
+line-profiler = "^4.0.3"
 jupytext = "^1.14.5"
 reorder-python-imports = "^3.9.0"
 flake8 = "^6.0.0"
 typer = "^0.7.0"
 jupyter = "^1.0.0"
-rich = "^13.3.2"
+rich = "^13.3.3"
 ipdb = "^0.13.13"
 tomli-w = "^1.0.0"
 
