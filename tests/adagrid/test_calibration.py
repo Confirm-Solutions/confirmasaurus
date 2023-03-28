@@ -98,7 +98,18 @@ def distributed_tester(backend, ch_db, snapshot):
     )
 
     restored_db = ada.DuckDBTiles.connect()
-    time.sleep(1)
+    i = 0
+    # wait for all the asynchronous CH inserts to finish
+    while i < 60:
+        time.sleep(1)
+        if (
+            ch.query(db.ch_client, "select count(*) from results").result_set[0][0]
+            == local_db.get_results().shape[0]
+        ):
+            break
+        i += 1
+    else:
+        raise TimeoutError("Clickhouse results not restored")
 
     asyncio.run(ch.restore(db.ch_client, restored_db))
     snapshot.reset()

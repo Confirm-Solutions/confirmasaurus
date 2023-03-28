@@ -180,9 +180,9 @@ def setup_worker(worker_args):
 
         import synchronicity
 
-        synchronizer = synchronicity.Synchronizer()
+        worker.synchronizer = synchronicity.Synchronizer()
 
-        @synchronizer.create_blocking
+        @worker.synchronizer.create_blocking
         async def async_process_tiles(tiles_df):
             lb = LocalBackend()
             async with lb.setup(worker.algo):
