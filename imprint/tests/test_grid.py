@@ -126,8 +126,7 @@ def test_add_null_hypos(simple_grid):
 
 def test_one_point_grid():
     g = grid._raw_init_grid(
-        *grid._cartesian_gridpts(np.array([0]), np.array([1]), np.array([1])),
-        worker_id=1
+        *grid._cartesian_gridpts(np.array([0]), np.array([1]), np.array([1]))
     )
     np.testing.assert_allclose(g.get_theta(), np.array([[0.5]]))
     np.testing.assert_allclose(g.get_radii(), np.array([[0.5]]))
@@ -138,11 +137,7 @@ def test_split_angled():
     in_theta, in_radii = grid._cartesian_gridpts(
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
-    g = (
-        grid._raw_init_grid(in_theta, in_radii, worker_id=1)
-        .add_null_hypos(Hs)
-        .prune_alternative()
-    )
+    g = grid._raw_init_grid(in_theta, in_radii).add_null_hypos(Hs).prune_alternative()
     assert g.prune_inactive().n_tiles == 10
     np.testing.assert_allclose(g.get_radii()[-1], [0.125, 0.25])
 
@@ -152,7 +147,7 @@ def test_immutability():
     in_theta, in_radii = grid._cartesian_gridpts(
         np.full(2, -1), np.full(2, 1), np.full(4, 4)
     )
-    g = grid._raw_init_grid(in_theta, in_radii, worker_id=1)
+    g = grid._raw_init_grid(in_theta, in_radii)
     g_copy = copy.deepcopy(g)
     _ = g.add_null_hypos(Hs).prune_alternative()
     assert (g.df == g_copy.df).all().all()

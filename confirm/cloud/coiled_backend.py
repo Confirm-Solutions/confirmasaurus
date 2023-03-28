@@ -160,7 +160,6 @@ def setup_worker(worker_args):
     if not (has_algo and has_hash) or (has_hash and hash_args != worker.algo_hash):
         ip.package_settings()
         model = model_type(*model_args, **model_kwargs)
-        cfg["worker_id"] = 2
         worker.algo = algo_type(model, None, None, cfg, None)
         worker.algo_hash = hash_args
 
@@ -218,7 +217,6 @@ class CoiledBackend(Backend):
             "tile_batch_size",
             "lam",
             "delta",
-            "worker_id",
             "global_target",
             "max_target",
             "bootstrap_seed",

@@ -97,7 +97,7 @@ class DBTester:
         assert pd_tiles.get_incomplete_packets() == []
         assert db_tiles.get_incomplete_packets() == []
 
-        g.df["id"] = ip.grid._gen_short_uuids(g.df.shape[0], g.worker_id)
+        g.df["id"] = ip.grid._gen_short_uuids(g.df.shape[0])
         g.df["step_id"] = 20
         g.df["packet_id"] = 0
         pd_tiles.insert_tiles(g.df)

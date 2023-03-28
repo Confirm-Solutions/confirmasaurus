@@ -134,7 +134,6 @@ class Grid:
     """
 
     df: pd.DataFrame
-    worker_id: int
     null_hypos: List[NullHypothesis] = field(default_factory=lambda: [])
 
     @property
@@ -227,7 +226,7 @@ class Grid:
         Returns:
             The grid with the null hypotheses added.
         """
-        out = Grid(self.df.copy(), self.worker_id, copy.deepcopy(self.null_hypos))
+        out = Grid(self.df.copy(), copy.deepcopy(self.null_hypos))
         for H in null_hypos:
             out = out._add_null_hypo(H, inherit_cols)
             out.null_hypos.append(H)
@@ -286,10 +285,10 @@ class Grid:
             The grid subset.
         """
         df = self.df.loc[which].reset_index(drop=True)
-        return Grid(df, self.worker_id, self.null_hypos)
+        return Grid(df, self.null_hypos)
 
     def add_cols(self, df):
-        return Grid(pd.concat((self.df, df), axis=1), self.worker_id, self.null_hypos)
+        return Grid(pd.concat((self.df, df), axis=1), self.null_hypos)
 
     def get_null_truth(self):
         return self.df[
@@ -325,7 +324,6 @@ class Grid:
         out = _raw_init_grid(
             new_thetas,
             new_radii,
-            self.worker_id,
             parents=parent_id,
         )
         _inherit(out.df, self.df, 2**self.d, inherit_cols)
@@ -335,12 +333,11 @@ class Grid:
         theta = np.repeat(self.get_theta(), n_reps, axis=0)
         radii = np.repeat(self.get_radii(), n_reps, axis=0)
         parents = np.repeat(self.df["id"].values, n_reps)
-        return _raw_init_grid(theta, radii, self.worker_id, parents=parents)
+        return _raw_init_grid(theta, radii, parents=parents)
 
     def concat(self, *others):
         return Grid(
             pd.concat((self.df, *[o.df for o in others]), axis=0, ignore_index=True),
-            self.worker_id,
             self.null_hypos,
         )
 
@@ -363,10 +360,10 @@ def _inherit(child_df, parent_df, repeat, inherit_cols):
     # )
 
 
-def _raw_init_grid(theta, radii, worker_id, parents=None):
+def _raw_init_grid(theta, radii, parents=None):
     d = theta.shape[1]
     indict = dict()
-    indict["id"] = _gen_short_uuids(theta.shape[0], worker_id=worker_id)
+    indict["id"] = _gen_short_uuids(theta.shape[0])
 
     # Is this a terminal tile in the tree?
     indict["active"] = True
@@ -380,7 +377,7 @@ def _raw_init_grid(theta, radii, worker_id, parents=None):
     for i in range(d):
         indict[f"radii{i}"] = radii[:, i]
 
-    return Grid(pd.DataFrame(indict), worker_id, [])
+    return Grid(pd.DataFrame(indict), [])
 
 
 def create_grid(
@@ -406,7 +403,7 @@ def create_grid(
         # TODO: implement voronoi diagrim gridding.
         raise NotImplementedError("Voronoi gridding not implemented yet.")
 
-    g = _raw_init_grid(theta, radii, 1)
+    g = _raw_init_grid(theta, radii)
 
     if null_hypos is not None:
         g = g.add_null_hypos(null_hypos)
@@ -600,73 +597,53 @@ def _get_edges(theta, radii):
     return edges
 
 
-def _gen_short_uuids(n, worker_id, t=None):
+def _gen_short_uuids(n, t=None):
     """
-    Short UUIDs are a custom identifier created for imprint that should allow
-    for concurrent creation of tiles without having overlapping indices.
+    Short UUIDs are a custom identifier created for imprint that should help
+    avoid having overlapping indices while keeping ids in sequence.
 
-    - The highest 28 bits are the time in seconds of creation. This will not
-      loop for 8.5 years. When we start running jobs that take longer than 8.5
+    - The highest 32 bits are the time in seconds of creation. This will not
+      loop for 136 years. When we start running jobs that take longer than 136
       years to complete, please send a message to me in the afterlife.
         - The unique_timer() function used for the time never returns the same
           time twice so the creation time is never re-used. If the creation
           time is going to be reused because less than one second has passed
           since the previous call to gen_short_uuids, then the timer increments
           by one.
-    - The next 18 bits are the index of the process. This is a pretty generous limit
-      on the number of processes. 2^18=262144.
-    - The lowest 18 bits are the index of the created tiles within this batch.
-      This allows for up to 2^18 = 262144 tiles to be created in a single
-      batch. This is not a problematic constraint, because we can just
-      increment the time by one and then grab another batch of IDs.
-
-    NOTE: This should be safe across processes but will not be safe across
-    threads within a single Python process because multithreaded programs share
-    globals.
+    - The lowest 32 bits are the index of the created tiles within this batch.
+      This allows for up to 4 billions tiles to be created in a single
+      batch. This is not a problematic constraint... But even if it were, we
+      can just increment the time by one and then grab another batch of IDs.
 
     Args:
         n: The number of short uuids to generate.
-        worker_id: The host id. Must be > 0 and < 2**18. For non-concurrent
-                   jobs, just set this to 1.
         t: The time to impose (used for testing). Defaults to None.
 
     Returns:
         An array with dtype uint64 of length n containing short uuids.
     """
-    n_max = 2 ** _gen_short_uuids_one_batch.config[0] - 1
+    n_max = (2**n_bits) - 1
     if n <= n_max:
-        return _gen_short_uuids_one_batch(n, worker_id, t)
+        return _gen_short_uuids_one_batch(n, t)
 
     out = np.empty(n, dtype=np.uint64)
     for i in range(0, n, n_max):
         chunk_size = min(n_max, n - i)
-        out[i : i + chunk_size] = _gen_short_uuids_one_batch(chunk_size, worker_id, t)
+        out[i : i + chunk_size] = _gen_short_uuids_one_batch(chunk_size, t)
     return out
 
 
-def _gen_short_uuids_one_batch(n, worker_id, t):
-    n_bits, worker_bits = _gen_short_uuids_one_batch.config
+def _gen_short_uuids_one_batch(n, t):
     assert n < 2**n_bits
-
-    assert worker_id > 0
-    assert worker_id < 2**worker_bits
 
     if t is None:
         t = unique_timer()
 
-    max_t = np.uint64(2 ** (64 - n_bits - worker_bits))
+    max_t = np.uint64(2 ** (64 - n_bits))
     looped_t = np.uint64(t) % max_t
 
-    out = (
-        (looped_t << np.uint64(n_bits + worker_bits))
-        + (np.uint64(worker_id) << np.uint64(n_bits))
-        + np.arange(n, dtype=np.uint64)
-    )
-    # logger.debug(
-    #     f"_gen_short_uuids(n={n}, worker_id={worker_id}, t={t}, n_bits={n_bits},"
-    #     f" worker_bits={worker_bits}) = [{str(out[:3])[1:-1]}, ...]:"
-    # )
+    out = (looped_t << np.uint64(n_bits)) + np.arange(n, dtype=np.uint64)
     return out
 
 
-_gen_short_uuids_one_batch.config = (18, 18)
+n_bits = 32

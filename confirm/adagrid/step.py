@@ -44,7 +44,6 @@ def submit_packet_df(backend, algo, tiles_df):
 def submit_packet(backend, algo, packet_df):
     start = time.time()
     report = dict()
-    report["worker_id"] = algo.cfg["worker_id"]
     report["step_id"] = packet_df.iloc[0]["step_id"]
     report["packet_id"] = packet_df.iloc[0]["packet_id"]
     report["n_tiles"] = packet_df.shape[0]
@@ -82,7 +81,6 @@ async def wait_for_packet(backend, algo, awaitable, report):
 async def process_packet(backend, algo, packet_df):
     start = time.time()
     report = dict()
-    report["worker_id"] = algo.cfg["worker_id"]
     report["step_id"] = packet_df.iloc[0]["step_id"]
     report["packet_id"] = packet_df.iloc[0]["packet_id"]
     report["n_tiles"] = packet_df.shape[0]
@@ -113,7 +111,6 @@ def new_step(algo, basal_step_id, new_step_id):
         report["n_packets"] = (
             tiles_df["packet_id"].nunique() if tiles_df is not None else 0
         )
-    report["worker_id"] = algo.cfg["worker_id"]
     report["status"] = status.name
     report["basal_step_id"] = basal_step_id
     report["step_id"] = new_step_id
@@ -162,7 +159,6 @@ def _new_step(algo, basal_step_id, new_step_id):
         logger.debug("New step is empty despite failure to converge.")
         return WorkerStatus.EMPTY_STEP, None, report
 
-    selection_df["finisher_id"] = algo.cfg["worker_id"]
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
 
     # NOTE: this is a pathway towards eventually having variable splitting
@@ -177,7 +173,6 @@ def _new_step(algo, basal_step_id, new_step_id):
         "packet_id",
         "id",
         "active",
-        "finisher_id",
         "refine",
         "deepen",
         "split",
@@ -205,11 +200,8 @@ def _new_step(algo, basal_step_id, new_step_id):
         return WorkerStatus.NO_NEW_TILES, None, report
 
     # Actually deepen and refine!
-    g_new = refine_and_deepen(
-        selection_df, algo.null_hypos, algo.cfg["max_K"], algo.cfg["worker_id"]
-    )
+    g_new = refine_and_deepen(selection_df, algo.null_hypos, algo.cfg["max_K"])
     g_new.df["step_id"] = new_step_id
-    g_new.df["creator_id"] = algo.cfg["worker_id"]
     g_new.df["creation_time"] = ip.timer.simple_timer()
 
     # there might be new inactive tiles that resulted from splitting with
@@ -221,7 +213,6 @@ def _new_step(algo, basal_step_id, new_step_id):
     inactive_done["refine"] = 0
     inactive_done["deepen"] = 0
     inactive_done["split"] = True
-    inactive_done["finisher_id"] = algo.cfg["worker_id"]
     inactive_done = inactive_done[["step_id"] + done_cols].copy()
     algo.db.insert_tiles(inactive_df)
     algo.db.insert_done(inactive_done)
@@ -248,12 +239,11 @@ def _new_step(algo, basal_step_id, new_step_id):
     return WorkerStatus.NEW_STEP, g_active.df, report
 
 
-def refine_and_deepen(df, null_hypos, max_K, worker_id):
-    g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)], worker_id)
+def refine_and_deepen(df, null_hypos, max_K):
+    g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)])
     g_deepen = ip.grid._raw_init_grid(
         g_deepen_in.get_theta(),
         g_deepen_in.get_radii(),
-        worker_id=worker_id,
         parents=g_deepen_in.df["id"],
     )
 
@@ -263,7 +253,7 @@ def refine_and_deepen(df, null_hypos, max_K, worker_id):
     # determine this?
     g_deepen.df["K"] = g_deepen_in.df["K"] * 2
 
-    g_refine_in = ip.grid.Grid(df.loc[df["refine"] > 0], worker_id)
+    g_refine_in = ip.grid.Grid(df.loc[df["refine"] > 0])
     inherit_cols = ["K"]
     # TODO: it's possible to do better by refining by more than just a
     # factor of 2.

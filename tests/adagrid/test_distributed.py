@@ -41,7 +41,7 @@ def test_init_first():
     kwargs["db"] = DuckDBTiles.connect()
 
     async def _test():
-        algo, incomplete_packets, next_step = init(AdaValidate, 1, kwargs)
+        algo, incomplete_packets, next_step = init(AdaValidate, kwargs)
         assert incomplete_packets == [(0, 0), (0, 1), (0, 2)]
         assert next_step == 1
 
@@ -56,7 +56,6 @@ def test_init_first():
 
         tiles_df = algo.db.get_tiles()
         assert algo.db.get_config().shape[0] == 1
-        assert algo.cfg["worker_id"] == 1
         assert tiles_df.shape[0] == 5
         assert (tiles_df["step_id"] == 0).all()
         assert tiles_df["packet_id"].value_counts().to_dict() == {0: 2, 1: 2, 2: 1}
@@ -69,13 +68,13 @@ def test_init_join():
     kwargs["db"] = DuckDBTiles.connect()
 
     async def _test():
-        algo1, _, _ = init(AdaValidate, 1, kwargs)
+        algo1, _, _ = init(AdaValidate, kwargs)
 
         kwargs2 = copy.copy(kwargs)
         kwargs2["g"] = None
         kwargs2["lam"] = -4
         kwargs2["overrides"] = dict(packet_size=3)
-        algo, incomplete2, next_step2 = init(AdaValidate, 1, kwargs2)
+        algo, incomplete2, next_step2 = init(AdaValidate, kwargs2)
         assert incomplete2 == [(0, 0), (0, 1), (0, 2)]
         assert next_step2 == 1
 
@@ -97,7 +96,7 @@ def test_process():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, zone_info = init(AdaValidate, 1, kwargs)
+        algo, incomplete, zone_info = init(AdaValidate, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, [(0, 0)])
             results_df = algo.db.get_results()
@@ -127,7 +126,7 @@ def test_new_step():
     backend = LocalBackend()
 
     async def _test():
-        algo, _, _ = init(AdaValidate, 1, kwargs)
+        algo, _, _ = init(AdaValidate, kwargs)
         async with backend.setup(algo):
             for i in range(3):
                 await process_packet_set(backend, algo, [(0, i) for i in range(3)])
@@ -150,14 +149,13 @@ def test_new_step():
 
         new_tiles = tiles_df[tiles_df["step_id"] == 1]
         assert new_tiles.shape[0] == 6
-        assert (new_tiles["creator_id"] == algo.cfg["worker_id"]).all()
 
         done = algo.db.get_done().sort_values(by=["id"])[1:]
         assert done.shape[0] == 3
         assert (done["refine"] > 0).all()
         assert (done["deepen"] == 0).all()
         assert (done["active"] == 0).all()
-        assert (done["step_id"] == 0).all()
+        assert (done["step_id"] == 1).all()
 
         report = algo.db.get_reports().iloc[-2]
         assert report["status"] == "NEW_STEP"
@@ -172,7 +170,7 @@ def test_reload_next_step():
     backend = LocalBackend()
 
     async def _test():
-        algo, incomplete, _ = init(AdaValidate, 1, kwargs)
+        algo, incomplete, _ = init(AdaValidate, kwargs)
         async with backend.setup(algo):
             await process_packet_set(backend, algo, incomplete)
         _, _ = new_step(algo, 0, 1)
@@ -180,7 +178,7 @@ def test_reload_next_step():
         kwargs2 = kwargs.copy()
         kwargs2["db"] = algo.db
         kwargs2["g"] = None
-        algo, incomplete, next_step = init(AdaValidate, 1, kwargs2)
+        algo, incomplete, next_step = init(AdaValidate, kwargs2)
         assert incomplete == [(1, 0), (1, 1), (1, 2)]
         assert next_step == 2
 

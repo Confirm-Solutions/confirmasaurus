@@ -4,9 +4,8 @@ def get_logs(job_id, query="select * from logs order by t"):
 
     Args:
         job_id: The job id.
-        query: The select query. This can be used to filter by worker_id or
-            time or message type or anything else! Defaults to 'select * from logs
-            order by t'.
+        query: The select query. This can be used to filter by time or message
+            type or anything else! Defaults to 'select * from logs order by t'.
 
     Returns:
         (str, pd.DataFrame, Clickhouse)
@@ -28,7 +27,7 @@ def get_logs(job_id, query="select * from logs order by t"):
 def reconstruct_messages(log_df):
     return "\n".join(
         [
-            f"[worker_id={row['worker_id']}] {row['t_str']}"
+            f"{row['t_str']}"
             f" - {row['name']} - {row['levelname']}\n"
             f"{row['message']}"
             for _, row in log_df.iterrows()

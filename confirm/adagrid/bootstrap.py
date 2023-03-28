@@ -24,9 +24,8 @@ class BootstrapCalibrate:
     For the basic `validate` and `calibrate` drivers, see `imprint.driver`.
     """
 
-    def __init__(self, model, bootstrap_seed, nB, Ks, worker_id=None):
+    def __init__(self, model, bootstrap_seed, nB, Ks):
         self.model = model
-        self.worker_id = worker_id
         self.forward_boundv, self.backward_boundv = driver.get_bound(
             model.family, model.family_params if hasattr(model, "family_params") else {}
         )
@@ -108,7 +107,7 @@ class BootstrapCalibrate:
             return lams, impossible, alpha0
 
         def f(K, K_df):
-            K_g = grid.Grid(K_df, self.worker_id)
+            K_g = grid.Grid(K_df)
 
             theta, vertices = K_g.get_theta_and_vertices()
             bootstrap_lams, impossible, alpha0 = batching.batch(
@@ -143,7 +142,7 @@ class BootstrapCalibrate:
 
     def many_rej(self, df, lams_arr):
         def f(K, K_df):
-            K_g = grid.Grid(K_df, self.worker_id)
+            K_g = grid.Grid(K_df)
 
             theta = K_g.get_theta()
 

@@ -125,9 +125,7 @@ def test_calibration_checkpointing():
 
     assert len(reports_two) == len(reports_once)
     df_reports_one = pd.DataFrame(reports_once)
-    drop_cols = ["worker_id"] + [
-        c for c in df_reports_one.columns if c.startswith("runtime")
-    ]
+    drop_cols = [c for c in df_reports_one.columns if c.startswith("runtime")]
     df_reports_one = df_reports_one.drop(drop_cols, axis=1)
     df_reports_two = (
         pd.DataFrame(reports_two).drop(drop_cols, axis=1).reset_index(drop=True)

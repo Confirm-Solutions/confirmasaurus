@@ -162,9 +162,7 @@ class HyperPlane(grid.NullHypothesis):
         new_radii = (max_val - min_val) / 2
 
         parent_id = np.repeat(g.df["id"], 2)
-        g_split = grid._raw_init_grid(
-            new_theta, new_radii, g.worker_id, parents=parent_id
-        )
+        g_split = grid._raw_init_grid(new_theta, new_radii, parents=parent_id)
 
         return g_split
 

@@ -4,8 +4,6 @@ import os
 import time
 import uuid
 
-import numpy as np
-import pandas as pd
 import pyarrow
 
 from ..adagrid.db import DuckDBTiles
@@ -23,93 +21,36 @@ all_tables = [
 ]
 
 
-async def backup(ch_client, duck, first_time):
-    logger.info("Backing up database")
-    if not duck.does_table_exist("backup_status"):
-        backup_df = pd.DataFrame(  # noqa
-            {  # noqa
-                "table_name": all_tables,
-                "next_rowid": np.array([0] * len(all_tables), dtype=np.uint64),
-            }
-        )
-        duck.con.execute(
-            """
-            create table backup_status as select * from backup_df
-        """
-        )
-    tasks = [
-        asyncio.create_task(backup_table(duck, ch_client, name, first_time))
-        for name in all_tables
-    ]
-    await asyncio.gather(*tasks)
-    logger.info(f"Backup complete to {ch_client.database}")
+def threaded_mirror_insert(ch_client, name, df):
+    create_table(ch_client, name, df)
+    return threaded_block_insert_df(ch_client, name, df)
 
 
-async def backup_table(duck, ch_client, name, first_time):
-    if not duck.does_table_exist(name):
-        return 0
+def create_table(ch_client, name, df):
+    cols = get_create_table_cols(df)
+    command(
+        ch_client,
+        f"""
+        CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
+        ENGINE = MergeTree()
+        ORDER BY ()
+        """,
+        default_insert_settings,
+    )
 
-    # Using rowid to do incremental backups is very simple because no rows are
-    # ever deleted in the DB.
-    while True:
-        next_rowid = duck.con.query(
-            f"select next_rowid from backup_status where table_name = '{name}'"
-        ).fetchone()[0]
-        max_rowid = duck.con.query(f"select max(rowid) from {name}").fetchone()[0]
-        if max_rowid is None:
-            # table is empty
-            return
-        if max_rowid < next_rowid:
-            # table has not changed
-            return
-        max_rowid = min(max_rowid, next_rowid + int(1e5))
-        start = time.time()
-        df = duck.con.query(
-            f"""
-            select rowid, * from {name} 
-                where rowid >= {next_rowid} 
-                and rowid <= {max_rowid}
-        """
-        ).df()
-        logger.debug(
-            f"Collecting backup data for"
-            f" table={name} took {time.time() - start:.2f} seconds"
-        )
 
-        cols = get_create_table_cols(df)
-        if first_time[name]:
-            await asyncio.to_thread(
-                command,
-                ch_client,
-                f"""
-                CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
-                ENGINE = MergeTree()
-                ORDER BY ()
-                """,
-                default_insert_settings,
-            )
-            first_time[name] = False
-        chunk_size = int(1e4)
-        chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
-        wait_for = []
-        for c_df in chunks:
-            wait_for.append(
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        insert_df, ch_client, name, c_df, default_insert_settings
-                    )
+def threaded_block_insert_df(ch_client, name, df, chunk_size=20000):
+    chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
+    wait_for = []
+    for c_df in chunks:
+        wait_for.append(
+            asyncio.create_task(
+                asyncio.to_thread(
+                    insert_df, ch_client, name, c_df, default_insert_settings
                 )
             )
-        await asyncio.gather(*wait_for)
-        logger.debug(f"Incremental backup complete for table={name}.")
-
-        duck.con.execute(
-            f"""
-            update backup_status 
-                set next_rowid = {max_rowid + 1} 
-                where table_name = '{name}'
-            """
         )
+    return wait_for
 
 
 async def restore(job_name, duck=None):
@@ -117,21 +58,6 @@ async def restore(job_name, duck=None):
     if duck is None:
         duck = DuckDBTiles.connect()
     await asyncio.gather(*[restore_table(duck, ch_client, name) for name in all_tables])
-    # duck.con.execute(
-    #     """
-    #     update results set
-    #         eligible = (id not in (select id from done)),
-    #         active = (id not in (select id from done where active=false))
-    #     where eligible = true and active = true
-    #     """
-    # )
-    # duck.con.execute(
-    #     """
-    #     update tiles set
-    #         active = (id not in (select id from done where active=false))
-    #     where active = true
-    #     """
-    # )
     # TODO: duplicated!!
     duck.con.execute(
         """

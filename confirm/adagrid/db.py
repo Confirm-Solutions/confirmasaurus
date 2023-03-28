@@ -312,6 +312,15 @@ class DuckDBTiles:
         json_strs = self.con.execute("select * from reports").fetchall()
         return pd.DataFrame([json.loads(s[0]) for s in json_strs])
 
+    def get_logs(self):
+        return self.con.execute("select * from logs").df()
+
+    def get_null_hypos(self):
+        return self.con.query("select * from null_hypos").df()
+
+    def get_config(self):
+        return self.con.query("select * from config").df()
+
     def get_incomplete_packets(self):
         if self.does_table_exist("results"):
             restrict = "and id not in (select id from results)"
@@ -571,17 +580,8 @@ class DuckDBTiles:
     def insert_logs(self, df):
         self.con.execute("insert into logs select * from df")
 
-    def get_logs(self):
-        return self.con.execute("select * from logs").df()
-
     def close(self) -> None:
         self.con.close()
-
-    def get_null_hypos(self):
-        return self.con.query("select * from null_hypos").df()
-
-    def get_config(self):
-        return self.con.query("select * from config").df()
 
     def insert_config(self, cfg_df):
         return self.con.execute("insert into config select * from cfg_df")
@@ -597,7 +597,6 @@ class DuckDBTiles:
                     packet_id INTEGER,
                     id UBIGINT,
                     active BOOL,
-                    finisher_id UINTEGER,
                     refine UINTEGER,
                     deepen UINTEGER,
                     split BOOL)
@@ -635,7 +634,6 @@ done_cols = [
     "packet_id",
     "id",
     "active",
-    "finisher_id",
     "refine",
     "deepen",
     "split",

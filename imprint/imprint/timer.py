@@ -32,6 +32,8 @@ class Timer:
     def unique(self):
         now = self.now()
         t = np.uint64(int(now))
+        if t == 0:
+            t = np.uint64(1)
         if t <= self.last:
             t = self.last + np.uint64(1)
         self.last = t
@@ -43,7 +45,7 @@ class Timer:
 
 class MockTimer:
     def __init__(self):
-        self.i = 0
+        self.i = 1
 
     def unique(self):
         self.i += 1

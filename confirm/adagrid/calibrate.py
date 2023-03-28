@@ -71,7 +71,7 @@ class AdaCalibrate:
         Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
         self.max_K = Ks[-1]
         self.driver = bootstrap.BootstrapCalibrate(
-            model, self.cfg["bootstrap_seed"], self.cfg["nB"], Ks, worker_id=1
+            model, self.cfg["bootstrap_seed"], self.cfg["nB"], Ks
         )
 
     def get_orderer(self):
@@ -89,15 +89,14 @@ class AdaCalibrate:
             calibration_min_idx=self.cfg["calibration_min_idx"],
             tile_batch_size=tile_batch_size,
         )
-        lams_df.insert(0, "processor_id", self.cfg["worker_id"])
-        lams_df.insert(1, "processing_time", ip.timer.simple_timer())
-        lams_df.insert(2, "completion_step", MAX_STEP)
+        lams_df.insert(0, "processing_time", ip.timer.simple_timer())
+        lams_df.insert(1, "completion_step", MAX_STEP)
 
         # we use insert here to order columns nicely for reading raw data
-        lams_df.insert(3, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
+        lams_df.insert(2, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
 
         lams_df.insert(
-            5,
+            3,
             "orderer",
             # Where calibration is impossible due to either small K or small alpha0,
             # the orderer is set to -inf so that such tiles are guaranteed to

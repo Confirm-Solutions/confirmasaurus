@@ -38,7 +38,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
     async with contextlib.AsyncExitStack() as stack:
         with timer("init"):
             stack.enter_context(DatabaseLogging(db))
-            algo, incomplete_packets, next_step = init(algo_type, 1, kwargs)
+            algo, incomplete_packets, next_step = init(algo_type, kwargs)
 
         with timer("backend.setup"):
             await stack.enter_async_context(backend.setup(algo))
@@ -156,7 +156,6 @@ class Backend(abc.ABC):
         "tile_batch_size",
         "lam",
         "delta",
-        "worker_id",
         "global_target",
         "max_target",
         "bootstrap_seed",

@@ -50,12 +50,11 @@ class AdaValidate:
             delta=self.cfg["delta"],
             tile_batch_size=tile_batch_size,
         )
-        rej_df.insert(0, "processor_id", self.cfg["worker_id"])
-        rej_df.insert(1, "processing_time", ip.timer.simple_timer())
-        rej_df.insert(2, "completion_step", MAX_STEP)
-        rej_df.insert(3, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
-        rej_df.insert(4, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
-        rej_df.insert(5, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])
+        rej_df.insert(0, "processing_time", ip.timer.simple_timer())
+        rej_df.insert(1, "completion_step", MAX_STEP)
+        rej_df.insert(2, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
+        rej_df.insert(3, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
+        rej_df.insert(4, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])
 
         # The orderer for validation consists of a tuple
         # total_cost_order: the first entry is the total_cost thresholded by
@@ -71,12 +70,12 @@ class AdaValidate:
         # This allows for having a global acceptable slack with global_target
         # and then a separate tighter criterion near the maximum tie_bound.
         rej_df.insert(
-            6,
+            5,
             "total_cost_order",
             -rej_df["total_cost"] * (rej_df["total_cost"] > self.cfg["global_target"]),
         )
         rej_df.insert(
-            7,
+            6,
             "tie_bound_order",
             -rej_df["tie_bound"] * (rej_df["total_cost"] > self.cfg["max_target"]),
         )

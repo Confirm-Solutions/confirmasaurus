@@ -17,7 +17,7 @@ from .const import MAX_STEP
 logger = logging.getLogger(__name__)
 
 
-def init(algo_type, worker_id, kwargs):
+def init(algo_type, kwargs):
     db = kwargs["db"]
     g = kwargs.get("g", None)
 
@@ -32,7 +32,6 @@ def init(algo_type, worker_id, kwargs):
     else:
         cfg, null_hypos = join(db, kwargs)
 
-    cfg["worker_id"] = worker_id
     add_system_cfg(cfg)
 
     if g is not None and not tiles_exists:
@@ -169,7 +168,6 @@ def init_grid(g, db, cfg):
 
     df["step_id"] = 0
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
-    df["creator_id"] = 1
     df["creation_time"] = ip.timer.simple_timer()
     df["inactivation_step"] = MAX_STEP
     df.drop("active", axis=1, inplace=True)
