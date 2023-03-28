@@ -160,7 +160,8 @@ def ada_validate(
     step_size=2**10,
     packet_size: int = None,
     n_parallel_steps: int = 1,
-    prod: bool = True,
+    record_system: bool = True,
+    clickhouse_service: str = None,
     job_name: str = None,
     overrides: dict = None,
     callback=print_report,
@@ -210,10 +211,12 @@ def ada_validate(
             Setting this parameter to anything greater than 1 will cause the steps
             to be based on lagged data. For example, with n_parallel_steps=2,
             step K will be based on data from step K-2. Defaults to 1.
-        prod: Is this a production run? If so, we will collection extra system
+        record_system: If True, we will collection extra system
             configuration info. Setting this to False will make startup time
-            a bit faster. If prod is False, we also skip database backups
-            unless job_name is specified. Defaults to True.
+            a bit faster.
+        clickhouse_service: If 'PROD', we mirror all database inserts to a the
+            prod Clickhouse service. If 'TEST' we mirror to the test service. If
+            None, we do not mirror inserts. Default is None.
         job_name: The job name is used for the database file used by DuckDB and
             for storing long-term backups in Clickhouse. By default (None), an
             in-memory DuckDB is used and a random UUID is chosen for

@@ -1,3 +1,4 @@
+import asyncio
 import logging.handlers
 import time
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from .const import MAX_STEP
 
 if TYPE_CHECKING:
     import duckdb
+    import clickhouse_connect
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +90,10 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
                     for record in self.buffer
                 ]
             )
-            self.db.insert_logs(df)
-            self.buffer = []
-        finally:
             self.lastFlush = time.time()
+            self.buffer = []
+            self.db.insert_logs(df)
+        finally:
             self.release()
 
 
@@ -244,15 +246,19 @@ class PandasTiles:
 @dataclass
 class DuckDBTiles:
     """
-    A tile database built on top of DuckDB. This should be very fast and
-    robust and is the default database for confirm.
+    A tile database built on top of DuckDB.
 
     See this GitHub issue for a discussion of the design:
     https://github.com/Confirm-Solutions/confirmasaurus/issues/95
+
+    See this github issue for thoughts on the mirrored insert backup to Clickhouse:
+    https://github.com/Confirm-Solutions/confirmasaurus/issues/323
     """
 
-    job_name: str
     con: "duckdb.DuckDBPyConnection"
+    ch_client: "clickhouse_connect.driver.httpclient.HttpClient" = None
+    ch_table_exists: set = field(default_factory=set)
+    ch_tasks: List[asyncio.Task] = field(default_factory=list)
     _d: int = None
 
     def __post_init__(self):
@@ -345,55 +351,80 @@ class DuckDBTiles:
         ).fetchone()[0]
 
     def insert_report(self, report):
-        self.con.execute(f"insert into reports values ('{json.dumps(report)}')")
+        report_str = json.dumps(report)
+        self.con.execute(f"insert into reports values ('{report_str}')")
+        self.ch_insert("reports", pd.DataFrame(dict(json=[report_str])), create=False)
         return report
 
     def insert_tiles(self, df: pd.DataFrame):
+        # NOTE: We insert to Clickhouse tiles and results in the packet
+        # processing instead. This spreads out the Clickhouse mirroring
+        # bandwidth requirements.
         column_order = ",".join(self._tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
         logger.debug("Inserted %d new tiles.", df.shape[0])
 
     def insert_results(self, df: pd.DataFrame, orderer: str):
+        # NOTE: We insert to Clickhouse tiles and results in the packet
+        # processing instead. This spreads out the Clickhouse mirroring
+        # bandwidth requirements.
         if not self.does_table_exist("results"):
             self.con.execute("create table if not exists results as select * from df")
-            return
-        column_order = ",".join(self._results_columns())
-        self.con.execute(f"insert into results select {column_order} from df")
+            self.ch_insert("results", df.iloc[:0], create=True)
+        else:
+            column_order = ",".join(self._results_columns())
+            self.con.execute(f"insert into results select {column_order} from df")
         logger.debug(f"Inserted {df.shape[0]} results.")
 
     def insert_done(self, df: pd.DataFrame):
         column_order = ",".join(self._done_columns())
         self.con.execute(f"insert into done select {column_order} from df")
+        self.ch_insert("done", df, create=False)
+        self.update_active_complete(df=df)
         # Updating active/complete is not strictly necessary since it can be
         # inferred from the info in the done table. But, updating the flags on
         # the tiles/results tables is more efficient for future queries.
-        self.con.execute(
-            """
-            update tiles 
-                set inactivation_step=df.step_id
-            from df 
-                where tiles.id=df.id
-                    and df.active=false
-            """
-        )
-        self.con.execute(
-            """
-            update results
-                set inactivation_step=df.step_id
-            from df 
-                where results.id=df.id
-                    and df.active=false
-            """
-        )
-        self.con.execute(
-            """
-            update results
-                set completion_step=df.step_id
-            from df 
-                where results.id=df.id
-            """
-        )
         logger.debug(f"Finished {df.shape[0]} tiles.")
+
+    def update_active_complete(self, df=None):
+        if df is None:
+            table = "done"
+        else:
+            table = "df"
+        self.con.execute(
+            f"""
+            update tiles 
+                set inactivation_step=d.step_id
+            from {table} d
+                where tiles.id=d.id
+                    and d.active=false
+            """
+        )
+        self.con.execute(
+            f"""
+            update results
+                set inactivation_step=d.step_id
+            from {table} d
+                where results.id=d.id
+                    and d.active=false
+            """
+        )
+        self.con.execute(
+            f"""
+            update results
+                set completion_step=d.step_id
+            from {table} d
+                where results.id=d.id
+            """
+        )
+
+    def insert_logs(self, df):
+        self.con.execute("insert into logs select * from df")
+        self.ch_insert("logs", df, create=True)
+
+    def insert_config(self, cfg_df):
+        self.con.execute("insert into config select * from cfg_df")
+        self.ch_insert("config", cfg_df, create=False)
 
     def get_packet(self, step_id: int, packet_id: int = None):
         if self.does_table_exist("results"):
@@ -577,14 +608,8 @@ class DuckDBTiles:
                 f" {deepened_tiles_with_incorrect_child_count}"
             )
 
-    def insert_logs(self, df):
-        self.con.execute("insert into logs select * from df")
-
     def close(self) -> None:
         self.con.close()
-
-    def insert_config(self, cfg_df):
-        return self.con.execute("insert into config select * from cfg_df")
 
     def init_grid(
         self, tiles_df: pd.DataFrame, null_hypos_df: pd.DataFrame, cfg_df: pd.DataFrame
@@ -607,26 +632,42 @@ class DuckDBTiles:
         self.con.execute("create table reports (json TEXT)")
         self.con.execute("create table null_hypos as select * from null_hypos_df")
         self.con.execute("create table config as select * from cfg_df")
+        self.ch_insert("tiles", tiles_df, create=True)
+        self.ch_insert("done", absent_parents_df, create=True)
+        self.ch_insert("null_hypos", null_hypos_df, create=True)
+        self.ch_insert("config", cfg_df, create=True)
+        self.ch_insert("reports", pd.DataFrame(columns=["json"]), create=True)
 
     @staticmethod
-    def connect(job_name: Optional[str] = None):
+    def connect(path: str = ":memory:", ch_client: Optional[str] = None):
         """
         Load a tile database from a file.
 
         Args:
             path: The filepath to the database.
+            ch_client: A Clickhouse client to use for mirroring inserts.
 
         Returns:
             The tile database.
         """
         import duckdb
 
-        if job_name is None:
-            db_filepath = ":memory:"
-        else:
-            db_filepath = f"{job_name}.db"
+        return DuckDBTiles(duckdb.connect(path), ch_client)
 
-        return DuckDBTiles(job_name, duckdb.connect(db_filepath))
+    def ch_insert(self, table: str, df: pd.DataFrame, create: bool):
+        if self.ch_client is not None:
+            import confirm.cloud.clickhouse as ch
+
+            if create and table not in self.ch_table_exists:
+                ch.create_table(self.ch_client, table, df)
+                self.ch_table_exists.add(table)
+            self.ch_tasks.extend(ch.threaded_block_insert_df(self.ch_client, table, df))
+
+    async def ch_wait(self):
+        while len(self.ch_tasks) > 0:
+            tmp = self.ch_tasks
+            self.ch_tasks = []
+            await asyncio.gather(*tmp)
 
 
 done_cols = [

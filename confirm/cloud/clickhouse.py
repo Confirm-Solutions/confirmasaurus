@@ -4,9 +4,8 @@ import os
 import time
 import uuid
 
+import pandas as pd
 import pyarrow
-
-from ..adagrid.db import DuckDBTiles
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +18,6 @@ all_tables = [
     "reports",
     "null_hypos",
 ]
-
-
-def threaded_mirror_insert(ch_client, name, df):
-    create_table(ch_client, name, df)
-    return threaded_block_insert_df(ch_client, name, df)
 
 
 def create_table(ch_client, name, df):
@@ -40,64 +34,46 @@ def create_table(ch_client, name, df):
 
 
 def threaded_block_insert_df(ch_client, name, df, chunk_size=20000):
+    try:
+        asyncio.get_running_loop()
+        run_directly = False
+    except RuntimeError:
+        run_directly = True
+
+    # Sometimes this gets called after the event loop has been closed. In that
+    # case, we run the insert directly rather than using asyncio.
+    if run_directly:
+
+        def wrapper(*args):
+            args[0](*args[1:])
+            return asyncio.sleep(0)
+
+    else:
+
+        def wrapper(*args):
+            return asyncio.create_task(asyncio.to_thread(*args))
+
     chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
     wait_for = []
     for c_df in chunks:
         wait_for.append(
-            asyncio.create_task(
-                asyncio.to_thread(
-                    insert_df, ch_client, name, c_df, default_insert_settings
-                )
-            )
+            wrapper(insert_df, ch_client, name, c_df, default_insert_settings)
         )
     return wait_for
 
 
-async def restore(job_name, duck=None):
-    ch_client = connect(job_name)
-    if duck is None:
-        duck = DuckDBTiles.connect()
-    await asyncio.gather(*[restore_table(duck, ch_client, name) for name in all_tables])
-    # TODO: duplicated!!
-    duck.con.execute(
-        """
-        update tiles 
-            set inactivation_step=done.step_id
-        from done 
-            where tiles.id=done.id
-                and done.active=false
-        """
-    )
-    duck.con.execute(
-        """
-        update results
-            set inactivation_step=done.step_id
-        from done 
-            where results.id=done.id
-                and done.active=false
-        """
-    )
-    duck.con.execute(
-        """
-        update results
-            set completion_step=done.step_id
-        from done 
-            where results.id=done.id
-                and done.active=true
-        """
-    )
-    return duck
+async def restore(ch_client, duck):
+    await asyncio.gather(*[restore_table(ch_client, duck, name) for name in all_tables])
+    duck.update_active_complete()
 
 
-async def restore_table(duck, ch_client, name):
+async def restore_table(ch_client, duck, name):
     # TODO: might need offset/limit and iteration here.
     def get_table_from_ch():
         df = query_df(ch_client, f"select * from {name}")
         if name == "logs":
-            df["t"] = df["t"].dt.tz_localize(None)
-        return (
-            df.sort_values(by=["rowid"]).drop(columns=["rowid"]).reset_index(drop=True)
-        )
+            df["t"] = pd.to_datetime(df["t"]).dt.tz_localize(None)
+        return df
 
     df = await asyncio.to_thread(get_table_from_ch)  # noqa
     if duck.does_table_exist(name):
@@ -259,7 +235,8 @@ def command(client, query, *args, **kwargs):
 
 
 def connect(
-    job_id: int = None,
+    job_name: str,
+    service="TEST",
     host=None,
     port=None,
     username=None,
@@ -297,8 +274,8 @@ def connect(
     Returns:
         A Clickhouse tile database object.
     """
-    connection_details = get_ch_config(host, port, username, password)
-    if job_id is None:
+    connection_details = get_ch_config(service, host, port, username, password)
+    if job_name is None:
         test_host = os.environ["CLICKHOUSE_TEST_HOST"]
         if not (
             (test_host is not None and test_host in connection_details["host"])
@@ -307,23 +284,24 @@ def connect(
             raise RuntimeError(
                 "To run a production job, please choose an explicit unique job_id."
             )
-        job_id = "unnamed_" + uuid.uuid4().hex
+        job_name = "unnamed_" + uuid.uuid4().hex
 
     client = get_ch_client(connection_details=connection_details, **kwargs)
     if not no_create:
         # Create job_id database if it doesn't exist
-        command(client, f"create database if not exists {job_id}")
+        command(client, f"create database if not exists {job_name}")
 
     # NOTE: client.database is invading private API, but based on reading
     # the clickhouse_connect code, this is unlikely to break
-    client.database = job_id
+    client.database = job_name
 
-    logger.info(f"Connected to job {job_id}")
+    logger.info(f"Connected to job {job_name}")
     return client
 
 
 def get_ch_client(
     connection_details=None,
+    service="TEST",
     host=None,
     port=None,
     username=None,
@@ -335,33 +313,36 @@ def get_ch_client(
 
     clickhouse_connect.common.set_setting("autogenerate_session_id", False)
     if connection_details is None:
-        connection_details = get_ch_config(host, port, username, password, database)
+        connection_details = get_ch_config(
+            service, host, port, username, password, database
+        )
+    connection_details["connect_timeout"] = 30
     # NOTE: this is a way to run more than the default 8 queries at once.
     # if 'pool_mgr' not in kwargs:
     #     kwargs['pool_mgr'] = clickhouse_connect.driver.httputil.get_pool_manager(
     #         maxsize=16
     #     )
-    return clickhouse_connect.get_client(**connection_details, **kwargs)
+    connection_details.update(kwargs)
+    return clickhouse_connect.get_client(**connection_details)
 
 
-def get_ch_config(host=None, port=None, username=None, password=None, database=None):
+def get_ch_config(
+    service="TEST", host=None, port=None, username=None, password=None, database=None
+):
     if host is None:
-        if "CLICKHOUSE_HOST" in os.environ:
-            host = os.environ["CLICKHOUSE_HOST"]
-        else:
-            host = os.environ["CLICKHOUSE_TEST_HOST"]
+        host = os.environ[f"CLICKHOUSE_{service}_HOST"]
     if port is None:
-        if "CLICKHOUSE_PORT" in os.environ:
-            port = os.environ["CLICKHOUSE_PORT"]
+        if f"CLICKHOUSE_{service}_PORT" in os.environ:
+            port = os.environ[f"CLICKHOUSE_{service}_PORT"]
         else:
             port = 8443
     if username is None:
-        if "CLICKHOUSE_USERNAME" in os.environ:
-            username = os.environ["CLICKHOUSE_USERNAME"]
+        if f"CLICKHOUSE_{service}_USERNAME" in os.environ:
+            username = os.environ[f"CLICKHOUSE_{service}_USERNAME"]
         else:
             username = "default"
     if password is None:
-        password = os.environ["CLICKHOUSE_PASSWORD"]
+        password = os.environ[f"CLICKHOUSE_{service}_PASSWORD"]
     logger.info(f"Clickhouse config: {username}@{host}:{port}/{database}")
     return dict(
         host=host,
@@ -381,9 +362,7 @@ def list_dbs(ch_client):
     ]
 
 
-def clear_dbs(
-    ch_client=None, prefix="unnamed", names=None, yes=False, allow_prod=False
-):
+def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
     """
     DANGER, WARNING, ACHTUNG, PELIGRO:
         Don't run this function for our production Clickhouse server. That
@@ -400,14 +379,6 @@ def clear_dbs(
     """
     if ch_client is None:
         ch_client = get_ch_client()
-
-    test_host = os.environ["CLICKHOUSE_TEST_HOST"]
-    if not allow_prod:
-        if not (
-            (test_host is not None and test_host in ch_client.url)
-            or "localhost" in ch_client.url
-        ):
-            raise RuntimeError("This function is only for localhost or test databases.")
 
     if names is None:
         print('dropping all databases starting with "{}"'.format(prefix))

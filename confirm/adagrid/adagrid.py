@@ -4,10 +4,12 @@ import contextlib
 import logging
 import queue
 import time
+import uuid
 from pprint import pformat
 
 import jax
 import numpy as np
+import synchronicity
 
 from .db import DatabaseLogging
 from .db import DuckDBTiles
@@ -20,6 +22,8 @@ from .step import WorkerStatus
 
 logger = logging.getLogger(__name__)
 
+synchronizer = synchronicity.Synchronizer()
+
 
 def entrypoint(algo_type, kwargs):
     backend = kwargs.get("backend", None)
@@ -29,11 +33,44 @@ def entrypoint(algo_type, kwargs):
     return backend.entrypoint(algo_type, kwargs)
 
 
+def setup_db(cfg):
+    print(list(cfg.keys()))
+    ch_client = None
+    if cfg["clickhouse_service"] is not None:
+        import confirm.cloud.clickhouse as ch
+
+        ch_client = ch.connect(
+            job_name=cfg["job_name"], service=cfg["clickhouse_service"]
+        )
+
+    db = cfg.get("db", None)
+    if db is None:
+        if cfg["job_name"] is None:
+            db_filepath = ":memory:"
+            cfg["job_name"] = "unnamed_" + uuid.uuid4().hex
+        else:
+            db_filepath = f"{cfg['job_name']}.db"
+        db = DuckDBTiles.connect(path=db_filepath, ch_client=ch_client)
+    db.ch_client = ch_client
+    return db
+
+
+# synchronizer is used so that we can run our event loop code in a separate
+# thread regardless of whether an event loop is already running.
+# If we're not running through Jupyter, then no event loop is running and we
+# can just run the async entrypoint directly:
+#   asyncio.run(async_entrypoint(self, algo_type, kwargs))
+#
+# But, if we're running through Jupyter, then an event loop will already be
+# running and we're not allowed to start a new event loop inside of the
+# existing one. So we need to run the async entrypoint in a separate
+# thread. synchronicity is a library that makes this easy.
+@synchronizer.create_blocking
 async def async_entrypoint(backend, algo_type, kwargs):
     entry_time = time.time()
-    if kwargs.get("db", None) is None:
-        kwargs["db"] = DuckDBTiles.connect(kwargs["job_name"])
-    db = kwargs["db"]
+
+    db = setup_db(kwargs)
+    kwargs["db"] = db
 
     async with contextlib.AsyncExitStack() as stack:
         with timer("init"):
@@ -43,8 +80,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
         with timer("backend.setup"):
             await stack.enter_async_context(backend.setup(algo))
 
-        check_backup = await stack.enter_async_context(backup_daemon(db, algo.cfg))
-
         with timer("process_initial_incompletes"):
             await process_packet_set(backend, algo, np.array(incomplete_packets))
 
@@ -52,8 +87,6 @@ async def async_entrypoint(backend, algo_type, kwargs):
         n_parallel_steps = algo.cfg["n_parallel_steps"]
         processing_tasks = queue.Queue()
         for step_id in range(next_step, algo.cfg["n_steps"]):
-            check_backup()
-
             basal_step_id = max(step_id - n_parallel_steps, 0)
 
             with timer("verify"):
@@ -92,54 +125,12 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 if processing_tasks.qsize() > n_parallel_steps - 1:
                     await wait_for_packets(backend, algo, processing_tasks.get())
 
+            with timer("wait for backup"):
+                await db.ch_wait()
+
     with timer("verify"):
         db.verify(basal_step_id)
     return db
-
-
-@contextlib.asynccontextmanager
-async def backup_daemon(db, cfg):
-    if (cfg["job_name"] is False) or (cfg["job_name"] is None and not cfg["prod"]):
-        yield lambda: None
-        return
-
-    import confirm.cloud.clickhouse as ch
-
-    last_backup = asyncio.Event()
-
-    async def _daemon():
-        ch_client = await asyncio.to_thread(ch.connect, cfg["job_name"])
-        done = False
-        first_time = {k: True for k in ch.all_tables}
-        while not done:
-            await asyncio.sleep(0.1)
-            if last_backup.is_set():
-                logger.info("Performing final backup.")
-                done = True
-            with timer("backup"):
-                try:
-                    await ch.backup(ch_client, db, first_time)
-                except Exception:
-                    # If a backup fails for some reason, we don't want that
-                    # to kill the job.
-                    logger.exception("Error backing up database", exc_info=True)
-
-    backup_task = asyncio.create_task(_daemon())
-
-    def check_backup():
-        try:
-            # by checking for a result, we can cause exception to be raised
-            # now instead of waiting for the whole job to be done.
-            backup_task.result()
-        except asyncio.InvalidStateError:
-            # if the backup_task is still running, that's great and we can
-            # ignore this!
-            pass
-
-    yield check_backup
-
-    last_backup.set()
-    await backup_task
 
 
 @contextlib.contextmanager
@@ -162,6 +153,8 @@ class Backend(abc.ABC):
         "nB",
         "alpha",
         "calibration_min_idx",
+        "clickhouse_service",
+        "job_name",
     ]
 
     def entrypoint(self, algo_type, kwargs):
@@ -171,28 +164,7 @@ class Backend(abc.ABC):
 
         The default behavior is to just run the leader locally.
         """
-        try:
-            asyncio.get_running_loop()
-            run_directly = False
-        except RuntimeError:
-            run_directly = True
-
-        if run_directly:
-            # If we're not running through Jupyter, then we can just run the
-            # async entrypoint directly.
-            return asyncio.run(async_entrypoint(self, algo_type, kwargs))
-        else:
-            # If we're running through Jupyter, then an event loop will already be
-            # running and we're not allowed to start a new event loop inside of the
-            # existing one. So we need to run the async entrypoint in a separate
-            # thread. synchronicity is a library that makes this easy.
-            import synchronicity
-
-            synchronizer = synchronicity.Synchronizer()
-            sync_entry = synchronizer.create(async_entrypoint)[
-                synchronicity.Interface.BLOCKING
-            ]
-            return sync_entry(self, algo_type, kwargs)
+        return async_entrypoint(self, algo_type, kwargs)
 
     @abc.abstractmethod
     def get_cfg(self):
@@ -222,13 +194,15 @@ class LocalBackend(Backend):
         yield
 
     def submit_tiles(self, tiles_df):
+        self.algo.db.ch_insert("tiles", tiles_df, create=False)
         tbs = self.algo.cfg["tile_batch_size"]
         if tbs is None:
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
         logger.debug("Processing tiles using tile batch size %s", tbs)
         start = time.time()
-        out = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
-        return out, time.time() - start
+        results_df = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+        self.algo.db.ch_insert("results", results_df, create=True)
+        return results_df, time.time() - start
 
     async def wait_for_results(self, awaitable):
         return awaitable

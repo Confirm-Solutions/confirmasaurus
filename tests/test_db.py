@@ -241,9 +241,9 @@ class TestDuckDB(DBTester):
         g = example_grid(-1, 1)
         p = Path("test.db")
         p.unlink(missing_ok=True)
-        db_tiles = DuckDBTiles.connect(job_name="test")
+        db_tiles = DuckDBTiles.connect(path="test")
         self.init_grid(db_tiles, g)
         db_tiles.close()
 
-        db_tiles2 = DuckDBTiles.connect(job_name="test")
+        db_tiles2 = DuckDBTiles.connect(path="test")
         assert_frame_equal_special(g.df, db_tiles2.get_tiles())

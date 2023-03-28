@@ -69,37 +69,13 @@ async def wait_for_packet(backend, algo, awaitable, report):
         report["runtime_simulating"] / report["n_total_sims"] * 1e9
     )
     report["time"] = time.time()
-    algo.db.insert_results(results_df, algo.get_orderer())
+    algo.db.insert_results(
+        results_df.drop("active", axis=1, errors="ignore"), algo.get_orderer()
+    )
     status = WorkerStatus.WORKING
     report["status"] = status.name
     report["runtime_total"] = time.time() - report["start"]
     del report["start"]
-    algo.callback(report, algo.db)
-    algo.db.insert_report(report)
-
-
-async def process_packet(backend, algo, packet_df):
-    start = time.time()
-    report = dict()
-    report["step_id"] = packet_df.iloc[0]["step_id"]
-    report["packet_id"] = packet_df.iloc[0]["packet_id"]
-    report["n_tiles"] = packet_df.shape[0]
-    report["n_total_sims"] = packet_df["K"].sum()
-
-    start = time.time()
-    logger.debug("Processing %d tiles.", packet_df.shape[0])
-    results_df, runtime_simulating = await backend.process_tiles(packet_df)
-
-    report["runtime_simulating"] = runtime_simulating
-    report["runtime_per_sim_ns"] = (
-        report["runtime_simulating"] / report["n_total_sims"] * 1e9
-    )
-    report["time"] = time.time()
-    report["runtime_process_tiles"] = time.time() - start
-    algo.db.insert_results(results_df, algo.get_orderer())
-    status = WorkerStatus.WORKING
-    report["status"] = status.name
-    report["runtime_total"] = time.time() - start
     algo.callback(report, algo.db)
     algo.db.insert_report(report)
 
@@ -214,7 +190,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     inactive_done["deepen"] = 0
     inactive_done["split"] = True
     inactive_done = inactive_done[["step_id"] + done_cols].copy()
-    algo.db.insert_tiles(inactive_df)
+    algo.db.insert_tiles(inactive_df.drop("active", axis=1))
     algo.db.insert_done(inactive_done)
 
     # Assign tiles to packets and then insert them into the database for
@@ -229,7 +205,10 @@ def _new_step(algo, basal_step_id, new_step_id):
 
     g_active.df["packet_id"] = assign_packets(g_active.df)
     g_active.df["inactivation_step"] = MAX_STEP
+    g_active.df.drop("active", axis=1, inplace=True)
+
     algo.db.insert_tiles(g_active.df)
+
     report["time"] = time.time()
     report["n_new_tiles"] = g_active.n_tiles
 

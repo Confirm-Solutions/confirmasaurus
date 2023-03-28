@@ -1,3 +1,5 @@
+import asyncio
+import time
 from unittest import mock
 
 import numpy as np
@@ -41,13 +43,13 @@ def test_calibration_cheap(snapshot):
     )
 
 
-def cal_tester(db, snapshot, ignore_story=True, prod=False, **kwargs):
+def cal_tester(snapshot, ignore_story=True, record_system=False, **kwargs):
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
         out_db = ada.ada_calibrate(
-            ZTest1D, g=g, db=db, nB=5, tile_batch_size=1, prod=prod, **kwargs
+            ZTest1D, g=g, nB=5, tile_batch_size=1, record_system=record_system, **kwargs
         )
 
     ip.testing.check_imprint_results(
@@ -59,32 +61,73 @@ def cal_tester(db, snapshot, ignore_story=True, prod=False, **kwargs):
 
 @pytest.mark.slow
 def test_calibration(snapshot):
-    cal_tester(None, snapshot, ignore_story=False)
+    cal_tester(snapshot, ignore_story=False)
 
 
 @pytest.mark.slow
 def test_calibration_packetsize1(snapshot):
     snapshot.set_test_name("test_calibration")
-    cal_tester(None, snapshot, packet_size=1)
+    cal_tester(snapshot, packet_size=1)
 
 
-@pytest.mark.slow
-def test_distributed(duckdb, ch_db, snapshot):
-    from confirm.cloud.modal_backend import ModalBackend
+def distributed_tester(backend, ch_db, snapshot):
+    import confirm.cloud.clickhouse as ch
 
     snapshot.set_test_name("test_calibration")
-    cal_tester(
-        duckdb,
+    db = ada.DuckDBTiles.connect()
+
+    with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
+        g = ip.cartesian_grid(
+            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
+        )
+        local_db = ada.ada_calibrate(
+            ZTest1D,
+            g=g,
+            nB=5,
+            record_system=False,
+            clickhouse_service="TEST",
+            db=db,
+            job_name=ch_db.database,
+            backend=backend,
+        )
+
+    ip.testing.check_imprint_results(
+        ip.Grid(local_db.get_results(), None).prune_inactive(),
         snapshot,
-        prod=True,
-        job_name=ch_db.database,
-        backend=ModalBackend(gpu=False),
+        ignore_story=True,
+    )
+
+    restored_db = ada.DuckDBTiles.connect()
+    time.sleep(1)
+
+    asyncio.run(ch.restore(db.ch_client, restored_db))
+    snapshot.reset()
+    ip.testing.check_imprint_results(
+        ip.Grid(restored_db.get_results(), None).prune_inactive(),
+        snapshot,
+        ignore_story=True,
     )
 
 
 @pytest.mark.slow
+def test_distributed_modal(ch_db, snapshot):
+    from confirm.cloud.modal_backend import ModalBackend
+
+    backend = ModalBackend(gpu=False)
+    distributed_tester(backend, ch_db, snapshot)
+
+
+# @pytest.mark.skip
+def test_distributed_coiled(ch_db, snapshot):
+    from confirm.cloud.coiled_backend import CoiledBackend
+
+    backend = CoiledBackend(restart_workers=True)
+    distributed_tester(backend, ch_db, snapshot)
+
+
+@pytest.mark.slow
 def test_two_parallel_steps(snapshot):
-    cal_tester(None, snapshot, n_parallel_steps=2, step_size=1, packet_size=1)
+    cal_tester(snapshot, n_parallel_steps=2, step_size=1, packet_size=1)
 
 
 @pytest.mark.slow
@@ -93,7 +136,6 @@ def test_two_parallel_steps_distributed(snapshot):
 
     snapshot.set_test_name("test_two_parallel_steps")
     cal_tester(
-        None,
         snapshot,
         n_parallel_steps=2,
         step_size=1,

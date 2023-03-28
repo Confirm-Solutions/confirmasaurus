@@ -3,7 +3,6 @@ import contextlib
 import logging
 import os
 import subprocess
-import tempfile
 
 import dask
 import jax
@@ -14,6 +13,7 @@ import confirm
 import imprint as ip
 from ..adagrid.adagrid import Backend
 from ..adagrid.adagrid import LocalBackend
+from ..adagrid.adagrid import setup_db
 
 logger = logging.getLogger(__name__)
 
@@ -36,31 +36,33 @@ def create_software_env():
         "--find-links "
         "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
     )
-    reqs.append(f"jax[cuda11_cudnn82]=={req_jax}")
+    reqs.append(f"jax[cuda11_pip]=={req_jax}")
     reqs = [r for r in reqs if r != ""]
-    pip_installs = "\n".join([f"    - {r}" for r in reqs])
-    environment_yml = f"""
-name: confirm
-channels:
-  - conda-forge
-  - nvidia
-dependencies:
-  - python=3.10
-  - nvidia:cuda-toolkit=11.8
-  - conda-forge:cudnn=8.4
-  - pip
-  - pip:
-{pip_installs}
-"""
-    logger.debug(f"Coiled environment:\n {environment_yml}")
     name = "confirm-coiled"
-    with tempfile.NamedTemporaryFile(mode="w") as f:
-        f.write(environment_yml)
-        f.flush()
-        logger.debug("Creating software environment %s", name)
-        import coiled
+    import coiled
 
-        coiled.create_software_environment(name=name, conda=f.name)
+    coiled.create_software_environment(name=name, pip=reqs)
+    #     pip_installs = "\n".join([f"    - {r}" for r in reqs])
+    #     environment_yml = f"""
+    # name: confirm
+    # channels:
+    #   - conda-forge
+    #   - nvidia
+    # dependencies:
+    #   - python=3.10
+    #   - pip
+    #   - pip:
+    # {pip_installs}
+    # """
+    #     logger.debug(f"Coiled environment:\n {environment_yml}")
+    # import tempfile
+    #     with tempfile.NamedTemporaryFile(mode="w") as f:
+    #         f.write(environment_yml)
+    #         f.flush()
+    #         logger.debug("Creating software environment %s", name)
+    #         import coiled
+
+    #         coiled.create_software_environment(name=name, conda=f.name)
     return name
 
 
@@ -139,13 +141,14 @@ def check():
 def setup_worker(worker_args):
     worker = get_worker()
 
-    (model_type, model_args, model_kwargs, algo_type, cfg) = worker_args
+    (model_type, model_args, model_kwargs, algo_type, cfg, environ) = worker_args
     # Hashing the arguments lets us avoid re-initializing the model and algo
     # if the arguments are the same.
     # NOTE: this could be extended to use an `algo` dictionary, where the key
     # is this hash. But, I'm suspicious that would cause out-of-memory errors
     # so the design is currently limited to a single algo per worker at a
     # single point in time.
+    print(model_type, model_args, model_kwargs, algo_type, cfg, environ)
     hash_args = hash(
         (
             model_type.__name__,
@@ -153,27 +156,39 @@ def setup_worker(worker_args):
             tuple(model_kwargs.items()),
             algo_type.__name__,
             tuple(cfg.items()),
+            tuple(environ.items()),
         )
     )
     has_hash = hasattr(worker, "algo_hash")
     has_algo = hasattr(worker, "algo")
     if not (has_algo and has_hash) or (has_hash and hash_args != worker.algo_hash):
         ip.package_settings()
+
+        # Need to insert variables into the environment for Clickhouse:
+        #
+        # NOTE: this is probably a little bit insecure and ideally we would
+        # transfer the encrypted secrets file and then use sops to decrypt it
+        # here. But that would probably require redoing the coiled software
+        # environment to use a docker image and I don't want to deal with that
+        # now.
+        os.environ.update(environ)
+        db = setup_db(cfg)
+
         model = model_type(*model_args, **model_kwargs)
-        worker.algo = algo_type(model, None, None, cfg, None)
+        worker.algo = algo_type(model, None, db, cfg, None)
         worker.algo_hash = hash_args
 
+        import synchronicity
+
+        synchronizer = synchronicity.Synchronizer()
+
+        @synchronizer.create_blocking
         async def async_process_tiles(tiles_df):
             lb = LocalBackend()
             async with lb.setup(worker.algo):
                 return await lb.wait_for_results(lb.submit_tiles(tiles_df))
 
-        import synchronicity
-
-        synchronizer = synchronicity.Synchronizer()
-        worker.process_tiles = synchronizer.create(async_process_tiles)[
-            synchronicity.Interface.BLOCKING
-        ]
+        worker.process_tiles = async_process_tiles
     return worker.process_tiles
 
 
@@ -211,32 +226,26 @@ class CoiledBackend(Backend):
         self.client = self.cluster.get_client()
         if self.restart_workers:
             self.client.restart()
-        algo_entries = [
-            "init_K",
-            "n_K_double",
-            "tile_batch_size",
-            "lam",
-            "delta",
-            "global_target",
-            "max_target",
-            "bootstrap_seed",
-            "nB",
-            "alpha",
-            "calibration_min_idx",
-        ]
-        filtered_cfg = {k: v for k, v in algo.cfg.items() if k in algo_entries}
+        filtered_cfg = {k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries}
         worker_args = (
             type(algo.driver.model),
             (algo.cfg["model_seed"], algo.max_K),
             algo.cfg["model_kwargs"],
             type(algo),
             filtered_cfg,
+            {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
         )
         self.worker_args_future = self.client.scatter(worker_args, broadcast=True)
         yield
 
     def submit_tiles(self, tiles_df):
-        return self.client.submit(dask_process_tiles, self.worker_args_future, tiles_df)
+        step_id = int(tiles_df["step_id"].iloc[0])
+        # negative step_id is the priority so that earlier steps are completed
+        # before later steps when we are using n_parallel_steps
+        with dask.annotate(priority=-step_id):
+            return self.client.submit(
+                dask_process_tiles, self.worker_args_future, tiles_df
+            )
 
     async def wait_for_results(self, awaitable):
         return await asyncio.to_thread(awaitable.result)

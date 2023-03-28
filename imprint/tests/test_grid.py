@@ -62,8 +62,8 @@ def simple_grid():
     return grid._raw_init_grid(thetas, radii, 1).add_null_hypos(hypos)
 
 
-n_bits, host_bits = grid._gen_short_uuids_one_batch.config
-t_bits = 64 - n_bits - host_bits
+n_bits = grid.n_bits
+t_bits = 64 - grid.n_bits
 
 
 def test_short_uuids():
@@ -73,7 +73,7 @@ def test_short_uuids():
     U2 = grid._gen_short_uuids(10, 1)
     assert U.dtype == np.uint64
     assert np.unique(U).shape[0] == 10
-    assert U2[0] - U[0] == 2 ** (n_bits + host_bits)
+    assert U2[0] - U[0] == 2**n_bits
 
 
 def test_no_duplicate_uuids():
@@ -90,7 +90,7 @@ def test_no_duplicate_uuids():
 def test_lots_of_short_uuids():
     n = 2**n_bits
     uuids = grid._gen_short_uuids(n, 1)
-    assert uuids[-1] - uuids[0] == 2 ** (n_bits + host_bits)
+    assert uuids[-1] - uuids[0] == 2**n_bits
     assert np.unique(uuids).shape[0] == n
 
 

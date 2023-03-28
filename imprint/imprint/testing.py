@@ -193,6 +193,9 @@ class SnapshotAssertion:
 
         return serializer.deserialize(str(self._get_filebase()), obj)
 
+    def reset(self):
+        self.calls = 0
+
     def __call__(self, obj, serializer=None):
         """
         Return the saved copy of the object. If --update-snapshots is passed,

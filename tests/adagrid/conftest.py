@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 
 from confirm.adagrid.db import DuckDBTiles
@@ -28,7 +30,8 @@ def ch_db(request):
 
     import confirm.cloud.clickhouse as ch
 
-    db = ch.connect()
+    job_name = "unnamed_" + uuid.uuid4().hex
+    db = ch.connect(job_name=job_name)
     yield db
     job_id = db.database
 

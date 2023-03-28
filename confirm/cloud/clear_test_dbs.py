@@ -10,14 +10,14 @@ def main(
     prefix: str = "unnamed",
     y: bool = False,
     list: bool = False,
-    allow_prod: bool = False,
+    service: str = "TEST",
 ):
     dotenv.load_dotenv()
-    ch_client = ch.get_ch_client()
+    ch_client = ch.get_ch_client(service=service)
     if list:
         print("All databases: ")
         pprint(ch.list_dbs(ch_client))
-    ch.clear_dbs(ch_client, prefix=prefix, names=None, yes=y, allow_prod=allow_prod)
+    ch.clear_dbs(ch_client, prefix=prefix, names=None, yes=y)
 
 
 if __name__ == "__main__":

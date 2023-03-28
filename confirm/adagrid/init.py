@@ -4,6 +4,7 @@ import json
 import logging
 import platform
 import subprocess
+import time
 import warnings
 
 import cloudpickle
@@ -135,6 +136,7 @@ def join(db, kwargs):
 
 
 def add_system_cfg(cfg):
+    cfg["init_time"] = time.time()
     cfg["jax_platform"] = jax.lib.xla_bridge.get_backend().platform
     if cfg["packet_size"] is None:
         cfg["packet_size"] = cfg["step_size"]
@@ -151,12 +153,12 @@ def add_system_cfg(cfg):
             nvidia_smi=_run(["nvidia-smi"]),
         )
     )
-    if cfg["prod"]:
+    if cfg["record_system"]:
         cfg["pip_freeze"] = _run(["pip", "freeze"])
         cfg["conda_list"] = _run(["conda", "list"])
     else:
-        cfg["pip_freeze"] = "skipped because prod=False"
-        cfg["conda_list"] = "skipped because prod=False"
+        cfg["pip_freeze"] = "skipped because record_system=False"
+        cfg["conda_list"] = "skipped because record_system=False"
 
     cfg["max_K"] = cfg["init_K"] * 2 ** cfg["n_K_double"]
 
