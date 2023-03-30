@@ -318,10 +318,10 @@ def get_ch_client(
         )
     connection_details["connect_timeout"] = 30
     # NOTE: this is a way to run more than the default 8 queries at once.
-    # if 'pool_mgr' not in kwargs:
-    #     kwargs['pool_mgr'] = clickhouse_connect.driver.httputil.get_pool_manager(
-    #         maxsize=16
-    #     )
+    if "pool_mgr" not in kwargs:
+        kwargs["pool_mgr"] = clickhouse_connect.driver.httputil.get_pool_manager(
+            maxsize=16, block=True
+        )
     connection_details.update(kwargs)
     return clickhouse_connect.get_client(**connection_details)
 

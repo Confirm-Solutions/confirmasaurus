@@ -65,7 +65,9 @@ def setup_db(cfg):
 # running and we're not allowed to start a new event loop inside of the
 # existing one. So we need to run the async entrypoint in a separate
 # thread. synchronicity is a library that makes this easy.
-@synchronizer.create_blocking
+# @synchronizer.create_blocking
+
+
 async def async_entrypoint(backend, algo_type, kwargs):
     entry_time = time.time()
 
@@ -136,6 +138,7 @@ async def async_entrypoint(backend, algo_type, kwargs):
 @contextlib.contextmanager
 def timer(name):
     start = time.time()
+    logger.debug(f"Starting timing block: {name}")
     yield
     logger.debug(f"{name} took {time.time() - start:.3f} seconds")
 
@@ -164,7 +167,7 @@ class Backend(abc.ABC):
 
         The default behavior is to just run the leader locally.
         """
-        return async_entrypoint(self, algo_type, kwargs)
+        return asyncio.run(async_entrypoint(self, algo_type, kwargs))
 
     @abc.abstractmethod
     def get_cfg(self):
@@ -194,15 +197,26 @@ class LocalBackend(Backend):
         yield
 
     def submit_tiles(self, tiles_df):
+        report = dict()
+        report["sim_start_time"] = time.time()
         self.algo.db.ch_insert("tiles", tiles_df, create=False)
         tbs = self.algo.cfg["tile_batch_size"]
         if tbs is None:
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
-        logger.debug("Processing tiles using tile batch size %s", tbs)
+        report["tile_batch_size"] = tbs
         start = time.time()
         results_df = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
         self.algo.db.ch_insert("results", results_df, create=True)
-        return results_df, time.time() - start
+        report["runtime_simulating"] = time.time() - start
+        report["sim_done_time"] = time.time()
+        # NOTE: We restrict the set of columns returned to the leader. Why?
+        # 1) The full results data has already been written to Clickhouse.
+        # 2) The leader only needs a subset of the results in order to
+        #    determine future adagrid steps.
+        # 3) The leader can fill in a lot of the tile details by joining with
+        #    the tiles table.
+        return_cols = ["id"] + self.algo.get_important_columns()
+        return results_df[return_cols], report
 
     async def wait_for_results(self, awaitable):
         return awaitable

@@ -52,7 +52,6 @@ import logging
 import numpy as np
 import pandas as pd
 
-import imprint as ip
 from . import bootstrap
 from .adagrid import entrypoint
 from .adagrid import print_report
@@ -77,6 +76,18 @@ class AdaCalibrate:
     def get_orderer(self):
         return "orderer"
 
+    def get_important_columns(self):
+        return [
+            "orderer",
+            "idx",
+            "alpha0",
+            "impossible",
+            "twb_max_lams",
+            "twb_mean_lams",
+            "twb_min_lams",
+            "lams",
+        ] + [f"B_lams{i}" for i in range(self.cfg["nB"])]
+
     def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
@@ -89,14 +100,9 @@ class AdaCalibrate:
             calibration_min_idx=self.cfg["calibration_min_idx"],
             tile_batch_size=tile_batch_size,
         )
-        lams_df.insert(0, "processing_time", ip.timer.simple_timer())
-        lams_df.insert(1, "completion_step", MAX_STEP)
-
-        # we use insert here to order columns nicely for reading raw data
-        lams_df.insert(2, "grid_cost", self.cfg["alpha"] - lams_df["alpha0"])
-
+        lams_df.insert(0, "completion_step", MAX_STEP)
         lams_df.insert(
-            3,
+            1,
             "orderer",
             # Where calibration is impossible due to either small K or small alpha0,
             # the orderer is set to -inf so that such tiles are guaranteed to
@@ -127,24 +133,25 @@ class AdaCalibrate:
         if any_impossible:
             return False, None, {}
 
-        worst_tile = self.db.worst_tile(basal_step_id, "lams")
-        lamss = worst_tile["lams"].iloc[0]
+        worst_tile_df = self.db.worst_tile(basal_step_id, "lams")
+        worst_tile = worst_tile_df.iloc[0]
+        lamss = worst_tile["lams"]
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
         logger.debug("Computing bias and standard deviation of lambda**")
         B_lamss = self.db.bootstrap_lamss(basal_step_id)
         worst_tile_tie_sum = self.driver.many_rej(
-            worst_tile, np.array([lamss] + list(B_lamss))
+            worst_tile_df, np.array([lamss] + list(B_lamss))
         ).iloc[0]
-        worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"].iloc[0]
+        worst_tile_tie_est = worst_tile_tie_sum / worst_tile["K"]
 
         # Given these TIE values, we can compute bias, standard deviation and
         # spread.
         bias_tie = worst_tile_tie_est[0] - worst_tile_tie_est[1:].mean()
         std_tie = worst_tile_tie_est.std()
         spread_tie = worst_tile_tie_est.max() - worst_tile_tie_est.min()
-        grid_cost = worst_tile["grid_cost"].iloc[0]
+        grid_cost = self.cfg["alpha"] - worst_tile["alpha0"]
 
         report = dict(
             bias_tie=bias_tie,
@@ -218,7 +225,9 @@ class AdaCalibrate:
         # The decision criteria is best described by the code below.
         ########################################
         at_max_K = tiles_df["K"] == self.max_K
-        tiles_df["refine"] = (tiles_df["grid_cost"] > self.cfg["grid_target"]) & (
+
+        grid_cost = self.cfg["alpha"] - tiles_df["alpha0"]
+        tiles_df["refine"] = (grid_cost > self.cfg["grid_target"]) & (
             (~deepen_likely_to_work) | at_max_K
         )
         tiles_df["deepen"] = (~tiles_df["refine"]) & (~at_max_K)

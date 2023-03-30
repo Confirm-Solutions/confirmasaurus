@@ -1,5 +1,6 @@
 import asyncio
 import logging.handlers
+import threading
 import time
 from dataclasses import dataclass
 from dataclasses import field
@@ -43,6 +44,7 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
         self.flushLevel = flushLevel
         self.interval = interval
         self.lastFlush = time.time()
+        self.creating_thread = threading.current_thread().ident
         super().__init__(self.capacity)
 
     def __enter__(self):
@@ -62,7 +64,7 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
             (len(self.buffer) >= self.capacity)
             or (record.levelno >= self.flushLevel)
             or (time.time() > self.lastFlush + self.interval)
-        )
+        ) and (threading.current_thread().ident == self.creating_thread)
 
     def flush(self):
         """
@@ -261,21 +263,6 @@ class DuckDBTiles:
     ch_tasks: List[asyncio.Task] = field(default_factory=list)
     _d: int = None
 
-    def __post_init__(self):
-        self.con.execute(
-            """
-            create table if not exists logs (
-                t TIMESTAMP,
-                name TEXT,
-                pathname TEXT,
-                lineno UINTEGER,
-                levelno UINTEGER,
-                levelname TEXT,
-                message TEXT
-            )
-            """
-        )
-
     def dimension(self):
         if self._d is None:
             cols = self._tiles_columns()
@@ -356,24 +343,37 @@ class DuckDBTiles:
         self.ch_insert("reports", pd.DataFrame(dict(json=[report_str])), create=False)
         return report
 
-    def insert_tiles(self, df: pd.DataFrame):
+    def insert_tiles(self, df: pd.DataFrame, ch_insert: bool = False):
         # NOTE: We insert to Clickhouse tiles and results in the packet
         # processing instead. This spreads out the Clickhouse mirroring
         # bandwidth requirements.
         column_order = ",".join(self._tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
         logger.debug("Inserted %d new tiles.", df.shape[0])
+        if ch_insert:
+            self.ch_insert("tiles", df, create=False)
 
     def insert_results(self, df: pd.DataFrame, orderer: str):
         # NOTE: We insert to Clickhouse tiles and results in the packet
         # processing instead. This spreads out the Clickhouse mirroring
         # bandwidth requirements.
+        df_cols = ",".join([f"df.{c}" for c in df.columns if c != "id"])
         if not self.does_table_exist("results"):
-            self.con.execute("create table if not exists results as select * from df")
-            self.ch_insert("results", df.iloc[:0], create=True)
+            self.con.execute(
+                f"""
+                create table results as (
+                    select tiles.*, {df_cols} from df
+                    left join tiles on df.id = tiles.id
+                )
+            """
+            )
         else:
-            column_order = ",".join(self._results_columns())
-            self.con.execute(f"insert into results select {column_order} from df")
+            self.con.execute(
+                f"""
+                insert into results select tiles.*, {df_cols} from df
+                    left join tiles on df.id = tiles.id
+            """
+            )
         logger.debug(f"Inserted {df.shape[0]} results.")
 
     def insert_done(self, df: pd.DataFrame):
@@ -419,6 +419,20 @@ class DuckDBTiles:
         )
 
     def insert_logs(self, df):
+        if not self.does_table_exist("logs"):
+            self.con.execute(
+                """
+                create table if not exists logs (
+                    t TIMESTAMP,
+                    name TEXT,
+                    pathname TEXT,
+                    lineno UINTEGER,
+                    levelno UINTEGER,
+                    levelname TEXT,
+                    message TEXT
+                )
+                """
+            )
         self.con.execute("insert into logs select * from df")
         self.ch_insert("logs", df, create=True)
 

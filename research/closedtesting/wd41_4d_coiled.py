@@ -15,7 +15,7 @@ modal_cfg["timeout"] = 60 * 60 * 24
 def main():
     import confirm.adagrid as ada
 
-    # import confirm.cloud.coiled_backend as coiled_backend
+    import confirm.cloud.coiled_backend as coiled_backend
     import confirm.models.wd41 as wd41
 
     import imprint as ip
@@ -23,11 +23,10 @@ def main():
 
     if stub.is_inside():
         modal_util.setup_env()
-        # modal_util.coiled_login()
-        import os
-        import dask
-
-        dask.config.set({"coiled.token": os.environ["COILED_TOKEN"]})
+        modal_util.coiled_login()
+        # import os
+        # import dask
+        # dask.config.set({"coiled.token": os.environ["COILED_TOKEN"]})
     else:
         ip.package_settings()
         dotenv.load_dotenv()
@@ -41,7 +40,8 @@ def main():
     )
     db = ada.ada_calibrate(  # noqa
         wd41.WD41,
-        job_name="wd41_4d_v57",
+        job_name="wd41_4d_v67",
+        clickhouse_service="PROD",
         g=grid,
         alpha=0.025,
         bias_target=0.001,
@@ -53,7 +53,7 @@ def main():
         packet_size=2**13,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
-        # backend=coiled_backend.CoiledBackend(restart_workers=True, n_workers=16),
+        backend=coiled_backend.CoiledBackend(restart_workers=True, n_workers=1),
         n_steps=2,
     )
     print("Done")

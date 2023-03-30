@@ -85,7 +85,7 @@ def upload_pkg(client, module, restart=False):
     )
 
 
-def setup_cluster(n_workers=1, idle_timeout="30 minutes"):
+def setup_cluster(n_workers=1, idle_timeout="60 minutes"):
     create_software_env()
     import coiled
 
@@ -148,7 +148,6 @@ def setup_worker(worker_args):
     # is this hash. But, I'm suspicious that would cause out-of-memory errors
     # so the design is currently limited to a single algo per worker at a
     # single point in time.
-    print(model_type, model_args, model_kwargs, algo_type, cfg, environ)
     hash_args = hash(
         (
             model_type.__name__,

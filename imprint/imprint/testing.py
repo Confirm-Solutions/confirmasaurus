@@ -294,7 +294,9 @@ def check_imprint_results(g, snapshot, ignore_story=True):
 
     # First check the cal/val outputs. These are the most important values
     # to get correct.
-    pd.testing.assert_frame_equal(check_subset, compare, check_dtype=False)
+    pd.testing.assert_frame_equal(
+        check_subset, compare, check_dtype=False, obj="DataFrames (important columns)"
+    )
     if ignore_story:
         return
 
@@ -309,6 +311,7 @@ def check_imprint_results(g, snapshot, ignore_story=True):
         check_like=True,
         check_index_type=False,
         check_dtype=False,
+        obj="Full DataFrames (shared columns)",
     )
 
     # Second, we check the remaining values. These are less important to be
@@ -320,4 +323,5 @@ def check_imprint_results(g, snapshot, ignore_story=True):
         check_like=True,
         check_index_type=False,
         check_dtype=False,
+        obj="Full DataFrames (all columns)",
     )

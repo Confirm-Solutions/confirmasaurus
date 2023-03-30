@@ -1,7 +1,7 @@
 ```python
 import confirm.cloud.clickhouse as ch
-# client = ch.connect('wd41_4d_v0')
-# ch.list_tables(client)
+client = ch.connect('wd41_4d_v63', service='PROD')
+ch.list_tables(client)
 ```
 
 ```python
@@ -18,14 +18,31 @@ import jax
 
 ip.setup_nb()
 
-self = ada.DuckDBTiles.connect('../../wd41_4d_v55')
+self = ada.DuckDBTiles.connect('../../wd41_4d_v63.db')
 ```
 
 ## Broad table exploration
 
 ```python
+def query(q):
+    return self.con.query(q).df()
+```
+
+```python
 n_rows_df = pd.DataFrame(
-    [(table, self.con.query(f'select count(*) from {table}').fetchone()[0]) for table in ch.all_tables],
+    [(table, query(f'select count(*) from {table}').iloc[0][0]) for table in ch.all_tables],
+    columns=['table', 'count']
+).set_index('table')
+n_rows_df
+```
+
+```python
+query('select * from results limit 1')
+```
+
+```python
+n_rows_df = pd.DataFrame(
+    [(table, query(f'select count(*) from {table}').iloc[0][0]) for table in ch.all_tables],
     columns=['table', 'count']
 ).set_index('table')
 n_rows_df
@@ -34,8 +51,8 @@ n_rows_df
 
 ```python
 from confirm.adagrid.const import MAX_STEP
-n_sims = self.con.query('select sum(K) from results').fetchone()[0]
-n_retained_sims = self.con.query(f'select sum(K) from results where inactivation_step={MAX_STEP}').fetchone()[0]
+n_sims = query('select sum(K) from results').iloc[0][0]
+n_retained_sims = query(f'select sum(K) from results where inactivation_step={MAX_STEP} and id not in (select id from done where active=false)').iloc[0][0]
 n_sims / 1e12, n_retained_sims / 1e12
 ```
 
@@ -59,27 +76,25 @@ volume_sql = (
     + "*"
     + ("*".join([f"radii{d}" for d in range(self.dimension())]))
 )
-
-self.con.execute(f'create index if not exists volume_idx2 on results (active, ({volume_sql}))')
 ```
 
 ```python
-smallest_tile = self.con.query(f'select * from results where active=true order by {volume_sql} limit 1').df()
+smallest_tile = self.con.query(f'select * from results where inactivation_step>10000 order by {volume_sql} limit 1').df()
 smallest_tile
 ```
 
 ```python
-largest_tile = self.con.query(f'select * from results where active=true order by {volume_sql} desc limit 1').df()
+largest_tile = self.con.query(f'select * from results where inactivation_step>10000 order by {volume_sql} desc limit 1').df()
 largest_tile
 ```
 
 ```python
-lamss_tile = self.con.query('select * from results where active=true order by lams limit 1').df()
+lamss_tile = self.con.query('select * from results where inactivation_step>10000 order by lams limit 1').df()
 lamss_tile
 ```
 
 ```python
-lams = self.con.query('select lams from results where active=true').df()
+lams = self.con.query('select lams from results where inactivation_step>10000').df()
 lamss = lams['lams'].min()
 max_display = lamss * 2
 plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
@@ -89,12 +104,12 @@ plt.show()
 ## Ordering
 
 ```python
-worst5000_df = self.con.query('select * from results where active=true order by lams limit 5000').df()
+worst5000_df = self.con.query('select * from results where inactivation_step>10000 order by lams limit 5000').df()
 ```
 
 ```python
 orderer_df = self.con.query(
-    f"select orderer from results where active=true and orderer <= {worst5000_df['orderer'].max()} order by orderer"
+    f"select orderer from results where inactivation_step>10000 and orderer <= {worst5000_df['orderer'].max()} order by orderer"
 ).df()
 
 ```
@@ -243,6 +258,14 @@ parallelism, sim_runtime / 3600, total_runtime / 3600
 plt.plot(working_reports['runtime_per_sim_ns'])
 plt.ylim([0, np.percentile(working_reports['runtime_per_sim_ns'], 99.5)])
 plt.show()
+```
+
+```python
+working_reports
+```
+
+```python
+working_reports['runtime_simulating'].sum()
 ```
 
 ```python

@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def process_packet_set(backend, algo, packets):
-    coros = []
+    wait_for = []
     for step_id, packet_id in packets:
         logger.debug(
             "waiting for work: (step_id=%s, packet_id=%s)",
@@ -27,9 +27,8 @@ async def process_packet_set(backend, algo, packets):
                 f" (step_id={step_id}, packet_id={packet_id})"
             )
         else:
-            awaitable, report = submit_packet(backend, algo, packet_df)
-            coros.append(wait_for_packet(backend, algo, awaitable, report))
-    await asyncio.gather(*coros)
+            wait_for.append(submit_packet(backend, algo, packet_df))
+    await wait_for_packets(backend, algo, wait_for)
 
 
 def submit_packet_df(backend, algo, tiles_df):
@@ -41,41 +40,50 @@ def submit_packet_df(backend, algo, tiles_df):
     return packets
 
 
+async def wait_for_packets(backend, algo, packets):
+    coros = []
+    for p in packets:
+        coros.append(wait_for_packet(backend, algo, *p))
+    logger.debug("Waiting for packets to finish.")
+    await asyncio.gather(*coros)
+    logger.debug("Packets finished.")
+
+
 def submit_packet(backend, algo, packet_df):
     start = time.time()
     report = dict()
+    report["start_time"] = start
     report["step_id"] = packet_df.iloc[0]["step_id"]
     report["packet_id"] = packet_df.iloc[0]["packet_id"]
     report["n_tiles"] = packet_df.shape[0]
     report["n_total_sims"] = packet_df["K"].sum()
 
-    start = time.time()
-    report["start"] = start
     logger.debug("Submitting %d tiles for processing.", packet_df.shape[0])
+    # NOTE: we do not restrict the list of columns sent to the worker! This is
+    # because the tile insert to Clickhouse happens on the worker.
+    # Justification:
+    # - we either need to insert tiles into Clickhouse from the leader or the worker.
+    # - we must send a minimal amount of data to the worker in order to simulate.
+    # Therefore, the minimal amount of *leader data transfer* occurs when we
+    # send all the tile info to the worker and allow the worker to insert the
+    # tiles into Clickhouse.
     return backend.submit_tiles(packet_df), report
 
 
-async def wait_for_packets(backend, algo, packets):
-    coros = []
-    for p in packets:
-        coros.append(wait_for_packet(backend, algo, *p))
-    await asyncio.gather(*coros)
-
-
 async def wait_for_packet(backend, algo, awaitable, report):
-    results_df, runtime_simulating = await backend.wait_for_results(awaitable)
-    report["runtime_simulating"] = runtime_simulating
+    results_df, sim_report = await backend.wait_for_results(awaitable)
+    # The completion_step column could be set on the worker but that would
+    # increase data transfer costs.
+    results_df["completion_step"] = MAX_STEP
+    report.update(sim_report)
     report["runtime_per_sim_ns"] = (
         report["runtime_simulating"] / report["n_total_sims"] * 1e9
     )
-    report["time"] = time.time()
-    algo.db.insert_results(
-        results_df.drop("active", axis=1, errors="ignore"), algo.get_orderer()
-    )
+    algo.db.insert_results(results_df, algo.get_orderer())
     status = WorkerStatus.WORKING
     report["status"] = status.name
-    report["runtime_total"] = time.time() - report["start"]
-    del report["start"]
+    report["runtime_total"] = time.time() - report["start_time"]
+    report["end_time"] = time.time()
     algo.callback(report, algo.db)
     algo.db.insert_report(report)
 
@@ -87,10 +95,11 @@ def new_step(algo, basal_step_id, new_step_id):
         report["n_packets"] = (
             tiles_df["packet_id"].nunique() if tiles_df is not None else 0
         )
+    report["start_time"] = start
     report["status"] = status.name
     report["basal_step_id"] = basal_step_id
     report["step_id"] = new_step_id
-    report["runtime_total"] = time.time() - start
+    report["runtime_total"] = time.time() - report["start_time"]
     algo.callback(report, algo.db)
     algo.db.insert_report(report)
     return status, tiles_df
@@ -178,7 +187,6 @@ def _new_step(algo, basal_step_id, new_step_id):
     # Actually deepen and refine!
     g_new = refine_and_deepen(selection_df, algo.null_hypos, algo.cfg["max_K"])
     g_new.df["step_id"] = new_step_id
-    g_new.df["creation_time"] = ip.timer.simple_timer()
 
     # there might be new inactive tiles that resulted from splitting with
     # the null hypotheses. we need to mark these tiles as finished.
@@ -190,7 +198,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     inactive_done["deepen"] = 0
     inactive_done["split"] = True
     inactive_done = inactive_done[["step_id"] + done_cols].copy()
-    algo.db.insert_tiles(inactive_df.drop("active", axis=1))
+    algo.db.insert_tiles(inactive_df.drop("active", axis=1), ch_insert=True)
     algo.db.insert_done(inactive_done)
 
     # Assign tiles to packets and then insert them into the database for
@@ -207,7 +215,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     g_active.df["inactivation_step"] = MAX_STEP
     g_active.df.drop("active", axis=1, inplace=True)
 
-    algo.db.insert_tiles(g_active.df)
+    algo.db.insert_tiles(g_active.df, ch_insert=False)
 
     report["time"] = time.time()
     report["n_new_tiles"] = g_active.n_tiles
