@@ -52,6 +52,7 @@ Ts_pruned = Ts[~jnp.isinf(Ts)]
 ```
 
 ```python
+fig = plt.figure(constrained_layout=True)
 plt.hist(Ts_pruned, density=True, bins=100, color='blue', alpha=0.5)
 plt.title(f"Histogram of $\max\limits_{{i: \\bar{{X}}_i > {eff_size_thresh}}} T_i \, | \max\limits_{{i}} \\bar{{X}}_i > {eff_size_thresh}$")
 plt.savefig("figures/introduction_att_hist.pdf", bbox_inches='tight')
@@ -95,6 +96,7 @@ out = [validate_2d(theta_min, theta_max, [n0, n0, 1], n_sims, lam) for n0 in ns]
 for i, (grid, validation_df) in enumerate(out):
     theta_tiles = grid.get_theta()
 
+    fig = plt.figure(constrained_layout=True)
     plt.title(f"Type I Error CP Bound (I={ns[i]})")
     cntf = plt.tricontourf(
         theta_tiles[:, 0],

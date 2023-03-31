@@ -42,8 +42,8 @@ grid = ip.cartesian_grid(
 ```python
 rej_df = ip.validate(
     TTest1DAda,
-    grid,
-    lam,
+    g=grid,
+    lam=lam,
     K=n_sims,
     model_kwargs={
         "n_init": n_init,

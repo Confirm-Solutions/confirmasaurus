@@ -46,3 +46,7 @@ venv
 terraform.*
 .cdk.staging/
 cdk.out/
+
+
+# Weird vscode byproduct
+*Untitled.ipynb

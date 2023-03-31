@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 rect1 = matplotlib.patches.Rectangle((0, 0), 1, 1, alpha=0.5, facecolor='none', edgecolor='black')
 ax.add_patch(rect1)
@@ -20,7 +20,7 @@ plt.show()
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 for yi, ya in enumerate([0.5, 0]):
     for xi, xa in enumerate([0, 0.5]):
@@ -42,7 +42,7 @@ plt.show()
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 for yi, ya in enumerate([0.5, 0]):
     for xi, xa in enumerate([0, 0.5]):
@@ -64,7 +64,7 @@ plt.show()
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 for yi, ya in enumerate([0.5, 0]):
     for xi, xa in enumerate([0, 0.5]):
@@ -87,7 +87,7 @@ plt.show()
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(111)
 for yi, ya in enumerate([0.5, 0]):
     for xi, xa in enumerate([0, 0.5]):

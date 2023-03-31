@@ -23,7 +23,7 @@ z_crit = scipy.stats.norm.isf(alpha)
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(1,1,1)
 tie0 = tie(theta0, z_crit)
 xeps, yeps = 0, tie0 * 0.1
@@ -49,7 +49,7 @@ bounds = jax.vmap(normal.tilt_bound_fwd_tile, in_axes=(0, None, 0, None))(qs, 1,
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = fig.add_subplot(1,1,1)
 tie0 = tie(theta0, z_crit)
 xeps, yeps = 0, tie0 * 0.1
@@ -94,9 +94,10 @@ linestylelist = [":"] * len(qlist)
 colorlist = ["g"] * len(qlist)
 true_ties = tie(x, z_crit)
 
-plt.plot(x, true_ties, "r:", linewidth=2, label="True Type I Error")
+fig = plt.figure(constrained_layout=True)
+plt.plot(x, true_ties, "r--", linewidth=1, label="True Type I Error")
 plt.scatter(theta0, tie0, color="k", marker="o", s=20)
-plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.98))
+plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.975))
 
 plt.xlabel("$\\theta_0 + v$")
 plt.ylabel("Type I Error ($\%$)")
@@ -113,9 +114,10 @@ plt.savefig("figures/greens_up_tie.pdf", bbox_inches="tight")
 ```
 
 ```python
-plt.plot(x, true_ties, "r:", linewidth=2, label="True Type I Error")
+fig = plt.figure(constrained_layout=True)
+plt.plot(x, true_ties, "r--", linewidth=1, label="True Type I Error")
 plt.scatter(theta0, tie0, color="k", marker="o", s=20)
-plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.98))
+plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.97))
 
 # plot just 1 one of tilt-bounds
 filter = outputs[0] < 0.0299
@@ -139,14 +141,18 @@ plt.yticks(
     ha="right",
 )
 plt.xlim([-0.253, 0.003])
-plt.legend(loc="lower right", fontsize=10)
+# make legend in correct order
+handles, labels = plt.gca().get_legend_handles_labels()
+order = [1,0]
+plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], loc="lower right", fontsize=10) 
 plt.savefig('figures/greens_up_one_q.pdf', bbox_inches='tight')
 ```
 
 ```python
-plt.plot(x, true_ties, "r:", linewidth=2, label="True Type I Error")
+fig = plt.figure(constrained_layout=True)
+plt.plot(x, true_ties, "r--", linewidth=1, label="True Type I Error")
 plt.scatter(theta0, tie0, color="k", marker="o", s=20)
-plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.98))
+plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.97))
 
 # Plotting for 6 different choices of q, ranging from 2^4 to 2^9
 for i in range(len(qlist)):
@@ -177,14 +183,19 @@ plt.yticks(
     ha="right",
 )
 plt.xlim([-0.253, 0.003])
-plt.legend(loc="lower right", fontsize=10)
+# make legend in correct order
+handles, labels = plt.gca().get_legend_handles_labels()
+order = [1,0]
+plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], loc="lower right", fontsize=10) 
 plt.savefig('figures/greens_up_all_q.pdf', bbox_inches='tight')
 ```
 
 ```python
-plt.plot(x, true_ties, "r:", linewidth=2, label="True Type I Error")
+fig = plt.figure(constrained_layout=True)
+
+plt.plot(x, true_ties, "r--", linewidth=1, label="True Type I Error")
 plt.scatter(theta0, tie0, color="k", marker="o", s=20)
-plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.98))
+plt.annotate("$f(\\theta_0)$", (theta0 * 0.98, tie0 * 0.97))
 
 # Plotting for 6 different choices of q, ranging from 2^4 to 2^9
 for i in range(len(qlist)):
@@ -207,20 +218,26 @@ plt.text(-0.008, 0.0301, "16", fontsize=8)
 
 # Now plotting the optimal
 filter = optbound < 0.3
-plt.plot(x[filter], optbound[filter], "k", linewidth=1, label="Optimized Bound")
+plt.plot(x[filter], optbound[filter], color="black", linestyle='-', linewidth=1, label="Optimized Bound")
 
 # Plot the maximum difference
 x_last = x[filter][-1]
 tie_last = tie(x_last, z_crit)
 yerr = optbound[filter][-1] - tie_last
-plt.errorbar(
-    x_last, tie_last + yerr / 2,
-    yerr=yerr / 2,
-    fmt='none',
-    ecolor='black',
-    capsize=6,
-)
-plt.annotate(f"{yerr * 100:.2f}", (x_last-2e-2, tie_last + yerr / 10))
+#plt.errorbar(
+#    x_last, tie_last + yerr / 2,
+#    yerr=yerr / 2,
+#    fmt='none',
+#    ecolor='black',
+#    capsize=6,
+#)
+#plt.annotate(f"{yerr * 100:.2f}", (x_last-2e-2, tie_last + yerr / 10))
+plt.annotate(r"$\}$", fontsize=40,
+            xy=(x_last + 8e-4, tie_last + yerr / 4), 
+            )
+plt.annotate(f"{yerr * 100:.2f}", fontsize=14,
+            xy=(x_last + 0.012, tie_last + yerr / 2.5), 
+            )
 
 plt.xlabel("$\\theta_0 + v$")
 plt.ylabel("Type I Error ($\%$)")
@@ -231,7 +248,12 @@ plt.yticks(
     rotation=45,
     ha="right",
 )
-plt.xlim([-0.253, 0.003])
-plt.legend(loc="lower right", fontsize=10)
+plt.xlim([-0.253, 0.03])
+
+# make legend in correct order
+handles, labels = plt.gca().get_legend_handles_labels()
+order = [1,2,0]
+plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], loc="lower right", fontsize=10) 
+
 plt.savefig('figures/greens_up.pdf', bbox_inches='tight')
 ```

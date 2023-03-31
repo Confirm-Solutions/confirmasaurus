@@ -29,7 +29,7 @@ theta0 = -0.5
 ts = np.array([1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8])
 ties = tie(theta0, ts)
 
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = plt.subplot(1,1,1)
 ax.axhline(alpha, linestyle='--', color='k')
 ax.scatter(np.full(len(ties), theta0), ties, s=30, color='b', label='$f_{\lambda}(\\theta_0)$')
@@ -58,7 +58,7 @@ n_sims_list = np.array([50, 70, 80])
 calib_ties = np.array([calib_tie(theta0, n, alpha) for n in n_sims_list])
 calib_ties = np.sort(calib_ties) # just for visuals
 
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = plt.subplot(1,1,1)
 ax.axhline(alpha, linestyle='--', color='k')
 for n_sim, tie in zip(n_sims_list, calib_ties):
@@ -82,7 +82,7 @@ plt.show()
 ```python
 theta = theta_max
 
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = plt.subplot(1,1,1)
 ax.axhline(alpha, linestyle='--', color='k')
 ax.scatter(theta, alpha, s=70, marker='*', color='r')
@@ -111,7 +111,7 @@ fwd_solver = normal.ForwardQCPSolver(1)
 fwd_qs = jax.vmap(fwd_solver.solve, in_axes=(0, None))(vs, bound)
 fwd_bounds = jax.vmap(normal.tilt_bound_fwd_tile, in_axes=(0, None, 0, None))(fwd_qs, 1, vs, bound)
 
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = plt.subplot(1,1,1)
 ax.axhline(alpha, linestyle='--', color='k')
 ax.scatter(theta0, bound, s=70, marker='*', color='b', 
@@ -157,6 +157,7 @@ styles = ["-", ":", "-.", "--"]
 npts = np.array([10, 20, 40, 80])
 nsims = np.array([100, 300, 1000, 3000, 10000])
 
+fig = plt.figure(constrained_layout=True)
 for i in range(len(npts)):
     temp = vectorize_over_nsim(npts[i], nsims, alpha)
     plt.plot(np.log(nsims), alpha - temp, linestyle=styles[i], label=f"{npts[i]:.0f} points")
@@ -224,7 +225,7 @@ ties_I = np.array([calib_full_tie(thetas, [I_large], n_sim)[0] for n_sim in n_si
 ```
 
 ```python
-fig, axes = plt.subplots(1, 2, figsize=(10, 6))
+fig, axes = plt.subplots(1, 2, figsize=(10, 6), constrained_layout=True)
 
 for i, n_tile in enumerate(n_tiles):
     tie_i = ties_N[i]
@@ -247,7 +248,6 @@ for i in range(2):
     axes[i].legend()
     axes[i].set_xlabel('$\\theta$')
     axes[i].set_ylabel('Type I Error (\%)')
-plt.tight_layout()
 plt.savefig('figures/calibration_z_test.pdf', bbox_inches='tight')
 plt.show()
 ```

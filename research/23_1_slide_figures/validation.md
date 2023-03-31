@@ -31,11 +31,11 @@ grid = ip.cartesian_grid(
 ```
 
 ```python
-rej_df = ip.validate(ZTest1D, grid, -z_crit, K=n_sims)
+rej_df = ip.validate(ZTest1D, g=grid, lam=-z_crit, K=n_sims)
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 theta, theta0, tie0, cp0 = (
     theta_max,
     grid.get_theta()[0,0], 
@@ -75,7 +75,7 @@ bounds = jax.vmap(normal.tilt_bound_fwd_tile, in_axes=(0, None, 0, None))(
 ```
 
 ```python
-fig = plt.figure()
+fig = plt.figure(constrained_layout=True)
 ax = plt.subplot(1,1,1)
 ax.errorbar(
     theta0, tie0,
@@ -127,7 +127,7 @@ def validate(
     radius = grid.get_radii()[0, 0]
 
     # run test
-    rej_df = ip.validate(ZTest1D, grid, -z_crit, K=n_sims)
+    rej_df = ip.validate(ZTest1D, g=grid, lam=-z_crit, K=n_sims)
 
     # set up plotting variables
     vlist = np.linspace(0, radius, v_size)
@@ -137,7 +137,7 @@ def validate(
     tie_err = rej_df['tie_cp_bound'] - tie_est
     qsolve = normal.ForwardQCPSolver(scale=1)
 
-    fig = plt.figure()
+    fig = plt.figure(constrained_layout=True)
     ax = plt.subplot(1,1,1)
     ax.plot(x, true_ties * 100, "r:", linewidth=2, label='True TIE')
     
