@@ -53,7 +53,7 @@ import numpy as np
 import pandas as pd
 
 from . import bootstrap
-from .adagrid import entrypoint
+from .adagrid import pass_control_to_backend
 from .adagrid import print_report
 from .const import MAX_STEP
 
@@ -335,4 +335,4 @@ def ada_calibrate(
         db: The database object used for the run. This can be used to
             inspect the results of the run.
     """
-    return entrypoint(AdaCalibrate, locals())
+    return pass_control_to_backend(AdaCalibrate, locals())

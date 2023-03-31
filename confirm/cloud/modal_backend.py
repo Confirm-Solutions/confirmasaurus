@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 import sys
@@ -13,6 +14,10 @@ stub = modal.aio.AioStub(name)
 process_tiles_config = modal_util.get_defaults()
 process_tiles_config["timeout"] = 60 * 60 * 1
 del process_tiles_config["retries"]
+
+
+async def wait_for_future(f):
+    await f
 
 
 class ModalBackend(Backend):
@@ -61,8 +66,10 @@ class ModalBackend(Backend):
             yield
         del sys.modules["confirm.cloud.modal_worker"]
 
-    def submit_tiles(self, tiles_df):
-        return self.w.process_tiles.call(self.worker_args, tiles_df)
+    async def submit_tiles(self, tiles_df):
+        return asyncio.create_task(
+            wait_for_future(self.w.process_tiles.call(self.worker_args, tiles_df))
+        )
 
     async def wait_for_results(self, awaitable):
         return await awaitable

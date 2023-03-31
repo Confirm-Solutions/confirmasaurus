@@ -45,14 +45,18 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
         self.interval = interval
         self.lastFlush = time.time()
         self.creating_thread = threading.current_thread().ident
+        self.running = False
         super().__init__(self.capacity)
 
     def __enter__(self):
+        self.running = True
         self.lastFlush = time.time()
         logging.getLogger().addHandler(self)
+        return self
 
     def __exit__(self, *_):
-        self.close()
+        self.close()  # flushes any remaining records
+        self.running = False
         logging.getLogger().removeHandler(self)
 
     def shouldFlush(self, record):
@@ -70,6 +74,9 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
         """
         Overriden.
         """
+        if not self.running:
+            return
+
         self.acquire()
         try:
             if len(self.buffer) == 0:
@@ -357,8 +364,8 @@ class DuckDBTiles:
         # NOTE: We insert to Clickhouse tiles and results in the packet
         # processing instead. This spreads out the Clickhouse mirroring
         # bandwidth requirements.
-        df_cols = ",".join([f"df.{c}" for c in df.columns if c != "id"])
         if not self.does_table_exist("results"):
+            df_cols = ",".join([f"df.{c}" for c in df.columns if c != "id"])
             self.con.execute(
                 f"""
                 create table results as (
@@ -368,6 +375,9 @@ class DuckDBTiles:
             """
             )
         else:
+            tiles_cols = self._tiles_columns()
+            columns = [c for c in self._results_columns() if c not in tiles_cols]
+            df_cols = ",".join([f"df.{c}" for c in columns if c != "id"])
             self.con.execute(
                 f"""
                 insert into results select tiles.*, {df_cols} from df
@@ -646,7 +656,7 @@ class DuckDBTiles:
         self.con.execute("create table reports (json TEXT)")
         self.con.execute("create table null_hypos as select * from null_hypos_df")
         self.con.execute("create table config as select * from cfg_df")
-        self.ch_insert("tiles", tiles_df, create=True)
+        self.ch_insert("tiles", tiles_df.iloc[:0], create=True)
         self.ch_insert("done", absent_parents_df, create=True)
         self.ch_insert("null_hypos", null_hypos_df, create=True)
         self.ch_insert("config", cfg_df, create=True)
@@ -679,7 +689,7 @@ class DuckDBTiles:
 
     async def ch_wait(self):
         while len(self.ch_tasks) > 0:
-            tmp = self.ch_tasks
+            tmp = [t for t in self.ch_tasks if t is not None]
             self.ch_tasks = []
             await asyncio.gather(*tmp)
 

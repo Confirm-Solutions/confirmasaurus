@@ -1,4 +1,3 @@
-import asyncio
 import time
 from unittest import mock
 
@@ -9,6 +8,7 @@ from jax.config import config
 
 import confirm.adagrid as ada
 import imprint as ip
+from .test_clickhouse import check_backup_correctness
 from imprint.models.ztest import ZTest1D
 
 config.update("jax_enable_x64", True)
@@ -97,27 +97,38 @@ def distributed_tester(backend, ch_db, snapshot):
         ignore_story=True,
     )
 
-    restored_db = ada.DuckDBTiles.connect()
     i = 0
     # wait for all the asynchronous CH inserts to finish
+    n_rows_df = pd.DataFrame(
+        [
+            (table, local_db.con.query(f"select count(*) from {table}").df().iloc[0][0])
+            for table in ch.all_tables
+        ],
+        columns=["table", "count"],
+    ).set_index("table")
     while i < 60:
         time.sleep(1)
-        if (
-            ch.query(db.ch_client, "select count(*) from results").result_set[0][0]
-            == local_db.get_results().shape[0]
-        ):
+        n_rows_ch = pd.DataFrame(
+            [
+                (
+                    table,
+                    ch.query(db.ch_client, f"select count(*) from {table}").result_set[
+                        0
+                    ][0],
+                )
+                for table in ch.all_tables
+            ],
+            columns=["table", "count"],
+        ).set_index("table")
+        if (n_rows_df == n_rows_ch).all().all():
             break
+        else:
+            print("Waiting for asynchronous Clickhouse inserts to finish.")
         i += 1
     else:
         raise TimeoutError("Clickhouse results not restored")
 
-    asyncio.run(ch.restore(db.ch_client, restored_db))
-    snapshot.reset()
-    ip.testing.check_imprint_results(
-        ip.Grid(restored_db.get_results(), None).prune_inactive(),
-        snapshot,
-        ignore_story=True,
-    )
+    check_backup_correctness(local_db)
 
 
 @pytest.mark.slow

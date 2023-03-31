@@ -27,16 +27,16 @@ async def process_packet_set(backend, algo, packets):
                 f" (step_id={step_id}, packet_id={packet_id})"
             )
         else:
-            wait_for.append(submit_packet(backend, algo, packet_df))
+            wait_for.append(await submit_packet(backend, algo, packet_df))
     await wait_for_packets(backend, algo, wait_for)
 
 
-def submit_packet_df(backend, algo, tiles_df):
+async def submit_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
         return []
     packets = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        packets.append(submit_packet(backend, algo, packet_df))
+        packets.append(await submit_packet(backend, algo, packet_df))
     return packets
 
 
@@ -49,7 +49,7 @@ async def wait_for_packets(backend, algo, packets):
     logger.debug("Packets finished.")
 
 
-def submit_packet(backend, algo, packet_df):
+async def submit_packet(backend, algo, packet_df):
     start = time.time()
     report = dict()
     report["start_time"] = start
@@ -67,7 +67,7 @@ def submit_packet(backend, algo, packet_df):
     # Therefore, the minimal amount of *leader data transfer* occurs when we
     # send all the tile info to the worker and allow the worker to insert the
     # tiles into Clickhouse.
-    return backend.submit_tiles(packet_df), report
+    return await backend.submit_tiles(packet_df), report
 
 
 async def wait_for_packet(backend, algo, awaitable, report):
@@ -83,11 +83,12 @@ async def wait_for_packet(backend, algo, awaitable, report):
     status = WorkerStatus.WORKING
     report["status"] = status.name
     report["runtime_total"] = time.time() - report["start_time"]
-    report["end_time"] = time.time()
+    report["done_time"] = time.time()
     algo.callback(report, algo.db)
     algo.db.insert_report(report)
 
 
+@profile
 def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
     status, tiles_df, report = _new_step(algo, basal_step_id, new_step_id)
@@ -105,6 +106,7 @@ def new_step(algo, basal_step_id, new_step_id):
     return status, tiles_df
 
 
+@profile
 def _new_step(algo, basal_step_id, new_step_id):
     converged, convergence_data, report = algo.convergence_criterion(basal_step_id)
 
@@ -226,6 +228,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     return WorkerStatus.NEW_STEP, g_active.df, report
 
 
+@profile
 def refine_and_deepen(df, null_hypos, max_K):
     g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)])
     g_deepen = ip.grid._raw_init_grid(
@@ -249,7 +252,8 @@ def refine_and_deepen(df, null_hypos, max_K):
     # NOTE: Instead of prune_alternative here, we mark alternative tiles as
     # inactive. This means that we will have a full history of grid
     # construction.
-    out = g_refine.concat(g_deepen).add_null_hypos(null_hypos, inherit_cols)
+    out = g_refine.concat(g_deepen)
+    out = out.add_null_hypos(null_hypos, inherit_cols)
     out.df.loc[out._which_alternative(), "active"] = False
     return out
 

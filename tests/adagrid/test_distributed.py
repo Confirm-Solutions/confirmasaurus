@@ -4,8 +4,8 @@ import copy
 import pandas as pd
 
 import imprint as ip
-from confirm.adagrid.adagrid import entrypoint
 from confirm.adagrid.adagrid import LocalBackend
+from confirm.adagrid.adagrid import pass_control_to_backend
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
@@ -187,12 +187,12 @@ def test_reload_next_step():
 
 def test_idempotency():
     kwargs = get_test_defaults(ada_validate)
-    db = entrypoint(AdaValidate, kwargs)
+    db = pass_control_to_backend(AdaValidate, kwargs)
     reports = db.get_reports()
 
     del kwargs["g"]
     kwargs["db"] = db
-    entrypoint(AdaValidate, kwargs)
+    pass_control_to_backend(AdaValidate, kwargs)
     reports2 = db.get_reports()
     assert reports.shape[0] + 1 == reports2.shape[0]
     drop_cols = [c for c in reports2.columns if "runtime" in c]

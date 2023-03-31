@@ -1,5 +1,4 @@
 import abc
-import asyncio
 import contextlib
 import logging
 import queue
@@ -11,6 +10,7 @@ import jax
 import numpy as np
 import synchronicity
 
+from .asyncio_runner import Runner
 from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 synchronizer = synchronicity.Synchronizer()
 
 
-def entrypoint(algo_type, kwargs):
+def pass_control_to_backend(algo_type, kwargs):
     backend = kwargs.get("backend", None)
     if backend is None:
         backend = LocalBackend()
@@ -33,7 +33,7 @@ def entrypoint(algo_type, kwargs):
     return backend.entrypoint(algo_type, kwargs)
 
 
-def setup_db(cfg):
+def setup_db(cfg, require_fresh=False):
     print(list(cfg.keys()))
     ch_client = None
     if cfg["clickhouse_service"] is not None:
@@ -42,6 +42,11 @@ def setup_db(cfg):
         ch_client = ch.connect(
             job_name=cfg["job_name"], service=cfg["clickhouse_service"]
         )
+        if require_fresh and ch.does_table_exist(ch_client, "tiles"):
+            raise ValueError(
+                "ClickHouse table 'tiles' already exists. "
+                "Please choose a fresh job_name."
+            )
 
     db = cfg.get("db", None)
     if db is None:
@@ -51,36 +56,54 @@ def setup_db(cfg):
         else:
             db_filepath = f"{cfg['job_name']}.db"
         db = DuckDBTiles.connect(path=db_filepath, ch_client=ch_client)
+        if require_fresh and db.does_table_exist("tiles"):
+            raise ValueError(
+                "DuckDB table 'tiles' already exists."
+                " Please choose a fresh job_name."
+            )
     db.ch_client = ch_client
     return db
 
 
-# synchronizer is used so that we can run our event loop code in a separate
-# thread regardless of whether an event loop is already running.
-# If we're not running through Jupyter, then no event loop is running and we
-# can just run the async entrypoint directly:
-#   asyncio.run(async_entrypoint(self, algo_type, kwargs))
-#
-# But, if we're running through Jupyter, then an event loop will already be
-# running and we're not allowed to start a new event loop inside of the
-# existing one. So we need to run the async entrypoint in a separate
-# thread. synchronicity is a library that makes this easy.
-# @synchronizer.create_blocking
+def entrypoint(backend, algo_type, kwargs):
+    """
+    Passing control of the entrypoint to the backend allows executing the
+    leader somewhere besides the launching machine.
 
+    The default behavior is to just run the leader locally.
+    """
 
-async def async_entrypoint(backend, algo_type, kwargs):
-    entry_time = time.time()
-
-    db = setup_db(kwargs)
+    db = setup_db(kwargs, require_fresh=True)
     kwargs["db"] = db
 
-    async with contextlib.AsyncExitStack() as stack:
-        with timer("init"):
-            stack.enter_context(DatabaseLogging(db))
-            algo, incomplete_packets, next_step = init(algo_type, kwargs)
+    with DatabaseLogging(db) as db_logging:
+        with Runner() as runner:
+            try:
+                runner.run(async_entrypoint(backend, algo_type, kwargs))
+            except Exception as e:  # noqa
+                # bare except is okay because we want to log the exception. the
+                # re-raise will preserve the original stack trace.
+                logging.error("Adagrid error", exc_info=e)
+                raise
+            finally:
+                # This should be the last thing we do so we can be sure that all logging
+                # messages have been sent to the database.
+                db_logging.flush()
+                runner.run(db.ch_wait())
+                assert len(db.ch_tasks) == 0
+    return db
 
-        with timer("backend.setup"):
-            await stack.enter_async_context(backend.setup(algo))
+
+@profile
+async def async_entrypoint(backend, algo_type, kwargs):
+    db = kwargs["db"]
+    entry_time = time.time()
+    with timer("init"):
+        algo, incomplete_packets, next_step = init(algo_type, kwargs)
+
+    start = time.time()
+    async with backend.setup(algo):
+        logger.debug(f"backend.setup() took {time.time() - start:.2f} seconds")
 
         with timer("process_initial_incompletes"):
             await process_packet_set(backend, algo, np.array(incomplete_packets))
@@ -122,17 +145,25 @@ async def async_entrypoint(backend, algo_type, kwargs):
 
             with timer("process packets"):
                 logger.info("Processing packets for step %d", step_id)
-                processing_tasks.put(submit_packet_df(backend, algo, tiles_df))
-                await asyncio.sleep(0)
+                processing_tasks.put(await submit_packet_df(backend, algo, tiles_df))
                 if processing_tasks.qsize() > n_parallel_steps - 1:
                     await wait_for_packets(backend, algo, processing_tasks.get())
 
-            with timer("wait for backup"):
+            with timer("Wait for Clickhouse inserts"):
                 await db.ch_wait()
 
-    with timer("verify"):
-        db.verify(basal_step_id)
-    return db
+        with timer("process final packets"):
+            while not processing_tasks.empty():
+                await wait_for_packets(backend, algo, processing_tasks.get())
+
+        with timer("verify"):
+            db.verify(basal_step_id)
+
+        assert processing_tasks.empty()
+        assert step_id < algo.cfg["n_steps"]
+        assert (
+            step_id == algo.cfg["n_steps"] - 1 or stopping_indicator >= n_parallel_steps
+        )
 
 
 @contextlib.contextmanager
@@ -167,7 +198,7 @@ class Backend(abc.ABC):
 
         The default behavior is to just run the leader locally.
         """
-        return asyncio.run(async_entrypoint(self, algo_type, kwargs))
+        return entrypoint(self, algo_type, kwargs)
 
     @abc.abstractmethod
     def get_cfg(self):
@@ -196,19 +227,23 @@ class LocalBackend(Backend):
         self.algo = algo
         yield
 
-    def submit_tiles(self, tiles_df):
+    def _submit_tiles(self, tiles_df):
         report = dict()
         report["sim_start_time"] = time.time()
-        self.algo.db.ch_insert("tiles", tiles_df, create=False)
         tbs = self.algo.cfg["tile_batch_size"]
         if tbs is None:
             tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
         report["tile_batch_size"] = tbs
         start = time.time()
         results_df = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
-        self.algo.db.ch_insert("results", results_df, create=True)
         report["runtime_simulating"] = time.time() - start
         report["sim_done_time"] = time.time()
+        return results_df, report
+
+    def sync_submit_tiles(self, tiles_df):
+        self.algo.db.ch_insert("tiles", tiles_df, create=False)
+        results_df, report = self._submit_tiles(tiles_df)
+        self.algo.db.ch_insert("results", results_df, create=True)
         # NOTE: We restrict the set of columns returned to the leader. Why?
         # 1) The full results data has already been written to Clickhouse.
         # 2) The leader only needs a subset of the results in order to
@@ -217,6 +252,9 @@ class LocalBackend(Backend):
         #    the tiles table.
         return_cols = ["id"] + self.algo.get_important_columns()
         return results_df[return_cols], report
+
+    async def submit_tiles(self, tiles_df):
+        return self.sync_submit_tiles(tiles_df)
 
     async def wait_for_results(self, awaitable):
         return awaitable

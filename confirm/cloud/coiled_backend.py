@@ -66,7 +66,7 @@ def create_software_env():
     return name
 
 
-def upload_pkg(client, module, restart=False):
+async def upload_pkg(client, module, restart=False):
     from pathlib import Path
 
     dir = Path(module.__file__).parent.parent
@@ -79,17 +79,20 @@ def upload_pkg(client, module, restart=False):
         ext = os.path.splitext(fn)[1]
         return (ext == ".pyc") or (".DS_Store" in fn)
 
-    return client.register_worker_plugin(
+    return await client.register_worker_plugin(
         UploadDirectory(dir, skip=(skip_f,), restart=restart, update_path=True),
         nanny=True,
     )
 
 
-def setup_cluster(n_workers=1, idle_timeout="60 minutes"):
-    create_software_env()
+async def setup_cluster(
+    update_software_env=True, n_workers=1, idle_timeout="60 minutes"
+):
+    if update_software_env:
+        create_software_env()
     import coiled
 
-    cluster = coiled.Cluster(
+    cluster = await coiled.Cluster(
         name="confirm-coiled",
         software="confirm-coiled",
         n_workers=n_workers,
@@ -101,16 +104,18 @@ def setup_cluster(n_workers=1, idle_timeout="60 minutes"):
         allow_ssh=True,
         wait_for_workers=1,
         worker_options={"nthreads": 2},
+        asynchronous=True,
     )
-    cluster.scale(n_workers)
-    client = cluster.get_client()
-    reset_confirm_imprint(client)
+    await cluster.scale(n_workers)
+    client = await cluster.get_client()
+    await reset_confirm_imprint(client)
     return cluster
 
 
-def reset_confirm_imprint(client):
-    upload_pkg(client, confirm)
-    upload_pkg(client, ip, restart=True)
+async def reset_confirm_imprint(client):
+    await asyncio.gather(
+        upload_pkg(client, confirm), upload_pkg(client, ip, restart=True)
+    )
 
 
 @dask.delayed
@@ -177,36 +182,32 @@ def setup_worker(worker_args):
         worker.algo = algo_type(model, None, db, cfg, None)
         worker.algo_hash = hash_args
 
-        import synchronicity
 
-        worker.synchronizer = synchronicity.Synchronizer()
-
-        @worker.synchronizer.create_blocking
-        async def async_process_tiles(tiles_df):
-            lb = LocalBackend()
-            async with lb.setup(worker.algo):
-                return await lb.wait_for_results(lb.submit_tiles(tiles_df))
-
-        worker.process_tiles = async_process_tiles
-    return worker.process_tiles
-
-
-def dask_process_tiles(worker_args, packet_df):
-    process_tiles = setup_worker(worker_args)
+def dask_process_tiles(worker_args, tiles_df):
+    setup_worker(worker_args)
     jax_platform = jax.lib.xla_bridge.get_backend().platform
     assert jax_platform == "gpu"
-    out, runtime_simulating = process_tiles(packet_df)
-    return out, runtime_simulating
+
+    worker = get_worker()
+    lb = LocalBackend()
+    lb.algo = worker.algo
+    return lb.sync_submit_tiles(tiles_df)
+
+
+async def wait_for_dask_future(f):
+    return await f
 
 
 class CoiledBackend(Backend):
     def __init__(
         self,
-        restart_workers: bool = False,
-        detach: bool = False,
+        update_software_env: bool = True,
         n_workers: int = 1,
+        detach: bool = False,
+        restart_workers: bool = False,
         cluster=None,
     ):
+        self.update_software_env = update_software_env
         self.restart_workers = restart_workers
         self.detach = detach
         self.n_workers = n_workers
@@ -220,31 +221,51 @@ class CoiledBackend(Backend):
 
     @contextlib.asynccontextmanager
     async def setup(self, algo):
-        if self.cluster is None:
-            self.cluster = setup_cluster(self.n_workers)
-        self.client = self.cluster.get_client()
-        if self.restart_workers:
-            self.client.restart()
-        filtered_cfg = {k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries}
-        worker_args = (
-            type(algo.driver.model),
-            (algo.cfg["model_seed"], algo.max_K),
-            algo.cfg["model_kwargs"],
-            type(algo),
-            filtered_cfg,
-            {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
-        )
-        self.worker_args_future = self.client.scatter(worker_args, broadcast=True)
-        yield
+        async with contextlib.AsyncExitStack() as stack:
+            if self.cluster is None:
+                self.cluster = await setup_cluster(
+                    update_software_env=self.update_software_env,
+                    n_workers=self.n_workers,
+                )
+                await stack.enter_async_context(async_closing(self.cluster))
+            self.client = await self.cluster.get_client()
+            await stack.enter_async_context(async_closing(self.client))
+            if self.restart_workers:
+                await self.client.restart()
+            filtered_cfg = {
+                k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
+            }
+            worker_args = (
+                type(algo.driver.model),
+                (algo.cfg["model_seed"], algo.max_K),
+                algo.cfg["model_kwargs"],
+                type(algo),
+                filtered_cfg,
+                {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
+            )
+            self.worker_args_future = await self.client.scatter(
+                worker_args, broadcast=True
+            )
+            yield
 
-    def submit_tiles(self, tiles_df):
+    async def submit_tiles(self, tiles_df):
         step_id = int(tiles_df["step_id"].iloc[0])
         # negative step_id is the priority so that earlier steps are completed
         # before later steps when we are using n_parallel_steps
         with dask.annotate(priority=-step_id):
-            return self.client.submit(
-                dask_process_tiles, self.worker_args_future, tiles_df
+            return asyncio.create_task(
+                self.client.submit(
+                    dask_process_tiles, self.worker_args_future, tiles_df
+                ).result()
             )
 
     async def wait_for_results(self, awaitable):
-        return await asyncio.to_thread(awaitable.result)
+        return await awaitable
+
+
+@contextlib.asynccontextmanager
+async def async_closing(thing):
+    try:
+        yield thing
+    finally:
+        await thing.close()

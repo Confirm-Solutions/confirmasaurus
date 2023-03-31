@@ -3,6 +3,32 @@ import asyncio
 import pandas as pd
 import pytest
 
+import confirm.adagrid as ada
+import imprint as ip
+from imprint.models.ztest import ZTest1D
+
+
+def check_backup_correctness(db):
+    import confirm.cloud.clickhouse as ch
+
+    db2 = ada.DuckDBTiles.connect()
+    asyncio.run(ch.restore(db.ch_client, db2))
+
+    orderby = {
+        "results": "id",
+        "tiles": "id",
+        "done": "id",
+        "logs": "t",
+        "reports": "json",
+    }
+    for table in ch.all_tables:
+        orig = db.con.query(f"select * from {table}").df()
+        restored = db2.con.query(f"select * from {table}").df()
+        if table in orderby:
+            orig = orig.sort_values(by=orderby[table]).reset_index(drop=True)
+            restored = restored.sort_values(by=orderby[table]).reset_index(drop=True)
+        pd.testing.assert_frame_equal(orig, restored[orig.columns], check_dtype=False)
+
 
 @pytest.mark.slow
 def test_connect_prod_no_job_id():
@@ -28,10 +54,7 @@ def test_clear_dbs_only_test():
 
 @pytest.mark.slow
 def test_backup(ch_db):
-    import imprint as ip
-    import confirm.adagrid as ada
     import confirm.cloud.clickhouse as ch
-    from imprint.models.ztest import ZTest1D
 
     # set backups to happen synchronously
     ch.set_insert_settings(ch.synchronous_insert_settings)
@@ -52,22 +75,4 @@ def test_backup(ch_db):
         job_name=ch_db.database,
         tile_batch_size=1,
     )
-
-    db2 = ada.DuckDBTiles.connect()
-    asyncio.run(ch.restore(db.ch_client, db2))
-
-    orderby = {
-        "results": "id",
-        "tiles": "id",
-        "done": "id",
-        "logs": "t",
-        "reports": "json",
-    }
-    for table in ch.all_tables:
-        print(table)
-        orig = db.con.query(f"select * from {table}").df()
-        restored = db2.con.query(f"select * from {table}").df()
-        if table in orderby:
-            orig = orig.sort_values(by=orderby[table]).reset_index(drop=True)
-            restored = restored.sort_values(by=orderby[table]).reset_index(drop=True)
-        pd.testing.assert_frame_equal(orig, restored, check_dtype=False)
+    check_backup_correctness(db)

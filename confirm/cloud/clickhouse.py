@@ -46,7 +46,6 @@ def threaded_block_insert_df(ch_client, name, df, chunk_size=20000):
 
         def wrapper(*args):
             args[0](*args[1:])
-            return asyncio.sleep(0)
 
     else:
 
@@ -70,7 +69,11 @@ async def restore(ch_client, duck):
 async def restore_table(ch_client, duck, name):
     # TODO: might need offset/limit and iteration here.
     def get_table_from_ch():
-        df = query_df(ch_client, f"select * from {name}")
+        cols = "*"
+        if name == "results":
+            col_list = query_df(ch_client, f"select * from {name} limit 0").columns
+            cols = ",".join([c for c in col_list if "twb_lams" not in c])
+        df = query_df(ch_client, f"select {cols} from {name}")
         if name == "logs":
             df["t"] = pd.to_datetime(df["t"]).dt.tz_localize(None)
         return df

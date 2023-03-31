@@ -152,6 +152,7 @@ class Grid:
     def n_active_tiles(self):
         return self.df["active"].sum()
 
+    @profile
     def _add_null_hypo(self, H: NullHypothesis, inherit_cols: List[str]):
         hypo_idx = len(self.null_hypos)
         g_inactive = self.subset(~self.df["active"])

@@ -1,52 +1,48 @@
 ```python
-import confirm.cloud.clickhouse as ch
-client = ch.connect('wd41_4d_v63', service='PROD')
-ch.list_tables(client)
-```
+from pathlib import Path
 
-```python
-import confirm.adagrid as ada
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import imprint as ip
 import scipy.special
 import jax
-```
+import duckdb
 
-```python
+import imprint as ip
+import confirm
+import confirm.adagrid as ada
+from confirm.adagrid.const import MAX_STEP
+import confirm.cloud.clickhouse as ch
 
 ip.setup_nb()
 
-self = ada.DuckDBTiles.connect('../../wd41_4d_v63.db')
+db = 'wd41_4d_v90'
+
+ddb_path = Path(confirm.__file__).parent.parent.joinpath(f'{db}.db')
+if ddb_path.exists():
+    ddb = ada.DuckDBTiles(duckdb.connect(str(ddb_path), read_only=True))
+    def query(q):
+        return ddb.con.query(q).df()
+else:
+    ch_client = ch.connect(db, service='PROD')
+    def query(q):
+        return ch.query_df(ch_client, q)
+```
+
+```python
+dim = len([c for c in query('select * from results limit 1').columns if c.startswith('theta')])
+n_steps = query('select max(step_id) from results').iloc[0][0] + 1
+dim, n_steps
 ```
 
 ## Broad table exploration
 
 ```python
-def query(q):
-    return self.con.query(q).df()
-```
-
-```python
 n_rows_df = pd.DataFrame(
     [(table, query(f'select count(*) from {table}').iloc[0][0]) for table in ch.all_tables],
     columns=['table', 'count']
 ).set_index('table')
 n_rows_df
-```
-
-```python
-query('select * from results limit 1')
-```
-
-```python
-n_rows_df = pd.DataFrame(
-    [(table, query(f'select count(*) from {table}').iloc[0][0]) for table in ch.all_tables],
-    columns=['table', 'count']
-).set_index('table')
-n_rows_df
-
 ```
 
 ```python
@@ -57,45 +53,63 @@ n_sims / 1e12, n_retained_sims / 1e12
 ```
 
 ```python
-n_active_tiles = self.con.query(
+n_active_tiles = query(
     f"select count(*) from results where inactivation_step={MAX_STEP}"
-).fetchone()[0]
-n_eligible_tiles = self.con.query(
+).iloc[0][0]
+n_eligible_tiles = query(
     f"select count(*) from results where completion_step={MAX_STEP}"
-).fetchone()[0]
+).iloc[0][0]
 n_active_tiles, n_eligible_tiles
 ```
 
 ```python
-self.con.query(f'select K, count(*) as n_tiles from tiles where inactivation_step={MAX_STEP} group by K order by K').df()
+query(f'select K, count(*) as n_tiles from tiles where inactivation_step={MAX_STEP} group by K order by K')
 ```
 
 ```python
 volume_sql = (
-    str(2 ** self.dimension())
+    str(2 ** dim)
     + "*"
-    + ("*".join([f"radii{d}" for d in range(self.dimension())]))
+    + ("*".join([f"radii{d}" for d in range(dim)]))
 )
 ```
 
 ```python
-smallest_tile = self.con.query(f'select * from results where inactivation_step>10000 order by {volume_sql} limit 1').df()
+smallest_tile = query(f'select * from results where inactivation_step={MAX_STEP} order by {volume_sql} limit 1')
 smallest_tile
 ```
 
 ```python
-largest_tile = self.con.query(f'select * from results where inactivation_step>10000 order by {volume_sql} desc limit 1').df()
+largest_tile = query(f'select * from results where inactivation_step={MAX_STEP} order by {volume_sql} desc limit 1')
 largest_tile
 ```
 
 ```python
-lamss_tile = self.con.query('select * from results where inactivation_step>10000 order by lams limit 1').df()
+n_possible_tiles = query('select count(*) from results where isNotNull(lams)').iloc[0][0]
+n_possible_tiles
+```
+
+```python
+lamss_tile = query(f'''
+select * from results 
+    where inactivation_step={MAX_STEP} 
+        and isNotNull(lams) 
+    order by lams 
+    limit 1
+''')
 lamss_tile
 ```
 
 ```python
-lams = self.con.query('select lams from results where inactivation_step>10000').df()
-lamss = lams['lams'].min()
+lamss = lamss_tile['lams'].iloc[0]
+```
+
+```python
+lams = query(f'''
+select lams from results 
+    where inactivation_step={MAX_STEP} 
+        and lams <= {lamss}
+''')
 max_display = lamss * 2
 plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
 plt.show()
@@ -158,98 +172,228 @@ deepen_likely_to_work = tiles_df["twb_min_lams"] > twb_worst_tile_mean_lams
 np.sum(deepen_likely_to_work)
 ```
 
-## Investigating the WD41 problem.
-
-```python
-import confirm.models.wd41 as wd41
-
-lamss_potential = lamss_tile.copy()
-for d in range(self.dimension()):
-    lamss_potential[f"radii{d}"] = 1e-7
-cal_df = ip.calibrate(
-    wd41.WD41,
-    g=ip.Grid(lamss_potential, 1),
-    model_kwargs={"ignore_intersection": True, "dtype": np.float64},
-)
-```
-
-```python
-debug_df = pd.concat(
-    (
-        lamss_potential[
-            [f"theta{d}" for d in range(self.dimension())]
-            + [f"radii{d}" for d in range(self.dimension())]
-        ],
-        cal_df,
-    ),
-    axis=1,
-)
-for d in range(self.dimension()):
-    name = ['p_{hr+, c}', 'p_{hr+, t}', 'p_{tnbc, c}', 'p_{tnbc, t}'][d]
-    debug_df[name] = scipy.special.expit(debug_df[f"theta{d}"])
-debug_df.drop(columns=[f"theta{d}" for d in range(self.dimension())], inplace=True)
-debug_df
-```
-
-```python
-model = wd41.WD41(0, 10000, ignore_intersection=True)
-g_explore = ip.cartesian_grid([-0.6, -1.5875, -0.6, 0.5125], [-0.4, -1.5875, -0.4, 0.5125], n=[10, 1, 10, 1], null_hypos=model.null_hypos)
-cal_df = ip.calibrate(wd41.WD41, g=g_explore, model_kwargs={"ignore_intersection": True, "dtype": np.float64})
-cal_df = pd.concat((g_explore.df, cal_df), axis=1)
-```
-
-```python
-cal_df['lams'].min()
-```
-
-```python
-plt.subplot(2,2,1)
-plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['null_truth0'])
-plt.colorbar()
-plt.subplot(2,2,2)
-plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['null_truth1'])
-plt.colorbar()
-plt.subplot(2,2,3)
-plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['lams'])
-plt.colorbar()
-plt.show()
-```
-
-```python
-p = scipy.special.expit(g_explore.get_theta()[40])
-sim_vmap = jax.vmap(model.sim, in_axes=(0, None, None, None, None, None))
-stats = sim_vmap(model.unifs, *p, True)
-# print(np.percentile(stats, 99))
-# plt.plot(np.sort(stats[0]))
-# plt.show()
-```
-
-```python
-bad_idx = stats['full_stat'].argmin()
-model.sim(model.unifs[bad_idx], *p, True)
-```
-
-```python
-print(np.percentile(stats['tnbc_stat'], 1))
-print(np.percentile(stats['full_stat'], 1))
-plt.subplot(1,2,1)
-plt.plot(np.sort(stats['tnbc_stat']))
-plt.subplot(1,2,1)
-plt.plot(np.sort(stats['full_stat']))
-plt.show()
-```
-
 ## Looking at the reports
 
 ```python
-report_df = self.get_reports()
+import json
+report_df = pd.DataFrame([json.loads(v) for v in query('select * from reports')['json'].values])
 working_reports = report_df[report_df['status'] == 'WORKING'].dropna(axis=1, how='all')
 new_step_reports = report_df[report_df['status'] == 'NEW_STEP'].dropna(axis=1, how='all')
+new_step_reports.set_index('step_id', inplace=True)
+```
+
+```python
+import coiled
+
+cluster = await coiled.Cluster(
+    name="confirm-coiled",
+    software="confirm-coiled",
+    n_workers=1,
+    worker_vm_types=["g4dn.xlarge"],
+    worker_gpu=1,
+    compute_purchase_option="spot_with_fallback",
+    shutdown_on_close=False,
+    scheduler_options={"idle_timeout": "60 minutes"},
+    allow_ssh=True,
+    wait_for_workers=1,
+    worker_options={"nthreads": 2},
+    asynchronous=True
+)
+```
+
+```python
+await cluster.scale(16)
+```
+
+```python
+client = await cluster.get_client()
+```
+
+```python
+cluster
+```
+
+```python
+def large_return():
+    import numpy as np
+    import time
+    time.sleep(2)
+    return np.random.uniform(size=(4000, 4000))
+```
+
+```python
+%%time
+A = large_return()
+```
+
+```python
+import time
+import asyncio
+start = time.time()
+R = asyncio.create_task(client.submit(large_return).result())
+await asyncio.sleep(4)
+RR = await R
+print(time.time() - start)
+```
+
+```python
+fut = await client.scatter([1,2,3], broadcast=True)
+```
+
+```python
+import time
+import asyncio
+start = time.time()
+fut2 = client.submit(lambda x: x + [2], fut)
+async def wait_for_dask_fut(f):
+    return await f
+await asyncio.create_task(wait_for_dask_fut(fut2))
+print(time.time() - start)
+```
+
+```python
+client.get(fut2)
+```
+
+```python
+print(cluster)
+```
+
+```python
+from matplotlib.gridspec import GridSpec
+
+min_step = 4
+max_step = 10
+color_list = ["k", "r", "b", "m"]
+offset = report_df["start_time"].min()
+
+step_id = working_reports["step_id"]
+include = (step_id >= min_step) & (step_id <= max_step)
+df = working_reports[include][
+    ["sim_start_time", "sim_done_time", "start_time", "done_time", "step_id"]
+].copy()
+df.sort_values(by=["sim_start_time"], inplace=True)
+df["adjusted_start_time"] = df["start_time"] - offset
+df["adjusted_done_time"] = df["done_time"] - offset
+df["adjusted_sim_start_time"] = df["sim_start_time"] - offset
+df["adjusted_sim_done_time"] = df["sim_done_time"] - offset
+min_time = df["adjusted_start_time"].min() - 10
+max_time = df["adjusted_done_time"].max() + 10
+
+df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
+df["packet_linelengths"] = df["done_time"] - df["start_time"]
+df["packet_lineoffsets"] = df["adjusted_start_time"] + df["packet_linelengths"] * 0.5
+df["packet_linewidths"] = 1
+
+df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
+df["linelengths"] = df["sim_done_time"] - df["sim_start_time"]
+df["lineoffsets"] = (
+    df["sim_start_time"] - report_df["start_time"].min() + df["linelengths"] * 0.5
+)
+df["colors"] = np.array(color_list)[df["step_id"] % len(color_list)]
+df["linewidths"] = 5
+fig = plt.figure(figsize=(15, 18), constrained_layout=True)
+plt.suptitle("Simulation timeline")
+gs = GridSpec(7, 1, figure=fig)
+plt.subplot(gs[0, 0])
+ts = np.linspace(min_time, max_time, 500)
+ongoing = []
+for t in ts:
+    ongoing.append(
+        ((df["adjusted_sim_start_time"] < t) & (df["adjusted_sim_done_time"] > t)).sum()
+    )
+plt.plot(ts, ongoing, "k-", label="Active worker threads")
+plt.legend()
+plt.xlim([min_time, max_time])
+plt.yticks(np.arange(0, 33, 8))
+
+plt.subplot(gs[1:, 0])
+plt.eventplot(
+    df["positions"].values[:, None],
+    lineoffsets="packet_lineoffsets",
+    linelengths="packet_linelengths",
+    linewidths="packet_linewidths",
+    colors="colors",
+    orientation="vertical",
+    data=df,
+)
+plt.eventplot(
+    df["positions"].values[:, None],
+    lineoffsets="lineoffsets",
+    linelengths="linelengths",
+    linewidths="linewidths",
+    colors="colors",
+    orientation="vertical",
+    data=df,
+)
+
+new_step_reports["adjusted_step_start_time"] = (
+    new_step_reports["time"] - new_step_reports["runtime_total"] - offset
+)
+new_step_reports["adjusted_step_done_time"] = new_step_reports["time"] - offset
+for step_id in range(min_step, max_step + 1):
+    try:
+        rpt = new_step_reports.loc[step_id]
+    except KeyError:
+        continue
+    plt.plot(
+        [
+            rpt["adjusted_step_start_time"],
+            rpt["adjusted_step_done_time"],
+        ],
+        [-1, -1],
+        color_list[step_id % len(color_list)],
+        linestyle='--',
+        linewidth=5,
+    )
+
+for step_id, step_df in df.groupby("step_id"):
+    plt.axvline(
+        step_df["adjusted_start_time"].min(),
+        color="k",
+        linestyle="--",
+        linewidth=1,
+        zorder=100,
+    )
+    plt.axvline(
+        step_df["adjusted_done_time"].max(), color="k", linestyle="--", linewidth=1
+    )
+for step_id, step_df in df.groupby("step_id"):
+    plt.text(
+        step_df["adjusted_start_time"].min(),
+        -3.7,
+        "$\\textbf{Step " + str(step_id) + " submit}$",
+        rotation=90,
+        va="bottom",
+        ha="right",
+        color=color_list[step_id % len(color_list)],
+        bbox=dict(facecolor="w", edgecolor="w", boxstyle="round"),
+    )
+    plt.text(
+        step_df["adjusted_done_time"].max(),
+        df["positions"].max() + 0.3,
+        f"Step {step_id} done",
+        rotation=90,
+        va="bottom",
+        ha="right",
+        color=color_list[step_id % len(color_list)],
+    )
+plt.xlabel("Seconds from start")
+plt.xlim([min_time, max_time])
+plt.ylim([-4, df["positions"].max() + 3.5])
+plt.gca().get_yaxis().set_visible(False)
+
+plt.show()
+
+```
+
+```python
+
 ```
 
 ```python
 sim_runtime = working_reports['runtime_simulating'].sum()
-total_runtime = report_df.iloc[-1]['time'] - report_df.iloc[0]['time']
+total_runtime = report_df['done_time'].max() - report_df['start_time'].min()
 parallelism = sim_runtime / total_runtime
 parallelism, sim_runtime / 3600, total_runtime / 3600
 ```
