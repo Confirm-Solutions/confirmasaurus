@@ -151,28 +151,6 @@ class PandasTiles:
     def get_reports(self):
         return pd.DataFrame(self.reports)
 
-    def get_incomplete_packets(self):
-        if self.results is None:
-            not_yet_simulated_df = self.tiles
-        else:
-            joined_df = self.tiles.set_index("id").merge(
-                self.results[["id"]].set_index("id"),
-                on="id",
-                how="left",
-                indicator=True,
-            )
-            not_yet_simulated_df = self.tiles[joined_df["_merge"] == "left_only"]
-
-        return list(
-            map(
-                tuple,
-                not_yet_simulated_df[["step_id", "packet_id"]]
-                .drop_duplicates()
-                .sort_values(by=["step_id", "packet_id"])
-                .values,
-            )
-        )
-
     def n_existing_packets(self, step_id):
         return self.tiles[self.tiles["step_id"] == step_id]["packet_id"].max() + 1
 
@@ -209,12 +187,6 @@ class PandasTiles:
 
         df_complete = df[df["active"] is True]
         self.results.loc[df_complete["id"], "completion_step"] = df_complete["step_id"]
-
-    def get_packet(self, step_id: int, packet_id: int) -> pd.DataFrame:
-        where = (self.tiles["step_id"] == step_id) & (
-            self.tiles["packet_id"] == packet_id
-        )
-        return self.tiles.loc[where]
 
     def next(
         self, basal_step_id: int, new_step_id: int, n: int, order_col: str
@@ -330,21 +302,6 @@ class DuckDBTiles:
     def get_config(self):
         return self.con.query("select * from config").df()
 
-    def get_incomplete_packets(self):
-        if self.does_table_exist("results"):
-            restrict = "and id not in (select id from results)"
-        else:
-            restrict = ""
-        return self.con.query(
-            f"""
-            select step_id, packet_id
-                from tiles
-                where inactivation_step={MAX_STEP} {restrict}
-                group by step_id, packet_id
-                order by step_id, packet_id
-            """
-        ).fetchall()
-
     def n_existing_packets(self, step_id):
         return self.con.query(
             f"""
@@ -358,40 +315,21 @@ class DuckDBTiles:
         self.con.execute("insert into reports select * from df")
         self.ch_insert("reports", df, create=False)
 
-    def insert_tiles(self, df: pd.DataFrame, ch_insert: bool = False):
+    def insert_tiles(self, df: pd.DataFrame):
         # NOTE: We insert to Clickhouse tiles and results in the packet
         # processing instead. This spreads out the Clickhouse mirroring
         # bandwidth requirements.
         column_order = ",".join(self._tiles_columns())
         self.con.execute(f"insert into tiles select {column_order} from df")
         logger.debug("Inserted %d new tiles.", df.shape[0])
-        if ch_insert:
-            self.ch_insert("tiles", df, create=False)
+        self.ch_insert("tiles", df, create=False)
 
     def insert_results(self, df: pd.DataFrame, orderer: str):
-        # NOTE: We insert to Clickhouse tiles and results in the packet
-        # processing instead. This spreads out the Clickhouse mirroring
-        # bandwidth requirements.
         if not self.does_table_exist("results"):
-            df_cols = ",".join([f"df.{c}" for c in df.columns if c != "id"])
-            self.con.execute(
-                f"""
-                create table results as (
-                    select tiles.*, {df_cols} from df
-                    left join tiles on df.id = tiles.id
-                )
-            """
-            )
+            self.con.execute("create table results as select * from df")
         else:
-            tiles_cols = self._tiles_columns()
-            columns = [c for c in self._results_columns() if c not in tiles_cols]
-            df_cols = ",".join([f"df.{c}" for c in columns if c != "id"])
-            self.con.execute(
-                f"""
-                insert into results select tiles.*, {df_cols} from df
-                    left join tiles on df.id = tiles.id
-            """
-            )
+            cols = ",".join([c for c in self._results_columns()])
+            self.con.execute(f"insert into results select {cols} from df")
         logger.debug(f"Inserted {df.shape[0]} results.")
 
     def insert_done(self, df: pd.DataFrame):
@@ -457,23 +395,6 @@ class DuckDBTiles:
     def insert_config(self, cfg_df):
         self.con.execute("insert into config select * from cfg_df")
         self.ch_insert("config", cfg_df, create=False)
-
-    def get_packet(self, step_id: int, packet_id: int = None):
-        if self.does_table_exist("results"):
-            restrict_clause = "and id not in (select id from results)"
-        else:
-            restrict_clause = ""
-        if packet_id is not None:
-            restrict_clause += f"and packet_id = {packet_id}"
-        return self.con.execute(
-            f"""
-            select * from tiles
-                where
-                    step_id = {step_id}
-                    and inactivation_step > {step_id}
-                    {restrict_clause}
-            """,
-        ).df()
 
     def next(
         self, basal_step_id: int, new_step_id: int, n: int, orderer: str
@@ -591,8 +512,7 @@ class DuckDBTiles:
         tiles_without_results = self.con.query(
             f"""
             select id from tiles
-            -- packet_id >= 0 excludes tiles that were split or pruned
-                where packet_id >= 0
+                where inactivation_step > step_id
                     and step_id <= {step_id}
                     and id not in (select id from results)
             """
@@ -629,8 +549,7 @@ class DuckDBTiles:
         inactive_tiles_with_no_children = self.con.query(
             f"""
             select id from tiles
-            -- packet_id >= 0 excludes tiles that were split or pruned
-                where packet_id >= 0
+                where inactivation_step > step_id
                     and inactivation_step < {MAX_STEP}
                     and id not in (select parent_id from tiles)
             """
@@ -679,7 +598,8 @@ class DuckDBTiles:
     def init_grid(
         self, tiles_df: pd.DataFrame, null_hypos_df: pd.DataFrame, cfg_df: pd.DataFrame
     ) -> None:
-        self.con.execute("create table tiles as select * from tiles_df")
+        empty_tiles_df = tiles_df.iloc[:0]
+        self.con.execute("create table tiles as select * from empty_tiles_df")
         self.con.execute(
             """
             create table done (
@@ -697,7 +617,7 @@ class DuckDBTiles:
         self.con.execute("create table reports (json TEXT)")
         self.con.execute("create table null_hypos as select * from null_hypos_df")
         self.con.execute("create table config as select * from cfg_df")
-        self.ch_insert("tiles", tiles_df.iloc[:0], create=True)
+        self.ch_insert("tiles", empty_tiles_df, create=True)
         self.ch_insert("done", absent_parents_df, create=True)
         self.ch_insert("null_hypos", null_hypos_df, create=True)
         self.ch_insert("config", cfg_df, create=True)

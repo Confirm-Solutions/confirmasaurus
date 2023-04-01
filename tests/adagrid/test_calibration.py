@@ -1,4 +1,3 @@
-import time
 from unittest import mock
 
 import numpy as np
@@ -35,7 +34,6 @@ def test_calibration_cheap(snapshot):
         grid_target=0.005,
         bias_target=0.005,
         std_target=0.005,
-        prod=False,
         tile_batch_size=1,
     )
     ip.testing.check_imprint_results(
@@ -78,8 +76,6 @@ def test_calibration_packetsize1(snapshot):
 
 
 def distributed_tester(backend, ch_db, snapshot):
-    import confirm.cloud.clickhouse as ch
-
     snapshot.set_test_name("test_calibration")
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):

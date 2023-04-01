@@ -21,21 +21,10 @@ def init(db, algo_type, kwargs):
     g = kwargs["g"]
 
     cfg, null_hypos = first(kwargs)
-    # cfg, null_hypos = join(db, kwargs)
 
     add_system_cfg(cfg)
 
-    # if g is not None and not tiles_exists:
-    incomplete_packets = init_grid(g, db, cfg)
-    next_step = 1
-    # else:
-    #     db.insert_config(pd.DataFrame([cfg]))
-    #     if g is not None:
-    #         logger.warning(
-    #             "Ignoring grid because tiles already exist " "in the provided database."
-    #         )
-    #     incomplete_packets = db.get_incomplete_packets()
-    #     next_step = db.get_next_step()
+    tiles_df = init_grid(g, db, cfg)
 
     cfg_copy = copy.copy(cfg)
     for k in ["git_diff", "conda_list", "nvidia_smi", "pip_freeze"]:
@@ -51,7 +40,7 @@ def init(db, algo_type, kwargs):
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
 
-    return algo, incomplete_packets, next_step
+    return algo, tiles_df
 
 
 def first(kwargs):
@@ -176,8 +165,7 @@ def init_grid(g, db, cfg):
         cfg["packet_size"],
     )
 
-    incomplete_packets = [(0, i) for i in range(n_packets)]
-    return incomplete_packets
+    return df
 
 
 def assign_packets(df, packet_size):

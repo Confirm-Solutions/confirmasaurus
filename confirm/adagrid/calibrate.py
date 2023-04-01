@@ -76,17 +76,22 @@ class AdaCalibrate:
     def get_orderer(self):
         return "orderer"
 
-    def get_important_columns(self):
-        return [
-            "orderer",
-            "idx",
-            "alpha0",
-            "impossible",
-            "twb_max_lams",
-            "twb_mean_lams",
-            "twb_min_lams",
-            "lams",
-        ] + [f"B_lams{i}" for i in range(self.cfg["nB"])]
+    @staticmethod
+    def get_columns(self):
+        return (
+            [
+                "orderer",
+                "idx",
+                "alpha0",
+                "impossible",
+                "twb_max_lams",
+                "twb_mean_lams",
+                "twb_min_lams",
+                "lams",
+            ]
+            + [f"B_lams{i}" for i in range(self.cfg["nB"])]
+            + [f"twb_lams{i}" for i in range(self.cfg["nB"])]
+        )
 
     def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.

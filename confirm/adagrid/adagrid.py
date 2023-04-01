@@ -7,21 +7,20 @@ from pprint import pformat
 
 import jax
 import numpy as np
-import synchronicity
 
+import imprint as ip
 from .asyncio_runner import Runner
+from .const import MAX_STEP
 from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
 from .step import new_step
-from .step import process_packet_set
+from .step import process_initial_packets
 from .step import submit_packet_df
 from .step import wait_for_packets
 from .step import WorkerStatus
 
 logger = logging.getLogger(__name__)
-
-synchronizer = synchronicity.Synchronizer()
 
 
 def pass_control_to_backend(algo_type, kwargs):
@@ -96,14 +95,15 @@ def entrypoint(backend, algo_type, kwargs):
 async def async_entrypoint(backend, db, algo_type, kwargs):
     entry_time = time.time()
     with timer("init"):
-        algo, incomplete_packets, next_step = init(db, algo_type, kwargs)
+        algo, initial_tiles_df = init(db, algo_type, kwargs)
+    next_step = 1
 
     start = time.time()
     async with backend.setup(algo):
         logger.debug(f"backend.setup() took {time.time() - start:.2f} seconds")
 
         with timer("process_initial_incompletes"):
-            await process_packet_set(backend, algo, np.array(incomplete_packets))
+            await process_initial_packets(backend, algo, initial_tiles_df)
 
         stopping_indicator = 0
         n_parallel_steps = algo.cfg["n_parallel_steps"]
@@ -224,8 +224,35 @@ class LocalBackend(Backend):
         self.algo = algo
         yield
 
-    def sim_tiles(self, tiles_df):
+    def refine_deepen_sim_tiles(self, df, refine_deepen: bool):
         report = dict()
+        if refine_deepen:
+            start = time.time()
+
+            step_id = df["step_id"].iloc[0]
+
+            g_new = refine_and_deepen(df, self.algo.null_hypos, self.algo.cfg["max_K"])
+
+            inactive_df = g_new.df[~g_new.df["active"]].copy()
+            inactive_df["inactivation_step"] = step_id
+            inactive_df["refine"] = 0
+            inactive_df["deepen"] = 0
+            inactive_df["split"] = True
+            self.algo.db.insert_tiles(inactive_df)
+            self.algo.db.insert_done(inactive_df)
+
+            g_active = g_new.prune_inactive()
+            tiles_df = g_active.df
+            tiles_df.drop("active", axis=1, inplace=True)
+            tiles_df["inactivation_step"] = MAX_STEP
+            report["runtime_refine_deepen"] = time.time() - start
+            report["n_inactive_tiles"] = inactive_df.shape[0]
+        else:
+            tiles_df = df
+
+        self.algo.db.insert_tiles(tiles_df)
+
+        report["n_tiles"] = tiles_df.shape[0]
         report["sim_start_time"] = time.time()
         tbs = self.algo.cfg["tile_batch_size"]
         if tbs is None:
@@ -233,22 +260,15 @@ class LocalBackend(Backend):
         report["tile_batch_size"] = tbs
         start = time.time()
         results_df = self.algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+        results_df["completion_step"] = MAX_STEP
         report["runtime_simulating"] = time.time() - start
         report["sim_done_time"] = time.time()
-        return results_df, report
 
-    async def submit_tiles(self, tiles_df):
-        self.algo.db.ch_insert("tiles", tiles_df, create=False)
-        results_df, report = self.sim_tiles(tiles_df)
-        self.algo.db.ch_insert("results", results_df, create=True)
-        # NOTE: We restrict the set of columns returned to the leader. Why?
-        # 1) The full results data has already been written to Clickhouse.
-        # 2) The leader only needs a subset of the results in order to
-        #    determine future adagrid steps.
-        # 3) The leader can fill in a lot of the tile details by joining with
-        #    the tiles table.
-        return_cols = ["id"] + self.algo.get_important_columns()
-        return results_df[return_cols], report
+        self.algo.db.insert_results(results_df, self.algo.get_orderer())
+        return report
+
+    async def submit_tiles(self, tiles_df, refine_deepen: bool):
+        return self.refine_deepen_sim_tiles(tiles_df, refine_deepen)
 
     async def wait_for_results(self, awaitable):
         return awaitable
@@ -264,3 +284,34 @@ def print_report(report, _db):
         ):
             ready[k] = f"{ready[k]:.6f}"
     logger.debug(pformat(ready))
+
+
+def refine_and_deepen(df, null_hypos, max_K):
+    g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)])
+    g_deepen = ip.grid._raw_init_grid(
+        g_deepen_in.get_theta(),
+        g_deepen_in.get_radii(),
+        parents=g_deepen_in.df["id"],
+    )
+
+    # We just multiply K by 2 to deepen.
+    # TODO: it's possible to do better by multiplying by 4 or 8
+    # sometimes when a tile clearly needs *way* more sims. how to
+    # determine this?
+    g_deepen.df["K"] = g_deepen_in.df["K"] * 2
+
+    g_refine_in = ip.grid.Grid(df.loc[df["refine"] > 0])
+    inherit_cols = ["K"]
+    # TODO: it's possible to do better by refining by more than just a
+    # factor of 2.
+    g_refine = g_refine_in.refine(inherit_cols)
+
+    # NOTE: Instead of prune_alternative here, we mark alternative tiles as
+    # inactive. This means that we will have a full history of grid
+    # construction.
+    out = g_refine.concat(g_deepen)
+    out = out.add_null_hypos(null_hypos, inherit_cols)
+    out.df.loc[out._which_alternative(), "active"] = False
+    for col in ["step_id", "packet_id"]:
+        out.df[col] = df[col].iloc[0]
+    return out

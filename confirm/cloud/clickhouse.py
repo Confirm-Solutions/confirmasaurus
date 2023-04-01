@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import time
-import uuid
 
 import pandas as pd
 import pyarrow
@@ -408,14 +407,14 @@ class ClickhouseTiles:
 
     def _tiles_columns(self):
         if self._tiles_columns_cache is None:
-            self._tiles_columns_cache = _query_df(
+            self._tiles_columns_cache = query_df(
                 self.client, "select * from tiles limit 1"
             ).columns
         return self._tiles_columns_cache
 
     def _results_columns(self):
         if self._results_columns_cache is None:
-            self._results_columns_cache = _query_df(
+            self._results_columns_cache = query_df(
                 self.client, "select * from results limit 1"
             ).columns
         return self._results_columns_cache

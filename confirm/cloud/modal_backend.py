@@ -66,9 +66,11 @@ class ModalBackend(Backend):
             yield
         del sys.modules["confirm.cloud.modal_worker"]
 
-    async def submit_tiles(self, tiles_df):
+    async def submit_tiles(self, tiles_df, refine_deepen):
         return asyncio.create_task(
-            wait_for_future(self.w.process_tiles.call(self.worker_args, tiles_df))
+            wait_for_future(
+                self.w.process_tiles.call(self.worker_args, tiles_df, refine_deepen)
+            )
         )
 
     async def wait_for_results(self, awaitable):

@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import logging
 import os
@@ -180,7 +179,7 @@ def setup_worker(worker_args):
         worker.algo_hash = hash_args
 
 
-def dask_process_tiles(worker_args, tiles_df):
+def dask_process_tiles(worker_args, tiles_df, refine_deepen):
     setup_worker(worker_args)
     jax_platform = jax.lib.xla_bridge.get_backend().platform
     assert jax_platform == "gpu"
@@ -188,11 +187,7 @@ def dask_process_tiles(worker_args, tiles_df):
     worker = get_worker()
     lb = LocalBackend()
     lb.algo = worker.algo
-
-    lb.algo.db.ch_insert("tiles", tiles_df, create=False)
-    results_df, report = lb.sim_tiles(tiles_df)
-    lb.algo.db.ch_insert("results", results_df, create=True)
-    return None, report
+    return lb.submit_tiles(tiles_df, refine_deepen)
 
 
 class CoiledBackend(Backend):
@@ -242,19 +237,18 @@ class CoiledBackend(Backend):
             self.worker_args_future = self.client.scatter(worker_args, broadcast=True)
             yield
 
-    async def submit_tiles(self, tiles_df):
+    async def submit_tiles(self, tiles_df, refine_deepen):
         step_id = int(tiles_df["step_id"].iloc[0])
         # negative step_id is the priority so that earlier steps are completed
         # before later steps when we are using n_parallel_steps
         with dask.annotate(priority=-step_id):
-            dask_future = self.client.submit(
-                dask_process_tiles, self.worker_args_future, tiles_df, retries=0
+            return self.client.submit(
+                dask_process_tiles,
+                self.worker_args_future,
+                tiles_df,
+                refine_deepen,
+                retries=0,
             )
-            out = asyncio.create_task(
-                asyncio.to_thread(self.client.gather, dask_future, direct=True)
-            )
-            await asyncio.sleep(0)
-            return out
 
     async def wait_for_results(self, awaitable):
         return await awaitable
