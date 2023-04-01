@@ -280,7 +280,16 @@ class DuckDBTiles:
         return self.con.execute("select * from tiles limit 0").df().columns
 
     def _results_columns(self):
-        return self.con.execute("select * from results limit 0").df().columns
+        if self.ch_client is None:
+            return self.con.execute("select * from results limit 0").df().columns
+        else:
+            if not hasattr(self, "_results_columns_cache"):
+                import confirm.cloud.clickhouse as ch
+
+                self._results_columns_cache = ch.query_df(
+                    "select * from results limit 1"
+                ).columns
+            return self._results_columns_cache
 
     def _done_columns(self):
         return self.con.execute("select * from done limit 0").df().columns
@@ -471,17 +480,27 @@ class DuckDBTiles:
     ) -> pd.DataFrame:
         # we wrap with a transaction to ensure that concurrent readers don't
         # grab the same chunk of work.
-        t = self.con.begin()
-        out = t.execute(
-            f"""
-            select * from results 
-                where completion_step >= {new_step_id}
-                    and step_id <= {basal_step_id}
-            order by {orderer} limit {n}
-            """
-        ).df()
-        t.commit()
-        return out
+        if self.ch_client is None:
+            return self.con.query(
+                f"""
+                select * from results 
+                    where completion_step >= {new_step_id}
+                        and step_id <= {basal_step_id}
+                order by {orderer} limit {n}
+                """
+            ).df()
+        else:
+            import confirm.cloud.clickhouse as ch
+
+            return ch.query_df(
+                self.ch_client,
+                f"""
+                select * from results
+                    where completion_step >= {new_step_id}
+                        and step_id <= {basal_step_id}
+                order by {orderer} limit {n}
+                """,
+            )
 
     def bootstrap_lamss(self, basal_step_id: int) -> List[float]:
         # Get the number of bootstrap lambda* columns
@@ -492,25 +511,48 @@ class DuckDBTiles:
 
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        lamss = self.con.execute(
-            f"""
-            select {cols} from results 
-                where inactivation_step > {basal_step_id}
-                    and step_id <= {basal_step_id}
-            """
-        ).fetchall()[0]
+        if self.ch_client is None:
+            return self.con.execute(
+                f"""
+                select {cols} from results 
+                    where inactivation_step > {basal_step_id}
+                        and step_id <= {basal_step_id}
+                """
+            ).fetchall()[0]
+        else:
+            import confirm.cloud.clickhouse as ch
 
-        return lamss
+            return ch.query_df(
+                self.ch_client,
+                f"""
+                select {cols} from results 
+                    where inactivation_step > {basal_step_id}
+                        and step_id <= {basal_step_id}
+                """,
+            ).iloc[0]
 
     def worst_tile(self, basal_step_id, order_col):
-        return self.con.execute(
-            f"""
-            select * from results
-                where inactivation_step > {basal_step_id}
-                    and step_id <= {basal_step_id}
-                order by {order_col} limit 1
-            """
-        ).df()
+        if self.ch_client is None:
+            return self.con.execute(
+                f"""
+                select * from results
+                    where inactivation_step > {basal_step_id}
+                        and step_id <= {basal_step_id}
+                    order by {order_col} limit 1
+                """
+            ).df()
+        else:
+            import confirm.cloud.clickhouse as ch
+
+            return ch.query_df(
+                self.ch_client,
+                f"""
+                select * from results
+                    where inactivation_step > {basal_step_id}
+                        and step_id <= {basal_step_id}
+                    order by {order_col} limit 1
+                """,
+            )
 
     def get_next_step(self):
         return self.con.query("select max(step_id) + 1 from tiles").fetchone()[0]
@@ -677,14 +719,16 @@ class DuckDBTiles:
 
         return DuckDBTiles(duckdb.connect(path), ch_client)
 
-    def ch_insert(self, table: str, df: pd.DataFrame, create: bool):
+    def ch_insert(
+        self, table: str, df: pd.DataFrame, create: bool, block: bool = False
+    ):
         if self.ch_client is not None:
             import confirm.cloud.clickhouse as ch
 
             if create and table not in self.ch_table_exists:
                 ch.create_table(self.ch_client, table, df)
                 self.ch_table_exists.add(table)
-            self.ch_tasks.extend(ch.threaded_block_insert_df(self.ch_client, table, df))
+            self.ch_tasks.extend(ch.insert_df(self.ch_client, table, df, block=block))
 
     async def ch_checkup(self):
         wait_for_done = [t for t in self.ch_tasks if t is not None and t.done()]

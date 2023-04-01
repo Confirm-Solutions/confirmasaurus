@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pandas as pd
 import pytest
@@ -10,6 +11,37 @@ from imprint.models.ztest import ZTest1D
 
 def check_backup_correctness(db):
     import confirm.cloud.clickhouse as ch
+
+    # wait for all the asynchronous CH inserts to finish
+    n_rows_df = pd.DataFrame(
+        [
+            (table, db.con.query(f"select count(*) from {table}").df().iloc[0][0])
+            for table in ch.all_tables
+        ],
+        columns=["table", "count"],
+    ).set_index("table")
+    i = 0
+    while i < 60:
+        time.sleep(1)
+        n_rows_ch = pd.DataFrame(
+            [
+                (
+                    table,
+                    ch.query(db.ch_client, f"select count(*) from {table}").result_set[
+                        0
+                    ][0],
+                )
+                for table in ch.all_tables
+            ],
+            columns=["table", "count"],
+        ).set_index("table")
+        if (n_rows_df == n_rows_ch).all().all():
+            break
+        else:
+            print("Waiting for asynchronous Clickhouse inserts to finish.")
+        i += 1
+    else:
+        raise TimeoutError("Clickhouse results not restored")
 
     db2 = ada.DuckDBTiles.connect()
     asyncio.run(ch.restore(db.ch_client, db2))

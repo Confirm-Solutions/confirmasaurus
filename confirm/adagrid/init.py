@@ -17,41 +17,31 @@ from .const import MAX_STEP
 logger = logging.getLogger(__name__)
 
 
-def init(algo_type, kwargs):
-    db = kwargs["db"]
-    g = kwargs.get("g", None)
+def init(db, algo_type, kwargs):
+    g = kwargs["g"]
 
-    tiles_exists = db.does_table_exist("tiles")
-    if g is None and not tiles_exists:
-        raise ValueError("If no grid is provided, the database must contain tiles.")
-    if g is not None and tiles_exists:
-        raise ValueError("If a grid is provided, the database must not contain tiles.")
-
-    if g is not None and not tiles_exists:
-        cfg, null_hypos = first(kwargs)
-    else:
-        cfg, null_hypos = join(db, kwargs)
+    cfg, null_hypos = first(kwargs)
+    # cfg, null_hypos = join(db, kwargs)
 
     add_system_cfg(cfg)
 
-    if g is not None and not tiles_exists:
-        incomplete_packets = init_grid(g, db, cfg)
-        next_step = 1
-    else:
-        db.insert_config(pd.DataFrame([cfg]))
-        if g is not None:
-            logger.warning(
-                "Ignoring grid because tiles already exist " "in the provided database."
-            )
-        incomplete_packets = db.get_incomplete_packets()
-        next_step = db.get_next_step()
+    # if g is not None and not tiles_exists:
+    incomplete_packets = init_grid(g, db, cfg)
+    next_step = 1
+    # else:
+    #     db.insert_config(pd.DataFrame([cfg]))
+    #     if g is not None:
+    #         logger.warning(
+    #             "Ignoring grid because tiles already exist " "in the provided database."
+    #         )
+    #     incomplete_packets = db.get_incomplete_packets()
+    #     next_step = db.get_next_step()
 
     cfg_copy = copy.copy(cfg)
-    del cfg_copy["git_diff"]
-    del cfg_copy["conda_list"]
-    del cfg_copy["nvidia_smi"]
-    del cfg_copy["pip_freeze"]
-    logger.info("Config (minus system info): \n%s", cfg_copy)
+    for k in ["git_diff", "conda_list", "nvidia_smi", "pip_freeze"]:
+        if k in cfg_copy:
+            del cfg_copy[k]
+    logger.info("Config minus system info: \n%s", cfg_copy)
 
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
     model = kwargs["model_type"](

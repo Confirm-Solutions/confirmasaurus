@@ -25,6 +25,11 @@ class ModalWorker:
     @stub.function(**process_tiles_config)
     async def process_tiles(self, worker_args, tiles_df):
         await self.setup(worker_args)
+
         lb = LocalBackend()
-        async with lb.setup(self.algo):
-            return await lb.wait_for_results(lb.submit_tiles(tiles_df))
+        lb.algo = self.algo
+
+        lb.algo.db.ch_insert("tiles", tiles_df, create=False)
+        results_df, report = lb.sim_tiles(tiles_df)
+        lb.algo.db.ch_insert("results", results_df, create=True)
+        return None, report

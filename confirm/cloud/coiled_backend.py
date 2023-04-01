@@ -188,7 +188,11 @@ def dask_process_tiles(worker_args, tiles_df):
     worker = get_worker()
     lb = LocalBackend()
     lb.algo = worker.algo
-    return lb.sync_submit_tiles(tiles_df)
+
+    lb.algo.db.ch_insert("tiles", tiles_df, create=False)
+    results_df, report = lb.sim_tiles(tiles_df)
+    lb.algo.db.ch_insert("results", results_df, create=True)
+    return None, report
 
 
 class CoiledBackend(Backend):

@@ -79,8 +79,9 @@ async def wait_for_packet(backend, algo, awaitable, report):
     report["runtime_per_sim_ns"] = (
         report["runtime_simulating"] / report["n_total_sims"] * 1e9
     )
-    results_df["completion_step"] = MAX_STEP
-    algo.db.insert_results(results_df, algo.get_orderer())
+    if results_df is not None:
+        results_df["completion_step"] = MAX_STEP
+        algo.db.insert_results(results_df, algo.get_orderer())
     status = WorkerStatus.WORKING
     report["status"] = status.name
     report["runtime_total"] = time.time() - report["start_time"]

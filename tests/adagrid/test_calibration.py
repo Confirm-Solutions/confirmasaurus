@@ -57,11 +57,18 @@ def cal_tester(snapshot, ignore_story=True, record_system=False, **kwargs):
         snapshot,
         ignore_story=ignore_story,
     )
+    return out_db
 
 
 @pytest.mark.slow
 def test_calibration(snapshot):
     cal_tester(snapshot, ignore_story=False)
+
+
+def test_calibration_clickhouse(ch_db, snapshot):
+    snapshot.set_test_name("test_calibration")
+    db = cal_tester(snapshot, clickhouse_service="TEST", job_name=ch_db.database)
+    check_backup_correctness(db)
 
 
 @pytest.mark.slow
@@ -74,7 +81,6 @@ def distributed_tester(backend, ch_db, snapshot):
     import confirm.cloud.clickhouse as ch
 
     snapshot.set_test_name("test_calibration")
-    db = ada.DuckDBTiles.connect()
 
     with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
         g = ip.cartesian_grid(
@@ -86,7 +92,6 @@ def distributed_tester(backend, ch_db, snapshot):
             nB=5,
             record_system=False,
             clickhouse_service="TEST",
-            db=db,
             job_name=ch_db.database,
             backend=backend,
         )
@@ -96,37 +101,6 @@ def distributed_tester(backend, ch_db, snapshot):
         snapshot,
         ignore_story=True,
     )
-
-    i = 0
-    # wait for all the asynchronous CH inserts to finish
-    n_rows_df = pd.DataFrame(
-        [
-            (table, local_db.con.query(f"select count(*) from {table}").df().iloc[0][0])
-            for table in ch.all_tables
-        ],
-        columns=["table", "count"],
-    ).set_index("table")
-    while i < 60:
-        time.sleep(1)
-        n_rows_ch = pd.DataFrame(
-            [
-                (
-                    table,
-                    ch.query(db.ch_client, f"select count(*) from {table}").result_set[
-                        0
-                    ][0],
-                )
-                for table in ch.all_tables
-            ],
-            columns=["table", "count"],
-        ).set_index("table")
-        if (n_rows_df == n_rows_ch).all().all():
-            break
-        else:
-            print("Waiting for asynchronous Clickhouse inserts to finish.")
-        i += 1
-    else:
-        raise TimeoutError("Clickhouse results not restored")
 
     check_backup_correctness(local_db)
 

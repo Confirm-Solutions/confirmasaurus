@@ -9,6 +9,21 @@ import pyarrow
 
 logger = logging.getLogger(__name__)
 
+
+synchronous_insert_settings = dict(
+    insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
+)
+async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+default_insert_settings = async_insert_settings
+
+
+def set_insert_settings(settings):
+    for k in list(default_insert_settings.keys()):
+        del default_insert_settings[k]
+    for k in settings:
+        default_insert_settings[k] = settings[k]
+
+
 all_tables = [
     "results",
     "tiles",
@@ -18,6 +33,36 @@ all_tables = [
     "reports",
     "null_hypos",
 ]
+
+
+type_map = {
+    "uint8": "UInt8",
+    "uint32": "UInt32",
+    "uint64": "UInt64",
+    "float32": "Float32",
+    "float64": "Float64",
+    "int32": "Int32",
+    "int64": "Int64",
+    "bool": "Boolean",
+    "string": "String",
+    "object": "String",
+    "datetime64[ns]": "DateTime64(9)",
+}
+
+
+def get_create_table_cols(df):
+    """
+    Map from Pandas dtypes to Clickhouse types.
+
+    Args:
+        df: The dataframe
+
+    Returns:
+        A list of strings of the form "column_name type"
+    """
+    return [
+        f"{c} Nullable({type_map[dt.name]})" for c, dt in zip(df.columns, df.dtypes)
+    ]
 
 
 def create_table(ch_client, name, df):
@@ -33,16 +78,16 @@ def create_table(ch_client, name, df):
     )
 
 
-def threaded_block_insert_df(ch_client, name, df, chunk_size=20000):
-    try:
-        asyncio.get_running_loop()
-        run_directly = False
-    except RuntimeError:
-        run_directly = True
+def insert_df(ch_client, name, df, settings=None, chunk_size=30000, block: bool = True):
+    if not block:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            block = True
 
     # Sometimes this gets called after the event loop has been closed. In that
     # case, we run the insert directly rather than using asyncio.
-    if run_directly:
+    if block:
 
         def wrapper(*args):
             args[0](*args[1:])
@@ -52,13 +97,29 @@ def threaded_block_insert_df(ch_client, name, df, chunk_size=20000):
         def wrapper(*args):
             return asyncio.create_task(asyncio.to_thread(*args))
 
-    chunks = [df.iloc[i : i + chunk_size] for i in range(0, len(df), chunk_size)]
     wait_for = []
-    for c_df in chunks:
+    for i in range(0, len(df), chunk_size):
         wait_for.append(
-            wrapper(insert_df, ch_client, name, c_df, default_insert_settings)
+            wrapper(
+                _insert_chunk_df, ch_client, name, df.iloc[i : i + chunk_size], settings
+            )
         )
     return wait_for
+
+
+def _insert_chunk_df(client, table, df, settings=None):
+    # Same as _query_df, inserting through arrow is faster!
+    start = time.time()
+    retry_ch_action(
+        client.insert_arrow,
+        table,
+        pyarrow.Table.from_pandas(df, preserve_index=False),
+        settings=settings or default_insert_settings,
+    )
+    logger.debug(
+        f"Inserting {df.shape[0]} rows into {table} took"
+        f" {time.time() - start} seconds"
+    )
 
 
 async def restore(ch_client, duck):
@@ -108,36 +169,6 @@ def does_table_exist(client, table_name: str) -> bool:
         )
         > 0
     )
-
-
-type_map = {
-    "uint8": "UInt8",
-    "uint32": "UInt32",
-    "uint64": "UInt64",
-    "float32": "Float32",
-    "float64": "Float64",
-    "int32": "Int32",
-    "int64": "Int64",
-    "bool": "Boolean",
-    "string": "String",
-    "object": "String",
-    "datetime64[ns]": "DateTime64(9)",
-}
-
-
-def get_create_table_cols(df):
-    """
-    Map from Pandas dtypes to Clickhouse types.
-
-    Args:
-        df: The dataframe
-
-    Returns:
-        A list of strings of the form "column_name type"
-    """
-    return [
-        f"{c} Nullable({type_map[dt.name]})" for c, dt in zip(df.columns, df.dtypes)
-    ]
 
 
 def retry_ch_action(method, *args, retries=2, is_retry=False, **kwargs):
@@ -194,35 +225,6 @@ def query_df(client, query):
     return out
 
 
-synchronous_insert_settings = dict(
-    insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
-)
-async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
-default_insert_settings = async_insert_settings
-
-
-def set_insert_settings(settings):
-    for k in list(default_insert_settings.keys()):
-        del default_insert_settings[k]
-    for k in settings:
-        default_insert_settings[k] = settings[k]
-
-
-def insert_df(client, table, df, settings=None):
-    # Same as _query_df, inserting through arrow is faster!
-    start = time.time()
-    retry_ch_action(
-        client.insert_arrow,
-        table,
-        pyarrow.Table.from_pandas(df, preserve_index=False),
-        settings=settings or default_insert_settings,
-    )
-    logger.debug(
-        f"Inserting {df.shape[0]} rows into {table} took"
-        f" {time.time() - start} seconds"
-    )
-
-
 def query(client, query, *args, **kwargs):
     start = time.time()
     out = retry_ch_action(client.query, query, *args, **kwargs)
@@ -250,8 +252,8 @@ def connect(
     """
     Connect to a Clickhouse server
 
-    Each job_id corresponds to a Clickhouse database on the Clickhouse
-    cluster. If job_id is None, we will find
+    Each job_name corresponds to a Clickhouse database on the Clickhouse
+    cluster.
 
     For Clickhouse, we will use the following environment variables:
         CLICKHOUSE_HOST: The hostname for the Clickhouse server.
@@ -267,7 +269,7 @@ def connect(
         port: 37085
 
     Args:
-        job_id: The job_id. Defaults to None.
+        job_name: The job_name.
         host: The hostname for the Clickhouse server. Defaults to None.
         port: The Clickhouse server port. Defaults to None.
         username: The Clickhouse username. Defaults to None.
@@ -278,16 +280,6 @@ def connect(
         A Clickhouse tile database object.
     """
     connection_details = get_ch_config(service, host, port, username, password)
-    if job_name is None:
-        test_host = os.environ["CLICKHOUSE_TEST_HOST"]
-        if not (
-            (test_host is not None and test_host in connection_details["host"])
-            or "localhost" in connection_details["host"]
-        ):
-            raise RuntimeError(
-                "To run a production job, please choose an explicit unique job_id."
-            )
-        job_name = "unnamed_" + uuid.uuid4().hex
 
     client = get_ch_client(connection_details=connection_details, **kwargs)
     if not no_create:
@@ -405,3 +397,25 @@ def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
                 cmd = f"drop database {db}"
                 print(cmd)
                 command(ch_client, cmd)
+
+
+class ClickhouseTiles:
+    def dimension(self):
+        if self._d is None:
+            cols = self._tiles_columns()
+            self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
+        return self._d
+
+    def _tiles_columns(self):
+        if self._tiles_columns_cache is None:
+            self._tiles_columns_cache = _query_df(
+                self.client, "select * from tiles limit 1"
+            ).columns
+        return self._tiles_columns_cache
+
+    def _results_columns(self):
+        if self._results_columns_cache is None:
+            self._results_columns_cache = _query_df(
+                self.client, "select * from results limit 1"
+            ).columns
+        return self._results_columns_cache

@@ -30,13 +30,15 @@ def pass_control_to_backend(algo_type, kwargs):
         backend = LocalBackend()
     kwargs.update(backend.get_cfg())
 
-    if kwargs.get("job_name", None) is not None:
-        kwargs["job_name"] = kwargs["job_name"] + "_" + time.strftime("%Y%m%d_%H%M%S")
-
     return backend.entrypoint(algo_type, kwargs)
 
 
 def setup_db(cfg, require_fresh=False):
+    if cfg["job_name"] is None:
+        if cfg["job_name_prefix"] is None:
+            cfg["job_name_prefix"] = "unnamed"
+        cfg["job_name"] = f"{cfg['job_name_prefix']}_{time.strftime('%Y%m%d_%H%M%S')}"
+
     print(list(cfg.keys()))
     ch_client = None
     if cfg["clickhouse_service"] is not None:
@@ -51,21 +53,16 @@ def setup_db(cfg, require_fresh=False):
                 "Please choose a fresh job_name."
             )
 
-    db = cfg.get("db", None)
-    if db is None:
-        if cfg["job_name"] is None:
-            db_filepath = ":memory:"
-            cfg["job_name"] = "unnamed_" + time.strftime("%Y%m%d_%H%M%S")
-        else:
-            db_filepath = f"{cfg['job_name']}.db"
+    if cfg["job_name"].startswith("unnamed"):
+        db_filepath = ":memory:"
+    else:
+        db_filepath = cfg["job_name"] + ".db"
 
-        db = DuckDBTiles.connect(path=db_filepath, ch_client=ch_client)
-        if require_fresh and db.does_table_exist("tiles"):
-            raise ValueError(
-                "DuckDB table 'tiles' already exists."
-                " Please choose a fresh job_name."
-            )
-    db.ch_client = ch_client
+    db = DuckDBTiles.connect(path=db_filepath, ch_client=ch_client)
+    if require_fresh and db.does_table_exist("tiles"):
+        raise ValueError(
+            "DuckDB table 'tiles' already exists." " Please choose a fresh job_name."
+        )
     return db
 
 
@@ -78,12 +75,10 @@ def entrypoint(backend, algo_type, kwargs):
     """
 
     db = setup_db(kwargs, require_fresh=True)
-    kwargs["db"] = db
-
     with DatabaseLogging(db) as db_logging:
         with Runner() as runner:
             try:
-                runner.run(async_entrypoint(backend, algo_type, kwargs))
+                runner.run(async_entrypoint(backend, db, algo_type, kwargs))
             except Exception as e:  # noqa
                 # bare except is okay because we want to log the exception. the
                 # re-raise will preserve the original stack trace.
@@ -98,11 +93,10 @@ def entrypoint(backend, algo_type, kwargs):
     return db
 
 
-async def async_entrypoint(backend, algo_type, kwargs):
-    db = kwargs["db"]
+async def async_entrypoint(backend, db, algo_type, kwargs):
     entry_time = time.time()
     with timer("init"):
-        algo, incomplete_packets, next_step = init(algo_type, kwargs)
+        algo, incomplete_packets, next_step = init(db, algo_type, kwargs)
 
     start = time.time()
     async with backend.setup(algo):
@@ -230,7 +224,7 @@ class LocalBackend(Backend):
         self.algo = algo
         yield
 
-    def _submit_tiles(self, tiles_df):
+    def sim_tiles(self, tiles_df):
         report = dict()
         report["sim_start_time"] = time.time()
         tbs = self.algo.cfg["tile_batch_size"]
@@ -243,9 +237,9 @@ class LocalBackend(Backend):
         report["sim_done_time"] = time.time()
         return results_df, report
 
-    def sync_submit_tiles(self, tiles_df):
+    async def submit_tiles(self, tiles_df):
         self.algo.db.ch_insert("tiles", tiles_df, create=False)
-        results_df, report = self._submit_tiles(tiles_df)
+        results_df, report = self.sim_tiles(tiles_df)
         self.algo.db.ch_insert("results", results_df, create=True)
         # NOTE: We restrict the set of columns returned to the leader. Why?
         # 1) The full results data has already been written to Clickhouse.
@@ -255,9 +249,6 @@ class LocalBackend(Backend):
         #    the tiles table.
         return_cols = ["id"] + self.algo.get_important_columns()
         return results_df[return_cols], report
-
-    async def submit_tiles(self, tiles_df):
-        return self.sync_submit_tiles(tiles_df)
 
     async def wait_for_results(self, awaitable):
         return awaitable

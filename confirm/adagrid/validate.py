@@ -146,7 +146,6 @@ def ada_validate(
     *,
     lam=None,
     g=None,
-    db=None,
     model_seed=0,
     model_kwargs=None,
     delta=0.01,
@@ -162,6 +161,7 @@ def ada_validate(
     n_parallel_steps: int = 1,
     record_system: bool = True,
     clickhouse_service: str = None,
+    job_name_prefix: str = None,
     job_name: str = None,
     overrides: dict = None,
     callback=print_report,
@@ -176,7 +176,6 @@ def ada_validate(
             null hypothesis.
         g: The initial grid. If not provided, the grid is assumed to be stored
             in the database. At least one of `g` or `db` must be provided.
-        db: The database backend to use. Defaults to `db.DuckDB.connect()`.
         model_seed: The random seed for the model. Defaults to 0.
         model_kwargs: Additional keyword arguments for constructing the Model
             object. Defaults to None.
@@ -217,9 +216,13 @@ def ada_validate(
         clickhouse_service: If 'PROD', we mirror all database inserts to a the
             prod Clickhouse service. If 'TEST' we mirror to the test service. If
             None, we do not mirror inserts. Default is None.
+        job_name_prefix: A prefix to use for the job name. This is useful for
+            grouping jobs together. Defaults to None. If job_name is set, this is
+            ignored. If job_name is not set, this is used to generate a job
+            name like: `{job_name_prefix}_{time.strftime("%Y%m%d_%H%M%S")}`.
         job_name: The job name is used for the database file used by DuckDB and
             for storing long-term backups in Clickhouse. By default (None), an
-            in-memory DuckDB is used and a random UUID is chosen for
+            in-memory DuckDB is used and unnamed_YYYYMMDD_HHMMSS is chosen for
             Clickhouse.
         overrides: If this call represents a continuation of an existing
             adagrid job, the overrides dictionary will be used to override the
