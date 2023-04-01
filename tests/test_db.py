@@ -74,7 +74,7 @@ class DBTester:
         db = self.connect()
         self.init_grid(db, example_grid(-1, 1))
         R = dict(zone_id=1, step_id=2, packet_id=3, testA="testB")
-        db.insert_report(R)
+        db.insert_reports(R)
         pd.testing.assert_frame_equal(pd.DataFrame([R]), db.get_reports())
 
     def test_write_tiles(self):

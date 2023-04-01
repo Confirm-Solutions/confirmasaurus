@@ -3,7 +3,6 @@ import contextlib
 import logging
 import queue
 import time
-import uuid
 from pprint import pformat
 
 import jax
@@ -30,6 +29,10 @@ def pass_control_to_backend(algo_type, kwargs):
     if backend is None:
         backend = LocalBackend()
     kwargs.update(backend.get_cfg())
+
+    if kwargs.get("job_name", None) is not None:
+        kwargs["job_name"] = kwargs["job_name"] + "_" + time.strftime("%Y%m%d_%H%M%S")
+
     return backend.entrypoint(algo_type, kwargs)
 
 
@@ -52,9 +55,10 @@ def setup_db(cfg, require_fresh=False):
     if db is None:
         if cfg["job_name"] is None:
             db_filepath = ":memory:"
-            cfg["job_name"] = "unnamed_" + uuid.uuid4().hex
+            cfg["job_name"] = "unnamed_" + time.strftime("%Y%m%d_%H%M%S")
         else:
             db_filepath = f"{cfg['job_name']}.db"
+
         db = DuckDBTiles.connect(path=db_filepath, ch_client=ch_client)
         if require_fresh and db.does_table_exist("tiles"):
             raise ValueError(
@@ -94,7 +98,6 @@ def entrypoint(backend, algo_type, kwargs):
     return db
 
 
-@profile
 async def async_entrypoint(backend, algo_type, kwargs):
     db = kwargs["db"]
     entry_time = time.time()
@@ -149,8 +152,8 @@ async def async_entrypoint(backend, algo_type, kwargs):
                 if processing_tasks.qsize() > n_parallel_steps - 1:
                     await wait_for_packets(backend, algo, processing_tasks.get())
 
-            with timer("Wait for Clickhouse inserts"):
-                await db.ch_wait()
+            with timer("Check on Clickhouse inserts"):
+                await db.ch_checkup()
 
         with timer("process final packets"):
             while not processing_tasks.empty():

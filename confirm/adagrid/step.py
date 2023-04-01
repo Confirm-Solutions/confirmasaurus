@@ -45,8 +45,9 @@ async def wait_for_packets(backend, algo, packets):
     for p in packets:
         coros.append(wait_for_packet(backend, algo, *p))
     logger.debug("Waiting for packets to finish.")
-    await asyncio.gather(*coros)
+    reports = await asyncio.gather(*coros)
     logger.debug("Packets finished.")
+    algo.db.insert_reports(reports)
 
 
 async def submit_packet(backend, algo, packet_df):
@@ -74,21 +75,20 @@ async def wait_for_packet(backend, algo, awaitable, report):
     results_df, sim_report = await backend.wait_for_results(awaitable)
     # The completion_step column could be set on the worker but that would
     # increase data transfer costs.
-    results_df["completion_step"] = MAX_STEP
     report.update(sim_report)
     report["runtime_per_sim_ns"] = (
         report["runtime_simulating"] / report["n_total_sims"] * 1e9
     )
+    results_df["completion_step"] = MAX_STEP
     algo.db.insert_results(results_df, algo.get_orderer())
     status = WorkerStatus.WORKING
     report["status"] = status.name
     report["runtime_total"] = time.time() - report["start_time"]
     report["done_time"] = time.time()
     algo.callback(report, algo.db)
-    algo.db.insert_report(report)
+    return report
 
 
-@profile
 def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
     status, tiles_df, report = _new_step(algo, basal_step_id, new_step_id)
@@ -102,11 +102,10 @@ def new_step(algo, basal_step_id, new_step_id):
     report["step_id"] = new_step_id
     report["runtime_total"] = time.time() - report["start_time"]
     algo.callback(report, algo.db)
-    algo.db.insert_report(report)
+    algo.db.insert_reports(report)
     return status, tiles_df
 
 
-@profile
 def _new_step(algo, basal_step_id, new_step_id):
     converged, convergence_data, report = algo.convergence_criterion(basal_step_id)
 
@@ -228,7 +227,6 @@ def _new_step(algo, basal_step_id, new_step_id):
     return WorkerStatus.NEW_STEP, g_active.df, report
 
 
-@profile
 def refine_and_deepen(df, null_hypos, max_K):
     g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)])
     g_deepen = ip.grid._raw_init_grid(

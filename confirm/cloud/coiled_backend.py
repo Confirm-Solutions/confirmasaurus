@@ -66,7 +66,7 @@ def create_software_env():
     return name
 
 
-async def upload_pkg(client, module, restart=False):
+def upload_pkg(client, module, restart=False):
     from pathlib import Path
 
     dir = Path(module.__file__).parent.parent
@@ -79,22 +79,21 @@ async def upload_pkg(client, module, restart=False):
         ext = os.path.splitext(fn)[1]
         return (ext == ".pyc") or (".DS_Store" in fn)
 
-    return await client.register_worker_plugin(
+    return client.register_worker_plugin(
         UploadDirectory(dir, skip=(skip_f,), restart=restart, update_path=True),
         nanny=True,
     )
 
 
-async def setup_cluster(
-    update_software_env=True, n_workers=1, idle_timeout="60 minutes"
-):
+def setup_cluster(update_software_env=True, n_workers=1, idle_timeout="60 minutes"):
     if update_software_env:
         create_software_env()
     import coiled
 
-    cluster = await coiled.Cluster(
+    cluster = coiled.Cluster(
         name="confirm-coiled",
         software="confirm-coiled",
+        scheduler_vm_types=["m5ad.2xlarge"],
         n_workers=n_workers,
         worker_vm_types=["g4dn.xlarge"],
         worker_gpu=1,
@@ -104,18 +103,16 @@ async def setup_cluster(
         allow_ssh=True,
         wait_for_workers=1,
         worker_options={"nthreads": 2},
-        asynchronous=True,
     )
-    await cluster.scale(n_workers)
-    client = await cluster.get_client()
-    await reset_confirm_imprint(client)
-    return cluster
+    cluster.scale(n_workers)
+    client = cluster.get_client()
+    reset_confirm_imprint(client)
+    return cluster, client
 
 
-async def reset_confirm_imprint(client):
-    await asyncio.gather(
-        upload_pkg(client, confirm), upload_pkg(client, ip, restart=True)
-    )
+def reset_confirm_imprint(client):
+    upload_pkg(client, confirm)
+    upload_pkg(client, ip, restart=True)
 
 
 @dask.delayed
@@ -194,10 +191,6 @@ def dask_process_tiles(worker_args, tiles_df):
     return lb.sync_submit_tiles(tiles_df)
 
 
-async def wait_for_dask_future(f):
-    return await f
-
-
 class CoiledBackend(Backend):
     def __init__(
         self,
@@ -205,13 +198,13 @@ class CoiledBackend(Backend):
         n_workers: int = 1,
         detach: bool = False,
         restart_workers: bool = False,
-        cluster=None,
+        client=None,
     ):
         self.update_software_env = update_software_env
         self.restart_workers = restart_workers
         self.detach = detach
         self.n_workers = n_workers
-        self.cluster = cluster
+        self.client = client
 
     def check(self):
         return check().compute()
@@ -221,17 +214,16 @@ class CoiledBackend(Backend):
 
     @contextlib.asynccontextmanager
     async def setup(self, algo):
-        async with contextlib.AsyncExitStack() as stack:
-            if self.cluster is None:
-                self.cluster = await setup_cluster(
+        with contextlib.ExitStack() as stack:
+            if self.client is None:
+                self.cluster, self.client = setup_cluster(
                     update_software_env=self.update_software_env,
                     n_workers=self.n_workers,
                 )
-                await stack.enter_async_context(async_closing(self.cluster))
-            self.client = await self.cluster.get_client()
-            await stack.enter_async_context(async_closing(self.client))
+                stack.enter_context(contextlib.closing(self.cluster))
+                stack.enter_context(contextlib.closing(self.client))
             if self.restart_workers:
-                await self.client.restart()
+                self.client.restart()
             filtered_cfg = {
                 k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
             }
@@ -243,9 +235,7 @@ class CoiledBackend(Backend):
                 filtered_cfg,
                 {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
             )
-            self.worker_args_future = await self.client.scatter(
-                worker_args, broadcast=True
-            )
+            self.worker_args_future = self.client.scatter(worker_args, broadcast=True)
             yield
 
     async def submit_tiles(self, tiles_df):
@@ -253,19 +243,14 @@ class CoiledBackend(Backend):
         # negative step_id is the priority so that earlier steps are completed
         # before later steps when we are using n_parallel_steps
         with dask.annotate(priority=-step_id):
-            return asyncio.create_task(
-                self.client.submit(
-                    dask_process_tiles, self.worker_args_future, tiles_df
-                ).result()
+            dask_future = self.client.submit(
+                dask_process_tiles, self.worker_args_future, tiles_df, retries=0
             )
+            out = asyncio.create_task(
+                asyncio.to_thread(self.client.gather, dask_future, direct=True)
+            )
+            await asyncio.sleep(0)
+            return out
 
     async def wait_for_results(self, awaitable):
         return await awaitable
-
-
-@contextlib.asynccontextmanager
-async def async_closing(thing):
-    try:
-        yield thing
-    finally:
-        await thing.close()

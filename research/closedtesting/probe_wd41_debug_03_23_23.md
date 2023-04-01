@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import scipy.special
 import jax
-import duckdb
 
 import imprint as ip
 import confirm
@@ -16,24 +15,14 @@ import confirm.cloud.clickhouse as ch
 
 ip.setup_nb()
 
-db = 'wd41_4d_20230331_210557'
-
+db = 'wd41_4d_v74'
 ddb_path = Path(confirm.__file__).parent.parent.joinpath(f'{db}.db')
-use_clickhouse = False
-if ddb_path.exists():
-    try:
-        ddb = ada.DuckDBTiles(duckdb.connect(str(ddb_path), read_only=True))
-        def query(q):
-            return ddb.con.query(q).df()
-    except Exception:
-        use_clickhouse = True
-else:
-    use_clickhouse = True
 
-if use_clickhouse:
-    ch_client = ch.connect(db, service='PROD')
-    def query(q):
-        return ch.query_df(ch_client, q)
+ch_client = ch.connect(db, service='PROD')
+def query(q):
+    # return ddb.con.query(q).df()
+    return ch.query_df(ch_client, q)
+ddb = ada.DuckDBTiles.connect(str(ddb_path))
 ```
 
 ```python
@@ -179,147 +168,98 @@ deepen_likely_to_work = tiles_df["twb_min_lams"] > twb_worst_tile_mean_lams
 np.sum(deepen_likely_to_work)
 ```
 
-## Looking at the reports
+## Investigating the WD41 problem.
 
 ```python
-import json
-report_df = pd.DataFrame([json.loads(v) for v in query('select * from reports')['json'].values])
-working_reports = report_df[report_df['status'] == 'WORKING'].dropna(axis=1, how='all')
-new_step_reports = report_df[report_df['status'] == 'NEW_STEP'].dropna(axis=1, how='all')
-new_step_reports.set_index('step_id', inplace=True)
+import confirm.models.wd41 as wd41
+
+lamss_potential = lamss_tile.copy()
+for d in range(self.dimension()):
+    lamss_potential[f"radii{d}"] = 1e-7
+cal_df = ip.calibrate(
+    wd41.WD41,
+    g=ip.Grid(lamss_potential, 1),
+    model_kwargs={"ignore_intersection": True, "dtype": np.float64},
+)
 ```
 
 ```python
-from matplotlib.gridspec import GridSpec
-
-min_step = 4
-max_step = 10
-color_list = ["k", "r", "b", "m"]
-offset = report_df["start_time"].min()
-
-step_id = working_reports["step_id"]
-include = (step_id >= min_step) & (step_id <= max_step)
-df = working_reports[include][
-    ["sim_start_time", "sim_done_time", "start_time", "done_time", "step_id"]
-].copy()
-df.sort_values(by=["sim_start_time"], inplace=True)
-df["adjusted_start_time"] = df["start_time"] - offset
-df["adjusted_done_time"] = df["done_time"] - offset
-df["adjusted_sim_start_time"] = df["sim_start_time"] - offset
-df["adjusted_sim_done_time"] = df["sim_done_time"] - offset
-min_time = df["adjusted_start_time"].min() - 10
-max_time = df["adjusted_done_time"].max() + 10
-
-df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
-df["packet_linelengths"] = df["done_time"] - df["start_time"]
-df["packet_lineoffsets"] = df["adjusted_start_time"] + df["packet_linelengths"] * 0.5
-df["packet_linewidths"] = 1
-
-df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
-df["linelengths"] = df["sim_done_time"] - df["sim_start_time"]
-df["lineoffsets"] = (
-    df["sim_start_time"] - report_df["start_time"].min() + df["linelengths"] * 0.5
-)
-df["colors"] = np.array(color_list)[df["step_id"] % len(color_list)]
-df["linewidths"] = 5
-fig = plt.figure(figsize=(15, 18), constrained_layout=True)
-plt.suptitle("Simulation timeline")
-gs = GridSpec(7, 1, figure=fig)
-plt.subplot(gs[0, 0])
-ts = np.linspace(min_time, max_time, 500)
-ongoing = []
-for t in ts:
-    ongoing.append(
-        ((df["adjusted_sim_start_time"] < t) & (df["adjusted_sim_done_time"] > t)).sum()
-    )
-plt.plot(ts, ongoing, "k-", label="Active worker threads")
-plt.legend()
-plt.xlim([min_time, max_time])
-plt.yticks(np.arange(0, 33, 8))
-
-plt.subplot(gs[1:, 0])
-plt.eventplot(
-    df["positions"].values[:, None],
-    lineoffsets="packet_lineoffsets",
-    linelengths="packet_linelengths",
-    linewidths="packet_linewidths",
-    colors="colors",
-    orientation="vertical",
-    data=df,
-)
-plt.eventplot(
-    df["positions"].values[:, None],
-    lineoffsets="lineoffsets",
-    linelengths="linelengths",
-    linewidths="linewidths",
-    colors="colors",
-    orientation="vertical",
-    data=df,
-)
-
-new_step_reports["adjusted_step_start_time"] = (
-    new_step_reports["time"] - new_step_reports["runtime_total"] - offset
-)
-new_step_reports["adjusted_step_done_time"] = new_step_reports["time"] - offset
-for step_id in range(min_step, max_step + 1):
-    try:
-        rpt = new_step_reports.loc[step_id]
-    except KeyError:
-        continue
-    plt.plot(
-        [
-            rpt["adjusted_step_start_time"],
-            rpt["adjusted_step_done_time"],
+debug_df = pd.concat(
+    (
+        lamss_potential[
+            [f"theta{d}" for d in range(self.dimension())]
+            + [f"radii{d}" for d in range(self.dimension())]
         ],
-        [-1, -1],
-        color_list[step_id % len(color_list)],
-        linestyle='--',
-        linewidth=5,
-    )
+        cal_df,
+    ),
+    axis=1,
+)
+for d in range(self.dimension()):
+    name = ['p_{hr+, c}', 'p_{hr+, t}', 'p_{tnbc, c}', 'p_{tnbc, t}'][d]
+    debug_df[name] = scipy.special.expit(debug_df[f"theta{d}"])
+debug_df.drop(columns=[f"theta{d}" for d in range(self.dimension())], inplace=True)
+debug_df
+```
 
-for step_id, step_df in df.groupby("step_id"):
-    plt.axvline(
-        step_df["adjusted_start_time"].min(),
-        color="k",
-        linestyle="--",
-        linewidth=1,
-        zorder=100,
-    )
-    plt.axvline(
-        step_df["adjusted_done_time"].max(), color="k", linestyle="--", linewidth=1
-    )
-for step_id, step_df in df.groupby("step_id"):
-    plt.text(
-        step_df["adjusted_start_time"].min(),
-        -3.7,
-        "$\\textbf{Step " + str(step_id) + " submit}$",
-        rotation=90,
-        va="bottom",
-        ha="right",
-        color=color_list[step_id % len(color_list)],
-        bbox=dict(facecolor="w", edgecolor="w", boxstyle="round"),
-    )
-    plt.text(
-        step_df["adjusted_done_time"].max(),
-        df["positions"].max() + 0.3,
-        f"Step {step_id} done",
-        rotation=90,
-        va="bottom",
-        ha="right",
-        color=color_list[step_id % len(color_list)],
-    )
-plt.xlabel("Seconds from start")
-plt.xlim([min_time, max_time])
-plt.ylim([-4, df["positions"].max() + 3.5])
-plt.gca().get_yaxis().set_visible(False)
+```python
+model = wd41.WD41(0, 10000, ignore_intersection=True)
+g_explore = ip.cartesian_grid([-0.6, -1.5875, -0.6, 0.5125], [-0.4, -1.5875, -0.4, 0.5125], n=[10, 1, 10, 1], null_hypos=model.null_hypos)
+cal_df = ip.calibrate(wd41.WD41, g=g_explore, model_kwargs={"ignore_intersection": True, "dtype": np.float64})
+cal_df = pd.concat((g_explore.df, cal_df), axis=1)
+```
 
+```python
+cal_df['lams'].min()
+```
+
+```python
+plt.subplot(2,2,1)
+plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['null_truth0'])
+plt.colorbar()
+plt.subplot(2,2,2)
+plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['null_truth1'])
+plt.colorbar()
+plt.subplot(2,2,3)
+plt.scatter(cal_df['theta0'], cal_df['theta2'], c=cal_df['lams'])
+plt.colorbar()
 plt.show()
+```
 
+```python
+p = scipy.special.expit(g_explore.get_theta()[40])
+sim_vmap = jax.vmap(model.sim, in_axes=(0, None, None, None, None, None))
+stats = sim_vmap(model.unifs, *p, True)
+# print(np.percentile(stats, 99))
+# plt.plot(np.sort(stats[0]))
+# plt.show()
+```
+
+```python
+bad_idx = stats['full_stat'].argmin()
+model.sim(model.unifs[bad_idx], *p, True)
+```
+
+```python
+print(np.percentile(stats['tnbc_stat'], 1))
+print(np.percentile(stats['full_stat'], 1))
+plt.subplot(1,2,1)
+plt.plot(np.sort(stats['tnbc_stat']))
+plt.subplot(1,2,1)
+plt.plot(np.sort(stats['full_stat']))
+plt.show()
+```
+
+## Looking at the reports
+
+```python
+report_df = self.get_reports()
+working_reports = report_df[report_df['status'] == 'WORKING'].dropna(axis=1, how='all')
+new_step_reports = report_df[report_df['status'] == 'NEW_STEP'].dropna(axis=1, how='all')
 ```
 
 ```python
 sim_runtime = working_reports['runtime_simulating'].sum()
-total_runtime = 2 * (report_df['done_time'].max() - report_df['start_time'].min())
+total_runtime = report_df.iloc[-1]['time'] - report_df.iloc[0]['time']
 parallelism = sim_runtime / total_runtime
 parallelism, sim_runtime / 3600, total_runtime / 3600
 ```
@@ -331,13 +271,17 @@ plt.show()
 ```
 
 ```python
+working_reports
+```
+
+```python
 working_reports['runtime_simulating'].sum()
 ```
 
 ```python
 max_working_time = working_reports.groupby('step_id')['time'].max()
 total_sim_time = working_reports.groupby('step_id')['runtime_simulating'].sum()
-ex_df = new_step_reports[['step_id', 'runtime_total', 'done_time']].set_index('step_id')
+ex_df = new_step_reports[['step_id', 'runtime_total', 'time']].set_index('step_id')
 ex_df['max_working_time'] = max_working_time
 ex_df['total_sim_time'] = total_sim_time
 step_parallelism = ex_df['total_sim_time'] / ((ex_df['max_working_time'] - ex_df['time']) + ex_df['runtime_total'])

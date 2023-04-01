@@ -176,7 +176,7 @@ class PandasTiles:
     def n_existing_packets(self, step_id):
         return self.tiles[self.tiles["step_id"] == step_id]["packet_id"].max() + 1
 
-    def insert_report(self, report):
+    def insert_reports(self, report):
         self.reports.append(report)
         return report
 
@@ -344,11 +344,10 @@ class DuckDBTiles:
             """
         ).fetchone()[0]
 
-    def insert_report(self, report):
-        report_str = json.dumps(report)
-        self.con.execute(f"insert into reports values ('{report_str}')")
-        self.ch_insert("reports", pd.DataFrame(dict(json=[report_str])), create=False)
-        return report
+    def insert_reports(self, *reports):
+        df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
+        self.con.execute("insert into reports select * from df")
+        self.ch_insert("reports", df, create=False)
 
     def insert_tiles(self, df: pd.DataFrame, ch_insert: bool = False):
         # NOTE: We insert to Clickhouse tiles and results in the packet
@@ -686,6 +685,19 @@ class DuckDBTiles:
                 ch.create_table(self.ch_client, table, df)
                 self.ch_table_exists.add(table)
             self.ch_tasks.extend(ch.threaded_block_insert_df(self.ch_client, table, df))
+
+    async def ch_checkup(self):
+        wait_for_done = [t for t in self.ch_tasks if t is not None and t.done()]
+        incomplete = []
+        for t in self.ch_tasks:
+            if t is None:
+                continue
+            if t.done():
+                wait_for_done.append(t)
+            else:
+                incomplete.append(t)
+        self.ch_tasks = incomplete
+        await asyncio.gather(*wait_for_done)
 
     async def ch_wait(self):
         while len(self.ch_tasks) > 0:
