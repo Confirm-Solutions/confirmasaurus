@@ -134,11 +134,13 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
                 logger.info(f"{n_parallel_steps} empty step. Stopping.")
                 break
 
-            with timer("process packets"):
-                logger.info("Processing packets for step %d", step_id)
+            with timer("submit packets"):
+                logger.info("Submitting packets for step %d", step_id)
                 processing_tasks.put(
                     (step_id, await submit_packet_df(backend, algo, tiles_df))
                 )
+
+            with timer("wait for packets"):
                 if processing_tasks.qsize() > n_parallel_steps - 1:
                     tasks_step_id, tasks = processing_tasks.get()
                     if tasks_step_id in expected_counts:
@@ -251,11 +253,11 @@ class LocalBackend(Backend):
         self.algo = algo
         yield
 
-    def sync_submit_tiles(self, tiles_df, refine_deepen: bool):
-        return process_tiles(self.algo, tiles_df, refine_deepen)
+    def sync_submit_tiles(self, tiles_df, refine_deepen: bool, report: dict):
+        return process_tiles(self.algo, tiles_df, refine_deepen, report)
 
-    async def submit_tiles(self, tiles_df, refine_deepen: bool):
-        return self.sync_submit_tiles(tiles_df, refine_deepen)
+    async def submit_tiles(self, tiles_df, refine_deepen: bool, report: dict):
+        return self.sync_submit_tiles(tiles_df, refine_deepen, report)
 
     async def wait_for_results(self, results):
         return results

@@ -46,7 +46,6 @@ def test_split2d():
     g = grid._raw_init_grid(
         np.array([[1.0, 1.0]]),
         np.array([[1.1, 1.1]]),
-        1,
     )
     vertex_dist = np.array([[0.2, 0.2, -1.9, -1.9]])
     g = HyperPlane(np.array([-1, 0]), -0.1).split(g, vertex_dist)
@@ -59,11 +58,11 @@ def simple_grid():
     thetas = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]])
     radii = np.full_like(thetas, 0.5)
     hypos = [HyperPlane(-np.identity(2)[i], -0.1) for i in range(2)]
-    return grid._raw_init_grid(thetas, radii, 1).add_null_hypos(hypos)
+    return grid._raw_init_grid(thetas, radii).add_null_hypos(hypos)
 
 
-n_bits = grid.n_bits
-t_bits = 64 - grid.n_bits
+n_bits, host_bits = grid._gen_short_uuids_one_batch.config
+t_bits = 64 - n_bits - host_bits
 
 
 def test_short_uuids():
@@ -73,7 +72,7 @@ def test_short_uuids():
     U2 = grid._gen_short_uuids(10, 1)
     assert U.dtype == np.uint64
     assert np.unique(U).shape[0] == 10
-    assert U2[0] - U[0] == 2**n_bits
+    assert U2[0] - U[0] == 2 ** (n_bits + host_bits)
 
 
 def test_no_duplicate_uuids():
@@ -90,7 +89,7 @@ def test_no_duplicate_uuids():
 def test_lots_of_short_uuids():
     n = 2**n_bits
     uuids = grid._gen_short_uuids(n, 1)
-    assert uuids[-1] - uuids[0] == 2**n_bits
+    assert uuids[-1] - uuids[0] == 2 ** (n_bits + host_bits)
     assert np.unique(uuids).shape[0] == n
 
 
@@ -195,7 +194,7 @@ def test_column_inheritance():
 def test_prune_no_surfaces():
     thetas = np.array([[-0.5, -0.5], [-0.5, 0.5], [0.5, -0.5], [0.5, 0.5]])
     radii = np.full_like(thetas, 0.5)
-    g = grid._raw_init_grid(thetas, radii, 1)
+    g = grid._raw_init_grid(thetas, radii)
     gp = g.prune_alternative()
     assert g == gp
 
@@ -215,11 +214,7 @@ def test_refine():
     )
 
     null_hypos = [HyperPlane(-np.identity(n_arms)[i], 1.1) for i in range(n_arms)]
-    g = (
-        grid._raw_init_grid(theta, radii, 1)
-        .add_null_hypos(null_hypos)
-        .prune_alternative()
-    )
+    g = grid._raw_init_grid(theta, radii).add_null_hypos(null_hypos).prune_alternative()
     refine_g = g.prune_inactive().subset(np.array([0, 3, 4, 5]))
     new_g = refine_g.refine()
     np.testing.assert_allclose(new_g.get_radii()[:12], 0.25)

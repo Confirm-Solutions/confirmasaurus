@@ -262,6 +262,7 @@ class SQLTiles:
             f"""
             select * from results 
                 where completion_step >= {new_step_id}
+                    and (id not in (select id from done where step_id < {new_step_id}))
                     and step_id <= {basal_step_id}
             order by {orderer} limit {n}
             """
@@ -274,8 +275,13 @@ class SQLTiles:
             self.query(
                 f"""
             select {cols} from results 
-                where inactivation_step > {basal_step_id}
-                    and step_id <= {basal_step_id}
+                where step_id <= {basal_step_id}
+                    and inactivation_step > {basal_step_id}
+                    and (id not in (
+                        select id from done 
+                            where active = false 
+                            and step_id <= {basal_step_id})
+                    )
             """
             )
             .iloc[0]
@@ -287,6 +293,11 @@ class SQLTiles:
             f"""
             select * from results
                 where inactivation_step > {basal_step_id}
+                    and (id not in (
+                        select id from done 
+                            where active = false 
+                            and step_id <= {basal_step_id})
+                    )
                     and step_id <= {basal_step_id}
                 order by {order_col} limit 1
             """
@@ -382,8 +393,9 @@ class SQLTiles:
                 where step_id <= {step_id}
                     and parent_id in 
                         (select id from results 
-                         where inactivation_step={MAX_STEP} 
-                            or completion_step={MAX_STEP})
+                         where (inactivation_step={MAX_STEP} 
+                            or completion_step={MAX_STEP}) 
+                            and (id not in (select id from done where active=false)))
             """,
             quiet=True,
         )
@@ -400,6 +412,11 @@ class SQLTiles:
                 where 
                     results.step_id <= {step_id}
                     and results.inactivation_step <= {step_id}
+                    and results.id not in (
+                        select id from done 
+                            where active=false 
+                            and step_id <= {step_id}
+                    )
                     and id not in (
                         select parent_id from tiles where step_id <= {step_id}
                     )

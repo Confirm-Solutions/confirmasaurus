@@ -45,13 +45,15 @@ class ModalBackend(LocalBackend):
         global stub
         global modal_config
         stub = modal.aio.AioStub(name)
+        stub.worker_id_queue = modal.aio.AioQueue()
         process_tiles_config["gpu"] = self.gpu
         process_tiles_config["keep_warm"] = self.n_workers
         process_tiles_config["concurrency_limit"] = self.n_workers
         from .modal_worker import ModalWorker
 
         self.w = ModalWorker()
-        async with stub.run():
+        async with stub.run() as app:
+            await app.worker_id_queue.put_many(list(range(2, self.n_workers * 5)))
             filtered_cfg = {
                 k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
             }
@@ -66,9 +68,9 @@ class ModalBackend(LocalBackend):
             yield
         del sys.modules["confirm.cloud.modal_worker"]
 
-    async def submit_tiles(self, tiles_df, refine_deepen):
+    async def submit_tiles(self, tiles_df, refine_deepen, report):
         return asyncio.create_task(
-            self.w.process_tiles.call(self.worker_args, tiles_df, refine_deepen)
+            self.w.process_tiles.call(self.worker_args, tiles_df, refine_deepen, report)
         )
 
     async def wait_for_results(self, awaitable):

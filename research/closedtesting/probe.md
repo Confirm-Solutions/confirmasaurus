@@ -16,7 +16,7 @@ import confirm.cloud.clickhouse as ch
 
 ip.setup_nb()
 
-db = "wd41_4d_20230401_215130"
+db = "wd41_4d_20230402_132502"
 
 ddb_path = Path(confirm.__file__).parent.parent.joinpath(f"{db}.db")
 use_clickhouse = False
@@ -45,18 +45,6 @@ dim = len(
 n_steps = query("select max(step_id) from results").iloc[0][0] + 1
 dim, n_steps
 
-```
-
-```python
-query('select count(*) from tiles group by active_at_birth')
-```
-
-```python
-query('select packet_id from done where step_id = 1 group by packet_id')
-```
-
-```python
-ch_db.n_tiles_done(1)
 ```
 
 ## Broad table exploration
@@ -240,9 +228,8 @@ np.sum(deepen_likely_to_work)
 ```python
 import json
 
-report_df = pd.DataFrame(
-    [json.loads(v) for v in query("select * from reports")["json"].values]
-)
+reports = [json.loads(v) for v in query("select * from reports")["json"].values]
+report_df = pd.DataFrame(reports)
 working_reports = report_df[report_df["status"] == "WORKING"].dropna(axis=1, how="all")
 new_step_reports = report_df[report_df["status"] == "NEW_STEP"].dropna(
     axis=1, how="all"

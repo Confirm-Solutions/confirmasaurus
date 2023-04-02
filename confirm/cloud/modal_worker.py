@@ -1,3 +1,6 @@
+import modal
+
+import imprint as ip
 from ..adagrid.adagrid import LocalBackend
 from .modal_backend import process_tiles_config
 from .modal_backend import stub
@@ -8,6 +11,12 @@ class ModalWorker:
     """
     See ModalBackend for an explanation of why this is in a separate module.
     """
+
+    async def __aenter__(self):
+        self.worker_id = modal.container_app.worker_id_queue.get(block=False)
+        if self.worker_id is None:
+            raise RuntimeError("No worker ID available")
+        ip.grid.worker_id = self.worker_id
 
     async def __aexit__(self, *args):
         if hasattr(self, "algo"):
@@ -33,10 +42,10 @@ class ModalWorker:
             self.algo = algo_type(model, null_hypos, db, cfg, None)
 
     @stub.function(**process_tiles_config)
-    async def process_tiles(self, worker_args, tiles_df, refine_deepen):
+    async def process_tiles(self, worker_args, tiles_df, refine_deepen, report):
         await self.setup(worker_args)
 
         lb = LocalBackend()
         lb.algo = self.algo
-        out = await lb.submit_tiles(tiles_df, refine_deepen)
+        out = await lb.submit_tiles(tiles_df, refine_deepen, report)
         return out

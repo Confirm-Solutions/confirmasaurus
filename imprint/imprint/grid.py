@@ -597,53 +597,74 @@ def _get_edges(theta, radii):
     return edges
 
 
-def _gen_short_uuids(n, t=None):
+def _gen_short_uuids(n, w_id=None, t=None):
     """
-    Short UUIDs are a custom identifier created for imprint that should help
-    avoid having overlapping indices while keeping ids in sequence.
-
-    - The highest 32 bits are the time in seconds of creation. This will not
-      loop for 136 years. When we start running jobs that take longer than 136
+    Short UUIDs are a custom identifier created for imprint that should allow
+    for concurrent creation of tiles without having overlapping indices.
+    - The highest 28 bits are the time in seconds of creation. This will not
+      loop for 8.5 years. When we start running jobs that take longer than 8.5
       years to complete, please send a message to me in the afterlife.
         - The unique_timer() function used for the time never returns the same
           time twice so the creation time is never re-used. If the creation
           time is going to be reused because less than one second has passed
           since the previous call to gen_short_uuids, then the timer increments
           by one.
-    - The lowest 32 bits are the index of the created tiles within this batch.
-      This allows for up to 4 billions tiles to be created in a single
-      batch. This is not a problematic constraint... But even if it were, we
-      can just increment the time by one and then grab another batch of IDs.
-
+    - The next 18 bits are the index of the process. This is a pretty generous limit
+      on the number of processes. 2^18=262144.
+    - The lowest 18 bits are the index of the created tiles within this batch.
+      This allows for up to 2^18 = 262144 tiles to be created in a single
+      batch. This is not a problematic constraint, because we can just
+      increment the time by one and then grab another batch of IDs.
+    NOTE: This should be safe across processes but will not be safe across
+    threads within a single Python process because multithreaded programs share
+    globals.
     Args:
         n: The number of short uuids to generate.
+        w_id: The host id. Must be > 0 and < 2**18. For non-concurrent
+                   jobs, just set this to 1.
         t: The time to impose (used for testing). Defaults to None.
-
     Returns:
         An array with dtype uint64 of length n containing short uuids.
     """
-    n_max = (2**n_bits) - 1
+    n_max = 2 ** _gen_short_uuids_one_batch.config[0] - 1
     if n <= n_max:
-        return _gen_short_uuids_one_batch(n, t)
+        return _gen_short_uuids_one_batch(n, w_id, t)
 
     out = np.empty(n, dtype=np.uint64)
     for i in range(0, n, n_max):
         chunk_size = min(n_max, n - i)
-        out[i : i + chunk_size] = _gen_short_uuids_one_batch(chunk_size, t)
+        out[i : i + chunk_size] = _gen_short_uuids_one_batch(chunk_size, w_id, t)
     return out
 
 
-def _gen_short_uuids_one_batch(n, t):
+def _gen_short_uuids_one_batch(n, w_id=None, t=None):
+    n_bits, worker_bits = _gen_short_uuids_one_batch.config
     assert n < 2**n_bits
 
     if t is None:
         t = unique_timer()
 
-    max_t = np.uint64(2 ** (64 - n_bits))
+    if w_id is None:
+        w_id = worker_id
+
+    assert w_id > 0
+    assert w_id < 2**worker_bits
+
+    max_t = np.uint64(2 ** (64 - n_bits - worker_bits))
     looped_t = np.uint64(t) % max_t
 
-    out = (looped_t << np.uint64(n_bits)) + np.arange(n, dtype=np.uint64)
+    out = (
+        (looped_t << np.uint64(n_bits + worker_bits))
+        + (np.uint64(w_id) << np.uint64(n_bits))
+        + np.arange(n, dtype=np.uint64)
+    )
+    logger.debug(
+        f"_gen_short_uuids(n={n}, worker_id={w_id}, t={t}, n_bits={n_bits},"
+        f" worker_bits={worker_bits}) = [{str(out[:3])[1:-1]}, ...]:"
+    )
     return out
 
 
-n_bits = 32
+worker_id = 1
+
+_gen_short_uuids_one_batch.config = (18, 18)

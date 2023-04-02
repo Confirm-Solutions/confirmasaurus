@@ -5,8 +5,8 @@ import os
 import subprocess
 
 import dask
+import distributed
 import jax
-from distributed import get_worker
 from distributed.diagnostics.plugin import UploadDirectory
 
 import confirm
@@ -117,7 +117,7 @@ def check():
 
 
 def setup_worker(worker_args):
-    worker = get_worker()
+    worker = distributed.get_worker()
 
     (
         algo_type,
@@ -163,21 +163,26 @@ def setup_worker(worker_args):
         db = ch.ClickhouseTiles.connect(
             job_name=cfg["job_name"], service=cfg["clickhouse_service"]
         )
+        logger.debug("Connected to Clickhouse")
+        client = distributed.get_client()
+        worker_id = distributed.Queue("worker_id", client=client).get()
+        logger.debug("Got worker_id: %s", worker_id)
+        ip.grid.worker_id = worker_id
 
         model = model_type(*model_args, **model_kwargs)
         worker.algo = algo_type(model, null_hypos, db, cfg, None)
         worker.algo_hash = hash_args
 
 
-def dask_process_tiles(worker_args, tiles_df, refine_deepen):
+def dask_process_tiles(worker_args, tiles_df, refine_deepen, report):
     setup_worker(worker_args)
     jax_platform = jax.lib.xla_bridge.get_backend().platform
     assert jax_platform == "gpu"
 
-    worker = get_worker()
+    worker = distributed.get_worker()
     lb = LocalBackend()
     lb.algo = worker.algo
-    return lb.sync_submit_tiles(tiles_df, refine_deepen)
+    return lb.sync_submit_tiles(tiles_df, refine_deepen, report)
 
 
 class CoiledBackend(LocalBackend):
@@ -227,6 +232,9 @@ class CoiledBackend(LocalBackend):
             filtered_cfg = {
                 k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
             }
+            self.queue = distributed.Queue("worker_id", client=self.client)
+            for i in range(2, 2 + 5 * self.n_workers):
+                self.queue.put(i)
             worker_args = (
                 type(algo),
                 type(algo.driver.model),
@@ -239,7 +247,7 @@ class CoiledBackend(LocalBackend):
             self.worker_args_future = self.client.scatter(worker_args, broadcast=True)
             yield
 
-    async def submit_tiles(self, tiles_df, refine_deepen):
+    async def submit_tiles(self, tiles_df, refine_deepen, report):
         step_id = int(tiles_df["step_id"].iloc[0])
         # negative step_id is the priority so that earlier steps are completed
         # before later steps when we are using n_parallel_steps
@@ -249,6 +257,7 @@ class CoiledBackend(LocalBackend):
                 self.worker_args_future,
                 tiles_df,
                 refine_deepen,
+                report,
                 retries=0,
             )
 

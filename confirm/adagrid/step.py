@@ -18,13 +18,8 @@ async def submit_packet_df(backend, algo, tiles_df, refine_deepen: bool = True):
         start = time.time()
         report = dict()
         report["start_time"] = start
-        report["step_id"] = packet_df.iloc[0]["step_id"]
-        report["packet_id"] = packet_df.iloc[0]["packet_id"]
-        report["n_tiles"] = packet_df.shape[0]
-        report["n_total_sims"] = packet_df["K"].sum()
-
         logger.debug("Submitting %d tiles for processing.", packet_df.shape[0])
-        return await backend.submit_tiles(packet_df, refine_deepen), report
+        return await backend.submit_tiles(packet_df, refine_deepen, report)
 
     if tiles_df is None or tiles_df.shape[0] == 0:
         return []
@@ -35,15 +30,9 @@ async def submit_packet_df(backend, algo, tiles_df, refine_deepen: bool = True):
 
 
 async def wait_for_packets(backend, algo, packets):
-    async def wait_for_packet(awaitable, report):
-        n_results, sim_report = await backend.wait_for_results(awaitable)
+    async def wait_for_packet(awaitable):
+        n_results, report = await backend.wait_for_results(awaitable)
         # TODO: move to worker?
-        report.update(sim_report)
-        report["runtime_per_sim_ns"] = (
-            report["runtime_simulating"] / report["n_total_sims"] * 1e9
-        )
-        status = WorkerStatus.WORKING
-        report["status"] = status.name
         report["runtime_total"] = time.time() - report["start_time"]
         report["done_time"] = time.time()
         algo.callback(report, algo.db)
@@ -51,7 +40,7 @@ async def wait_for_packets(backend, algo, packets):
 
     coros = []
     for p in packets:
-        coros.append(wait_for_packet(*p))
+        coros.append(wait_for_packet(p))
     logger.debug("Waiting for packets to finish.")
     outs = await asyncio.gather(*coros)
     if len(outs) == 0:
@@ -60,12 +49,11 @@ async def wait_for_packets(backend, algo, packets):
     else:
         n_results, reports = zip(*outs)
     logger.debug("Packets finished.")
-    algo.db.insert_reports(reports)
+    algo.db.insert_reports(*reports)
     return sum(n_results)
 
 
-def process_tiles(algo, df, refine_deepen: bool):
-    report = dict()
+def process_tiles(algo, df, refine_deepen: bool, report: dict):
     if refine_deepen:
         start = time.time()
         tiles_df, inactive_df = refine_and_deepen(
@@ -79,21 +67,29 @@ def process_tiles(algo, df, refine_deepen: bool):
         tiles_df = df
 
     algo.db.insert("tiles", tiles_df)
-    report["n_tiles"] = tiles_df.shape[0]
-    report["sim_start_time"] = time.time()
 
     tbs = algo.cfg["tile_batch_size"]
     if tbs is None:
         tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
-    report["tile_batch_size"] = tbs
-    start = time.time()
+    report["sim_start_time"] = time.time()
     results_df = algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+    report["sim_done_time"] = time.time()
     results_df["completion_step"] = MAX_STEP
     results_df["inactivation_step"] = MAX_STEP
-    report["runtime_simulating"] = time.time() - start
-    report["sim_done_time"] = time.time()
-
     algo.db.insert("results", results_df)
+
+    report["step_id"] = df.iloc[0]["step_id"]
+    report["packet_id"] = df.iloc[0]["packet_id"]
+    report["n_parent_tiles"] = df.shape[0]
+    report["n_tiles"] = tiles_df.shape[0]
+    report["tile_batch_size"] = tbs
+    report["n_total_sims"] = results_df["K"].sum()
+    report["runtime_simulating"] = report["sim_done_time"] - report["sim_start_time"]
+    report["runtime_per_sim_ns"] = (
+        report["runtime_simulating"] / report["n_total_sims"] * 1e9
+    )
+    report["status"] = WorkerStatus.WORKING.name
+
     return results_df.shape[0], report
 
 
