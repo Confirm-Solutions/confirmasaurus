@@ -1,13 +1,12 @@
-import asyncio
 import logging.handlers
 import threading
 import time
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
+from typing import Any
 from typing import Dict
 from typing import List
-from typing import Optional
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -17,7 +16,6 @@ from .const import MAX_STEP
 
 if TYPE_CHECKING:
     import duckdb
-    import clickhouse_connect
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +37,6 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
 
     def __init__(self, db, capacity=100, interval=15, flushLevel=logging.WARNING):
         self.db = db
-        assert hasattr(self.db, "insert_logs")
         self.capacity = capacity
         self.flushLevel = flushLevel
         self.interval = interval
@@ -101,7 +98,7 @@ class DatabaseLogging(logging.handlers.BufferingHandler):
             )
             self.lastFlush = time.time()
             self.buffer = []
-            self.db.insert_logs(df)
+            self.db.insert("logs", df)
         finally:
             self.release()
 
@@ -225,46 +222,260 @@ class PandasTiles:
 
 
 @dataclass
-class DuckDBTiles:
+class SQLTiles:
+    def dimension(self):
+        return (
+            max(
+                [int(c[5:]) for c in self.get_columns("tiles") if c.startswith("theta")]
+            )
+            + 1
+        )
+
+    def get_table(self, table_name: str) -> pd.DataFrame:
+        return self.query(f"select * from {table_name}")
+
+    def get_results(self) -> pd.DataFrame:
+        out = self.get_table("results")
+        out.insert(0, "active", out["inactivation_step"] == MAX_STEP)
+        return out
+
+    def get_reports(self) -> pd.DataFrame:
+        json_strs = self.get_table("reports").values[:, 0]
+        return pd.DataFrame([json.loads(s[0]) for s in json_strs])
+
+    def n_existing_packets(self, step_id: int) -> int:
+        return self.query(
+            f"""
+            select max(packet_id) + 1 from tiles
+                where step_id = {step_id}
+            """
+        ).iloc[0][0]
+
+    def insert_reports(self, *reports: Dict[str, Any]) -> None:
+        df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
+        self.insert("reports", df)
+
+    def next(
+        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
+    ) -> pd.DataFrame:
+        return self.query(
+            f"""
+            select * from results 
+                where completion_step >= {new_step_id}
+                    and step_id <= {basal_step_id}
+            order by {orderer} limit {n}
+            """
+        )
+
+    def bootstrap_lamss(self, basal_step_id: int, nB: int) -> List[float]:
+        # Get lambda**_Bi for each bootstrap sample.
+        cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        return (
+            self.query(
+                f"""
+            select {cols} from results 
+                where inactivation_step > {basal_step_id}
+                    and step_id <= {basal_step_id}
+            """
+            )
+            .iloc[0]
+            .values
+        )
+
+    def worst_tile(self, basal_step_id: int, order_col: str) -> pd.DataFrame:
+        return self.query(
+            f"""
+            select * from results
+                where inactivation_step > {basal_step_id}
+                    and step_id <= {basal_step_id}
+                order by {order_col} limit 1
+            """
+        )
+
+    async def wait_for_step(
+        self, basal_step_id: int, step_id: int, expected_counts: Dict[int, int]
+    ):
+        pass
+
+    def verify(self, step_id: int):
+        duplicate_tiles = self.query(
+            f"""
+            select id from tiles 
+                where step_id <= {step_id}
+                group by id 
+                having count(*) > 1
+            """,
+            quiet=True,
+        )
+        if len(duplicate_tiles) > 0:
+            raise ValueError(f"Duplicate tiles: {duplicate_tiles}")
+
+        duplicate_results = self.query(
+            f"""
+            select id from results 
+                where step_id <= {step_id} 
+                group by id 
+                having count(*) > 1
+            """,
+            quiet=True,
+        )
+        if len(duplicate_results) > 0:
+            raise ValueError(f"Duplicate results: {duplicate_results}")
+
+        duplicate_done = self.query(
+            f"""
+            select id from done 
+                where step_id <= {step_id} 
+                group by id 
+                having count(*) > 1
+            """,
+            quiet=True,
+        )
+        if len(duplicate_done) > 0:
+            raise ValueError(f"Duplicate done: {duplicate_done}")
+
+        results_without_tiles = self.query(
+            f"""
+            select id from results
+                where step_id <= {step_id}
+                    and id not in (select id from tiles)
+            """,
+            quiet=True,
+        )
+        if len(results_without_tiles) > 0:
+            raise ValueError(
+                "Rows in results without corresponding rows in tiles:"
+                f" {results_without_tiles}"
+            )
+
+        active_tiles_without_results = self.query(
+            f"""
+            select id from tiles
+                where 
+                    step_id <= {step_id}
+                    and active_at_birth = true
+                    and id not in (select id from results)
+            """,
+            quiet=True,
+        )
+        if len(active_tiles_without_results) > 0:
+            raise ValueError(
+                "Rows in tiles without corresponding rows in results:"
+                f" {active_tiles_without_results}"
+            )
+
+        tiles_without_parents = self.query(
+            f"""
+            select parent_id, id from tiles
+                where active_at_birth = true
+                    and step_id <= {step_id}
+                    and parent_id not in (select id from done)
+            """,
+            quiet=True,
+        )
+        if len(tiles_without_parents) > 0:
+            raise ValueError(f"tiles without parents: {tiles_without_parents}")
+
+        tiles_with_active_or_incomplete_parents = self.query(
+            f"""
+            select parent_id, id from tiles
+                where step_id <= {step_id}
+                    and parent_id in 
+                        (select id from results 
+                         where inactivation_step={MAX_STEP} 
+                            or completion_step={MAX_STEP})
+            """,
+            quiet=True,
+        )
+        if len(tiles_with_active_or_incomplete_parents) > 0:
+            raise ValueError(
+                f"tiles with active parents: {tiles_with_active_or_incomplete_parents}"
+            )
+
+        # we want to ignore tiles that were never active (i.e. pruned during refinement)
+        # to do this, we check that the done.step_id is greater than tiles.step_id
+        inactive_tiles_with_no_children = self.query(
+            f"""
+            select id from results
+                where 
+                    results.step_id <= {step_id}
+                    and results.inactivation_step <= {step_id}
+                    and id not in (
+                        select parent_id from tiles where step_id <= {step_id}
+                    )
+            """,
+            quiet=True,
+        )
+        if len(inactive_tiles_with_no_children) > 0:
+            raise ValueError(
+                f"inactive tiles with no children: {inactive_tiles_with_no_children}"
+            )
+
+        refined_tiles_with_incorrect_child_count = self.query(
+            f"""
+            select d.id, count(*) as n_children, max(refine) as n_expected
+                from done d
+                left join tiles t
+                    on t.parent_id = d.id
+                where d.step_id <= {step_id}
+                    and refine > 0
+                group by d.id
+                having count(*) != max(refine)
+            """,
+            quiet=True,
+        )
+        if len(refined_tiles_with_incorrect_child_count) > 0:
+            raise ValueError(
+                "refined tiles with wrong number of children:"
+                f" {refined_tiles_with_incorrect_child_count}"
+            )
+
+        deepened_tiles_with_incorrect_child_count = self.query(
+            f"""
+            select d.id, count(*) from done d
+                left join tiles t
+                    on t.parent_id = d.id
+                where d.step_id <= {step_id}
+                    and deepen=true
+                group by d.id
+                having count(*) != 1
+            """,
+            quiet=True,
+        )
+        if len(deepened_tiles_with_incorrect_child_count) > 0:
+            raise ValueError(
+                "deepened tiles with wrong number of children:"
+                f" {deepened_tiles_with_incorrect_child_count}"
+            )
+
+    async def finalize(self) -> None:
+        pass
+
+
+@dataclass
+class DuckDBTiles(SQLTiles):
     """
     A tile database built on top of DuckDB.
 
     See this GitHub issue for a discussion of the design:
     https://github.com/Confirm-Solutions/confirmasaurus/issues/95
-
-    See this github issue for thoughts on the mirrored insert backup to Clickhouse:
-    https://github.com/Confirm-Solutions/confirmasaurus/issues/323
     """
 
     con: "duckdb.DuckDBPyConnection"
-    ch_client: "clickhouse_connect.driver.httpclient.HttpClient" = None
-    ch_table_exists: set = field(default_factory=set)
-    ch_tasks: List[asyncio.Task] = field(default_factory=list)
-    _d: int = None
 
-    def dimension(self):
-        if self._d is None:
-            cols = self._tiles_columns()
-            self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
-        return self._d
+    def query(self, query, quiet=False):
+        return self.con.query(query).df()
 
-    def _tiles_columns(self):
-        return self.con.execute("select * from tiles limit 0").df().columns
-
-    def _results_columns(self):
-        if self.ch_client is None:
-            return self.con.execute("select * from results limit 0").df().columns
+    def insert(self, table, df):
+        if not self.does_table_exist(table):
+            self.con.execute(f"create table {table} as select * from df")
         else:
-            if not hasattr(self, "_results_columns_cache"):
-                import confirm.cloud.clickhouse as ch
+            cols = self.con.query(f"select * from {table} limit 0").df().columns
+            col_order = ",".join([c for c in cols])
+            self.con.execute(f"insert into {table} select {col_order} from df")
 
-                self._results_columns_cache = ch.query_df(
-                    "select * from results limit 1"
-                ).columns
-            return self._results_columns_cache
-
-    def _done_columns(self):
-        return self.con.execute("select * from done limit 0").df().columns
+    def get_columns(self, table):
+        return self.query(f"select * from {table} limit 0").columns
 
     def does_table_exist(self, table_name):
         out = self.con.query(
@@ -278,416 +489,33 @@ class DuckDBTiles:
             return False
         return True
 
-    def get_tiles(self):
-        return self.con.execute("select * from tiles").df()
-
-    def get_results(self):
-        out = self.con.execute("select * from results").df()
-        out.insert(0, "active", out["inactivation_step"] == MAX_STEP)
-        return out
-
-    def get_done(self):
-        return self.con.execute("select * from done").df()
-
-    def get_reports(self):
-        json_strs = self.con.execute("select * from reports").fetchall()
-        return pd.DataFrame([json.loads(s[0]) for s in json_strs])
-
-    def get_logs(self):
-        return self.con.execute("select * from logs").df()
-
-    def get_null_hypos(self):
-        return self.con.query("select * from null_hypos").df()
-
-    def get_config(self):
-        return self.con.query("select * from config").df()
-
-    def n_existing_packets(self, step_id):
-        return self.con.query(
-            f"""
-            select max(packet_id) + 1 from tiles
-                where step_id = {step_id}
-            """
-        ).fetchone()[0]
-
-    def insert_reports(self, *reports):
-        df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
-        self.con.execute("insert into reports select * from df")
-        self.ch_insert("reports", df, create=False)
-
-    def insert_tiles(self, df: pd.DataFrame):
-        # NOTE: We insert to Clickhouse tiles and results in the packet
-        # processing instead. This spreads out the Clickhouse mirroring
-        # bandwidth requirements.
-        column_order = ",".join(self._tiles_columns())
-        self.con.execute(f"insert into tiles select {column_order} from df")
-        logger.debug("Inserted %d new tiles.", df.shape[0])
-        self.ch_insert("tiles", df, create=False)
-
-    def insert_results(self, df: pd.DataFrame, orderer: str):
-        if not self.does_table_exist("results"):
-            self.con.execute("create table results as select * from df")
-        else:
-            cols = ",".join([c for c in self._results_columns()])
-            self.con.execute(f"insert into results select {cols} from df")
-        logger.debug(f"Inserted {df.shape[0]} results.")
-
-    def insert_done(self, df: pd.DataFrame):
-        column_order = ",".join(self._done_columns())
-        self.con.execute(f"insert into done select {column_order} from df")
-        self.ch_insert("done", df, create=False)
-        self.update_active_complete(df=df)
-        # Updating active/complete is not strictly necessary since it can be
-        # inferred from the info in the done table. But, updating the flags on
-        # the tiles/results tables is more efficient for future queries.
-        logger.debug(f"Finished {df.shape[0]} tiles.")
-
-    def update_active_complete(self, df=None):
-        if df is None:
-            table = "done"
-        else:
-            table = "df"
+    def insert_done_update_results(self, df: pd.DataFrame):
+        self.insert("done", df)
         self.con.execute(
-            f"""
-            update tiles 
-                set inactivation_step=d.step_id
-            from {table} d
-                where tiles.id=d.id
-                    and d.active=false
             """
-        )
-        self.con.execute(
-            f"""
             update results
-                set inactivation_step=d.step_id
-            from {table} d
-                where results.id=d.id
-                    and d.active=false
+                set inactivation_step=(
+                        CASE WHEN df.active 
+                            THEN results.inactivation_step 
+                            ELSE df.step_id 
+                        END),
+                    completion_step=df.step_id
+            from df
+                where results.id=df.id
             """
         )
-        self.con.execute(
-            f"""
-            update results
-                set completion_step=d.step_id
-            from {table} d
-                where results.id=d.id
-            """
-        )
-
-    def insert_logs(self, df):
-        if not self.does_table_exist("logs"):
-            self.con.execute(
-                """
-                create table if not exists logs (
-                    t TIMESTAMP,
-                    name TEXT,
-                    pathname TEXT,
-                    lineno UINTEGER,
-                    levelno UINTEGER,
-                    levelname TEXT,
-                    message TEXT
-                )
-                """
-            )
-        self.con.execute("insert into logs select * from df")
-        self.ch_insert("logs", df, create=True)
-
-    def insert_config(self, cfg_df):
-        self.con.execute("insert into config select * from cfg_df")
-        self.ch_insert("config", cfg_df, create=False)
-
-    def next(
-        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
-    ) -> pd.DataFrame:
-        # we wrap with a transaction to ensure that concurrent readers don't
-        # grab the same chunk of work.
-        if self.ch_client is None:
-            return self.con.query(
-                f"""
-                select * from results 
-                    where completion_step >= {new_step_id}
-                        and step_id <= {basal_step_id}
-                order by {orderer} limit {n}
-                """
-            ).df()
-        else:
-            import confirm.cloud.clickhouse as ch
-
-            return ch.query_df(
-                self.ch_client,
-                f"""
-                select * from results
-                    where completion_step >= {new_step_id}
-                        and step_id <= {basal_step_id}
-                order by {orderer} limit {n}
-                """,
-            )
-
-    def bootstrap_lamss(self, basal_step_id: int) -> List[float]:
-        # Get the number of bootstrap lambda* columns
-        nB = (
-            max([int(c[6:]) for c in self._results_columns() if c.startswith("B_lams")])
-            + 1
-        )
-
-        # Get lambda**_Bi for each bootstrap sample.
-        cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        if self.ch_client is None:
-            return self.con.execute(
-                f"""
-                select {cols} from results 
-                    where inactivation_step > {basal_step_id}
-                        and step_id <= {basal_step_id}
-                """
-            ).fetchall()[0]
-        else:
-            import confirm.cloud.clickhouse as ch
-
-            return ch.query_df(
-                self.ch_client,
-                f"""
-                select {cols} from results 
-                    where inactivation_step > {basal_step_id}
-                        and step_id <= {basal_step_id}
-                """,
-            ).iloc[0]
-
-    def worst_tile(self, basal_step_id, order_col):
-        if self.ch_client is None:
-            return self.con.execute(
-                f"""
-                select * from results
-                    where inactivation_step > {basal_step_id}
-                        and step_id <= {basal_step_id}
-                    order by {order_col} limit 1
-                """
-            ).df()
-        else:
-            import confirm.cloud.clickhouse as ch
-
-            return ch.query_df(
-                self.ch_client,
-                f"""
-                select * from results
-                    where inactivation_step > {basal_step_id}
-                        and step_id <= {basal_step_id}
-                    order by {order_col} limit 1
-                """,
-            )
-
-    def get_next_step(self):
-        return self.con.query("select max(step_id) + 1 from tiles").fetchone()[0]
-
-    def verify(self, step_id: int):
-        duplicate_tiles = self.con.query(
-            "select id from tiles group by id having count(*) > 1"
-        ).df()
-        if len(duplicate_tiles) > 0:
-            raise ValueError(f"Duplicate tiles: {duplicate_tiles}")
-
-        duplicate_results = self.con.query(
-            "select id from results group by id having count(*) > 1"
-        ).df()
-        if len(duplicate_results) > 0:
-            raise ValueError(f"Duplicate results: {duplicate_results}")
-
-        duplicate_done = self.con.query(
-            "select id from done group by id having count(*) > 1"
-        ).df()
-        if len(duplicate_done) > 0:
-            raise ValueError(f"Duplicate done: {duplicate_done}")
-
-        results_without_tiles = self.con.query(
-            """
-            select id from results
-                where id not in (select id from tiles)
-            """
-        ).df()
-        if len(results_without_tiles) > 0:
-            raise ValueError(
-                "Rows in results without corresponding rows in tiles:"
-                f" {results_without_tiles}"
-            )
-
-        tiles_without_results = self.con.query(
-            f"""
-            select id from tiles
-                where inactivation_step > step_id
-                    and step_id <= {step_id}
-                    and id not in (select id from results)
-            """
-        ).df()
-        if len(tiles_without_results) > 0:
-            raise ValueError(
-                "Rows in tiles without corresponding rows in results:"
-                f" {tiles_without_results}"
-            )
-
-        tiles_without_parents = self.con.query(
-            """
-            select parent_id, id from tiles
-                where parent_id not in (select id from done)
-            """
-        ).df()
-        if len(tiles_without_parents) > 0:
-            raise ValueError(f"tiles without parents: {tiles_without_parents}")
-
-        tiles_with_active_or_incomplete_parents = self.con.query(
-            f"""
-            select parent_id, id from tiles
-                where parent_id in 
-                    (select id from results 
-                         where inactivation_step={MAX_STEP} 
-                            or completion_step={MAX_STEP})
-            """
-        ).df()
-        if len(tiles_with_active_or_incomplete_parents) > 0:
-            raise ValueError(
-                f"tiles with active parents: {tiles_with_active_or_incomplete_parents}"
-            )
-
-        inactive_tiles_with_no_children = self.con.query(
-            f"""
-            select id from tiles
-                where inactivation_step > step_id
-                    and inactivation_step < {MAX_STEP}
-                    and id not in (select parent_id from tiles)
-            """
-        ).df()
-        if len(inactive_tiles_with_no_children) > 0:
-            raise ValueError(
-                f"inactive tiles with no children: {inactive_tiles_with_no_children}"
-            )
-
-        refined_tiles_with_incorrect_child_count = self.con.query(
-            """
-            select d.id, count(*) as n_children, max(refine) as n_expected
-                from done d
-                left join tiles t
-                    on t.parent_id = d.id
-                where refine > 0
-                group by d.id
-                having count(*) != max(refine)
-            """
-        ).df()
-        if len(refined_tiles_with_incorrect_child_count) > 0:
-            raise ValueError(
-                "refined tiles with wrong number of children:"
-                f" {refined_tiles_with_incorrect_child_count}"
-            )
-
-        deepened_tiles_with_incorrect_child_count = self.con.query(
-            """
-            select d.id, count(*) from done d
-                left join tiles t
-                    on t.parent_id = d.id
-                where deepen=true
-                group by d.id
-                having count(*) != 1
-            """
-        ).df()
-        if len(deepened_tiles_with_incorrect_child_count) > 0:
-            raise ValueError(
-                "deepened tiles with wrong number of children:"
-                f" {deepened_tiles_with_incorrect_child_count}"
-            )
-
-    def close(self) -> None:
-        self.con.close()
-
-    def init_grid(
-        self, tiles_df: pd.DataFrame, null_hypos_df: pd.DataFrame, cfg_df: pd.DataFrame
-    ) -> None:
-        empty_tiles_df = tiles_df.iloc[:0]
-        self.con.execute("create table tiles as select * from empty_tiles_df")
-        self.con.execute(
-            """
-            create table done (
-                    step_id UINTEGER,
-                    packet_id INTEGER,
-                    id UBIGINT,
-                    active BOOL,
-                    refine UINTEGER,
-                    deepen UINTEGER,
-                    split BOOL)
-            """
-        )
-        absent_parents_df = get_absent_parents(tiles_df)  # noqa
-        self.con.execute("insert into done select * from absent_parents_df")
-        self.con.execute("create table reports (json TEXT)")
-        self.con.execute("create table null_hypos as select * from null_hypos_df")
-        self.con.execute("create table config as select * from cfg_df")
-        self.ch_insert("tiles", empty_tiles_df, create=True)
-        self.ch_insert("done", absent_parents_df, create=True)
-        self.ch_insert("null_hypos", null_hypos_df, create=True)
-        self.ch_insert("config", cfg_df, create=True)
-        self.ch_insert("reports", pd.DataFrame(columns=["json"]), create=True)
 
     @staticmethod
-    def connect(path: str = ":memory:", ch_client: Optional[str] = None):
+    def connect(path: str = ":memory:"):
         """
         Load a tile database from a file.
 
         Args:
             path: The filepath to the database.
-            ch_client: A Clickhouse client to use for mirroring inserts.
 
         Returns:
             The tile database.
         """
         import duckdb
 
-        return DuckDBTiles(duckdb.connect(path), ch_client)
-
-    def ch_insert(
-        self, table: str, df: pd.DataFrame, create: bool, block: bool = False
-    ):
-        if self.ch_client is not None:
-            import confirm.cloud.clickhouse as ch
-
-            if create and table not in self.ch_table_exists:
-                ch.create_table(self.ch_client, table, df)
-                self.ch_table_exists.add(table)
-            self.ch_tasks.extend(ch.insert_df(self.ch_client, table, df, block=block))
-
-    async def ch_checkup(self):
-        wait_for_done = [t for t in self.ch_tasks if t is not None and t.done()]
-        incomplete = []
-        for t in self.ch_tasks:
-            if t is None:
-                continue
-            if t.done():
-                wait_for_done.append(t)
-            else:
-                incomplete.append(t)
-        self.ch_tasks = incomplete
-        await asyncio.gather(*wait_for_done)
-
-    async def ch_wait(self):
-        while len(self.ch_tasks) > 0:
-            tmp = [t for t in self.ch_tasks if t is not None]
-            self.ch_tasks = []
-            await asyncio.gather(*tmp)
-
-
-done_cols = [
-    "step_id",
-    "packet_id",
-    "id",
-    "active",
-    "refine",
-    "deepen",
-    "split",
-]
-
-
-def get_absent_parents(tiles_df):
-    # these tiles have no parents. poor sad tiles :(
-    # we need to put these absent parents into the done table
-    absent_parents = pd.DataFrame(
-        tiles_df["parent_id"].unique()[:, None], columns=["id"]
-    )
-    for c in done_cols:
-        if c not in absent_parents.columns:
-            absent_parents[c] = 0
-    return absent_parents[done_cols]
+        return DuckDBTiles(duckdb.connect(path))

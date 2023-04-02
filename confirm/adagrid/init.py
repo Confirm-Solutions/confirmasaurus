@@ -12,8 +12,6 @@ import jax
 import numpy as np
 import pandas as pd
 
-from .const import MAX_STEP
-
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +22,7 @@ def init(db, algo_type, kwargs):
 
     add_system_cfg(cfg)
 
-    tiles_df = init_grid(g, db, cfg)
+    tiles_df, parent_count = init_grid(g, db, cfg)
 
     cfg_copy = copy.copy(cfg)
     for k in ["git_diff", "conda_list", "nvidia_smi", "pip_freeze"]:
@@ -40,7 +38,7 @@ def init(db, algo_type, kwargs):
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
 
-    return algo, tiles_df
+    return algo, tiles_df, parent_count
 
 
 def first(kwargs):
@@ -148,12 +146,29 @@ def init_grid(g, db, cfg):
 
     df["step_id"] = 0
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
-    df["inactivation_step"] = MAX_STEP
-    df.drop("active", axis=1, inplace=True)
+    df.rename(columns={"active": "active_at_birth"}, inplace=True)
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
+    db.insert("null_hypos", null_hypos_df)
 
-    db.init_grid(df, null_hypos_df, pd.DataFrame([cfg]))
+    # these tiles have no parents. poor sad tiles :(
+    # we need to put these absent parents into the done table
+    absent_parents = pd.DataFrame(df["parent_id"].unique()[:, None], columns=["id"])
+    done_cols = [
+        "step_id",
+        "packet_id",
+        "id",
+        "active",
+        "active_at_birth",
+        "refine",
+        "deepen",
+        "split",
+    ]
+    for c in done_cols:
+        if c not in absent_parents.columns:
+            absent_parents[c] = 0
+    db.insert("done", absent_parents[done_cols])
+    db.insert("config", pd.DataFrame([cfg]))
 
     n_packets = df["packet_id"].nunique()
     logger.debug(
@@ -165,7 +180,7 @@ def init_grid(g, db, cfg):
         cfg["packet_size"],
     )
 
-    return df
+    return df, absent_parents.shape[0]
 
 
 def assign_packets(df, packet_size):

@@ -29,7 +29,7 @@ def f():
 
     db = ada.ada_calibrate(  # noqa
         wd41.WD41,
-        job_name="wd41_4d",
+        job_name_prefix="wd41_4d",
         clickhouse_service="PROD",
         g=grid,
         alpha=0.025,
@@ -39,7 +39,7 @@ def f():
         n_K_double=6,
         calibration_min_idx=70,
         step_size=2**16,
-        packet_size=2**13,
+        packet_size=2**11,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
         # backend=coiled_backend.CoiledBackend(client=get_client()),
@@ -48,7 +48,6 @@ def f():
         # TODO:
         # TODO:
         n_steps=8,
-        nB=1,
     )
     print("Done inner")
 

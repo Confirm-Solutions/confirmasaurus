@@ -16,47 +16,73 @@ import confirm.cloud.clickhouse as ch
 
 ip.setup_nb()
 
-db = 'wd41_4d_20230331_210557'
+db = "wd41_4d_20230401_215130"
 
-ddb_path = Path(confirm.__file__).parent.parent.joinpath(f'{db}.db')
+ddb_path = Path(confirm.__file__).parent.parent.joinpath(f"{db}.db")
 use_clickhouse = False
 if ddb_path.exists():
     try:
         ddb = ada.DuckDBTiles(duckdb.connect(str(ddb_path), read_only=True))
+
         def query(q):
             return ddb.con.query(q).df()
+
     except Exception:
         use_clickhouse = True
 else:
     use_clickhouse = True
 
 if use_clickhouse:
-    ch_client = ch.connect(db, service='PROD')
-    def query(q):
-        return ch.query_df(ch_client, q)
+    ch_db = ch.ClickhouseTiles.connect(db, service="PROD")
+    query = ch_db.query
+
 ```
 
 ```python
-dim = len([c for c in query('select * from results limit 1').columns if c.startswith('theta')])
-n_steps = query('select max(step_id) from results').iloc[0][0] + 1
+dim = len(
+    [c for c in query("select * from results limit 1").columns if c.startswith("theta")]
+)
+n_steps = query("select max(step_id) from results").iloc[0][0] + 1
 dim, n_steps
+
+```
+
+```python
+query('select count(*) from tiles group by active_at_birth')
+```
+
+```python
+query('select packet_id from done where step_id = 1 group by packet_id')
+```
+
+```python
+ch_db.n_tiles_done(1)
 ```
 
 ## Broad table exploration
 
+
 ```python
 n_rows_df = pd.DataFrame(
-    [(table, query(f'select count(*) from {table}').iloc[0][0]) for table in ch.all_tables],
-    columns=['table', 'count']
-).set_index('table')
+    [
+        (table, query(f"select count(*) from {table}").iloc[0][0])
+        for table in ch.all_tables
+    ],
+    columns=["table", "count"],
+).set_index("table")
 n_rows_df
+
 ```
 
 ```python
 from confirm.adagrid.const import MAX_STEP
-n_sims = query('select sum(K) from results').iloc[0][0]
-n_retained_sims = query(f'select sum(K) from results where inactivation_step={MAX_STEP} and id not in (select id from done where active=false)').iloc[0][0]
+
+n_sims = query("select sum(K) from results").iloc[0][0]
+n_retained_sims = query(
+    f"select sum(K) from results where inactivation_step={MAX_STEP} and id not in (select id from done where active=false)"
+).iloc[0][0]
 n_sims / 1e12, n_retained_sims / 1e12
+
 ```
 
 ```python
@@ -67,65 +93,86 @@ n_eligible_tiles = query(
     f"select count(*) from results where completion_step={MAX_STEP}"
 ).iloc[0][0]
 n_active_tiles, n_eligible_tiles
+
 ```
 
 ```python
-query(f'select K, count(*) as n_tiles from tiles where inactivation_step={MAX_STEP} group by K order by K')
-```
-
-```python
-volume_sql = (
-    str(2 ** dim)
-    + "*"
-    + ("*".join([f"radii{d}" for d in range(dim)]))
+query(
+    f"select K, count(*) as n_tiles from tiles where inactivation_step={MAX_STEP} group by K order by K"
 )
+
 ```
 
 ```python
-smallest_tile = query(f'select * from results where inactivation_step={MAX_STEP} order by {volume_sql} limit 1')
+volume_sql = str(2**dim) + "*" + ("*".join([f"radii{d}" for d in range(dim)]))
+
+```
+
+```python
+smallest_tile = query(
+    f"select * from results where inactivation_step={MAX_STEP} order by {volume_sql} limit 1"
+)
 smallest_tile
+
 ```
 
 ```python
-largest_tile = query(f'select * from results where inactivation_step={MAX_STEP} order by {volume_sql} desc limit 1')
+largest_tile = query(
+    f"select * from results where inactivation_step={MAX_STEP} order by {volume_sql} desc limit 1"
+)
 largest_tile
+
 ```
 
 ```python
-n_possible_tiles = query('select count(*) from results where isNotNull(lams)').iloc[0][0]
+n_possible_tiles = query("select count(*) from results where isNotNull(lams)").iloc[0][
+    0
+]
 n_possible_tiles
+
 ```
 
 ```python
-lamss_tile = query(f'''
+lamss_tile = query(
+    f"""
 select * from results 
     where inactivation_step={MAX_STEP} 
         and isNotNull(lams) 
     order by lams 
     limit 1
-''')
+"""
+)
 lamss_tile
+
 ```
 
 ```python
-lamss = lamss_tile['lams'].iloc[0]
+lamss = lamss_tile["lams"].iloc[0]
+
 ```
 
 ```python
-lams = query(f'''
+lams = query(
+    f"""
 select lams from results 
     where inactivation_step={MAX_STEP} 
         and lams <= {lamss}
-''')
+"""
+)
 max_display = lamss * 2
-plt.hist(lams['lams'], bins=np.linspace(lamss, max_display, 100))
+plt.hist(lams["lams"], bins=np.linspace(lamss, max_display, 100))
 plt.show()
+
 ```
 
 ## Ordering
 
+
 ```python
-worst5000_df = self.con.query('select * from results where inactivation_step>10000 order by lams limit 5000').df()
+worst5000_df = self.con.query(
+    "select * from results where inactivation_step>10000 order by lams limit 5000"
+).df()
+
 ```
 
 ```python
@@ -136,26 +183,32 @@ orderer_df = self.con.query(
 ```
 
 ```python
-wait = np.searchsorted(orderer_df['orderer'], worst5000_df['orderer'])
+wait = np.searchsorted(orderer_df["orderer"], worst5000_df["orderer"])
 wait
+
 ```
 
 ```python
 cfg = self.get_config().iloc[0].to_dict()
+
 ```
 
 ```python
 import confirm.adagrid.calibrate as adacal
 import confirm.models.wd41 as wd41
+
 report = dict()
-algo = adacal.AdaCalibrate(wd41.WD41(0, 600000, ignore_intersection=True), None, self, cfg, None)
+algo = adacal.AdaCalibrate(
+    wd41.WD41(0, 600000, ignore_intersection=True), None, self, cfg, None
+)
 
 ```
 
 ```python
-tiles_df = self.next(10, 11, 50000, 'orderer')
+tiles_df = self.next(10, 11, 50000, "orderer")
 twb_worst_tile = self.worst_tile(10, "twb_mean_lams")
 # np.sum(tiles_df['twb_min_lams'] > twb_worst_tile['twb_mean_lams'].iloc[0])
+
 ```
 
 ```python
@@ -173,20 +226,29 @@ twb_worst_tile_lams = self.driver.bootstrap_calibrate(
 )
 twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
 deepen_likely_to_work = tiles_df["twb_min_lams"] > twb_worst_tile_mean_lams
+
 ```
 
 ```python
 np.sum(deepen_likely_to_work)
+
 ```
 
 ## Looking at the reports
 
+
 ```python
 import json
-report_df = pd.DataFrame([json.loads(v) for v in query('select * from reports')['json'].values])
-working_reports = report_df[report_df['status'] == 'WORKING'].dropna(axis=1, how='all')
-new_step_reports = report_df[report_df['status'] == 'NEW_STEP'].dropna(axis=1, how='all')
-new_step_reports.set_index('step_id', inplace=True)
+
+report_df = pd.DataFrame(
+    [json.loads(v) for v in query("select * from reports")["json"].values]
+)
+working_reports = report_df[report_df["status"] == "WORKING"].dropna(axis=1, how="all")
+new_step_reports = report_df[report_df["status"] == "NEW_STEP"].dropna(
+    axis=1, how="all"
+)
+new_step_reports.set_index("step_id", inplace=True)
+
 ```
 
 ```python
@@ -273,7 +335,7 @@ for step_id in range(min_step, max_step + 1):
         ],
         [-1, -1],
         color_list[step_id % len(color_list)],
-        linestyle='--',
+        linestyle="--",
         linewidth=5,
     )
 
@@ -318,82 +380,97 @@ plt.show()
 ```
 
 ```python
-sim_runtime = working_reports['runtime_simulating'].sum()
-total_runtime = 2 * (report_df['done_time'].max() - report_df['start_time'].min())
+sim_runtime = working_reports["runtime_simulating"].sum()
+total_runtime = 2 * (report_df["done_time"].max() - report_df["start_time"].min())
 parallelism = sim_runtime / total_runtime
 parallelism, sim_runtime / 3600, total_runtime / 3600
+
 ```
 
 ```python
-plt.plot(working_reports['runtime_per_sim_ns'])
-plt.ylim([0, np.percentile(working_reports['runtime_per_sim_ns'], 99.5)])
+plt.plot(working_reports["runtime_per_sim_ns"])
+plt.ylim([0, np.percentile(working_reports["runtime_per_sim_ns"], 99.5)])
 plt.show()
+
 ```
 
 ```python
-working_reports['runtime_simulating'].sum()
+working_reports["runtime_simulating"].sum()
+
 ```
 
 ```python
-max_working_time = working_reports.groupby('step_id')['time'].max()
-total_sim_time = working_reports.groupby('step_id')['runtime_simulating'].sum()
-ex_df = new_step_reports[['step_id', 'runtime_total', 'done_time']].set_index('step_id')
-ex_df['max_working_time'] = max_working_time
-ex_df['total_sim_time'] = total_sim_time
-step_parallelism = ex_df['total_sim_time'] / ((ex_df['max_working_time'] - ex_df['time']) + ex_df['runtime_total'])
-plt.plot(step_parallelism, 'k-o', markersize=3)
-plt.xlabel('step_id')
-plt.ylabel('parallelism')
+max_working_time = working_reports.groupby("step_id")["time"].max()
+total_sim_time = working_reports.groupby("step_id")["runtime_simulating"].sum()
+ex_df = new_step_reports[["step_id", "runtime_total", "done_time"]].set_index("step_id")
+ex_df["max_working_time"] = max_working_time
+ex_df["total_sim_time"] = total_sim_time
+step_parallelism = ex_df["total_sim_time"] / (
+    (ex_df["max_working_time"] - ex_df["time"]) + ex_df["runtime_total"]
+)
+plt.plot(step_parallelism, "k-o", markersize=3)
+plt.xlabel("step_id")
+plt.ylabel("parallelism")
 plt.show()
+
 ```
 
 ```python
-plt.plot(new_step_reports[['step_id', 'lamss']].set_index('step_id'))
-plt.xlabel('step_id')
-plt.ylabel('$\lambda^{**}$')
+plt.plot(new_step_reports[["step_id", "lamss"]].set_index("step_id"))
+plt.xlabel("step_id")
+plt.ylabel("$\lambda^{**}$")
 plt.show()
+
 ```
 
 ```python
-plt.plot(new_step_reports['tie_{k}(lamss)'])
+plt.plot(new_step_reports["tie_{k}(lamss)"])
 plt.show()
+
 ```
 
 ```python
 import numpy as np
+
 xs = np.linspace(-2, 1, 10)
 ys = np.linspace(-2, 1, 10)
 counts = np.empty((len(xs), len(ys)))
 for i, x in enumerate(xs):
     for j, y in enumerate(ys):
-        NN = self.con.query(f'''
+        NN = self.con.query(
+            f"""
             select count(*) 
                 from results
                 where 
                     inactivation_step={MAX_STEP}
                     and abs(theta0 - {x}) < 0.167
                     and abs(theta2 - {y}) < 0.167
-        ''').fetchone()[0]
+        """
+        ).fetchone()[0]
         counts[i, j] = NN
+
 ```
 
 ```python
 counts.sum() / 1e6
+
 ```
 
 ```python
-XX, YY = np.meshgrid(xs, ys, indexing='ij')
+XX, YY = np.meshgrid(xs, ys, indexing="ij")
 # plt.scatter(XX.ravel(), YY.ravel(), c=counts.ravel())
 plt.contourf(XX, YY, counts, levels=20)
-plt.xlabel('$\\theta_{TNBC, c}$')
-plt.ylabel('$\\theta_{HR+, c}$')
+plt.xlabel("$\\theta_{TNBC, c}$")
+plt.ylabel("$\\theta_{HR+, c}$")
 cbar = plt.colorbar()
-cbar.set_label('$N$')
+cbar.set_label("$N$")
 plt.show()
+
 ```
 
 ```python
-plot_df = self.con.query('''
+plot_df = self.con.query(
+    """
     select theta0, theta1, theta2, theta3, 
             radii0, radii1, radii2, radii3, 
             alpha0, K, lams, twb_mean_lams, twb_min_lams 
@@ -401,22 +478,25 @@ plot_df = self.con.query('''
         where 
             abs(theta0 + 1) < 0.05
             and abs(theta2 + 1) < 0.05
-''').df()
+"""
+).df()
+
 ```
 
 ```python
 plt.figure(figsize=(10, 10))
 plt.subplot(2, 2, 1)
-plt.scatter(plot_df['theta1'], plot_df['theta3'], c=plot_df['K'], s=5)
+plt.scatter(plot_df["theta1"], plot_df["theta3"], c=plot_df["K"], s=5)
 plt.colorbar()
 plt.subplot(2, 2, 2)
-plt.scatter(plot_df['theta1'], plot_df['theta3'], c=plot_df['alpha0'], s=5)
+plt.scatter(plot_df["theta1"], plot_df["theta3"], c=plot_df["alpha0"], s=5)
 plt.colorbar()
 plt.subplot(2, 2, 3)
-plt.scatter(plot_df['theta1'], plot_df['theta3'], c=plot_df['lams'], s=5)
+plt.scatter(plot_df["theta1"], plot_df["theta3"], c=plot_df["lams"], s=5)
 plt.colorbar()
 plt.subplot(2, 2, 4)
-plt.scatter(plot_df['theta1'], plot_df['theta3'], c=plot_df['twb_min_lams'], s=5)
+plt.scatter(plot_df["theta1"], plot_df["theta3"], c=plot_df["twb_min_lams"], s=5)
 plt.colorbar()
 plt.show()
+
 ```

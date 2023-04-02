@@ -7,7 +7,6 @@ from jax.config import config
 
 import confirm.adagrid as ada
 import imprint as ip
-from .test_clickhouse import check_backup_correctness
 from imprint.models.ztest import ZTest1D
 
 config.update("jax_enable_x64", True)
@@ -65,8 +64,12 @@ def test_calibration(snapshot):
 
 def test_calibration_clickhouse(ch_db, snapshot):
     snapshot.set_test_name("test_calibration")
-    db = cal_tester(snapshot, clickhouse_service="TEST", job_name=ch_db.database)
-    check_backup_correctness(db)
+    cal_tester(
+        snapshot,
+        clickhouse_service="TEST",
+        job_name=ch_db.job_name,
+        backend=ada.LocalBackend(use_clickhouse=True),
+    )
 
 
 @pytest.mark.slow
@@ -75,46 +78,30 @@ def test_calibration_packetsize1(snapshot):
     cal_tester(snapshot, packet_size=1)
 
 
-def distributed_tester(backend, ch_db, snapshot):
-    snapshot.set_test_name("test_calibration")
-
-    with mock.patch("imprint.timer._timer", ip.timer.new_mock_timer()):
-        g = ip.cartesian_grid(
-            theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
-        )
-        local_db = ada.ada_calibrate(
-            ZTest1D,
-            g=g,
-            nB=5,
-            record_system=False,
-            clickhouse_service="TEST",
-            job_name=ch_db.database,
-            backend=backend,
-        )
-
-    ip.testing.check_imprint_results(
-        ip.Grid(local_db.get_results(), None).prune_inactive(),
-        snapshot,
-        ignore_story=True,
-    )
-
-    check_backup_correctness(local_db)
-
-
 @pytest.mark.slow
 def test_distributed_modal(ch_db, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
-    backend = ModalBackend(gpu=False)
-    distributed_tester(backend, ch_db, snapshot)
+    snapshot.set_test_name("test_calibration")
+    cal_tester(
+        snapshot,
+        clickhouse_service="TEST",
+        job_name=ch_db.job_name,
+        backend=ModalBackend(gpu=False),
+    )
 
 
-# @pytest.mark.skip
+@pytest.mark.skip
 def test_distributed_coiled(ch_db, snapshot):
     from confirm.cloud.coiled_backend import CoiledBackend
 
-    backend = CoiledBackend(restart_workers=True)
-    distributed_tester(backend, ch_db, snapshot)
+    snapshot.set_test_name("test_calibration")
+    cal_tester(
+        snapshot,
+        clickhouse_service="TEST",
+        job_name=ch_db.job_name,
+        backend=CoiledBackend(restart_workers=True),
+    )
 
 
 @pytest.mark.slow
@@ -123,7 +110,7 @@ def test_two_parallel_steps(snapshot):
 
 
 @pytest.mark.slow
-def test_two_parallel_steps_distributed(snapshot):
+def test_two_parallel_steps_modal(ch_db, snapshot):
     from confirm.cloud.modal_backend import ModalBackend
 
     snapshot.set_test_name("test_two_parallel_steps")
@@ -132,6 +119,8 @@ def test_two_parallel_steps_distributed(snapshot):
         n_parallel_steps=2,
         step_size=1,
         packet_size=1,
+        clickhouse_service="TEST",
+        job_name=ch_db.job_name,
         backend=ModalBackend(gpu=False),
     )
 

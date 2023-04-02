@@ -119,7 +119,7 @@ class AdaValidate:
         tiles_df = raw_tiles[include].copy()
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
-            return None
+            return None, {}
 
         report = dict(
             n_tiles=tiles_df.shape[0],

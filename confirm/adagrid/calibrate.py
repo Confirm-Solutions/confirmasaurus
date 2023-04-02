@@ -145,7 +145,7 @@ class AdaCalibrate:
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
         logger.debug("Computing bias and standard deviation of lambda**")
-        B_lamss = self.db.bootstrap_lamss(basal_step_id)
+        B_lamss = self.db.bootstrap_lamss(basal_step_id, self.cfg["nB"])
         worst_tile_tie_sum = self.driver.many_rej(
             worst_tile_df, np.array([lamss] + list(B_lamss))
         ).iloc[0]

@@ -19,7 +19,7 @@ def check(db, snapshot):
     # plt.plot(results.df["theta0"], results.df["tie_bound"], 'ro')
     # plt.show()
 
-    max_tie = db.worst_tile(db.get_next_step(), "tie_bound")["tie_bound"].iloc[0]
+    max_tie = db.worst_tile(100, "tie_bound")["tie_bound"].iloc[0]
     np.testing.assert_allclose(max_tie, snapshot(max_tie))
 
     all_tiles_df = db.get_results()
@@ -49,7 +49,7 @@ def test_validation(snapshot):
         g = ip.cartesian_grid(
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
-        db = ada.ada_validate(ZTest1D, g=g, lam=-1.96, prod=False, tile_batch_size=1)
+        db = ada.ada_validate(ZTest1D, g=g, lam=-1.96, tile_batch_size=1)
     check(db, snapshot)
 
 
@@ -61,6 +61,26 @@ def test_validation2d():
     g = ip.Grid(db.get_results(), None).prune_inactive()
     assert g.df["tie_bound"].max() <= 0.0265
     assert g.n_tiles == 355
+
+
+def test_validation2d_n_parallel_ch(ch_db):
+    g = ip.cartesian_grid(
+        theta_min=[-1, -1], theta_max=[0, 0], null_hypos=[ip.hypo("theta0 > theta1")]
+    )
+    db = ada.ada_validate(
+        ZTest1D,
+        g=g,
+        lam=-1.96,
+        tile_batch_size=1,
+        n_parallel_steps=2,
+        step_size=10,
+        clickhouse_service="TEST",
+        job_name=ch_db.job_name,
+        backend=ada.LocalBackend(use_clickhouse=True),
+    )
+    g = ip.Grid(db.get_results(), None).prune_inactive()
+    assert g.df["tie_bound"].max() <= 0.0265
+    assert g.n_tiles == 219
 
 
 def test_validation2d_restart():

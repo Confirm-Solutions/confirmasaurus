@@ -1,16 +1,31 @@
 import asyncio
+import json
 import logging
 import os
 import time
+from dataclasses import dataclass
+from dataclasses import field
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import pyarrow
+
+if TYPE_CHECKING:
+    import clickhouse_connect
+
+from ..adagrid.db import SQLTiles
+from ..adagrid.const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
 
 synchronous_insert_settings = dict(
-    insert_distributed_sync=1, insert_quorum="auto", insert_quorum_parallel=1
+    insert_distributed_sync=1,
+    insert_quorum="auto",
+    insert_quorum_parallel=1,
 )
 async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
 default_insert_settings = async_insert_settings
@@ -213,21 +228,23 @@ def retry_ch_action(method, *args, retries=2, is_retry=False, **kwargs):
         raise e
 
 
-def query_df(client, query):
+def query_df(client, query, quiet=False):
     # Loading via Arrow and then converting to Pandas is faster than using
     # query_df directly to load a pandas dataframe. I'm guessing that loading
     # through arrow is a little less flexible or something, but for our
     # purposes, faster loading is great.
     start = time.time()
     out = retry_ch_action(client.query_arrow, query).to_pandas()
-    logger.debug(f"Query took {time.time() - start} seconds\n{query}")
+    if not quiet:
+        logger.debug(f"Query took {time.time() - start} seconds\n{query}")
     return out
 
 
-def query(client, query, *args, **kwargs):
+def query(client, query, quiet=False, *args, **kwargs):
     start = time.time()
     out = retry_ch_action(client.query, query, *args, **kwargs)
-    logger.debug(f"Query took {time.time() - start} seconds\n{query} ")
+    if not quiet:
+        logger.debug(f"Query took {time.time() - start} seconds\n{query} ")
     return out
 
 
@@ -236,61 +253,6 @@ def command(client, query, *args, **kwargs):
     out = retry_ch_action(client.command, query, *args, **kwargs)
     logger.debug(f"Command took {time.time() - start} seconds\n{query}")
     return out
-
-
-def connect(
-    job_name: str,
-    service="TEST",
-    host=None,
-    port=None,
-    username=None,
-    password=None,
-    no_create=False,
-    **kwargs,
-):
-    """
-    Connect to a Clickhouse server
-
-    Each job_name corresponds to a Clickhouse database on the Clickhouse
-    cluster.
-
-    For Clickhouse, we will use the following environment variables:
-        CLICKHOUSE_HOST: The hostname for the Clickhouse server.
-        CLICKHOUSE_PORT: The Clickhouse server port.
-        CLICKHOUSE_USERNAME: The Clickhouse username.
-        CLICKHOUSE_PASSWORD: The Clickhouse username.
-
-    If the environment variables are not set, the defaults will be:
-        port: 8443
-        username: "default"
-
-    If the environment variables are not set, the defaults will be:
-        port: 37085
-
-    Args:
-        job_name: The job_name.
-        host: The hostname for the Clickhouse server. Defaults to None.
-        port: The Clickhouse server port. Defaults to None.
-        username: The Clickhouse username. Defaults to None.
-        password: The Clickhouse password. Defaults to None.
-        no_create: If True, do not create the job_id database. Defaults to False.
-
-    Returns:
-        A Clickhouse tile database object.
-    """
-    connection_details = get_ch_config(service, host, port, username, password)
-
-    client = get_ch_client(connection_details=connection_details, **kwargs)
-    if not no_create:
-        # Create job_id database if it doesn't exist
-        command(client, f"create database if not exists {job_name}")
-
-    # NOTE: client.database is invading private API, but based on reading
-    # the clickhouse_connect code, this is unlikely to break
-    client.database = job_name
-
-    logger.info(f"Connected to job {job_name}")
-    return client
 
 
 def get_ch_client(
@@ -398,23 +360,207 @@ def clear_dbs(ch_client=None, prefix="unnamed", names=None, yes=False):
                 command(ch_client, cmd)
 
 
-class ClickhouseTiles:
-    def dimension(self):
-        if self._d is None:
-            cols = self._tiles_columns()
-            self._d = max([int(c[5:]) for c in cols if c.startswith("theta")]) + 1
-        return self._d
+@dataclass
+class ClickhouseTiles(SQLTiles):
+    connection_details: Dict[str, str]
+    client: "clickhouse_connect.driver.httpclient.HttpClient"
+    job_name: str
+    tasks: List[asyncio.Task] = field(default_factory=list)
+    _table_exists: Dict[str, bool] = field(default_factory=set)
+    _table_columns: Dict[str, List[str]] = field(default_factory=dict)
+    _done_task: asyncio.Task = None
 
-    def _tiles_columns(self):
-        if self._tiles_columns_cache is None:
-            self._tiles_columns_cache = query_df(
-                self.client, "select * from tiles limit 1"
-            ).columns
-        return self._tiles_columns_cache
+    def query(self, query: str, quiet: bool = False) -> pd.DataFrame:
+        return query_df(self.client, query, quiet=quiet)
 
-    def _results_columns(self):
-        if self._results_columns_cache is None:
-            self._results_columns_cache = query_df(
-                self.client, "select * from results limit 1"
+    def insert(
+        self, table: str, df: pd.DataFrame, create: bool = True, block: bool = False
+    ) -> None:
+        if create and table not in self._table_exists:
+            create_table(self.client, table, df)
+        df_subset = df[self.get_columns(table)]
+        self.tasks.extend(insert_df(self.client, table, df_subset, block=block))
+        self._table_exists.add(table)
+
+    def get_columns(self, table_name: str) -> List[str]:
+        if table_name not in self._table_columns:
+            self._table_columns[table_name] = self.query(
+                f"select * from {table_name} limit 0"
             ).columns
-        return self._results_columns_cache
+        return self._table_columns[table_name]
+
+    def does_table_exist(self, table_name: str) -> bool:
+        if table_name not in self._table_exists:
+            if does_table_exist(self.client, table_name):
+                self._table_exists.add(table_name)
+                return True
+            else:
+                return False
+        else:
+            return True
+
+    def insert_report(self, report: Dict[str, Any]) -> None:
+        command(self.client, f"insert into reports values ('{json.dumps(report)}')")
+
+    def insert_done_update_results(self, df: pd.DataFrame) -> None:
+        assert self._done_task is None
+        step_id = df["step_id"].iloc[0]
+        tasks = insert_df(
+            self.client,
+            "done",
+            df[self.get_columns("done")],
+            settings=synchronous_insert_settings,
+        )
+        tasks = [t for t in tasks if t is not None]
+
+        async def insert_then_update() -> None:
+            await asyncio.gather(*tasks)
+            await asyncio.to_thread(
+                command,
+                self.client,
+                f"""
+                ALTER TABLE results 
+                UPDATE
+                    inactivation_step=if(
+                        id in (select id from done 
+                                where step_id={step_id} and active=false),
+                        {step_id},
+                        inactivation_step
+                    ),
+                    completion_step=if(
+                        id in (select id from done where step_id={step_id}),
+                        {step_id},
+                        completion_step
+                    )
+                WHERE
+                    completion_step={MAX_STEP}
+                    and step_id < {step_id}
+                """,
+                settings=dict(mutations_sync=2, allow_nondeterministic_mutations=1),
+            )
+
+        self._done_task = asyncio.create_task(insert_then_update())
+
+    async def cleanup(self) -> None:
+        # Clean up finished tasks.
+        wait_for_done = [t for t in self.tasks if t is not None and t.done()]
+        incomplete = []
+        for t in self.tasks:
+            if t is None:
+                continue
+            if t.done():
+                wait_for_done.append(t)
+            else:
+                incomplete.append(t)
+        self.tasks = incomplete
+        await asyncio.gather(*wait_for_done)
+        logger.debug(
+            f"Cleaned up {len(wait_for_done)} finished Clickhouse insertion tasks."
+        )
+        logger.debug(f"{len(self.tasks)} Clickhouse insert tasks remaining.")
+
+    def n_tiles_done(self, step_id):
+        return self.query(
+            f"""
+            select count(*) from results
+                where step_id = {step_id} 
+            """,
+            quiet=True,
+        )
+
+    async def wait_for_step(
+        self, basal_step_id: int, step_id: int, expected_counts: Dict[int, int]
+    ) -> None:
+        await self.cleanup()
+        if self._done_task is not None:
+            await self._done_task
+        self._done_task = None
+
+        while True:
+            count = (await asyncio.to_thread(self.n_tiles_done, basal_step_id)).iloc[0][
+                0
+            ]
+            expected = expected_counts[basal_step_id]
+            logger.debug(
+                f"Waiting for step {basal_step_id} to complete."
+                f" {count}/{expected} tiles done."
+            )
+            if count == expected:
+                break
+            elif count > expected:
+                raise ValueError(
+                    f"More tiles completed than expected for step {basal_step_id}."
+                    f" Expected {expected}, got {count}."
+                )
+            else:
+                await asyncio.sleep(0.2)
+
+    def verify(self, step_id: int) -> asyncio.Task:
+        return asyncio.create_task(asyncio.to_thread(super().verify, step_id))
+
+    async def finalize(self):
+        while len(self.tasks) > 0:
+            tmp = [t for t in self.tasks if t is not None]
+            self.tasks = []
+            await asyncio.gather(*tmp)
+
+    def close(self):
+        self.client.close()
+
+    @staticmethod
+    def connect(
+        job_name: str,
+        service="TEST",
+        host=None,
+        port=None,
+        username=None,
+        password=None,
+        no_create=False,
+        **kwargs,
+    ):
+        """
+        Connect to a Clickhouse server
+
+        Each job_name corresponds to a Clickhouse database on the Clickhouse
+        cluster.
+
+        For Clickhouse, we will use the following environment variables:
+            CLICKHOUSE_HOST: The hostname for the Clickhouse server.
+            CLICKHOUSE_PORT: The Clickhouse server port.
+            CLICKHOUSE_USERNAME: The Clickhouse username.
+            CLICKHOUSE_PASSWORD: The Clickhouse username.
+
+        If the environment variables are not set, the defaults will be:
+            port: 8443
+            username: "default"
+
+        If the environment variables are not set, the defaults will be:
+            port: 37085
+
+        Args:
+            job_name: The job_name.
+            host: The hostname for the Clickhouse server. Defaults to None.
+            port: The Clickhouse server port. Defaults to None.
+            username: The Clickhouse username. Defaults to None.
+            password: The Clickhouse password. Defaults to None.
+            no_create: If True, do not create the job_id database. Defaults to False.
+
+        Returns:
+            A Clickhouse tile database object.
+        """
+
+        connection_details = get_ch_config(service, host, port, username, password)
+
+        client = get_ch_client(connection_details=connection_details, **kwargs)
+        if not no_create:
+            # Create job_id database if it doesn't exist
+            command(client, f"create database if not exists {job_name}")
+
+        # NOTE: client.database is invading private API, but based on reading
+        # the clickhouse_connect code, this is unlikely to break
+        client.database = job_name
+
+        logger.info(f"Connected to job {job_name}")
+        return ClickhouseTiles(
+            connection_details=connection_details, client=client, job_name=job_name
+        )

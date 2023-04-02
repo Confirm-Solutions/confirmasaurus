@@ -3,10 +3,12 @@ import logging
 import time
 from enum import Enum
 
+import jax
 import numpy as np
 import pandas as pd
 
 import imprint as ip
+from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ async def process_initial_packets(backend, algo, tiles_df):
         wait_for.append(
             await submit_packet(backend, algo, packet_df, refine_deepen=False)
         )
-    await wait_for_packets(backend, algo, wait_for)
+    return await wait_for_packets(backend, algo, wait_for)
 
 
 async def submit_packet_df(backend, algo, tiles_df):
@@ -29,16 +31,6 @@ async def submit_packet_df(backend, algo, tiles_df):
             await submit_packet(backend, algo, packet_df, refine_deepen=True)
         )
     return packets
-
-
-async def wait_for_packets(backend, algo, packets):
-    coros = []
-    for p in packets:
-        coros.append(wait_for_packet(backend, algo, *p))
-    logger.debug("Waiting for packets to finish.")
-    reports = await asyncio.gather(*coros)
-    logger.debug("Packets finished.")
-    algo.db.insert_reports(reports)
 
 
 async def submit_packet(backend, algo, packet_df, refine_deepen):
@@ -62,8 +54,24 @@ async def submit_packet(backend, algo, packet_df, refine_deepen):
     return await backend.submit_tiles(packet_df, refine_deepen), report
 
 
+async def wait_for_packets(backend, algo, packets):
+    coros = []
+    for p in packets:
+        coros.append(wait_for_packet(backend, algo, *p))
+    logger.debug("Waiting for packets to finish.")
+    outs = await asyncio.gather(*coros)
+    if len(outs) == 0:
+        n_results = [0]
+        reports = []
+    else:
+        n_results, reports = zip(*outs)
+    logger.debug("Packets finished.")
+    algo.db.insert_reports(reports)
+    return sum(n_results)
+
+
 async def wait_for_packet(backend, algo, awaitable, report):
-    sim_report = await backend.wait_for_results(awaitable)
+    n_results, sim_report = await backend.wait_for_results(awaitable)
     # TODO: move to worker?
     report.update(sim_report)
     report["runtime_per_sim_ns"] = (
@@ -74,7 +82,83 @@ async def wait_for_packet(backend, algo, awaitable, report):
     report["runtime_total"] = time.time() - report["start_time"]
     report["done_time"] = time.time()
     algo.callback(report, algo.db)
-    return report
+    return n_results, report
+
+
+def process_tiles(algo, df, refine_deepen: bool):
+    report = dict()
+    if refine_deepen:
+        start = time.time()
+        tiles_df, inactive_df = refine_and_deepen(
+            df, algo.null_hypos, algo.cfg["max_K"]
+        )
+        algo.db.insert("tiles", inactive_df)
+        algo.db.insert("done", inactive_df)
+        report["runtime_refine_deepen"] = time.time() - start
+        report["n_inactive_tiles"] = inactive_df.shape[0]
+    else:
+        tiles_df = df
+
+    algo.db.insert("tiles", tiles_df)
+    report["n_tiles"] = tiles_df.shape[0]
+    report["sim_start_time"] = time.time()
+
+    tbs = algo.cfg["tile_batch_size"]
+    if tbs is None:
+        tbs = dict(gpu=64, cpu=4)[jax.lib.xla_bridge.get_backend().platform]
+    report["tile_batch_size"] = tbs
+    start = time.time()
+    results_df = algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
+    results_df["completion_step"] = MAX_STEP
+    results_df["inactivation_step"] = MAX_STEP
+    report["runtime_simulating"] = time.time() - start
+    report["sim_done_time"] = time.time()
+
+    algo.db.insert("results", results_df)
+    return results_df.shape[0], report
+
+
+def refine_and_deepen(df, null_hypos, max_K):
+    g_deepen_in = ip.Grid(df.loc[(df["deepen"] > 0) & (df["K"] < max_K)])
+    g_deepen = ip.grid._raw_init_grid(
+        g_deepen_in.get_theta(),
+        g_deepen_in.get_radii(),
+        parents=g_deepen_in.df["id"],
+    )
+    # No need to recalculate null_truth after deepening because the tile
+    # positions have not changed.
+    for i in range(len(null_hypos)):
+        g_deepen.df[f"null_truth{i}"] = g_deepen_in.df[f"null_truth{i}"]
+    # We just multiply K by 2 to deepen.
+    # TODO: it's possible to do better by multiplying by 4 or 8
+    # sometimes when a tile clearly needs *way* more sims. how to
+    # determine this?
+    g_deepen.df["K"] = g_deepen_in.df["K"] * 2
+
+    g_refine_in = ip.grid.Grid(df.loc[df["refine"] > 0])
+    inherit_cols = ["K"]
+    # TODO: it's possible to do better by refining by more than just a
+    # factor of 2.
+    g_refine = g_refine_in.refine(inherit_cols)
+
+    # NOTE: Instead of prune_alternative here, we mark alternative tiles as
+    # inactive. This means that we will have a full history of grid
+    # construction.
+    g_refine = g_refine.add_null_hypos(null_hypos, inherit_cols)
+    g_refine.df.loc[g_refine._which_alternative(), "active"] = False
+
+    g_new = g_refine.concat(g_deepen)
+    for col in ["step_id", "packet_id"]:
+        g_new.df[col] = df[col].iloc[0]
+    g_new.df.rename(columns={"active": "active_at_birth"}, inplace=True)
+    inactive_df = g_new.df[~g_new.df["active_at_birth"]].copy()
+    inactive_df["refine"] = 0
+    inactive_df["deepen"] = 0
+    inactive_df["split"] = 1
+    inactive_df["active"] = False
+
+    active_df = g_new.df[g_new.df["active_at_birth"]]
+    return active_df, inactive_df
 
 
 def new_step(algo, basal_step_id, new_step_id):
@@ -170,7 +254,7 @@ def _new_step(algo, basal_step_id, new_step_id):
 
     selection_df["packet_id"] = assign_packets(selection_df)
     selection_df["step_id"] = new_step_id
-    algo.db.insert_done(selection_df)
+    algo.db.insert_done_update_results(selection_df)
 
     report["time"] = time.time()
     report["n_new_tiles"] = (

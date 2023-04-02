@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 import os
@@ -10,9 +11,7 @@ from distributed.diagnostics.plugin import UploadDirectory
 
 import confirm
 import imprint as ip
-from ..adagrid.adagrid import Backend
 from ..adagrid.adagrid import LocalBackend
-from ..adagrid.adagrid import setup_db
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +40,6 @@ def create_software_env():
     import coiled
 
     coiled.create_software_environment(name=name, pip=reqs)
-    #     pip_installs = "\n".join([f"    - {r}" for r in reqs])
-    #     environment_yml = f"""
-    # name: confirm
-    # channels:
-    #   - conda-forge
-    #   - nvidia
-    # dependencies:
-    #   - python=3.10
-    #   - pip
-    #   - pip:
-    # {pip_installs}
-    # """
-    #     logger.debug(f"Coiled environment:\n {environment_yml}")
-    # import tempfile
-    #     with tempfile.NamedTemporaryFile(mode="w") as f:
-    #         f.write(environment_yml)
-    #         f.flush()
-    #         logger.debug("Creating software environment %s", name)
-    #         import coiled
-
-    #         coiled.create_software_environment(name=name, conda=f.name)
     return name
 
 
@@ -92,7 +70,6 @@ def setup_cluster(update_software_env=True, n_workers=1, idle_timeout="60 minute
     cluster = coiled.Cluster(
         name="confirm-coiled",
         software="confirm-coiled",
-        scheduler_vm_types=["m5ad.2xlarge"],
         n_workers=n_workers,
         worker_vm_types=["g4dn.xlarge"],
         worker_gpu=1,
@@ -142,7 +119,15 @@ def check():
 def setup_worker(worker_args):
     worker = get_worker()
 
-    (model_type, model_args, model_kwargs, algo_type, cfg, environ) = worker_args
+    (
+        algo_type,
+        model_type,
+        model_args,
+        model_kwargs,
+        null_hypos,
+        cfg,
+        environ,
+    ) = worker_args
     # Hashing the arguments lets us avoid re-initializing the model and algo
     # if the arguments are the same.
     # NOTE: this could be extended to use an `algo` dictionary, where the key
@@ -151,10 +136,11 @@ def setup_worker(worker_args):
     # single point in time.
     hash_args = hash(
         (
+            algo_type.__name__,
             model_type.__name__,
             model_args,
             tuple(model_kwargs.items()),
-            algo_type.__name__,
+            tuple([h.description() for h in null_hypos]),
             tuple(cfg.items()),
             tuple(environ.items()),
         )
@@ -172,10 +158,14 @@ def setup_worker(worker_args):
         # environment to use a docker image and I don't want to deal with that
         # now.
         os.environ.update(environ)
-        db = setup_db(cfg)
+        import confirm.cloud.clickhouse as ch
+
+        db = ch.ClickhouseTiles.connect(
+            job_name=cfg["job_name"], service=cfg["clickhouse_service"]
+        )
 
         model = model_type(*model_args, **model_kwargs)
-        worker.algo = algo_type(model, None, db, cfg, None)
+        worker.algo = algo_type(model, null_hypos, db, cfg, None)
         worker.algo_hash = hash_args
 
 
@@ -187,10 +177,10 @@ def dask_process_tiles(worker_args, tiles_df, refine_deepen):
     worker = get_worker()
     lb = LocalBackend()
     lb.algo = worker.algo
-    return lb.submit_tiles(tiles_df, refine_deepen)
+    return lb.sync_submit_tiles(tiles_df, refine_deepen)
 
 
-class CoiledBackend(Backend):
+class CoiledBackend(LocalBackend):
     def __init__(
         self,
         update_software_env: bool = True,
@@ -199,6 +189,8 @@ class CoiledBackend(Backend):
         restart_workers: bool = False,
         client=None,
     ):
+        super().__init__()
+        self.use_clickhouse = True
         self.update_software_env = update_software_env
         self.restart_workers = restart_workers
         self.detach = detach
@@ -209,7 +201,16 @@ class CoiledBackend(Backend):
         return check().compute()
 
     def get_cfg(self):
-        return {}
+        out = super().get_cfg()
+        out.update(
+            {
+                "update_software_env": self.update_software_env,
+                "restart_workers": self.restart_workers,
+                "detach": self.detach,
+                "n_workers": self.n_workers,
+            }
+        )
+        return out
 
     @contextlib.asynccontextmanager
     async def setup(self, algo):
@@ -227,10 +228,11 @@ class CoiledBackend(Backend):
                 k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
             }
             worker_args = (
+                type(algo),
                 type(algo.driver.model),
                 (algo.cfg["model_seed"], algo.max_K),
                 algo.cfg["model_kwargs"],
-                type(algo),
+                algo.null_hypos,
                 filtered_cfg,
                 {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
             )
@@ -251,4 +253,4 @@ class CoiledBackend(Backend):
             )
 
     async def wait_for_results(self, awaitable):
-        return await awaitable
+        return await asyncio.to_thread(awaitable.result)

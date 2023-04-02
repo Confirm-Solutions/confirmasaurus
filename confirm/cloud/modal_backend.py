@@ -6,7 +6,7 @@ import sys
 import modal.aio
 
 from . import modal_util
-from confirm.adagrid.adagrid import Backend
+from confirm.adagrid.adagrid import LocalBackend
 
 logger = logging.getLogger(__name__)
 name = "modal_adagrid"
@@ -16,18 +16,17 @@ process_tiles_config["timeout"] = 60 * 60 * 1
 del process_tiles_config["retries"]
 
 
-async def wait_for_future(f):
-    await f
-
-
-class ModalBackend(Backend):
+class ModalBackend(LocalBackend):
     def __init__(self, n_workers=1, gpu="any"):
         super().__init__()
+        self.use_clickhouse = True
         self.n_workers = n_workers
         self.gpu = gpu
 
     def get_cfg(self):
-        return {"n_workers": self.n_workers, "gpu": self.gpu}
+        out = super().get_cfg()
+        out.update({"n_workers": self.n_workers, "gpu": self.gpu})
+        return out
 
     @contextlib.asynccontextmanager
     async def setup(self, algo):
@@ -57,10 +56,11 @@ class ModalBackend(Backend):
                 k: v for k, v in algo.cfg.items() if k in self.algo_cfg_entries
             }
             self.worker_args = (
+                type(algo),
                 type(algo.driver.model),
                 (algo.cfg["model_seed"], algo.max_K),
                 algo.cfg["model_kwargs"],
-                type(algo),
+                algo.null_hypos,
                 filtered_cfg,
             )
             yield
@@ -68,9 +68,7 @@ class ModalBackend(Backend):
 
     async def submit_tiles(self, tiles_df, refine_deepen):
         return asyncio.create_task(
-            wait_for_future(
-                self.w.process_tiles.call(self.worker_args, tiles_df, refine_deepen)
-            )
+            self.w.process_tiles.call(self.worker_args, tiles_df, refine_deepen)
         )
 
     async def wait_for_results(self, awaitable):
