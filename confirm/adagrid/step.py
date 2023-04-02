@@ -13,51 +13,45 @@ from .const import MAX_STEP
 logger = logging.getLogger(__name__)
 
 
-async def process_initial_packets(backend, algo, tiles_df):
-    wait_for = []
-    for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        wait_for.append(
-            await submit_packet(backend, algo, packet_df, refine_deepen=False)
-        )
-    return await wait_for_packets(backend, algo, wait_for)
+async def submit_packet_df(backend, algo, tiles_df, refine_deepen: bool = True):
+    async def submit_packet(packet_df):
+        start = time.time()
+        report = dict()
+        report["start_time"] = start
+        report["step_id"] = packet_df.iloc[0]["step_id"]
+        report["packet_id"] = packet_df.iloc[0]["packet_id"]
+        report["n_tiles"] = packet_df.shape[0]
+        report["n_total_sims"] = packet_df["K"].sum()
 
+        logger.debug("Submitting %d tiles for processing.", packet_df.shape[0])
+        return await backend.submit_tiles(packet_df, refine_deepen), report
 
-async def submit_packet_df(backend, algo, tiles_df):
     if tiles_df is None or tiles_df.shape[0] == 0:
         return []
     packets = []
     for packet_id, packet_df in tiles_df.groupby("packet_id"):
-        packets.append(
-            await submit_packet(backend, algo, packet_df, refine_deepen=True)
-        )
+        packets.append(await submit_packet(packet_df))
     return packets
 
 
-async def submit_packet(backend, algo, packet_df, refine_deepen):
-    start = time.time()
-    report = dict()
-    report["start_time"] = start
-    report["step_id"] = packet_df.iloc[0]["step_id"]
-    report["packet_id"] = packet_df.iloc[0]["packet_id"]
-    report["n_tiles"] = packet_df.shape[0]
-    report["n_total_sims"] = packet_df["K"].sum()
-
-    logger.debug("Submitting %d tiles for processing.", packet_df.shape[0])
-    # NOTE: we do not restrict the list of columns sent to the worker! This is
-    # because the tile insert to Clickhouse happens on the worker.
-    # Justification:
-    # - we either need to insert tiles into Clickhouse from the leader or the worker.
-    # - we must send a minimal amount of data to the worker in order to simulate.
-    # Therefore, the minimal amount of *leader data transfer* occurs when we
-    # send all the tile info to the worker and allow the worker to insert the
-    # tiles into Clickhouse.
-    return await backend.submit_tiles(packet_df, refine_deepen), report
-
-
 async def wait_for_packets(backend, algo, packets):
+    async def wait_for_packet(awaitable, report):
+        n_results, sim_report = await backend.wait_for_results(awaitable)
+        # TODO: move to worker?
+        report.update(sim_report)
+        report["runtime_per_sim_ns"] = (
+            report["runtime_simulating"] / report["n_total_sims"] * 1e9
+        )
+        status = WorkerStatus.WORKING
+        report["status"] = status.name
+        report["runtime_total"] = time.time() - report["start_time"]
+        report["done_time"] = time.time()
+        algo.callback(report, algo.db)
+        return n_results, report
+
     coros = []
     for p in packets:
-        coros.append(wait_for_packet(backend, algo, *p))
+        coros.append(wait_for_packet(*p))
     logger.debug("Waiting for packets to finish.")
     outs = await asyncio.gather(*coros)
     if len(outs) == 0:
@@ -68,21 +62,6 @@ async def wait_for_packets(backend, algo, packets):
     logger.debug("Packets finished.")
     algo.db.insert_reports(reports)
     return sum(n_results)
-
-
-async def wait_for_packet(backend, algo, awaitable, report):
-    n_results, sim_report = await backend.wait_for_results(awaitable)
-    # TODO: move to worker?
-    report.update(sim_report)
-    report["runtime_per_sim_ns"] = (
-        report["runtime_simulating"] / report["n_total_sims"] * 1e9
-    )
-    status = WorkerStatus.WORKING
-    report["status"] = status.name
-    report["runtime_total"] = time.time() - report["start_time"]
-    report["done_time"] = time.time()
-    algo.callback(report, algo.db)
-    return n_results, report
 
 
 def process_tiles(algo, df, refine_deepen: bool):

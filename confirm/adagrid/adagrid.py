@@ -14,7 +14,6 @@ from .db import DatabaseLogging
 from .db import DuckDBTiles
 from .init import init
 from .step import new_step
-from .step import process_initial_packets
 from .step import process_tiles
 from .step import submit_packet_df
 from .step import wait_for_packets
@@ -84,8 +83,12 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
         logger.debug(f"backend.setup() took {time.time() - start:.2f} seconds")
 
         with timer("process_initial_incompletes"):
-            expected_counts[0] = await process_initial_packets(
-                backend, algo, initial_tiles_df
+            expected_counts[0] = await wait_for_packets(
+                backend,
+                algo,
+                await submit_packet_df(
+                    backend, algo, initial_tiles_df, refine_deepen=False
+                ),
             )
 
         stopping_indicator = 0
