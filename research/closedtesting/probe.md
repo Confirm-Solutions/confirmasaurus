@@ -16,9 +16,10 @@ import confirm.cloud.clickhouse as ch
 
 ip.setup_nb()
 
-db = "wd41_4d_20230402_132502"
+job_name_prefix = "wd41"
+service = "PROD"
 
-ddb_path = Path(confirm.__file__).parent.parent.joinpath(f"{db}.db")
+ddb_path = Path(confirm.__file__).parent.parent.joinpath(f"{job_name_prefix}.db")
 use_clickhouse = False
 if ddb_path.exists():
     try:
@@ -33,9 +34,18 @@ else:
     use_clickhouse = True
 
 if use_clickhouse:
-    ch_db = ch.ClickhouseTiles.connect(db, service="PROD")
+    client = ch.get_ch_client(service=service)
+    jobs = [job_name for job_name in ch.list_dbs(client) if job_name.startswith(job_name_prefix)]
+    jobs.sort()
+    job_name = jobs[-1]
+
+    ch_db = ch.ClickhouseTiles.connect(job_name, service=service)
     query = ch_db.query
 
+```
+
+```python
+query('select count(*) from results')
 ```
 
 ```python
@@ -239,9 +249,24 @@ new_step_reports.set_index("step_id", inplace=True)
 ```
 
 ```python
+query("""
+            select * from results
+                where step_id <= 2
+                    and inactivation_step > 2
+                    and (id not in (
+                        select id from done 
+                            where active = false 
+                            and step_id <= 2
+                            and step_id > 1
+                    ))
+                order by impossible limit 1
+""")
+```
+
+```python
 from matplotlib.gridspec import GridSpec
 
-min_step = 4
+min_step = 1
 max_step = 10
 color_list = ["k", "r", "b", "m"]
 offset = report_df["start_time"].min()

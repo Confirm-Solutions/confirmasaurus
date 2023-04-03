@@ -1,5 +1,4 @@
 import abc
-import asyncio
 import contextlib
 import logging
 import queue
@@ -71,11 +70,12 @@ def entrypoint(backend, algo_type, kwargs):
     return db
 
 
+@profile
 async def async_entrypoint(backend, db, algo_type, kwargs):
     entry_time = time.time()
-    with timer("init"):
-        algo, initial_tiles_df, parent_count = init(db, algo_type, kwargs)
     expected_counts = dict()
+    with timer("init"):
+        algo, initial_tiles_df, expected_counts[0] = init(db, algo_type, kwargs)
     next_step = 1
 
     start = time.time()
@@ -83,28 +83,25 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
         logger.debug(f"backend.setup() took {time.time() - start:.2f} seconds")
 
         with timer("process_initial_incompletes"):
-            expected_counts[0] = await wait_for_packets(
+            n_inserts = await wait_for_packets(
                 backend,
                 algo,
                 await submit_packet_df(
                     backend, algo, initial_tiles_df, refine_deepen=False
                 ),
             )
+            for k in n_inserts:
+                expected_counts[0][k] += n_inserts[k]
 
         stopping_indicator = 0
         n_parallel_steps = algo.cfg["n_parallel_steps"]
         processing_tasks = queue.Queue()
-        verify_tasks = []
         for step_id in range(next_step, algo.cfg["n_steps"]):
             basal_step_id = max(step_id - n_parallel_steps, 0)
             with timer("wait for basal step"):
-                await db.wait_for_step(basal_step_id, step_id, expected_counts)
-
-            done_verifies = [t for t in verify_tasks if t is not None and t.done()]
-            await asyncio.gather(*done_verifies)
-            verify_tasks = [
-                t for t in verify_tasks if t is not None and not t.done()
-            ] + [db.verify(basal_step_id)]
+                await db.wait_for_basal_step(
+                    basal_step_id, expected_counts[basal_step_id]
+                )
 
             if time.time() - entry_time > kwargs["timeout"]:
                 logger.info("Job timeout reached, stopping.")
@@ -112,9 +109,11 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
 
             with timer("new step"):
                 logger.info(f"Beginning step {step_id}")
-                status, tiles_df = new_step(algo, basal_step_id, step_id)
+                status, tiles_df, expected_counts[step_id] = new_step(
+                    algo, basal_step_id, step_id
+                )
                 if tiles_df is None:
-                    expected_counts[step_id] = 0
+                    expected_counts[step_id] = {"tiles": 0, "results": 0, "done": 0}
 
             if status in [WorkerStatus.CONVERGED, WorkerStatus.EMPTY_STEP]:
                 stopping_indicator += 1
@@ -143,20 +142,16 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
             with timer("wait for packets"):
                 if processing_tasks.qsize() > n_parallel_steps - 1:
                     tasks_step_id, tasks = processing_tasks.get()
-                    if tasks_step_id in expected_counts:
-                        assert len(tasks) == 0
-                    else:
-                        expected_counts[tasks_step_id] = await wait_for_packets(
-                            backend, algo, tasks
-                        )
+                    n_inserts = await wait_for_packets(backend, algo, tasks)
+                    for k in n_inserts:
+                        expected_counts[tasks_step_id][k] += n_inserts[k]
 
         with timer("process final packets"):
             while not processing_tasks.empty():
                 await wait_for_packets(backend, algo, processing_tasks.get()[1])
 
         with timer("verify"):
-            await asyncio.gather(*[t for t in verify_tasks if t is not None])
-            db.verify(step_id)
+            db.verify(step_id, expected_counts[step_id])
 
         assert processing_tasks.empty()
         assert step_id < algo.cfg["n_steps"]

@@ -39,7 +39,7 @@ def f():
         n_K_double=6,
         calibration_min_idx=70,
         step_size=2**16,
-        packet_size=2**10,
+        packet_size=2**27,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
         # backend=coiled_backend.CoiledBackend(client=get_client()),

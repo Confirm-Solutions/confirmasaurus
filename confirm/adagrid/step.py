@@ -4,7 +4,6 @@ import time
 from enum import Enum
 
 import jax
-import numpy as np
 import pandas as pd
 
 import imprint as ip
@@ -31,12 +30,12 @@ async def submit_packet_df(backend, algo, tiles_df, refine_deepen: bool = True):
 
 async def wait_for_packets(backend, algo, packets):
     async def wait_for_packet(awaitable):
-        n_results, report = await backend.wait_for_results(awaitable)
+        n_inserts, report = await backend.wait_for_results(awaitable)
         # TODO: move to worker?
         report["runtime_total"] = time.time() - report["start_time"]
         report["done_time"] = time.time()
         algo.callback(report, algo.db)
-        return n_results, report
+        return n_inserts, report
 
     coros = []
     for p in packets:
@@ -44,13 +43,17 @@ async def wait_for_packets(backend, algo, packets):
     logger.debug("Waiting for packets to finish.")
     outs = await asyncio.gather(*coros)
     if len(outs) == 0:
-        n_results = [0]
+        n_inserts = [dict(tiles=0, results=0, done=0)]
         reports = []
     else:
-        n_results, reports = zip(*outs)
+        n_inserts, reports = zip(*outs)
     logger.debug("Packets finished.")
     algo.db.insert_reports(*reports)
-    return sum(n_results)
+    out_n_inserts = dict(tiles=0, results=0, done=0)
+    for n in n_inserts:
+        for k in n:
+            out_n_inserts[k] += n[k]
+    return out_n_inserts
 
 
 def process_tiles(algo, df, refine_deepen: bool, report: dict):
@@ -62,9 +65,10 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
         algo.db.insert("tiles", inactive_df)
         algo.db.insert("done", inactive_df)
         report["runtime_refine_deepen"] = time.time() - start
-        report["n_inactive_tiles"] = inactive_df.shape[0]
+        n_inactive = inactive_df.shape[0]
     else:
         tiles_df = df
+        n_inactive = 0
 
     algo.db.insert("tiles", tiles_df)
 
@@ -82,6 +86,7 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
     report["packet_id"] = df.iloc[0]["packet_id"]
     report["n_parent_tiles"] = df.shape[0]
     report["n_tiles"] = tiles_df.shape[0]
+    report["n_inactive_tiles"] = n_inactive
     report["tile_batch_size"] = tbs
     report["n_total_sims"] = results_df["K"].sum()
     report["runtime_simulating"] = report["sim_done_time"] - report["sim_start_time"]
@@ -90,7 +95,12 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
     )
     report["status"] = WorkerStatus.WORKING.name
 
-    return results_df.shape[0], report
+    n_inserts = dict(
+        tiles=tiles_df.shape[0] + n_inactive,
+        done=n_inactive,
+        results=results_df.shape[0],
+    )
+    return n_inserts, report
 
 
 def refine_and_deepen(df, null_hypos, max_K):
@@ -136,9 +146,10 @@ def refine_and_deepen(df, null_hypos, max_K):
     return active_df, inactive_df
 
 
+@profile
 def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
-    status, tiles_df, report = _new_step(algo, basal_step_id, new_step_id)
+    status, tiles_df, report, n_inserts = _new_step(algo, basal_step_id, new_step_id)
     if tiles_df is not None:
         report["n_packets"] = (
             tiles_df["packet_id"].nunique() if tiles_df is not None else 0
@@ -150,9 +161,13 @@ def new_step(algo, basal_step_id, new_step_id):
     report["runtime_total"] = time.time() - report["start_time"]
     algo.callback(report, algo.db)
     algo.db.insert_reports(report)
-    return status, tiles_df
+    for k in ["tiles", "results", "done"]:
+        if k not in n_inserts:
+            n_inserts[k] = 0
+    return status, tiles_df, n_inserts
 
 
+@profile
 def _new_step(algo, basal_step_id, new_step_id):
     converged, convergence_data, report = algo.convergence_criterion(basal_step_id)
 
@@ -160,7 +175,7 @@ def _new_step(algo, basal_step_id, new_step_id):
     report["runtime_convergence_criterion"] = time.time() - start
     if converged:
         logger.debug("Convergence!!")
-        return WorkerStatus.CONVERGED, None, report
+        return WorkerStatus.CONVERGED, None, report, {}
     elif new_step_id >= algo.cfg["n_steps"]:
         logger.error(
             "Reached maximum number of steps. Terminating."
@@ -178,6 +193,7 @@ def _new_step(algo, basal_step_id, new_step_id):
             WorkerStatus.ALREADY_EXISTS,
             algo.db.get_packet(new_step_id),
             report,
+            {},
         )
 
     # If we haven't converged, we create a new step.
@@ -190,7 +206,7 @@ def _new_step(algo, basal_step_id, new_step_id):
         # New step is empty so we have terminated but
         # failed to converge.
         logger.debug("New step is empty despite failure to converge.")
-        return WorkerStatus.EMPTY_STEP, None, report
+        return WorkerStatus.EMPTY_STEP, None, report, {}
 
     selection_df["active"] = ~(selection_df["refine"] | selection_df["deepen"])
 
@@ -219,15 +235,9 @@ def _new_step(algo, basal_step_id, new_step_id):
             "No tiles are refined or deepened in this step."
             " Marking these parent tiles as finished and trying again."
         )
-        return WorkerStatus.NO_NEW_TILES, None, report
+        return WorkerStatus.NO_NEW_TILES, None, report, {}
 
-    def assign_packets(df):
-        return pd.Series(
-            np.floor(np.arange(df.shape[0]) / algo.cfg["packet_size"]).astype(int),
-            df.index,
-        )
-
-    selection_df["packet_id"] = assign_packets(selection_df)
+    selection_df["packet_id"] = assign_packets(selection_df, algo.cfg["packet_size"])
     selection_df["step_id"] = new_step_id
     algo.db.insert_done_update_results(selection_df)
 
@@ -242,7 +252,13 @@ def _new_step(algo, basal_step_id, new_step_id):
         f"Starting step {new_step_id}"
         f" with {report['n_new_tiles']} tiles to simulate."
     )
-    return WorkerStatus.NEW_STEP, selection_df, report
+    n_inserts = dict(tiles=0, done=selection_df.shape[0], results=0)
+    return WorkerStatus.NEW_STEP, selection_df, report, n_inserts
+
+
+def assign_packets(df, packet_size):
+    cum_sims = (df["K"] * (df["refine"] + df["deepen"])).cumsum()
+    return pd.Series((cum_sims // packet_size).astype(int), df.index)
 
 
 class WorkerStatus(Enum):

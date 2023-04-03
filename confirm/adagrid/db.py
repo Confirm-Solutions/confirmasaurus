@@ -262,7 +262,11 @@ class SQLTiles:
             f"""
             select * from results 
                 where completion_step >= {new_step_id}
-                    and (id not in (select id from done where step_id < {new_step_id}))
+                    and (id not in (
+                        select id from done 
+                            where step_id < {new_step_id}
+                            and step_id > {self.max_done_step}
+                    ))
                     and step_id <= {basal_step_id}
             order by {orderer} limit {n}
             """
@@ -280,8 +284,9 @@ class SQLTiles:
                     and (id not in (
                         select id from done 
                             where active = false 
-                            and step_id <= {basal_step_id})
-                    )
+                            and step_id <= {basal_step_id}
+                            and step_id > {self.max_done_step}
+                    ))
             """
             )
             .iloc[0]
@@ -292,23 +297,24 @@ class SQLTiles:
         return self.query(
             f"""
             select * from results
-                where inactivation_step > {basal_step_id}
+                where step_id <= {basal_step_id}
+                    and inactivation_step > {basal_step_id}
                     and (id not in (
                         select id from done 
                             where active = false 
-                            and step_id <= {basal_step_id})
-                    )
-                    and step_id <= {basal_step_id}
+                            and step_id <= {basal_step_id}
+                            and step_id > {self.max_done_step}
+                    ))
                 order by {order_col} limit 1
             """
         )
 
-    async def wait_for_step(
-        self, basal_step_id: int, step_id: int, expected_counts: Dict[int, int]
+    async def wait_for_basal_step(
+        self, basal_step_id: int, expected_counts: Dict[str, int]
     ):
-        pass
+        await self.verify(basal_step_id, expected_counts)
 
-    def verify(self, step_id: int):
+    def verify(self, step_id: int, expected_counts: Dict[str, int]):
         duplicate_tiles = self.query(
             f"""
             select id from tiles 
@@ -377,7 +383,7 @@ class SQLTiles:
 
         tiles_without_parents = self.query(
             f"""
-            select parent_id, id from tiles
+            select parent_id, id from results
                 where active_at_birth = true
                     and step_id <= {step_id}
                     and parent_id not in (select id from done)
@@ -465,9 +471,6 @@ class SQLTiles:
                 f" {deepened_tiles_with_incorrect_child_count}"
             )
 
-    async def finalize(self) -> None:
-        pass
-
 
 @dataclass
 class DuckDBTiles(SQLTiles):
@@ -479,6 +482,7 @@ class DuckDBTiles(SQLTiles):
     """
 
     con: "duckdb.DuckDBPyConnection"
+    max_done_step: int = -1
 
     def query(self, query, quiet=False):
         return self.con.query(query).df()
@@ -508,17 +512,20 @@ class DuckDBTiles(SQLTiles):
 
     def insert_done_update_results(self, df: pd.DataFrame):
         self.insert("done", df)
+
+    async def finalize(self) -> None:
+        # TODO: move back to insert_done_update_results. just here for testing...
         self.con.execute(
             """
             update results
                 set inactivation_step=(
-                        CASE WHEN df.active 
+                        CASE WHEN done.active 
                             THEN results.inactivation_step 
-                            ELSE df.step_id 
+                            ELSE done.step_id 
                         END),
-                    completion_step=df.step_id
-            from df
-                where results.id=df.id
+                    completion_step=done.step_id
+            from done
+                where results.id=done.id
             """
         )
 

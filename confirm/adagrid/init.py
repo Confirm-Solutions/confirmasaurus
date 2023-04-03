@@ -22,7 +22,7 @@ def init(db, algo_type, kwargs):
 
     add_system_cfg(cfg)
 
-    tiles_df, parent_count = init_grid(g, db, cfg)
+    tiles_df, expected_counts = init_grid(g, db, cfg)
 
     cfg_copy = copy.copy(cfg)
     for k in ["git_diff", "conda_list", "nvidia_smi", "pip_freeze"]:
@@ -38,7 +38,7 @@ def init(db, algo_type, kwargs):
     )
     algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
 
-    return algo, tiles_df, parent_count
+    return algo, tiles_df, expected_counts
 
 
 def first(kwargs):
@@ -114,8 +114,6 @@ def join(db, kwargs):
 def add_system_cfg(cfg):
     cfg["init_time"] = time.time()
     cfg["jax_platform"] = jax.lib.xla_bridge.get_backend().platform
-    if cfg["packet_size"] is None:
-        cfg["packet_size"] = cfg["step_size"]
 
     ########################################
     # STEP 3: Collect a bunch of system information for later debugging and
@@ -180,14 +178,12 @@ def init_grid(g, db, cfg):
         cfg["packet_size"],
     )
 
-    return df, absent_parents.shape[0]
+    return df, dict(tiles=0, results=0, done=absent_parents.shape[0])
 
 
 def assign_packets(df, packet_size):
-    return pd.Series(
-        np.floor(np.arange(df.shape[0]) / packet_size).astype(int),
-        df.index,
-    )
+    cum_sims = df["K"].cumsum()
+    return pd.Series((cum_sims // packet_size).astype(int), df.index)
 
 
 def _serialize_null_hypos(null_hypos):

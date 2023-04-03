@@ -260,7 +260,7 @@ def ada_calibrate(
     n_steps: int = 100,
     timeout: int = 60 * 60 * 12,
     step_size: int = 2**10,
-    packet_size: int = None,
+    packet_size: int = 2**25,
     n_parallel_steps: int = 1,
     record_system: bool = True,
     clickhouse_service: str = None,
@@ -306,8 +306,8 @@ def ada_calibrate(
            packet_size because we select tiles once and then run many
            simulation "iterations" in parallel each processing one
            packet of tiles. Defaults to 2**10.
-        packet_size: The number of tiles to process per iteration. Defaults to
-            None. If None, we use the same value as step_size.
+        packet_size: The number of simulations to process per iteration. Defaults to
+            2**25=~33 million.
         n_parallel_steps: The number of Adagrid steps to run in parallel.
             Setting this parameter to anything greater than 1 will cause the steps
             to be based on lagged data. For example, with n_parallel_steps=2,
