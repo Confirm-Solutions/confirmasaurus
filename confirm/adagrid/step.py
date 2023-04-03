@@ -60,7 +60,7 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
     if refine_deepen:
         start = time.time()
         tiles_df, inactive_df = refine_and_deepen(
-            df, algo.null_hypos, algo.cfg["max_K"]
+            df, algo.model.null_hypos, algo.cfg["max_K"]
         )
         algo.db.insert("tiles", inactive_df, create=False)
         algo.db.insert("done", inactive_df, create=False)
@@ -149,9 +149,11 @@ def refine_and_deepen(df, null_hypos, max_K):
 
 
 @profile
-def new_step(algo, basal_step_id, new_step_id):
+async def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
-    status, tiles_df, report, n_inserts = _new_step(algo, basal_step_id, new_step_id)
+    status, tiles_df, report, n_inserts = await _new_step(
+        algo, basal_step_id, new_step_id
+    )
     if tiles_df is not None:
         report["n_packets"] = (
             tiles_df["packet_id"].nunique() if tiles_df is not None else 0
@@ -170,13 +172,19 @@ def new_step(algo, basal_step_id, new_step_id):
 
 
 @profile
-def _new_step(algo, basal_step_id, new_step_id):
-    converged, convergence_data, report = algo.convergence_criterion(basal_step_id)
+async def _new_step(algo, basal_step_id, new_step_id):
+    db = algo.db
+    select_task = asyncio.create_task(algo.select_tiles(basal_step_id, new_step_id))
+    await asyncio.sleep(0)
+
+    convergence_task = db.launch_thread(algo.convergence_criterion, basal_step_id)
+    converged, report = await convergence_task
 
     start = time.time()
     report["runtime_convergence_criterion"] = time.time() - start
     if converged:
         logger.debug("Convergence!!")
+        select_task.cancel()
         return WorkerStatus.CONVERGED, None, report, {}
     elif new_step_id >= algo.cfg["n_steps"]:
         logger.error(
@@ -185,16 +193,14 @@ def _new_step(algo, basal_step_id, new_step_id):
         )
         assert False
 
-    n_existing_packets = algo.db.n_existing_packets(new_step_id)
+    n_existing_packets = db.n_existing_packets(new_step_id)
     if n_existing_packets is not None and n_existing_packets > 0:
         raise RuntimeError(
             f"Step {new_step_id} already exists with {n_existing_packets} packets."
         )
 
     # If we haven't converged, we create a new step.
-    selection_df, selection_report = algo.select_tiles(
-        basal_step_id, new_step_id, convergence_data
-    )
+    selection_df, selection_report = await select_task
     report.update(selection_report)
 
     if selection_df is None:
@@ -234,7 +240,7 @@ def _new_step(algo, basal_step_id, new_step_id):
 
     selection_df["packet_id"] = assign_packets(selection_df, algo.cfg["packet_size"])
     selection_df["step_id"] = new_step_id
-    algo.db.insert_done_update_results(selection_df)
+    db.insert_done_update_results(selection_df)
 
     report["time"] = time.time()
     report["n_new_tiles"] = (

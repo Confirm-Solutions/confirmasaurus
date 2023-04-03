@@ -1,3 +1,4 @@
+import asyncio
 import logging.handlers
 import threading
 import time
@@ -261,12 +262,10 @@ class SQLTiles:
         df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
         self.insert("reports", df)
 
-    async def wait_for_basal_step(
-        self, basal_step_id: int, expected_counts: Dict[str, int]
-    ):
-        self.verify(basal_step_id, expected_counts)
+    async def wait_for_basal_step(self, basal_step_id: int):
+        self.verify(basal_step_id)
 
-    def verify(self, step_id: int, expected_counts: Dict[str, int]):
+    def verify(self, step_id: int):
         duplicate_tiles = self.query(
             f"""
             select id from tiles 
@@ -434,7 +433,15 @@ class DuckDBTiles(SQLTiles):
     """
 
     con: "duckdb.DuckDBPyConnection"
-    max_done_step: int = -1
+    expected_counts: Dict[int, Dict[str, int]] = field(default_factory=dict)
+
+    def launch_thread(self, f, *args, **kwargs):
+        out = f(*args, **kwargs)
+
+        async def return_f():
+            return out
+
+        return asyncio.create_task(return_f())
 
     def query(self, query, quiet=False):
         return self.con.query(query).df()

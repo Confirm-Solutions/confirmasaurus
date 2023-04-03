@@ -22,31 +22,19 @@ from ..adagrid.const import MAX_STEP
 logger = logging.getLogger(__name__)
 
 
-synchronous_insert_settings = dict(
+async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
+sync_insert_settings = dict(
     insert_distributed_sync=1,
     insert_quorum="auto",
     insert_quorum_parallel=1,
+    load_balancing="first_or_random",
 )
-async_insert_settings = {"async_insert": 1, "wait_for_async_insert": 0}
-default_insert_settings = async_insert_settings
+select_settings = dict(
+    select_sequential_consistency=1, load_balancing="first_or_random"
+)
 
 
-def set_insert_settings(settings):
-    for k in list(default_insert_settings.keys()):
-        del default_insert_settings[k]
-    for k in settings:
-        default_insert_settings[k] = settings[k]
-
-
-all_tables = [
-    "results",
-    "tiles",
-    "done",
-    "config",
-    "logs",
-    "reports",
-    "null_hypos",
-]
+all_tables = ["results", "tiles", "done", "config", "logs", "reports"]
 
 
 type_map = {
@@ -93,7 +81,7 @@ def create_table(ch_client, name, df, partitioner, orderer):
         PARTITION BY ({partitioner})
         ORDER BY ({orderer})
         """,
-        default_insert_settings,
+        sync_insert_settings,
     )
 
 
@@ -133,7 +121,7 @@ def _insert_chunk_df(client, table, df, settings=None):
         client.insert_arrow,
         table,
         pyarrow.Table.from_pandas(df, preserve_index=False),
-        settings=settings or default_insert_settings,
+        settings=settings or sync_insert_settings,
     )
     logger.debug(
         f"Inserting {df.shape[0]} rows into {table} took"
@@ -233,13 +221,13 @@ def retry_ch_action(method, *args, retries=2, is_retry=False, **kwargs):
         raise e
 
 
-def query_df(client, query, quiet=False):
+def query_df(client, query, quiet=False, **kwargs):
     # Loading via Arrow and then converting to Pandas is faster than using
     # query_df directly to load a pandas dataframe. I'm guessing that loading
     # through arrow is a little less flexible or something, but for our
     # purposes, faster loading is great.
     start = time.time()
-    out = retry_ch_action(client.query_arrow, query).to_pandas()
+    out = retry_ch_action(client.query_arrow, query, **kwargs).to_pandas()
     if not quiet:
         logger.debug(f"Query took {time.time() - start} seconds\n{query}")
     return out
@@ -371,6 +359,7 @@ class ClickhouseTiles(SQLTiles):
     client: "clickhouse_connect.driver.httpclient.HttpClient"
     job_name: str
     tasks: List[asyncio.Task] = field(default_factory=list)
+    expected_counts: Dict[int, Dict[str, int]] = field(default_factory=dict)
     max_done_step: int = -1
     _table_exists: Dict[str, bool] = field(default_factory=set)
     _table_columns: Dict[str, List[str]] = field(default_factory=dict)
@@ -378,8 +367,11 @@ class ClickhouseTiles(SQLTiles):
     _update_task: asyncio.Task = None
     _verify_task: asyncio.Task = None
 
+    def launch_thread(self, f, *args, **kwargs):
+        return asyncio.create_task(asyncio.to_thread(f, *args, **kwargs))
+
     def query(self, query: str, quiet: bool = False) -> pd.DataFrame:
-        return query_df(self.client, query, quiet=quiet)
+        return query_df(self.client, query, quiet=quiet, settings=select_settings)
 
     def insert(
         self, table: str, df: pd.DataFrame, create: bool = True, block: bool = False
@@ -403,13 +395,7 @@ class ClickhouseTiles(SQLTiles):
                 orderers.get(table, ""),
             )
         df_subset = df[self.get_columns(table)]
-        if block:
-            settings = synchronous_insert_settings
-        else:
-            settings = None
-        self.tasks.extend(
-            insert_df(self.client, table, df_subset, settings=settings, block=block)
-        )
+        self.tasks.extend(insert_df(self.client, table, df_subset, block=block))
         self._table_exists.add(table)
 
     def get_columns(self, table_name: str) -> List[str]:
@@ -429,9 +415,19 @@ class ClickhouseTiles(SQLTiles):
         else:
             return True
 
+    def wait_for_results(self, step_id):
+        self.wait_for_table(
+            "Adagrid",
+            "results",
+            step_id,
+            self.expected_counts[step_id]["results"],
+            0.1,
+        )
+
     def next(
         self, basal_step_id: int, new_step_id: int, n: int, orderer: str
     ) -> pd.DataFrame:
+        self.wait_for_results(basal_step_id)
         return self.query(
             f"""
             select * from results 
@@ -449,6 +445,7 @@ class ClickhouseTiles(SQLTiles):
     def bootstrap_lamss(self, basal_step_id: int, nB: int) -> List[float]:
         # Get lambda**_Bi for each bootstrap sample.
         cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        self.wait_for_results(basal_step_id)
         return (
             self.query(
                 f"""
@@ -468,6 +465,7 @@ class ClickhouseTiles(SQLTiles):
         )
 
     def worst_tile(self, basal_step_id: int, order_col: str) -> pd.DataFrame:
+        self.wait_for_results(basal_step_id)
         return self.query(
             f"""
             select * from results
@@ -493,7 +491,6 @@ class ClickhouseTiles(SQLTiles):
             self.client,
             "done",
             df[self.get_columns("done")],
-            settings=synchronous_insert_settings,
             block=False,
         )
         insert_tasks = [t for t in insert_tasks if t is not None]
@@ -550,50 +547,54 @@ class ClickhouseTiles(SQLTiles):
         )
         return step_id
 
-    async def wait_for_basal_step(
-        self, basal_step_id: int, expected_counts: Dict[str, int]
-    ) -> None:
+    async def wait_for_basal_step(self, basal_step_id: int) -> None:
         self.cleanup()
         if self._done_task is not None:
-            done_step_id = await self._done_task
+            self.ready_to_update = await self._done_task
             self._done_task = None
 
-            async def update_task():
-                if self._update_task is not None:
-                    self.max_done_step = await self._update_task
-                self._update_task = asyncio.create_task(
-                    asyncio.to_thread(self.alter_update, done_step_id)
-                )
+            # update pattern duplicated with verify below.
+            if self._update_task is None:
+                self.update_stop = False
 
-            self.tasks.append(asyncio.create_task(update_task()))
+                def update_task():
+                    last_updated = -1
+                    while not self.update_stop or self.ready_to_update > last_updated:
+                        if self.ready_to_update > last_updated:
+                            last_updated += 1
+                            self.max_done_step = self.alter_update(last_updated)
+                        else:
+                            time.sleep(2.0)
 
-        # It's slightly inefficient to use the main thread here to wait for the
-        # results table, but we need to do the waiting in the same thread as
-        # the query in new_step. Ideally, we'd rearrange stuff so that new_step
-        # and the wait here happen both in the same separate thread.
-        self.wait_for_table(
-            "Adagrid",
-            "results",
-            basal_step_id,
-            expected_counts["results"],
-            0.2,
-        )
+                self._update_task = asyncio.create_task(asyncio.to_thread(update_task))
+                await asyncio.sleep(0)
+            else:
+                if self._update_task.done():
+                    self._update_task.result()
 
-        async def verify_task():
-            # TODO:
-            # We use this pattern a lot. Maybe abstract it out?
-            # - _verify_task
-            # - _done_task
-            # - _update_task
-            if self._verify_task is not None:
-                await self._verify_task
-            self._verify_task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.verify, basal_step_id, expected_counts, sleep_time=3.0
-                )
-            )
+        self.wait_for_results(basal_step_id)
 
-        self.tasks.append(asyncio.create_task(verify_task()))
+        self.ready_to_verify = basal_step_id
+        self.verify_stop = False
+        if self._verify_task is None:
+
+            def verify_task():
+                last_verified = -1
+                while not self.verify_stop or self.ready_to_verify > last_verified:
+                    if self.ready_to_verify > last_verified:
+                        last_verified = self.ready_to_verify
+                        self.verify(
+                            last_verified,
+                            sleep_time=3.0,
+                        )
+                    else:
+                        time.sleep(2.0)
+
+            self.tasks.append(asyncio.create_task(asyncio.to_thread(verify_task)))
+            await asyncio.sleep(0)
+        else:
+            if self._verify_task.done():
+                self._verify_task.result()
 
     def wait_for_table(
         self,
@@ -625,9 +626,7 @@ class ClickhouseTiles(SQLTiles):
             else:
                 time.sleep(sleep_time)
 
-    def verify(
-        self, step_id: int, expected_counts: Dict[str, int], sleep_time: float = 0.5
-    ) -> asyncio.Task:
+    def verify(self, step_id: int, sleep_time: float = 0.5) -> asyncio.Task:
         # TRICKY!
         # In order to ensure that the tables are fully populated we need to
         # wait for inserts. But, we also need to make sure that the waiting is
@@ -635,17 +634,27 @@ class ClickhouseTiles(SQLTiles):
         # This is because different threads may connect to different replicas
         # in the Clickhouse Cloud cluster.
         self.wait_for_table(
-            "Verify", "results", step_id, expected_counts["results"], sleep_time
+            "Verify",
+            "results",
+            step_id,
+            self.expected_counts[step_id]["results"],
+            sleep_time,
         )
         self.wait_for_table(
-            "Verify", "tiles", step_id, expected_counts["tiles"], sleep_time
+            "Verify",
+            "tiles",
+            step_id,
+            self.expected_counts[step_id]["tiles"],
+            sleep_time,
         )
         self.wait_for_table(
-            "Verify", "done", step_id, expected_counts["done"], sleep_time
+            "Verify", "done", step_id, self.expected_counts[step_id]["done"], sleep_time
         )
-        super().verify(step_id, expected_counts)
+        super().verify(step_id)
 
     async def finalize(self):
+        self.verify_stop = True
+        self.update_stop = True
         while len(self.tasks) > 0:
             tmp = [t for t in self.tasks if t is not None]
             self.tasks = []

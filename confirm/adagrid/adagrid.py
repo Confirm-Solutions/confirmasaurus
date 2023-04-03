@@ -73,9 +73,8 @@ def entrypoint(backend, algo_type, kwargs):
 @profile
 async def async_entrypoint(backend, db, algo_type, kwargs):
     entry_time = time.time()
-    expected_counts = dict()
     with timer("init"):
-        algo, initial_tiles_df, expected_counts[0] = init(db, algo_type, kwargs)
+        algo, initial_tiles_df, db.expected_counts[0] = init(db, algo_type, kwargs)
     next_step = 1
 
     start = time.time()
@@ -91,7 +90,7 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
                 ),
             )
             for k in n_inserts:
-                expected_counts[0][k] += n_inserts[k]
+                db.expected_counts[0][k] += n_inserts[k]
 
         stopping_indicator = 0
         n_parallel_steps = algo.cfg["n_parallel_steps"]
@@ -99,9 +98,7 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
         for step_id in range(next_step, algo.cfg["n_steps"]):
             basal_step_id = max(step_id - n_parallel_steps, 0)
             with timer("wait for basal step"):
-                await db.wait_for_basal_step(
-                    basal_step_id, expected_counts[basal_step_id]
-                )
+                await db.wait_for_basal_step(basal_step_id)
 
             if time.time() - entry_time > kwargs["timeout"]:
                 logger.info("Job timeout reached, stopping.")
@@ -109,11 +106,11 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
 
             with timer("new step"):
                 logger.info(f"Beginning step {step_id}")
-                status, tiles_df, expected_counts[step_id] = new_step(
+                status, tiles_df, db.expected_counts[step_id] = await new_step(
                     algo, basal_step_id, step_id
                 )
                 if tiles_df is None:
-                    expected_counts[step_id] = {"tiles": 0, "results": 0, "done": 0}
+                    db.expected_counts[step_id] = {"tiles": 0, "results": 0, "done": 0}
 
             if status in [WorkerStatus.CONVERGED, WorkerStatus.EMPTY_STEP]:
                 stopping_indicator += 1
@@ -144,19 +141,18 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
                     tasks_step_id, tasks = processing_tasks.get()
                     n_inserts = await wait_for_packets(backend, algo, tasks)
                     for k in n_inserts:
-                        expected_counts[tasks_step_id][k] += n_inserts[k]
+                        db.expected_counts[tasks_step_id][k] += n_inserts[k]
 
         with timer("process final packets"):
             while not processing_tasks.empty():
                 # TODO: duplicated above, refactor
                 tasks_step_id, tasks = processing_tasks.get()
-                await wait_for_packets(backend, algo, tasks)
                 n_inserts = await wait_for_packets(backend, algo, tasks)
                 for k in n_inserts:
-                    expected_counts[tasks_step_id][k] += n_inserts[k]
+                    db.expected_counts[tasks_step_id][k] += n_inserts[k]
 
         with timer("verify"):
-            db.verify(step_id, expected_counts[step_id])
+            db.verify(step_id)
 
         assert processing_tasks.empty()
         assert step_id < algo.cfg["n_steps"]

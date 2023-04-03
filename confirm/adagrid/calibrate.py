@@ -61,8 +61,7 @@ logger = logging.getLogger(__name__)
 
 
 class AdaCalibrate:
-    def __init__(self, model_type, null_hypos, db, cfg, callback):
-        self.null_hypos = null_hypos
+    def __init__(self, model_type, db, cfg, callback):
         self.db = db
         self.cfg = cfg
         self.callback = callback
@@ -77,13 +76,14 @@ class AdaCalibrate:
         # In a distributed setting, we might not need to create the driver on
         # the leader, so we do it lazily.
         if self._driver is None:
-            self._model = self.model_type(
+            self.model = self.model_type(
                 seed=self.cfg["model_seed"],
                 max_K=self.max_K,
                 **self.cfg["model_kwargs"],
             )
+            self.null_hypos = self.model.null_hypos
             self._driver = bootstrap.BootstrapCalibrate(
-                self._model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks
+                self.model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks
             )
         return self._driver
 
@@ -146,11 +146,11 @@ class AdaCalibrate:
 
         # If there are no tiles, we are done.
         if worst_tile_impossible.shape[0] == 0:
-            return True, None, {}
+            return True, {}
 
         any_impossible = worst_tile_impossible["impossible"].iloc[0]
         if any_impossible:
-            return False, None, {}
+            return False, {}
 
         worst_tile_df = self.db.worst_tile(basal_step_id, "lams")
         worst_tile = worst_tile_df.iloc[0]
@@ -190,15 +190,15 @@ class AdaCalibrate:
             and (std_tie < self.cfg["std_target"])
             and (grid_cost < self.cfg["grid_target"])
         )
-        return report["converged"], None, report
+        return report["converged"], report
 
-    def select_tiles(self, basal_step_id, new_step_id, _):
-        tiles_df = self.db.next(
-            basal_step_id, new_step_id, self.cfg["step_size"], "orderer"
+    async def select_tiles(self, basal_step_id, new_step_id):
+        twb_worst_task = self.db.launch_thread(
+            self.db.worst_tile, basal_step_id, "twb_mean_lams"
         )
-        logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
-        if tiles_df.shape[0] == 0:
-            return None, {}
+        tiles_task = self.db.launch_thread(
+            self.db.next, basal_step_id, new_step_id, self.cfg["step_size"], "orderer"
+        )
 
         ########################################
         # Is deepening likely to be enough?
@@ -223,7 +223,7 @@ class AdaCalibrate:
         # tile, then the tile actually has a chance of being the worst tile. In
         # which case, we choose the more expensive option of refining the tile.
 
-        twb_worst_tile = self.db.worst_tile(basal_step_id, "twb_mean_lams")
+        twb_worst_tile = await twb_worst_task
         for col in twb_worst_tile.columns:
             if col.startswith("radii"):
                 twb_worst_tile[col] = 1e-6
@@ -235,6 +235,11 @@ class AdaCalibrate:
             tile_batch_size=1,
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
+
+        tiles_df = await tiles_task
+        logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
+        if tiles_df.shape[0] == 0:
+            return None, {}
         deepen_likely_to_work = (
             tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
         ) & (~tiles_df["impossible"])

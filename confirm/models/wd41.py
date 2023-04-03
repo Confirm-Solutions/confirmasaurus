@@ -13,7 +13,7 @@ default_frac_tnbc = 0.54
 class WD41Null(ip.grid.NullHypothesis):
     def __init__(self, frac_tnbc=default_frac_tnbc):
         self.frac_tnbc = frac_tnbc
-        self.jit_f = jax.jit(jax.vmap(self.f))
+        self.jit_f = None
 
     def get_theta(self, theta):
         return theta
@@ -32,6 +32,8 @@ class WD41Null(ip.grid.NullHypothesis):
         return control_term - treat_term
 
     def dist(self, theta):
+        if self.jit_f is None:
+            self.jit_f = jax.jit(jax.vmap(self.f))
         return self.jit_f(theta)
 
     def description(self):

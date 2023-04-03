@@ -38,7 +38,7 @@ def f():
         std_target=0.002,
         n_K_double=6,
         calibration_min_idx=70,
-        step_size=2**16,
+        step_size=2**17,
         packet_size=2**27,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
@@ -48,7 +48,7 @@ def f():
         # TODO:
         # TODO:
         # backend=coiled_backend.CoiledBackend(client=get_client()),
-        n_steps=8,
+        n_steps=10,
     )
     print("Done inner")
 

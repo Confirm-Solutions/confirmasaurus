@@ -113,7 +113,7 @@ class AdaValidate:
             next_tile_K=next_tile["K"],
             next_tile_at_max_K=next_tile["K"] == self.max_K,
         )
-        return report["converged"], max_tie_est, report
+        return report["converged"], report
 
     def _are_tiles_done(self, tiles, max_tie_est):
         return ~(
@@ -121,7 +121,7 @@ class AdaValidate:
             | (((tiles["tie_bound_order"] < 0) & (tiles["tie_bound"] > max_tie_est)))
         )
 
-    def select_tiles(self, basal_step_id, new_step_id, max_tie_est):
+    async def select_tiles(self, basal_step_id, new_step_id, max_tie_est):
         # TODO: output how many tiles are left according to the criterion?
         raw_tiles = self.db.next(
             basal_step_id,
@@ -129,6 +129,9 @@ class AdaValidate:
             self.cfg["step_size"],
             "total_cost_order, tie_bound_order",
         )
+        max_tie_est = self.db.worst_tile(basal_step_id, "tie_est desc")["tie_est"].iloc[
+            0
+        ]
         include = ~self._are_tiles_done(raw_tiles, max_tie_est)
         tiles_df = raw_tiles[include].copy()
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")

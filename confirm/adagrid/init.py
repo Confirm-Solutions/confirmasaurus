@@ -1,4 +1,3 @@
-import codecs
 import copy
 import json
 import logging
@@ -7,7 +6,6 @@ import subprocess
 import time
 import warnings
 
-import cloudpickle
 import jax
 import numpy as np
 import pandas as pd
@@ -18,7 +16,7 @@ logger = logging.getLogger(__name__)
 def init(db, algo_type, kwargs):
     g = kwargs["g"]
 
-    cfg, null_hypos = first(kwargs)
+    cfg = first(kwargs)
 
     add_system_cfg(cfg)
 
@@ -31,7 +29,7 @@ def init(db, algo_type, kwargs):
     logger.info("Config minus system info: \n%s", cfg_copy)
 
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
-    algo = algo_type(kwargs["model_type"], null_hypos, db, cfg, kwargs["callback"])
+    algo = algo_type(kwargs["model_type"], db, cfg, kwargs["callback"])
 
     return algo, tiles_df, expected_counts
 
@@ -67,7 +65,7 @@ def first(kwargs):
 
     if kwargs["overrides"] is not None:
         warnings.warn("Overrides are ignored when starting a new job.")
-    return cfg, kwargs["g"].null_hypos
+    return cfg
 
 
 def join(db, kwargs):
@@ -102,8 +100,7 @@ def join(db, kwargs):
         ]:
             raise ValueError(f"Parameter {k} cannot be overridden.")
         cfg[k] = overrides[k]
-    null_hypos = _deserialize_null_hypos(db.get_null_hypos())
-    return cfg, null_hypos
+    return cfg
 
 
 def add_system_cfg(cfg):
@@ -141,9 +138,6 @@ def init_grid(g, db, cfg):
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df.rename(columns={"active": "active_at_birth"}, inplace=True)
 
-    null_hypos_df = _serialize_null_hypos(g.null_hypos)
-    db.insert("null_hypos", null_hypos_df, create=True)
-
     # these tiles have no parents. poor sad tiles :(
     # we need to put these absent parents into the done table
     absent_parents = pd.DataFrame(df["parent_id"].unique()[:, None], columns=["id"])
@@ -179,27 +173,6 @@ def init_grid(g, db, cfg):
 def assign_packets(df, packet_size):
     cum_sims = df["K"].cumsum()
     return pd.Series((cum_sims // packet_size).astype(int), df.index)
-
-
-def _serialize_null_hypos(null_hypos):
-    # we need to convert the pickled object to a valid string so that it can be
-    # inserted into a database. converting to a from base64 achieves this goal:
-    # https://stackoverflow.com/a/30469744/3817027
-    serialized = [
-        codecs.encode(cloudpickle.dumps(h), "base64").decode() for h in null_hypos
-    ]
-    desc = [h.description() for h in null_hypos]
-    return pd.DataFrame({"serialized": serialized, "description": desc})
-
-
-def _deserialize_null_hypos(df):
-    null_hypos = []
-    for i in range(df.shape[0]):
-        row = df.iloc[i]
-        null_hypos.append(
-            cloudpickle.loads(codecs.decode(row["serialized"].encode(), "base64"))
-        )
-    return null_hypos
 
 
 def _run(cmd):
