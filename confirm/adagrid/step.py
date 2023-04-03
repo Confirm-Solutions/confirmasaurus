@@ -62,15 +62,16 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
         tiles_df, inactive_df = refine_and_deepen(
             df, algo.null_hypos, algo.cfg["max_K"]
         )
-        algo.db.insert("tiles", inactive_df)
-        algo.db.insert("done", inactive_df)
+        algo.db.insert("tiles", inactive_df, create=False)
+        algo.db.insert("done", inactive_df, create=False)
         report["runtime_refine_deepen"] = time.time() - start
         n_inactive = inactive_df.shape[0]
     else:
         tiles_df = df
         n_inactive = 0
 
-    algo.db.insert("tiles", tiles_df)
+    step_id = df.iloc[0]["step_id"]
+    algo.db.insert("tiles", tiles_df, create=step_id == 0)
 
     tbs = algo.cfg["tile_batch_size"]
     if tbs is None:
@@ -80,9 +81,10 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
     report["sim_done_time"] = time.time()
     results_df["completion_step"] = MAX_STEP
     results_df["inactivation_step"] = MAX_STEP
-    algo.db.insert("results", results_df)
 
-    report["step_id"] = df.iloc[0]["step_id"]
+    algo.db.insert("results", results_df, create=step_id == 0)
+
+    report["step_id"] = step_id
     report["packet_id"] = df.iloc[0]["packet_id"]
     report["n_parent_tiles"] = df.shape[0]
     report["n_tiles"] = tiles_df.shape[0]
@@ -185,15 +187,8 @@ def _new_step(algo, basal_step_id, new_step_id):
 
     n_existing_packets = algo.db.n_existing_packets(new_step_id)
     if n_existing_packets is not None and n_existing_packets > 0:
-        logger.debug(
-            f"Step {new_step_id} already exists with"
-            f" {n_existing_packets} packets. Skipping."
-        )
-        return (
-            WorkerStatus.ALREADY_EXISTS,
-            algo.db.get_packet(new_step_id),
-            report,
-            {},
+        raise RuntimeError(
+            f"Step {new_step_id} already exists with {n_existing_packets} packets."
         )
 
     # If we haven't converged, we create a new step.

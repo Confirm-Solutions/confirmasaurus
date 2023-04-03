@@ -31,12 +31,7 @@ def init(db, algo_type, kwargs):
     logger.info("Config minus system info: \n%s", cfg_copy)
 
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
-    model = kwargs["model_type"](
-        seed=cfg["model_seed"],
-        max_K=cfg["init_K"] * 2 ** cfg["n_K_double"],
-        **cfg["model_kwargs"],
-    )
-    algo = algo_type(model, null_hypos, db, cfg, kwargs["callback"])
+    algo = algo_type(kwargs["model_type"], null_hypos, db, cfg, kwargs["callback"])
 
     return algo, tiles_df, expected_counts
 
@@ -147,7 +142,7 @@ def init_grid(g, db, cfg):
     df.rename(columns={"active": "active_at_birth"}, inplace=True)
 
     null_hypos_df = _serialize_null_hypos(g.null_hypos)
-    db.insert("null_hypos", null_hypos_df)
+    db.insert("null_hypos", null_hypos_df, create=True)
 
     # these tiles have no parents. poor sad tiles :(
     # we need to put these absent parents into the done table
@@ -165,8 +160,8 @@ def init_grid(g, db, cfg):
     for c in done_cols:
         if c not in absent_parents.columns:
             absent_parents[c] = 0
-    db.insert("done", absent_parents[done_cols])
-    db.insert("config", pd.DataFrame([cfg]))
+    db.insert("done", absent_parents[done_cols], create=True)
+    db.insert("config", pd.DataFrame([cfg]), create=True)
 
     n_packets = df["packet_id"].nunique()
     logger.debug(

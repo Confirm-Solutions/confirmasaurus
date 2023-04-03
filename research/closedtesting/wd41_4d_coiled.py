@@ -42,11 +42,12 @@ def f():
         packet_size=2**27,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
-        # backend=coiled_backend.CoiledBackend(client=get_client()),
+        # backend=ada.LocalBackend(use_clickhouse=True),
         backend=coiled_backend.CoiledBackend(n_workers=16),
         # TODO:
         # TODO:
         # TODO:
+        # backend=coiled_backend.CoiledBackend(client=get_client()),
         n_steps=8,
     )
     print("Done inner")

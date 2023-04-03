@@ -62,7 +62,9 @@ def upload_pkg(client, module, restart=False):
     )
 
 
-def setup_cluster(update_software_env=True, n_workers=1, idle_timeout="60 minutes"):
+def setup_cluster(
+    update_software_env=True, n_workers=1, scale: bool = True, idle_timeout="60 minutes"
+):
     if update_software_env:
         create_software_env()
     import coiled
@@ -80,7 +82,8 @@ def setup_cluster(update_software_env=True, n_workers=1, idle_timeout="60 minute
         wait_for_workers=1,
         worker_options={"nthreads": 2},
     )
-    cluster.scale(n_workers)
+    if scale:
+        cluster.scale(n_workers)
     client = cluster.get_client()
     reset_confirm_imprint(client)
     return cluster, client
@@ -116,73 +119,59 @@ def check():
     return nvidia_smi, jax_platform
 
 
-def setup_worker(worker_args):
-    worker = distributed.get_worker()
-
+def setup_worker(dask_worker, worker_args=None):
     (
         algo_type,
         model_type,
-        model_args,
-        model_kwargs,
         null_hypos,
         cfg,
         environ,
     ) = worker_args
-    # Hashing the arguments lets us avoid re-initializing the model and algo
-    # if the arguments are the same.
-    # NOTE: this could be extended to use an `algo` dictionary, where the key
-    # is this hash. But, I'm suspicious that would cause out-of-memory errors
-    # so the design is currently limited to a single algo per worker at a
-    # single point in time.
-    hash_args = hash(
-        (
-            algo_type.__name__,
-            model_type.__name__,
-            model_args,
-            tuple(model_kwargs.items()),
-            tuple([h.description() for h in null_hypos]),
-            tuple(cfg.items()),
-            tuple(environ.items()),
-        )
+
+    ip.package_settings()
+
+    # Need to insert variables into the environment for Clickhouse:
+    #
+    # NOTE: this is probably a little bit insecure and ideally we would
+    # transfer the encrypted secrets file and then use sops to decrypt it
+    # here. But that would probably require redoing the coiled software
+    # environment to use a docker image and I don't want to deal with that
+    # now.
+    # Coiled also supports including secrets in the software environment or
+    # Cluster configuration.
+    os.environ.update(environ)
+
+    jax_platform = jax.lib.xla_bridge.get_backend().platform
+    assert jax_platform == "gpu"
+
+    import confirm.cloud.clickhouse as ch
+
+    db = ch.ClickhouseTiles.connect(
+        job_name=cfg["job_name"], service=cfg["clickhouse_service"]
     )
-    has_hash = hasattr(worker, "algo_hash")
-    has_algo = hasattr(worker, "algo")
-    if not (has_algo and has_hash) or (has_hash and hash_args != worker.algo_hash):
-        ip.package_settings()
+    logger.debug("Connected to Clickhouse")
 
-        # Need to insert variables into the environment for Clickhouse:
-        #
-        # NOTE: this is probably a little bit insecure and ideally we would
-        # transfer the encrypted secrets file and then use sops to decrypt it
-        # here. But that would probably require redoing the coiled software
-        # environment to use a docker image and I don't want to deal with that
-        # now.
-        os.environ.update(environ)
-        import confirm.cloud.clickhouse as ch
+    dask_worker.algo = algo_type(model_type, null_hypos, db, cfg, None)
+    assert dask_worker.algo.driver is not None
 
-        db = ch.ClickhouseTiles.connect(
-            job_name=cfg["job_name"], service=cfg["clickhouse_service"]
-        )
-        logger.debug("Connected to Clickhouse")
+
+def raise_db_exceptions(dask_worker):
+    if hasattr(dask_worker, "algo"):
+        dask_worker.algo.db.cleanup()
+
+
+def dask_process_tiles(tiles_df, refine_deepen, report):
+    if ip.grid.worker_id == 1:
         client = distributed.get_client()
         worker_id = distributed.Queue("worker_id", client=client).get()
         logger.debug("Got worker_id: %s", worker_id)
         ip.grid.worker_id = worker_id
 
-        model = model_type(*model_args, **model_kwargs)
-        worker.algo = algo_type(model, null_hypos, db, cfg, None)
-        worker.algo_hash = hash_args
-
-
-def dask_process_tiles(worker_args, tiles_df, refine_deepen, report):
-    setup_worker(worker_args)
-    jax_platform = jax.lib.xla_bridge.get_backend().platform
-    assert jax_platform == "gpu"
-
-    worker = distributed.get_worker()
     lb = LocalBackend()
-    lb.algo = worker.algo
-    return lb.sync_submit_tiles(tiles_df, refine_deepen, report)
+    lb.algo = distributed.get_worker().algo
+    out = lb.sync_submit_tiles(tiles_df, refine_deepen, report)
+    raise_db_exceptions(distributed.get_worker())
+    return out
 
 
 class CoiledBackend(LocalBackend):
@@ -190,6 +179,7 @@ class CoiledBackend(LocalBackend):
         self,
         update_software_env: bool = True,
         n_workers: int = 1,
+        scale: bool = True,
         detach: bool = False,
         restart_workers: bool = False,
         client=None,
@@ -198,6 +188,7 @@ class CoiledBackend(LocalBackend):
         self.use_clickhouse = True
         self.update_software_env = update_software_env
         self.restart_workers = restart_workers
+        self.scale = scale
         self.detach = detach
         self.n_workers = n_workers
         self.client = client
@@ -224,6 +215,7 @@ class CoiledBackend(LocalBackend):
                 self.cluster, self.client = setup_cluster(
                     update_software_env=self.update_software_env,
                     n_workers=self.n_workers,
+                    scale=self.scale,
                 )
                 stack.enter_context(contextlib.closing(self.cluster))
                 stack.enter_context(contextlib.closing(self.client))
@@ -237,24 +229,27 @@ class CoiledBackend(LocalBackend):
                 self.queue.put(i)
             worker_args = (
                 type(algo),
-                type(algo.driver.model),
-                (algo.cfg["model_seed"], algo.max_K),
-                algo.cfg["model_kwargs"],
+                algo.model_type,
                 algo.null_hypos,
                 filtered_cfg,
                 {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
             )
-            self.worker_args_future = self.client.scatter(worker_args, broadcast=True)
+            self.setup_task = asyncio.create_task(
+                asyncio.to_thread(
+                    self.client.run, setup_worker, worker_args=worker_args
+                )
+            )
             yield
+            self.client.run(raise_db_exceptions)
 
     async def submit_tiles(self, tiles_df, refine_deepen, report):
+        await self.setup_task
         step_id = int(tiles_df["step_id"].iloc[0])
         # negative step_id is the priority so that earlier steps are completed
         # before later steps when we are using n_parallel_steps
         with dask.annotate(priority=-step_id):
             return self.client.submit(
                 dask_process_tiles,
-                self.worker_args_future,
                 tiles_df,
                 refine_deepen,
                 report,

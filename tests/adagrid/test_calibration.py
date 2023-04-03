@@ -91,7 +91,7 @@ def test_distributed_modal(ch_db, snapshot):
     )
 
 
-@pytest.mark.skip
+# @pytest.mark.skip
 def test_distributed_coiled(ch_db, snapshot):
     from confirm.cloud.coiled_backend import CoiledBackend
 
@@ -100,7 +100,7 @@ def test_distributed_coiled(ch_db, snapshot):
         snapshot,
         clickhouse_service="TEST",
         job_name=ch_db.job_name,
-        backend=CoiledBackend(restart_workers=True),
+        backend=CoiledBackend(scale=False, restart_workers=True),
     )
 
 

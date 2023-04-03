@@ -249,21 +249,6 @@ new_step_reports.set_index("step_id", inplace=True)
 ```
 
 ```python
-query("""
-            select * from results
-                where step_id <= 2
-                    and inactivation_step > 2
-                    and (id not in (
-                        select id from done 
-                            where active = false 
-                            and step_id <= 2
-                            and step_id > 1
-                    ))
-                order by impossible limit 1
-""")
-```
-
-```python
 from matplotlib.gridspec import GridSpec
 
 min_step = 1

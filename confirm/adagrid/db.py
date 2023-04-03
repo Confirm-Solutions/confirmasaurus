@@ -244,75 +244,27 @@ class SQLTiles:
         return pd.DataFrame([json.loads(s[0]) for s in json_strs])
 
     def n_existing_packets(self, step_id: int) -> int:
-        return self.query(
+        df = self.query(
             f"""
-            select max(packet_id) + 1 from tiles
+            select count(*), max(packet_id) + 1 from tiles
                 where step_id = {step_id}
             """
-        ).iloc[0][0]
+        )
+        if df.shape[0] == 0:
+            return 0
+        elif df.iloc[0][0] == 0:
+            return 0
+        else:
+            return df.iloc[0][1]
 
     def insert_reports(self, *reports: Dict[str, Any]) -> None:
         df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
         self.insert("reports", df)
 
-    def next(
-        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
-    ) -> pd.DataFrame:
-        return self.query(
-            f"""
-            select * from results 
-                where completion_step >= {new_step_id}
-                    and (id not in (
-                        select id from done 
-                            where step_id < {new_step_id}
-                            and step_id > {self.max_done_step}
-                    ))
-                    and step_id <= {basal_step_id}
-            order by {orderer} limit {n}
-            """
-        )
-
-    def bootstrap_lamss(self, basal_step_id: int, nB: int) -> List[float]:
-        # Get lambda**_Bi for each bootstrap sample.
-        cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
-        return (
-            self.query(
-                f"""
-            select {cols} from results 
-                where step_id <= {basal_step_id}
-                    and inactivation_step > {basal_step_id}
-                    and (id not in (
-                        select id from done 
-                            where active = false 
-                            and step_id <= {basal_step_id}
-                            and step_id > {self.max_done_step}
-                    ))
-            """
-            )
-            .iloc[0]
-            .values
-        )
-
-    def worst_tile(self, basal_step_id: int, order_col: str) -> pd.DataFrame:
-        return self.query(
-            f"""
-            select * from results
-                where step_id <= {basal_step_id}
-                    and inactivation_step > {basal_step_id}
-                    and (id not in (
-                        select id from done 
-                            where active = false 
-                            and step_id <= {basal_step_id}
-                            and step_id > {self.max_done_step}
-                    ))
-                order by {order_col} limit 1
-            """
-        )
-
     async def wait_for_basal_step(
         self, basal_step_id: int, expected_counts: Dict[str, int]
     ):
-        await self.verify(basal_step_id, expected_counts)
+        self.verify(basal_step_id, expected_counts)
 
     def verify(self, step_id: int, expected_counts: Dict[str, int]):
         duplicate_tiles = self.query(
@@ -487,7 +439,9 @@ class DuckDBTiles(SQLTiles):
     def query(self, query, quiet=False):
         return self.con.query(query).df()
 
-    def insert(self, table, df):
+    def insert(self, table, df, create: bool = True):
+        # create parameter is ignored because checking if the table exists is
+        # cheap.
         if not self.does_table_exist(table):
             self.con.execute(f"create table {table} as select * from df")
         else:
@@ -510,11 +464,45 @@ class DuckDBTiles(SQLTiles):
             return False
         return True
 
+    def next(
+        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
+    ) -> pd.DataFrame:
+        return self.query(
+            f"""
+            select * from results 
+                where completion_step >= {new_step_id}
+                    and step_id <= {basal_step_id}
+            order by {orderer} limit {n}
+            """
+        )
+
+    def bootstrap_lamss(self, basal_step_id: int, nB: int) -> List[float]:
+        # Get lambda**_Bi for each bootstrap sample.
+        cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        return (
+            self.query(
+                f"""
+            select {cols} from results 
+                where step_id <= {basal_step_id}
+                    and inactivation_step > {basal_step_id}
+            """
+            )
+            .iloc[0]
+            .values
+        )
+
+    def worst_tile(self, basal_step_id: int, order_col: str) -> pd.DataFrame:
+        return self.query(
+            f"""
+            select * from results
+                where step_id <= {basal_step_id}
+                    and inactivation_step > {basal_step_id}
+                order by {order_col} limit 1
+            """
+        )
+
     def insert_done_update_results(self, df: pd.DataFrame):
         self.insert("done", df)
-
-    async def finalize(self) -> None:
-        # TODO: move back to insert_done_update_results. just here for testing...
         self.con.execute(
             """
             update results
@@ -528,6 +516,9 @@ class DuckDBTiles(SQLTiles):
                 where results.id=done.id
             """
         )
+
+    async def finalize(self) -> None:
+        pass
 
     @staticmethod
     def connect(path: str = ":memory:"):

@@ -61,17 +61,31 @@ logger = logging.getLogger(__name__)
 
 
 class AdaCalibrate:
-    def __init__(self, model, null_hypos, db, cfg, callback):
+    def __init__(self, model_type, null_hypos, db, cfg, callback):
         self.null_hypos = null_hypos
         self.db = db
         self.cfg = cfg
         self.callback = callback
 
-        Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
-        self.max_K = Ks[-1]
-        self.driver = bootstrap.BootstrapCalibrate(
-            model, self.cfg["bootstrap_seed"], self.cfg["nB"], Ks
-        )
+        self.Ks = self.cfg["init_K"] * 2 ** np.arange(self.cfg["n_K_double"] + 1)
+        self.max_K = self.Ks[-1]
+        self.model_type = model_type
+        self._driver = None
+
+    @property
+    def driver(self):
+        # In a distributed setting, we might not need to create the driver on
+        # the leader, so we do it lazily.
+        if self._driver is None:
+            self._model = self.model_type(
+                seed=self.cfg["model_seed"],
+                max_K=self.max_K,
+                **self.cfg["model_kwargs"],
+            )
+            self._driver = bootstrap.BootstrapCalibrate(
+                self._model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks
+            )
+        return self._driver
 
     def get_orderer(self):
         return "orderer"
@@ -221,7 +235,9 @@ class AdaCalibrate:
             tile_batch_size=1,
         )
         twb_worst_tile_mean_lams = twb_worst_tile_lams["twb_mean_lams"].iloc[0]
-        deepen_likely_to_work = tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
+        deepen_likely_to_work = (
+            tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
+        ) & (~tiles_df["impossible"])
 
         ########################################
         # Decide whether to refine or deepen

@@ -28,8 +28,6 @@ class ModalWorker:
             (
                 algo_type,
                 model_type,
-                model_args,
-                model_kwargs,
                 null_hypos,
                 cfg,
             ) = worker_args
@@ -38,8 +36,8 @@ class ModalWorker:
             db = ch.ClickhouseTiles.connect(
                 job_name=cfg["job_name"], service=cfg["clickhouse_service"]
             )
-            model = model_type(*model_args, **model_kwargs)
-            self.algo = algo_type(model, null_hypos, db, cfg, None)
+            self.algo = algo_type(model_type, null_hypos, db, cfg, None)
+            assert self.algo.driver is not None
 
     @stub.function(**process_tiles_config)
     async def process_tiles(self, worker_args, tiles_df, refine_deepen, report):
@@ -47,5 +45,4 @@ class ModalWorker:
 
         lb = LocalBackend()
         lb.algo = self.algo
-        out = await lb.submit_tiles(tiles_df, refine_deepen, report)
-        return out
+        return lb.sync_submit_tiles(tiles_df, refine_deepen, report)

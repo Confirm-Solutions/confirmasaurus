@@ -9,7 +9,6 @@ from confirm.adagrid.adagrid import pass_control_to_backend
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.init import init
 from confirm.adagrid.step import new_step
-from confirm.adagrid.step import process_initial_packets
 from confirm.adagrid.step import WorkerStatus
 from confirm.adagrid.validate import ada_validate
 from confirm.adagrid.validate import AdaValidate

@@ -59,9 +59,7 @@ class ModalBackend(LocalBackend):
             }
             self.worker_args = (
                 type(algo),
-                type(algo.driver.model),
-                (algo.cfg["model_seed"], algo.max_K),
-                algo.cfg["model_kwargs"],
+                algo.model_type,
                 algo.null_hypos,
                 filtered_cfg,
             )

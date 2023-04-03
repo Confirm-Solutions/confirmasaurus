@@ -77,20 +77,21 @@ def get_create_table_cols(df):
     out = []
     for c, dt in zip(df.columns, df.dtypes):
         ch_type = type_map[dt.name]
-        if not ch_type.startswith("Float"):
+        if not (("Float" in ch_type) or ("Int" in ch_type) or ("Boolean" in ch_type)):
             ch_type = f"Nullable({ch_type})"
         out.append(f"{c} {ch_type}")
     return out
 
 
-def create_table(ch_client, name, df, orderer):
+def create_table(ch_client, name, df, partitioner, orderer):
     cols = get_create_table_cols(df)
     command(
         ch_client,
         f"""
         CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
         ENGINE = MergeTree()
-        ORDER BY ()
+        PARTITION BY ({partitioner})
+        ORDER BY ({orderer})
         """,
         default_insert_settings,
     )
@@ -375,6 +376,7 @@ class ClickhouseTiles(SQLTiles):
     _table_columns: Dict[str, List[str]] = field(default_factory=dict)
     _done_task: asyncio.Task = None
     _update_task: asyncio.Task = None
+    _verify_task: asyncio.Task = None
 
     def query(self, query: str, quiet: bool = False) -> pd.DataFrame:
         return query_df(self.client, query, quiet=quiet)
@@ -383,14 +385,31 @@ class ClickhouseTiles(SQLTiles):
         self, table: str, df: pd.DataFrame, create: bool = True, block: bool = False
     ) -> None:
         orderers = {
+            "tiles": "id",
+            "done": "id",
+            "results": "orderer",
+        }
+        partitioners = {
             "tiles": "",
-            "done": "step_id, id",
-            "results": "step_id, orderer",
+            "done": "",
+            "results": "",
         }
         if create and table not in self._table_exists:
-            create_table(self.client, table, df, orderers.get(table, ""))
+            create_table(
+                self.client,
+                table,
+                df,
+                partitioners.get(table, ""),
+                orderers.get(table, ""),
+            )
         df_subset = df[self.get_columns(table)]
-        self.tasks.extend(insert_df(self.client, table, df_subset, block=block))
+        if block:
+            settings = synchronous_insert_settings
+        else:
+            settings = None
+        self.tasks.extend(
+            insert_df(self.client, table, df_subset, settings=settings, block=block)
+        )
         self._table_exists.add(table)
 
     def get_columns(self, table_name: str) -> List[str]:
@@ -410,6 +429,60 @@ class ClickhouseTiles(SQLTiles):
         else:
             return True
 
+    def next(
+        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
+    ) -> pd.DataFrame:
+        return self.query(
+            f"""
+            select * from results 
+                where completion_step >= {new_step_id}
+                    and (id not in (
+                        select id from done 
+                            where step_id < {new_step_id}
+                            and step_id > {self.max_done_step}
+                    ))
+                    and step_id <= {basal_step_id}
+            order by {orderer} limit {n}
+            """
+        )
+
+    def bootstrap_lamss(self, basal_step_id: int, nB: int) -> List[float]:
+        # Get lambda**_Bi for each bootstrap sample.
+        cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        return (
+            self.query(
+                f"""
+            select {cols} from results 
+                where step_id <= {basal_step_id}
+                    and inactivation_step > {basal_step_id}
+                    and (id not in (
+                        select id from done 
+                            where active = false 
+                            and step_id <= {basal_step_id}
+                            and step_id > {self.max_done_step}
+                    ))
+            """
+            )
+            .iloc[0]
+            .values
+        )
+
+    def worst_tile(self, basal_step_id: int, order_col: str) -> pd.DataFrame:
+        return self.query(
+            f"""
+            select * from results
+                where step_id <= {basal_step_id}
+                    and inactivation_step > {basal_step_id}
+                    and (id not in (
+                        select id from done 
+                            where active = false 
+                            and step_id <= {basal_step_id}
+                            and step_id > {self.max_done_step}
+                    ))
+                order by {order_col} limit 1
+            """
+        )
+
     def insert_report(self, report: Dict[str, Any]) -> None:
         command(self.client, f"insert into reports values ('{json.dumps(report)}')")
 
@@ -425,46 +498,13 @@ class ClickhouseTiles(SQLTiles):
         )
         insert_tasks = [t for t in insert_tasks if t is not None]
 
-        async def update_results():
-            if self._update_task is not None:
-                self.max_done_step = await self._update_task
-
-            async def update_inner():
-                await asyncio.to_thread(
-                    command,
-                    self.client,
-                    f"""
-                    ALTER TABLE results 
-                    UPDATE
-                        inactivation_step=if(
-                            id in (select id from done 
-                                    where step_id={step_id} and active=false),
-                            {step_id},
-                            inactivation_step
-                        ),
-                        completion_step=if(
-                            id in (select id from done where step_id={step_id}),
-                            {step_id},
-                            completion_step
-                        )
-                    WHERE
-                        completion_step={MAX_STEP}
-                        and inactivation_step={MAX_STEP}
-                        and step_id < {step_id}
-                    """,
-                    settings=dict(mutations_sync=2, allow_nondeterministic_mutations=1),
-                )
-                return step_id
-
-            self._update_task = asyncio.create_task(update_inner())
-
-        async def insert_then_update() -> None:
+        async def wait_for_done() -> None:
             await asyncio.gather(*insert_tasks)
-            self.tasks.append(asyncio.create_task(update_results()))
+            return step_id
 
-        self._done_task = asyncio.create_task(insert_then_update())
+        self._done_task = asyncio.create_task(wait_for_done())
 
-    async def cleanup(self) -> None:
+    def cleanup(self) -> None:
         # Clean up finished tasks.
         wait_for_done = [t for t in self.tasks if t is not None and t.done()]
         incomplete = []
@@ -476,19 +516,57 @@ class ClickhouseTiles(SQLTiles):
             else:
                 incomplete.append(t)
         self.tasks = incomplete
-        await asyncio.gather(*wait_for_done)
+        # By calling .result on the done Tasks, we will cause exceptions to be
+        # re-raised.
+        [w.result() for w in wait_for_done]
         logger.debug(
             f"Cleaned up {len(wait_for_done)} finished Clickhouse insertion tasks."
         )
         logger.debug(f"{len(self.tasks)} Clickhouse insert tasks remaining.")
 
+    def alter_update(self, step_id):
+        command(
+            self.client,
+            f"""
+            ALTER TABLE results 
+            UPDATE
+                inactivation_step=if(
+                    id in (select id from done 
+                            where step_id={step_id} and active=false),
+                    {step_id},
+                    inactivation_step
+                ),
+                completion_step=if(
+                    id in (select id from done where step_id={step_id}),
+                    {step_id},
+                    completion_step
+                )
+            WHERE
+                completion_step={MAX_STEP}
+                and inactivation_step={MAX_STEP}
+                and step_id < {step_id}
+            """,
+            settings=dict(mutations_sync=2, allow_nondeterministic_mutations=1),
+        )
+        return step_id
+
     async def wait_for_basal_step(
         self, basal_step_id: int, expected_counts: Dict[str, int]
     ) -> None:
-        await self.cleanup()
+        self.cleanup()
         if self._done_task is not None:
-            await self._done_task
-        self._done_task = None
+            done_step_id = await self._done_task
+            self._done_task = None
+
+            async def update_task():
+                if self._update_task is not None:
+                    self.max_done_step = await self._update_task
+                self._update_task = asyncio.create_task(
+                    asyncio.to_thread(self.alter_update, done_step_id)
+                )
+
+            self.tasks.append(asyncio.create_task(update_task()))
+
         # It's slightly inefficient to use the main thread here to wait for the
         # results table, but we need to do the waiting in the same thread as
         # the query in new_step. Ideally, we'd rearrange stuff so that new_step
@@ -500,13 +578,22 @@ class ClickhouseTiles(SQLTiles):
             expected_counts["results"],
             0.2,
         )
-        self.tasks.append(
-            asyncio.create_task(
+
+        async def verify_task():
+            # TODO:
+            # We use this pattern a lot. Maybe abstract it out?
+            # - _verify_task
+            # - _done_task
+            # - _update_task
+            if self._verify_task is not None:
+                await self._verify_task
+            self._verify_task = asyncio.create_task(
                 asyncio.to_thread(
                     self.verify, basal_step_id, expected_counts, sleep_time=3.0
                 )
             )
-        )
+
+        self.tasks.append(asyncio.create_task(verify_task()))
 
     def wait_for_table(
         self,
@@ -559,12 +646,16 @@ class ClickhouseTiles(SQLTiles):
         super().verify(step_id, expected_counts)
 
     async def finalize(self):
-        if self._done_task is not None:
-            await self._done_task
         while len(self.tasks) > 0:
             tmp = [t for t in self.tasks if t is not None]
             self.tasks = []
             await asyncio.gather(*tmp)
+            if self._done_task is not None:
+                await self._done_task
+            if self._update_task is not None:
+                await self._update_task
+            if self._verify_task is not None:
+                await self._verify_task
 
     def close(self):
         self.client.close()

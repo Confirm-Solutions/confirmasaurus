@@ -148,7 +148,12 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
 
         with timer("process final packets"):
             while not processing_tasks.empty():
-                await wait_for_packets(backend, algo, processing_tasks.get()[1])
+                # TODO: duplicated above, refactor
+                tasks_step_id, tasks = processing_tasks.get()
+                await wait_for_packets(backend, algo, tasks)
+                n_inserts = await wait_for_packets(backend, algo, tasks)
+                for k in n_inserts:
+                    expected_counts[tasks_step_id][k] += n_inserts[k]
 
         with timer("verify"):
             db.verify(step_id, expected_counts[step_id])
@@ -184,6 +189,8 @@ class Backend(abc.ABC):
         "calibration_min_idx",
         "clickhouse_service",
         "job_name",
+        "model_seed",
+        "model_kwargs",
     ]
 
     def entrypoint(self, algo_type, kwargs):

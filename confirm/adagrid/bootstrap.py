@@ -38,7 +38,10 @@ class BootstrapCalibrate:
 
         self.Ks = Ks
         self.nB = nB
-        np.random.seed(bootstrap_seed)
+        self.bootstrap_seed = bootstrap_seed
+        self.bootstrap_idxs = None
+
+        np.random.seed(self.bootstrap_seed)
         self.bootstrap_idxs = {
             K: np.concatenate(
                 (
@@ -49,7 +52,7 @@ class BootstrapCalibrate:
                     ),
                 )
             ).astype(np.int32)
-            for K in Ks
+            for K in self.Ks
         }
 
         # Sampling using JAX is substantially slower on CPU than numpy.
@@ -97,7 +100,8 @@ class BootstrapCalibrate:
             impossible = ~possible
             if impossible.any():
                 lams = np.full(
-                    (theta.shape[0], self.bootstrap_idxs[K].shape[0]), np.nan
+                    (theta.shape[0], self.bootstrap_idxs[K].shape[0]),
+                    np.finfo(theta.dtype).max,
                 )
                 lams[possible] = _cal(
                     K, theta[possible], null_truth[possible], alpha0[possible]
