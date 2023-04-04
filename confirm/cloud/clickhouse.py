@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -71,30 +72,36 @@ def get_create_table_cols(df):
     return out
 
 
-def create_table(ch_client, name, df, partitioner, orderer):
+def create_table(ch_client, name, df):
     cols = get_create_table_cols(df)
     command(
         ch_client,
         f"""
         CREATE TABLE IF NOT EXISTS {name} ({",".join(cols)})
         ENGINE = MergeTree()
-        PARTITION BY ({partitioner})
-        ORDER BY ({orderer})
+        ORDER BY ()
         """,
         sync_insert_settings,
     )
 
 
-def insert_df(ch_client, name, df, settings=None, chunk_size=30000, block: bool = True):
-    if not block:
+def should_block(block_requested):
+    # Sometimes this gets called after the event loop has been closed. In that
+    # case, we run the insert directly rather than using asyncio.
+    if not block_requested:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            block = True
+            logger.debug(
+                'Running blocking insert despite "block" '
+                "being False because there is no running event loop."
+            )
+            block_requested = True
+    return block_requested
 
-    # Sometimes this gets called after the event loop has been closed. In that
-    # case, we run the insert directly rather than using asyncio.
-    if block:
+
+def insert_df(ch_client, name, df, settings=None, chunk_size=30000, block: bool = True):
+    if should_block(block):
 
         def wrapper(*args):
             args[0](*args[1:])
@@ -361,6 +368,9 @@ class ClickhouseTiles(SQLTiles):
     tasks: List[asyncio.Task] = field(default_factory=list)
     expected_counts: Dict[int, Dict[str, int]] = field(default_factory=dict)
     max_done_step: int = -1
+    _threadpool: concurrent.futures.ThreadPoolExecutor = field(
+        default_factory=concurrent.futures.ThreadPoolExecutor
+    )
     _table_exists: Dict[str, bool] = field(default_factory=set)
     _table_columns: Dict[str, List[str]] = field(default_factory=dict)
     _done_task: asyncio.Task = None
@@ -376,27 +386,17 @@ class ClickhouseTiles(SQLTiles):
     def insert(
         self, table: str, df: pd.DataFrame, create: bool = True, block: bool = False
     ) -> None:
-        orderers = {
-            "tiles": "id",
-            "done": "id",
-            "results": "orderer",
-        }
-        partitioners = {
-            "tiles": "",
-            "done": "",
-            "results": "",
-        }
-        if create and table not in self._table_exists:
-            create_table(
-                self.client,
-                table,
-                df,
-                partitioners.get(table, ""),
-                orderers.get(table, ""),
-            )
-        df_subset = df[self.get_columns(table)]
-        self.tasks.extend(insert_df(self.client, table, df_subset, block=block))
-        self._table_exists.add(table)
+        def _inner():
+            if create and table not in self._table_exists:
+                if table == "results":
+                    self.create_results_table(df)
+                else:
+                    create_table(self.client, table, df)
+            df_subset = df[self.get_columns(table)]
+            insert_df(self.client, table, df_subset, block=True)
+            self._table_exists.add(table)
+
+        self.tasks.append(self._threadpool.submit(_inner))
 
     def get_columns(self, table_name: str) -> List[str]:
         if table_name not in self._table_columns:
@@ -423,6 +423,72 @@ class ClickhouseTiles(SQLTiles):
             self.expected_counts[step_id]["results"],
             0.1,
         )
+
+    def wait_for_table(
+        self,
+        purpose: str,
+        table_name: str,
+        step_id: int,
+        expected: int,
+        sleep_time: float,
+    ):
+        while True:
+            if table_name not in self._table_exists:
+                if does_table_exist(self.client, table_name):
+                    self._table_exists.add(table_name)
+                else:
+                    time.sleep(sleep_time)
+                    continue
+
+            count = self.query(
+                f"""
+                select count(*) from {table_name}
+                where step_id = {step_id} 
+                """,
+                quiet=True,
+            ).iloc[0][0]
+            logger.debug(
+                f"{purpose} is waiting for step {step_id}: "
+                f" {count}/{expected} in {table_name}"
+            )
+            if count == expected:
+                return
+            elif count > expected:
+                raise ValueError(
+                    f"Too many rows in {table_name} for step {step_id}."
+                    f" Expected {expected}, got {count}."
+                )
+            else:
+                time.sleep(sleep_time)
+
+    def create_results_table(self, df):
+        cols = get_create_table_cols(df)
+        command(
+            self.client,
+            f"""
+            CREATE TABLE IF NOT EXISTS results ({",".join(cols)})
+            ENGINE = MergeTree()
+            ORDER BY ()
+            """,
+            sync_insert_settings,
+        )
+        # TODO: self.orderer!!
+        # TODO: self.orderer!!
+        # TODO: self.orderer!!
+        # TODO: self.orderer!!
+        # TODO: self.orderer!!
+        # command(
+        #     self.client,
+        #     f"""
+        #     CREATE MATERIALIZED VIEW results_next
+        #     ENGINE = MergeTree()
+        #     ORDER BY (orderer)
+        #     AS SELECT
+        #         select * from results
+        #             where completion_step = {MAX_STEP}
+        #                 and (id not in (select id from done))
+        #     """
+        # )
 
     def next(
         self, basal_step_id: int, new_step_id: int, n: int, orderer: str
@@ -590,41 +656,11 @@ class ClickhouseTiles(SQLTiles):
                     else:
                         time.sleep(2.0)
 
-            self.tasks.append(asyncio.create_task(asyncio.to_thread(verify_task)))
+            self._verify_task = asyncio.create_task(asyncio.to_thread(verify_task))
             await asyncio.sleep(0)
         else:
             if self._verify_task.done():
                 self._verify_task.result()
-
-    def wait_for_table(
-        self,
-        purpose: str,
-        table_name: str,
-        step_id: int,
-        expected: int,
-        sleep_time: float,
-    ):
-        while True:
-            count = self.query(
-                f"""
-                select count(*) from {table_name}
-                where step_id = {step_id} 
-                """,
-                quiet=True,
-            ).iloc[0][0]
-            logger.debug(
-                f"{purpose} is waiting for step {step_id}: "
-                f" {count}/{expected} in {table_name}"
-            )
-            if count == expected:
-                return
-            elif count > expected:
-                raise ValueError(
-                    f"Too many rows in {table_name} for step {step_id}."
-                    f" Expected {expected}, got {count}."
-                )
-            else:
-                time.sleep(sleep_time)
 
     def verify(self, step_id: int, sleep_time: float = 0.5) -> asyncio.Task:
         # TRICKY!
@@ -656,7 +692,7 @@ class ClickhouseTiles(SQLTiles):
         self.verify_stop = True
         self.update_stop = True
         while len(self.tasks) > 0:
-            tmp = [t for t in self.tasks if t is not None]
+            tmp = [asyncio.wrap_future(t) for t in self.tasks if t is not None]
             self.tasks = []
             await asyncio.gather(*tmp)
             if self._done_task is not None:

@@ -45,7 +45,7 @@ if use_clickhouse:
 ```
 
 ```python
-query('select count(*) from results')
+query('select count(*)/1000000 from results')
 ```
 
 ```python
@@ -55,6 +55,182 @@ dim = len(
 n_steps = query("select max(step_id) from results").iloc[0][0] + 1
 dim, n_steps
 
+```
+
+## Performance
+
+```python
+import json
+
+reports = [json.loads(v) for v in query("select * from reports")["json"].values]
+report_df = pd.DataFrame(reports)
+working_reports = report_df[report_df["status"] == "WORKING"].dropna(axis=1, how="all")
+new_step_reports = report_df[report_df["status"] == "NEW_STEP"].dropna(
+    axis=1, how="all"
+)
+new_step_reports.set_index("step_id", inplace=True)
+
+```
+
+```python
+min_runtime_per_sim_ns = working_reports["runtime_per_sim_ns"].min()
+min_runtime_per_sim_ns = 24
+```
+
+```python
+from matplotlib.gridspec import GridSpec
+
+min_step = 1
+max_step = 10
+color_list = ["k", "r", "b", "m"]
+offset = report_df["start_time"].min()
+
+step_id = working_reports["step_id"]
+include = (step_id >= min_step) & (step_id <= max_step)
+df = working_reports[include][
+    ['n_total_sims', "sim_start_time", "sim_done_time", "start_time", "done_time", "step_id", 'runtime_per_sim_ns']
+].copy()
+df.sort_values(by=["sim_start_time"], inplace=True)
+df["adjusted_start_time"] = df["start_time"] - offset
+df["adjusted_done_time"] = df["done_time"] - offset
+df["adjusted_sim_start_time"] = df["sim_start_time"] - offset
+df["adjusted_sim_done_time"] = df["sim_done_time"] - offset
+min_time = df["adjusted_start_time"].min() - 10
+max_time = df["adjusted_done_time"].max() + 10
+df['sims_per_sec'] = 1e9 / df['runtime_per_sim_ns']
+
+df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
+df["packet_linelengths"] = df["done_time"] - df["start_time"]
+df["packet_lineoffsets"] = df["adjusted_start_time"] + df["packet_linelengths"] * 0.5
+df["packet_linewidths"] = 1
+
+df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
+df["linelengths"] = df["sim_done_time"] - df["sim_start_time"]
+df["lineoffsets"] = (
+    df["sim_start_time"] - report_df["start_time"].min() + df["linelengths"] * 0.5
+)
+df["colors"] = np.array(color_list)[df["step_id"] % len(color_list)]
+df["linewidths"] = 5
+fig = plt.figure(figsize=(15, 18), constrained_layout=True)
+plt.suptitle("Simulation timeline")
+gs = GridSpec(7, 1, figure=fig)
+plt.subplot(gs[0, 0])
+ts = np.linspace(min_time, max_time, 500)
+ongoing = []
+for t in ts:
+    ongoing.append(
+        (((df["adjusted_sim_start_time"] < t) & (df["adjusted_sim_done_time"] > t)) * df['sims_per_sec']).sum()
+    )
+ongoing = np.array(ongoing)
+max_serial_sims_per_sec = 1e9 / min_runtime_per_sim_ns
+plt.axhline(16, color="k", linestyle="--", label="16x")
+plt.axhline(8, color="k", linestyle="--", label="8x")
+plt.plot(ts, ongoing / max_serial_sims_per_sec, "k-", label="Parallelism")
+plt.legend()
+plt.xlim([min_time, max_time])
+
+plt.subplot(gs[1:, 0])
+plt.eventplot(
+    df["positions"].values[:, None],
+    lineoffsets="packet_lineoffsets",
+    linelengths="packet_linelengths",
+    linewidths="packet_linewidths",
+    colors="colors",
+    orientation="vertical",
+    data=df,
+)
+plt.eventplot(
+    df["positions"].values[:, None],
+    lineoffsets="lineoffsets",
+    linelengths="linelengths",
+    linewidths="linewidths",
+    colors="colors",
+    orientation="vertical",
+    data=df,
+)
+
+new_step_reports["adjusted_step_start_time"] = (
+    new_step_reports["time"] - new_step_reports["runtime_total"] - offset
+)
+new_step_reports["adjusted_step_done_time"] = new_step_reports["time"] - offset
+for step_id in range(min_step, max_step + 1):
+    try:
+        rpt = new_step_reports.loc[step_id]
+    except KeyError:
+        continue
+    plt.plot(
+        [
+            rpt["adjusted_step_start_time"],
+            rpt["adjusted_step_done_time"],
+        ],
+        [-1, -1],
+        color_list[step_id % len(color_list)],
+        linestyle="--",
+        linewidth=5,
+    )
+
+for step_id, step_df in df.groupby("step_id"):
+    plt.axvline(
+        step_df["adjusted_start_time"].min(),
+        color="k",
+        linestyle="--",
+        linewidth=1,
+        zorder=100,
+    )
+    plt.axvline(
+        step_df["adjusted_done_time"].max(), color="k", linestyle="--", linewidth=1
+    )
+for step_id, step_df in df.groupby("step_id"):
+    plt.text(
+        step_df["adjusted_start_time"].min(),
+        -3.7,
+        "$\\textbf{Step " + str(step_id) + " submit}$",
+        rotation=90,
+        va="bottom",
+        ha="right",
+        color=color_list[step_id % len(color_list)],
+        bbox=dict(facecolor="w", edgecolor="w", boxstyle="round"),
+    )
+    plt.text(
+        step_df["adjusted_done_time"].max(),
+        df["positions"].max() + 0.3,
+        f"Step {step_id} done",
+        rotation=90,
+        va="bottom",
+        ha="right",
+        color=color_list[step_id % len(color_list)],
+    )
+plt.xlabel("Seconds from start")
+plt.xlim([min_time, max_time])
+plt.ylim([-4, df["positions"].max() + 3.5])
+plt.gca().get_yaxis().set_visible(False)
+
+plt.show()
+```
+
+```python
+for i in range(8):
+    print(i, df[df['step_id'] == i]['adjusted_sim_start_time'].min(), df[df['step_id'] == i]['adjusted_sim_start_time'].max())
+```
+
+```python
+df[df['step_id'] == 4]['adjusted_sim_start_time'].min()
+```
+
+```python
+parallelism1 = df["n_total_sims"].sum() * min_runtime_per_sim_ns * 1e-9 / (
+    df["sim_done_time"].max() - df["sim_start_time"].min()
+)
+
+sim_runtime = working_reports["runtime_simulating"].sum()
+total_runtime = 2 * (report_df["done_time"].max() - report_df["start_time"].min())
+parallelism2 = sim_runtime / total_runtime
+parallelism1, parallelism2, sim_runtime / 3600, total_runtime / 3600
+
+```
+
+```python
+print(working_reports['profile'].iloc[0])
 ```
 
 ## Broad table exploration
@@ -234,164 +410,6 @@ np.sum(deepen_likely_to_work)
 
 ## Looking at the reports
 
-
-```python
-import json
-
-reports = [json.loads(v) for v in query("select * from reports")["json"].values]
-report_df = pd.DataFrame(reports)
-working_reports = report_df[report_df["status"] == "WORKING"].dropna(axis=1, how="all")
-new_step_reports = report_df[report_df["status"] == "NEW_STEP"].dropna(
-    axis=1, how="all"
-)
-new_step_reports.set_index("step_id", inplace=True)
-
-```
-
-```python
-
-```
-
-```python
-from matplotlib.gridspec import GridSpec
-
-min_step = 1
-max_step = 10
-color_list = ["k", "r", "b", "m"]
-offset = report_df["start_time"].min()
-
-step_id = working_reports["step_id"]
-include = (step_id >= min_step) & (step_id <= max_step)
-df = working_reports[include][
-    ['n_total_sims', "sim_start_time", "sim_done_time", "start_time", "done_time", "step_id", 'runtime_per_sim_ns']
-].copy()
-df.sort_values(by=["sim_start_time"], inplace=True)
-df["adjusted_start_time"] = df["start_time"] - offset
-df["adjusted_done_time"] = df["done_time"] - offset
-df["adjusted_sim_start_time"] = df["sim_start_time"] - offset
-df["adjusted_sim_done_time"] = df["sim_done_time"] - offset
-min_time = df["adjusted_start_time"].min() - 10
-max_time = df["adjusted_done_time"].max() + 10
-df['sims_per_sec'] = 1e9 / df['runtime_per_sim_ns']
-
-df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
-df["packet_linelengths"] = df["done_time"] - df["start_time"]
-df["packet_lineoffsets"] = df["adjusted_start_time"] + df["packet_linelengths"] * 0.5
-df["packet_linewidths"] = 1
-
-df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
-df["linelengths"] = df["sim_done_time"] - df["sim_start_time"]
-df["lineoffsets"] = (
-    df["sim_start_time"] - report_df["start_time"].min() + df["linelengths"] * 0.5
-)
-df["colors"] = np.array(color_list)[df["step_id"] % len(color_list)]
-df["linewidths"] = 5
-fig = plt.figure(figsize=(15, 18), constrained_layout=True)
-plt.suptitle("Simulation timeline")
-gs = GridSpec(7, 1, figure=fig)
-plt.subplot(gs[0, 0])
-ts = np.linspace(min_time, max_time, 500)
-ongoing = []
-for t in ts:
-    ongoing.append(
-        (((df["adjusted_sim_start_time"] < t) & (df["adjusted_sim_done_time"] > t)) * df['sims_per_sec']).sum()
-    )
-ongoing = np.array(ongoing)
-max_serial_sims_per_sec = 1e9 / df['runtime_per_sim_ns'].min()
-plt.plot(ts, ongoing / max_serial_sims_per_sec, "k-", label="Parallelism")
-plt.legend()
-plt.xlim([min_time, max_time])
-
-plt.subplot(gs[1:, 0])
-plt.eventplot(
-    df["positions"].values[:, None],
-    lineoffsets="packet_lineoffsets",
-    linelengths="packet_linelengths",
-    linewidths="packet_linewidths",
-    colors="colors",
-    orientation="vertical",
-    data=df,
-)
-plt.eventplot(
-    df["positions"].values[:, None],
-    lineoffsets="lineoffsets",
-    linelengths="linelengths",
-    linewidths="linewidths",
-    colors="colors",
-    orientation="vertical",
-    data=df,
-)
-
-new_step_reports["adjusted_step_start_time"] = (
-    new_step_reports["time"] - new_step_reports["runtime_total"] - offset
-)
-new_step_reports["adjusted_step_done_time"] = new_step_reports["time"] - offset
-for step_id in range(min_step, max_step + 1):
-    try:
-        rpt = new_step_reports.loc[step_id]
-    except KeyError:
-        continue
-    plt.plot(
-        [
-            rpt["adjusted_step_start_time"],
-            rpt["adjusted_step_done_time"],
-        ],
-        [-1, -1],
-        color_list[step_id % len(color_list)],
-        linestyle="--",
-        linewidth=5,
-    )
-
-for step_id, step_df in df.groupby("step_id"):
-    plt.axvline(
-        step_df["adjusted_start_time"].min(),
-        color="k",
-        linestyle="--",
-        linewidth=1,
-        zorder=100,
-    )
-    plt.axvline(
-        step_df["adjusted_done_time"].max(), color="k", linestyle="--", linewidth=1
-    )
-for step_id, step_df in df.groupby("step_id"):
-    plt.text(
-        step_df["adjusted_start_time"].min(),
-        -3.7,
-        "$\\textbf{Step " + str(step_id) + " submit}$",
-        rotation=90,
-        va="bottom",
-        ha="right",
-        color=color_list[step_id % len(color_list)],
-        bbox=dict(facecolor="w", edgecolor="w", boxstyle="round"),
-    )
-    plt.text(
-        step_df["adjusted_done_time"].max(),
-        df["positions"].max() + 0.3,
-        f"Step {step_id} done",
-        rotation=90,
-        va="bottom",
-        ha="right",
-        color=color_list[step_id % len(color_list)],
-    )
-plt.xlabel("Seconds from start")
-plt.xlim([min_time, max_time])
-plt.ylim([-4, df["positions"].max() + 3.5])
-plt.gca().get_yaxis().set_visible(False)
-
-plt.show()
-```
-
-```python
-parallelism1 = df["n_total_sims"].sum() * working_reports["runtime_per_sim_ns"].min() * 1e-9 / (
-    df["sim_done_time"].max() - df["sim_start_time"].min()
-)
-
-sim_runtime = working_reports["runtime_simulating"].sum()
-total_runtime = 2 * (report_df["done_time"].max() - report_df["start_time"].min())
-parallelism2 = sim_runtime / total_runtime
-parallelism1, parallelism2, sim_runtime / 3600, total_runtime / 3600
-
-```
 
 ```python
 plt.plot(working_reports["runtime_per_sim_ns"])

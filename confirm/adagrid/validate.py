@@ -100,7 +100,7 @@ class AdaValidate:
         )
         return pd.concat((tiles_df.drop("K", axis=1), rej_df), axis=1)
 
-    def convergence_criterion(self, basal_step_id):
+    async def convergence_criterion(self, basal_step_id):
         max_tie_est = self.db.worst_tile(basal_step_id, "tie_est desc")["tie_est"].iloc[
             0
         ]

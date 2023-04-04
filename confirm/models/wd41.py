@@ -1,8 +1,6 @@
 """
 The only thing better than WD40 is WD41.
 """
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -12,21 +10,34 @@ import imprint as ip
 default_frac_tnbc = 0.54
 
 
-@jax.jit
-@partial(jax.vmap, in_axes=(None, 0))
+# NOTE: This WD41Null code used to be running on JAX, but that actually
+# resulted in much worse performance because the GPU memory transfer costs were
+# too high. I saw ~30x speedup by moving to numpy/scipy.
+#
+# @jax.jit
+# @partial(jax.vmap, in_axes=(None, 0))
+# def _dist(frac_tnbc, theta):
+#     (
+#         pcontrol_tnbc,
+#         ptreat_tnbc,
+#         pcontrol_hrplus,
+#         ptreat_hrplus,
+#     ) = jax.scipy.special.expit(theta)
+#     control_term = frac_tnbc * pcontrol_tnbc + (1 - frac_tnbc) * pcontrol_hrplus
+#     treat_term = frac_tnbc * ptreat_tnbc + (1 - frac_tnbc) * ptreat_hrplus
+#     return control_term - treat_term
+# @jax.jit
+# @partial(jax.vmap, in_axes=(None, 0))
 def _dist(frac_tnbc, theta):
-    (
-        pcontrol_tnbc,
-        ptreat_tnbc,
-        pcontrol_hrplus,
-        ptreat_hrplus,
-    ) = jax.scipy.special.expit(theta)
-    control_term = frac_tnbc * pcontrol_tnbc + (1 - frac_tnbc) * pcontrol_hrplus
-    treat_term = frac_tnbc * ptreat_tnbc + (1 - frac_tnbc) * ptreat_hrplus
+    import scipy.special
+
+    p = scipy.special.expit(theta)
+    control_term = frac_tnbc * p[..., 0] + (1 - frac_tnbc) * p[..., 2]
+    treat_term = frac_tnbc * p[..., 1] + (1 - frac_tnbc) * p[..., 3]
     return control_term - treat_term
 
 
-@jax.jit
+# @jax.jit
 def _side(frac_tnbc, theta, radii, hcube_verts):
     vertices = theta[:, None, :] + hcube_verts[None, :, :] * radii[:, None, :]
     eps = 1e-15
@@ -34,10 +45,10 @@ def _side(frac_tnbc, theta, radii, hcube_verts):
     vertex_dist = _dist(frac_tnbc, vertices.reshape((-1, d))).reshape(
         (-1, vertices.shape[1])
     )
-    side = jnp.where(
+    side = np.where(
         (vertex_dist >= -eps).all(axis=-1),
         1,
-        jnp.where((vertex_dist <= eps).all(axis=-1), -1, 0),
+        np.where((vertex_dist <= eps).all(axis=-1), -1, 0),
     )
     return side, vertex_dist
 
@@ -47,9 +58,9 @@ class WD41Null(ip.grid.NullHypothesis):
         self.frac_tnbc = frac_tnbc
 
     def side(self, g: ip.Grid):
-        theta = jnp.array(g.get_theta())
-        radii = jnp.array(g.get_radii())
-        hcube_verts = jnp.array(ip.grid.hypercube_vertices(theta.shape[-1]))
+        theta = g.get_theta()
+        radii = g.get_radii()
+        hcube_verts = ip.grid.hypercube_vertices(theta.shape[-1])
         return _side(self.frac_tnbc, theta, radii, hcube_verts)
 
     def dist(self, theta):

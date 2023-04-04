@@ -160,6 +160,10 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
             step_id == algo.cfg["n_steps"] - 1 or stopping_indicator >= n_parallel_steps
         )
 
+    # We call finalize here to clean up the database threads. But we will call
+    # finalize again after flushing the logs in the entrypoint function above.
+    await db.finalize()
+
 
 @contextlib.contextmanager
 def timer(name):
@@ -270,4 +274,6 @@ def print_report(report, _db):
             or isinstance(ready[k], jax.Array)
         ):
             ready[k] = f"{ready[k]:.6f}"
+    if "profile" in ready:
+        del ready["profile"]
     logger.debug(pformat(ready))

@@ -166,10 +166,11 @@ def dask_process_tiles(tiles_df, refine_deepen, report):
         logger.debug("Got worker_id: %s", worker_id)
         ip.grid.worker_id = worker_id
 
+    dask_worker = distributed.get_worker()
     lb = LocalBackend()
-    lb.algo = distributed.get_worker().algo
+    lb.algo = dask_worker.algo
     out = lb.sync_submit_tiles(tiles_df, refine_deepen, report)
-    raise_db_exceptions(distributed.get_worker())
+    raise_db_exceptions(dask_worker)
     return out
 
 

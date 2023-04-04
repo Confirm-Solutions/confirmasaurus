@@ -139,7 +139,7 @@ class AdaCalibrate:
         return pd.concat((tiles_df, lams_df), axis=1)
 
     @profile
-    def convergence_criterion(self, basal_step_id):
+    async def convergence_criterion(self, basal_step_id):
         ########################################
         # Step 2: Convergence criterion! In terms of:
         # - bias
@@ -148,24 +148,33 @@ class AdaCalibrate:
         #
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
-        worst_tile_impossible = self.db.worst_tile(basal_step_id, "impossible")
+        impossible_task = self.db.launch_thread(
+            self.db.worst_tile, basal_step_id, "impossible"
+        )
+        worst_tile_task = self.db.launch_thread(
+            self.db.worst_tile, basal_step_id, "lams"
+        )
+        B_lamss_task = self.db.launch_thread(
+            self.db.bootstrap_lamss, basal_step_id, self.cfg["nB"]
+        )
+        impossible_df = await impossible_task
 
         # If there are no tiles, we are done.
-        if worst_tile_impossible.shape[0] == 0:
+        if impossible_df.shape[0] == 0:
             return True, {}
 
-        any_impossible = worst_tile_impossible["impossible"].iloc[0]
+        any_impossible = impossible_df["impossible"].iloc[0]
         if any_impossible:
             return False, {}
 
-        worst_tile_df = self.db.worst_tile(basal_step_id, "lams")
+        worst_tile_df = await worst_tile_task
         worst_tile = worst_tile_df.iloc[0]
         lamss = worst_tile["lams"]
 
         # We determine the bias by comparing the Type I error at the worst
         # tile for each lambda**_B:
         logger.debug("Computing bias and standard deviation of lambda**")
-        B_lamss = self.db.bootstrap_lamss(basal_step_id, self.cfg["nB"])
+        B_lamss = await B_lamss_task
         worst_tile_tie_sum = self.driver.many_rej(
             worst_tile_df, np.array([lamss] + list(B_lamss))
         ).iloc[0]
