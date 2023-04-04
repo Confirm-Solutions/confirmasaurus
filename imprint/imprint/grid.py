@@ -100,7 +100,7 @@ class NullHypothesis(ABC):
         side = np.zeros(vertices.shape[0], dtype=np.int8)
         side[(vertex_dist >= -eps).all(axis=-1)] = 1
         side[(vertex_dist <= eps).all(axis=-1)] = -1
-        return side, vertex_dist[side == 0]
+        return side, vertex_dist
 
     @abstractmethod
     def description(self):
@@ -152,13 +152,14 @@ class Grid:
     def n_active_tiles(self):
         return self.df["active"].sum()
 
+    @profile
     def _add_null_hypo(self, H: NullHypothesis, inherit_cols: List[str]):
         hypo_idx = len(self.null_hypos)
         g_inactive = self.subset(~self.df["active"])
         g_inactive.df[f"null_truth{hypo_idx}"] = H.dist(g_inactive.get_theta()) >= 0
 
         g_active = self.prune_inactive()
-        theta, vertices = g_active.get_theta_and_vertices()
+        theta = g_active.get_theta()
         radii = g_active.get_radii()
         gridpt_dist = H.dist(theta)
         g_active.df[f"null_truth{hypo_idx}"] = gridpt_dist >= 0
@@ -173,7 +174,9 @@ class Grid:
             close = np.ones(g_active.n_tiles, dtype=bool)
         else:
             close = np.abs(gridpt_dist) <= np.sqrt(np.sum(radii**2, axis=-1))
-        side_close, curve_data = H.side(g_active.subset(close))
+        close_subset = g_active.subset(close)
+        side_close, curve_data = H.side(close_subset)
+        curve_data = curve_data[side_close == 0]
         side = np.zeros(g_active.n_tiles, dtype=np.int8)
         side[close] = side_close
         side[~close] = np.sign(gridpt_dist[~close])

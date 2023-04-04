@@ -28,7 +28,6 @@ class ModalWorker:
             (
                 algo_type,
                 model_type,
-                null_hypos,
                 cfg,
             ) = worker_args
             import confirm.cloud.clickhouse as ch
@@ -36,7 +35,7 @@ class ModalWorker:
             db = ch.ClickhouseTiles.connect(
                 job_name=cfg["job_name"], service=cfg["clickhouse_service"]
             )
-            self.algo = algo_type(model_type, null_hypos, db, cfg, None)
+            self.algo = algo_type(model_type, db, cfg, None)
             assert self.algo.driver is not None
 
     @stub.function(**process_tiles_config)

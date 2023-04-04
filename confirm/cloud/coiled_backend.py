@@ -123,7 +123,6 @@ def setup_worker(dask_worker, worker_args=None):
     (
         algo_type,
         model_type,
-        null_hypos,
         cfg,
         environ,
     ) = worker_args
@@ -151,7 +150,7 @@ def setup_worker(dask_worker, worker_args=None):
     )
     logger.debug("Connected to Clickhouse")
 
-    dask_worker.algo = algo_type(model_type, null_hypos, db, cfg, None)
+    dask_worker.algo = algo_type(model_type, db, cfg, None)
     assert dask_worker.algo.driver is not None
 
 
@@ -230,7 +229,6 @@ class CoiledBackend(LocalBackend):
             worker_args = (
                 type(algo),
                 algo.model_type,
-                algo.null_hypos,
                 filtered_cfg,
                 {k: v for k, v in os.environ.items() if k.startswith("CLICKHOUSE")},
             )

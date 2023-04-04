@@ -25,6 +25,7 @@ class ZTest1D(ip.Model):
 
         np.random.seed(seed)
         self.samples = np.random.normal(size=(max_K,)).astype(self.dtype)
+        self.null_hypos = [ip.hypo("x0 < 0")]
 
     def sim_batch(
         self,

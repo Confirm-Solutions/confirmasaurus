@@ -1,6 +1,8 @@
 """
 The only thing better than WD40 is WD41.
 """
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -10,31 +12,51 @@ import imprint as ip
 default_frac_tnbc = 0.54
 
 
+@jax.jit
+@partial(jax.vmap, in_axes=(None, 0))
+def _dist(frac_tnbc, theta):
+    (
+        pcontrol_tnbc,
+        ptreat_tnbc,
+        pcontrol_hrplus,
+        ptreat_hrplus,
+    ) = jax.scipy.special.expit(theta)
+    control_term = frac_tnbc * pcontrol_tnbc + (1 - frac_tnbc) * pcontrol_hrplus
+    treat_term = frac_tnbc * ptreat_tnbc + (1 - frac_tnbc) * ptreat_hrplus
+    return control_term - treat_term
+
+
+@jax.jit
+def _side(frac_tnbc, theta, radii, hcube_verts):
+    vertices = theta[:, None, :] + hcube_verts[None, :, :] * radii[:, None, :]
+    eps = 1e-15
+    d = vertices.shape[-1]
+    vertex_dist = _dist(frac_tnbc, vertices.reshape((-1, d))).reshape(
+        (-1, vertices.shape[1])
+    )
+    side = jnp.where(
+        (vertex_dist >= -eps).all(axis=-1),
+        1,
+        jnp.where((vertex_dist <= eps).all(axis=-1), -1, 0),
+    )
+    return side, vertex_dist
+
+
 class WD41Null(ip.grid.NullHypothesis):
     def __init__(self, frac_tnbc=default_frac_tnbc):
         self.frac_tnbc = frac_tnbc
-        self.jit_f = None
+
+    def side(self, g: ip.Grid):
+        theta = jnp.array(g.get_theta())
+        radii = jnp.array(g.get_radii())
+        hcube_verts = jnp.array(ip.grid.hypercube_vertices(theta.shape[-1]))
+        return _side(self.frac_tnbc, theta, radii, hcube_verts)
+
+    def dist(self, theta):
+        return _dist(self.frac_tnbc, theta)
 
     def get_theta(self, theta):
         return theta
-
-    def f(self, theta):
-        (
-            pcontrol_tnbc,
-            ptreat_tnbc,
-            pcontrol_hrplus,
-            ptreat_hrplus,
-        ) = jax.scipy.special.expit(self.get_theta(theta))
-        control_term = (
-            self.frac_tnbc * pcontrol_tnbc + (1 - self.frac_tnbc) * pcontrol_hrplus
-        )
-        treat_term = self.frac_tnbc * ptreat_tnbc + (1 - self.frac_tnbc) * ptreat_hrplus
-        return control_term - treat_term
-
-    def dist(self, theta):
-        if self.jit_f is None:
-            self.jit_f = jax.jit(jax.vmap(self.f))
-        return self.jit_f(theta)
 
     def description(self):
         return f"WD41Null({self.frac_tnbc})"

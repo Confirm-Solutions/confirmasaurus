@@ -60,7 +60,6 @@ class ModalBackend(LocalBackend):
             self.worker_args = (
                 type(algo),
                 algo.model_type,
-                algo.null_hypos,
                 filtered_cfg,
             )
             yield

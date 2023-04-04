@@ -249,6 +249,10 @@ new_step_reports.set_index("step_id", inplace=True)
 ```
 
 ```python
+
+```
+
+```python
 from matplotlib.gridspec import GridSpec
 
 min_step = 1
@@ -259,7 +263,7 @@ offset = report_df["start_time"].min()
 step_id = working_reports["step_id"]
 include = (step_id >= min_step) & (step_id <= max_step)
 df = working_reports[include][
-    ["sim_start_time", "sim_done_time", "start_time", "done_time", "step_id"]
+    ['n_total_sims', "sim_start_time", "sim_done_time", "start_time", "done_time", "step_id", 'runtime_per_sim_ns']
 ].copy()
 df.sort_values(by=["sim_start_time"], inplace=True)
 df["adjusted_start_time"] = df["start_time"] - offset
@@ -268,6 +272,7 @@ df["adjusted_sim_start_time"] = df["sim_start_time"] - offset
 df["adjusted_sim_done_time"] = df["sim_done_time"] - offset
 min_time = df["adjusted_start_time"].min() - 10
 max_time = df["adjusted_done_time"].max() + 10
+df['sims_per_sec'] = 1e9 / df['runtime_per_sim_ns']
 
 df["positions"] = (df.groupby("step_id").cumcount()) / 10.0
 df["packet_linelengths"] = df["done_time"] - df["start_time"]
@@ -289,12 +294,13 @@ ts = np.linspace(min_time, max_time, 500)
 ongoing = []
 for t in ts:
     ongoing.append(
-        ((df["adjusted_sim_start_time"] < t) & (df["adjusted_sim_done_time"] > t)).sum()
+        (((df["adjusted_sim_start_time"] < t) & (df["adjusted_sim_done_time"] > t)) * df['sims_per_sec']).sum()
     )
-plt.plot(ts, ongoing, "k-", label="Active worker threads")
+ongoing = np.array(ongoing)
+max_serial_sims_per_sec = 1e9 / df['runtime_per_sim_ns'].min()
+plt.plot(ts, ongoing / max_serial_sims_per_sec, "k-", label="Parallelism")
 plt.legend()
 plt.xlim([min_time, max_time])
-plt.yticks(np.arange(0, 33, 8))
 
 plt.subplot(gs[1:, 0])
 plt.eventplot(
@@ -373,14 +379,17 @@ plt.ylim([-4, df["positions"].max() + 3.5])
 plt.gca().get_yaxis().set_visible(False)
 
 plt.show()
-
 ```
 
 ```python
+parallelism1 = df["n_total_sims"].sum() * working_reports["runtime_per_sim_ns"].min() * 1e-9 / (
+    df["sim_done_time"].max() - df["sim_start_time"].min()
+)
+
 sim_runtime = working_reports["runtime_simulating"].sum()
 total_runtime = 2 * (report_df["done_time"].max() - report_df["start_time"].min())
-parallelism = sim_runtime / total_runtime
-parallelism, sim_runtime / 3600, total_runtime / 3600
+parallelism2 = sim_runtime / total_runtime
+parallelism1, parallelism2, sim_runtime / 3600, total_runtime / 3600
 
 ```
 

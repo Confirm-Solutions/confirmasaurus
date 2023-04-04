@@ -12,8 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class AdaValidate:
-    def __init__(self, model_type, null_hypos, db, cfg, callback):
-        self.null_hypos = null_hypos
+    def __init__(self, model_type, db, cfg, callback):
         self.db = db
         self.cfg = cfg
         self.callback = callback
@@ -22,18 +21,24 @@ class AdaValidate:
         self.max_K = self.Ks[-1]
         self.model_type = model_type
         self._driver = None
+        self._model = None
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = self.model_type(
+                seed=self.cfg["model_seed"],
+                max_K=self.max_K,
+                **self.cfg["model_kwargs"],
+            )
+        return self._model
 
     @property
     def driver(self):
         # In a distributed setting, we don't need to create the driver on the
         # leader, so we do it lazily.
         if self._driver is None:
-            self._model = self.model_type(
-                seed=self.cfg["model_seed"],
-                max_K=self.max_K,
-                **self.cfg["model_kwargs"],
-            )
-            self._driver = ip.driver.Driver(self._model)
+            self._driver = ip.driver.Driver(self.model)
         return self._driver
 
     def get_orderer(self):

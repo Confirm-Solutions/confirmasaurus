@@ -70,18 +70,23 @@ class AdaCalibrate:
         self.max_K = self.Ks[-1]
         self.model_type = model_type
         self._driver = None
+        self._model = None
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = self.model_type(
+                seed=self.cfg["model_seed"],
+                max_K=self.max_K,
+                **self.cfg["model_kwargs"],
+            )
+        return self._model
 
     @property
     def driver(self):
         # In a distributed setting, we might not need to create the driver on
         # the leader, so we do it lazily.
         if self._driver is None:
-            self.model = self.model_type(
-                seed=self.cfg["model_seed"],
-                max_K=self.max_K,
-                **self.cfg["model_kwargs"],
-            )
-            self.null_hypos = self.model.null_hypos
             self._driver = bootstrap.BootstrapCalibrate(
                 self.model, self.cfg["bootstrap_seed"], self.cfg["nB"], self.Ks
             )
@@ -133,6 +138,7 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df, lams_df), axis=1)
 
+    @profile
     def convergence_criterion(self, basal_step_id):
         ########################################
         # Step 2: Convergence criterion! In terms of:
@@ -192,6 +198,7 @@ class AdaCalibrate:
         )
         return report["converged"], report
 
+    @profile
     async def select_tiles(self, basal_step_id, new_step_id):
         twb_worst_task = self.db.launch_thread(
             self.db.worst_tile, basal_step_id, "twb_mean_lams"
