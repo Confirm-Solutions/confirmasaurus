@@ -41,11 +41,18 @@ if use_clickhouse:
 
     ch_db = ch.ClickhouseTiles.connect(job_name, service=service)
     query = ch_db.query
+```
 
+```python
+ch.command(ch_db.client,'alter table results_orderer delete where id in (select id from done where active_at_birth=true and step_id < 49)', settings={'allow_nondeterministic_mutations': 1})
 ```
 
 ```python
 query('select count(*)/1000000 from results')
+```
+
+```python
+query('select sum(K)/1e12 from results')
 ```
 
 ```python
@@ -55,6 +62,52 @@ dim = len(
 n_steps = query("select max(step_id) from results").iloc[0][0] + 1
 dim, n_steps
 
+```
+
+```python
+for m in query("select * from logs where message LIKE '%Command took%'")['message'].values:
+    print(m)
+```
+
+```python
+{Query=1, SelectQuery=1, FileOpen=884, Seek=68,
+ReadBufferFromFileDescriptorRead=483,
+ReadBufferFromFileDescriptorReadBytes=46947132,
+WriteBufferFromFileDescriptorWrite=558,
+WriteBufferFromFileDescriptorWriteBytes=170270807,
+ReadCompressedBytes=208726409, CompressedReadBufferBlocks=46759,
+CompressedReadBufferBytes=2096992592, OpenedFileCacheHits=53,
+OpenedFileCacheMisses=414, IOBufferAllocs=2040, IOBufferAllocBytes=825897988,
+ArenaAllocChunks=1853, ArenaAllocBytes=7589888, FunctionExecute=6548,
+MarkCacheHits=99, MarkCacheMisses=45, CreatedReadBufferOrdinary=467,
+DiskReadElapsedMicroseconds=14076, DiskWriteElapsedMicroseconds=133093,
+SelectedParts=64, SelectedRanges=64, SelectedMarks=15307,
+SelectedRows=124762503, SelectedBytes=2096992592,
+WaitMarksLoadMicroseconds=1313843, BackgroundLoadingMarksTasks=144,
+ContextLock=755, RWLockAcquiredReadLocks=4, RealTimeMicroseconds=79290017,
+UserTimeMicroseconds=9144162, SystemTimeMicroseconds=854946,
+SoftPageFaults=71393, OSCPUWaitMicroseconds=896021,
+OSCPUVirtualTimeMicroseconds=9998555, OSWriteBytes=171438080,
+OSReadChars=221404858, OSWriteChars=171828370, CreatedHTTPConnections=470,
+QueryProfilerRuns=89, S3ReadMicroseconds=22474609, S3ReadRequestsCount=470,
+DiskS3ReadMicroseconds=22474609, DiskS3ReadRequestsCount=470, S3GetObject=470,
+DiskS3GetObject=470, ReadBufferFromS3Microseconds=25258233,
+ReadBufferFromS3Bytes=170270807,
+CachedReadBufferReadFromSourceMicroseconds=25258754,
+CachedReadBufferReadFromCacheMicroseconds=13256,
+CachedReadBufferReadFromSourceBytes=170270807,
+CachedReadBufferReadFromCacheBytes=46929732,
+CachedReadBufferCacheWriteBytes=170270807,
+CachedReadBufferCacheWriteMicroseconds=222139, RemoteFSSeeks=458,
+RemoteFSPrefetches=685, RemoteFSPrefetchedReads=685,
+RemoteFSUnprefetchedReads=90, RemoteFSSeeksWithReset=458, RemoteFSBuffers=266,
+ThreadpoolReaderTaskMicroseconds=24226064, ThreadpoolReaderReadBytes=208726409,
+ThreadpoolReaderSubmit=91019, AsynchronousRemoteReadWaitMicroseconds=19313139}
+```
+
+```python
+for m in query("select * from logs where message LIKE '%Query took%'")['message'].values:
+    print(m)
 ```
 
 ## Performance
@@ -69,19 +122,20 @@ new_step_reports = report_df[report_df["status"] == "NEW_STEP"].dropna(
     axis=1, how="all"
 )
 new_step_reports.set_index("step_id", inplace=True)
+new_step_reports.sort_index(inplace=True)
 
 ```
 
 ```python
 min_runtime_per_sim_ns = working_reports["runtime_per_sim_ns"].min()
-min_runtime_per_sim_ns = 24
+min_runtime_per_sim_ns = 25
 ```
 
 ```python
 from matplotlib.gridspec import GridSpec
 
-min_step = 1
-max_step = 10
+max_step = working_reports['step_id'].max()
+min_step = max_step - 8
 color_list = ["k", "r", "b", "m"]
 offset = report_df["start_time"].min()
 
@@ -111,6 +165,10 @@ df["lineoffsets"] = (
 )
 df["colors"] = np.array(color_list)[df["step_id"] % len(color_list)]
 df["linewidths"] = 5
+```
+
+```python
+
 fig = plt.figure(figsize=(15, 18), constrained_layout=True)
 plt.suptitle("Simulation timeline")
 gs = GridSpec(7, 1, figure=fig)
@@ -209,12 +267,11 @@ plt.show()
 ```
 
 ```python
-for i in range(8):
-    print(i, df[df['step_id'] == i]['adjusted_sim_start_time'].min(), df[df['step_id'] == i]['adjusted_sim_start_time'].max())
-```
-
-```python
-df[df['step_id'] == 4]['adjusted_sim_start_time'].min()
+done = df.groupby('step_id')['adjusted_done_time'].max()
+start = df.groupby('step_id')['adjusted_start_time'].max()
+step_prep_time = start.values[3:] - done.values[1:-2]
+plt.plot(done.index[3:], step_prep_time)
+plt.show()
 ```
 
 ```python
@@ -412,6 +469,11 @@ np.sum(deepen_likely_to_work)
 
 
 ```python
+runtime_mins = (working_reports['done_time'].max() - working_reports['start_time'].min()) / 60
+runtime_mins
+```
+
+```python
 plt.plot(working_reports["runtime_per_sim_ns"])
 plt.ylim([0, np.percentile(working_reports["runtime_per_sim_ns"], 99.5)])
 plt.show()
@@ -424,33 +486,41 @@ working_reports["runtime_simulating"].sum()
 ```
 
 ```python
-max_working_time = working_reports.groupby("step_id")["time"].max()
-total_sim_time = working_reports.groupby("step_id")["runtime_simulating"].sum()
-ex_df = new_step_reports[["step_id", "runtime_total", "done_time"]].set_index("step_id")
-ex_df["max_working_time"] = max_working_time
-ex_df["total_sim_time"] = total_sim_time
-step_parallelism = ex_df["total_sim_time"] / (
-    (ex_df["max_working_time"] - ex_df["time"]) + ex_df["runtime_total"]
-)
-plt.plot(step_parallelism, "k-o", markersize=3)
-plt.xlabel("step_id")
-plt.ylabel("parallelism")
-plt.show()
-
+new_step_reports
 ```
 
 ```python
-plt.plot(new_step_reports[["step_id", "lamss"]].set_index("step_id"))
-plt.xlabel("step_id")
+plt.figure(figsize=(10, 10), constrained_layout=True)
+plt.subplot(2,2,1)
+plt.plot(new_step_reports["lamss"])
+plt.xlabel("Step")
 plt.ylabel("$\lambda^{**}$")
-plt.show()
-
-```
-
-```python
+plt.subplot(2,2,2)
 plt.plot(new_step_reports["tie_{k}(lamss)"])
-plt.show()
+plt.axhline(0.025, color="red", linestyle="--")
+plt.xlabel("Step")
+plt.ylabel("$\hat{f}(\lambda^{**})$")
+plt.ylim([0, 0.03])
 
+plt.subplot(2,2,3)
+plt.plot(new_step_reports["grid_cost"])
+plt.xlabel("Step")
+plt.ylabel(r"$\alpha - \alpha_0$")
+
+plt.subplot(2,2,3)
+plt.plot(new_step_reports["grid_cost"], label=r'$\alpha - \alpha_0$')
+plt.plot(new_step_reports["bias_tie"], label="bias")
+plt.legend()
+plt.xlabel("Step")
+plt.ylabel(r"$TIE$")
+
+plt.subplot(2,2,4)
+plt.plot(new_step_reports["n_refine"], label='$N_{Refine}$)')
+plt.plot(new_step_reports["n_deepen"], label="$N_{Deepen}$")
+plt.legend()
+plt.xlabel("Step")
+plt.ylabel("N")
+plt.show()
 ```
 
 ```python

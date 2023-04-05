@@ -70,7 +70,6 @@ def entrypoint(backend, algo_type, kwargs):
     return db
 
 
-@profile
 async def async_entrypoint(backend, db, algo_type, kwargs):
     entry_time = time.time()
     with timer("init"):
@@ -98,7 +97,12 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
         for step_id in range(next_step, algo.cfg["n_steps"]):
             basal_step_id = max(step_id - n_parallel_steps, 0)
             with timer("wait for basal step"):
-                await db.wait_for_basal_step(basal_step_id)
+                await db.prepare_step(
+                    basal_step_id,
+                    step_id,
+                    algo.cfg["step_size"],
+                    algo.get_orderer(),
+                )
 
             if time.time() - entry_time > kwargs["timeout"]:
                 logger.info("Job timeout reached, stopping.")

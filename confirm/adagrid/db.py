@@ -235,11 +235,6 @@ class SQLTiles:
     def get_table(self, table_name: str) -> pd.DataFrame:
         return self.query(f"select * from {table_name}")
 
-    def get_results(self) -> pd.DataFrame:
-        out = self.get_table("results")
-        out.insert(0, "active", out["inactivation_step"] == MAX_STEP)
-        return out
-
     def get_reports(self) -> pd.DataFrame:
         json_strs = self.get_table("reports").values[:, 0]
         return pd.DataFrame([json.loads(s[0]) for s in json_strs])
@@ -262,7 +257,9 @@ class SQLTiles:
         df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
         self.insert("reports", df)
 
-    async def wait_for_basal_step(self, basal_step_id: int):
+    async def prepare_step(
+        self, basal_step_id: int, step_id: int, n: int, orderer: str
+    ):
         self.verify(basal_step_id)
 
     def verify(self, step_id: int):
@@ -456,6 +453,9 @@ class DuckDBTiles(SQLTiles):
             col_order = ",".join([c for c in cols])
             self.con.execute(f"insert into {table} select {col_order} from df")
 
+    def insert_results(self, df, create: bool = True):
+        self.insert("results", df, create=create)
+
     def get_columns(self, table):
         return self.query(f"select * from {table} limit 0").columns
 
@@ -470,6 +470,11 @@ class DuckDBTiles(SQLTiles):
         if len(out) == 0:
             return False
         return True
+
+    def get_results(self) -> pd.DataFrame:
+        out = self.get_table("results")
+        out.insert(0, "active", out["inactivation_step"] == MAX_STEP)
+        return out
 
     def next(
         self, basal_step_id: int, new_step_id: int, n: int, orderer: str
@@ -498,13 +503,14 @@ class DuckDBTiles(SQLTiles):
             .values
         )
 
-    def worst_tile(self, basal_step_id: int, order_col: str) -> pd.DataFrame:
+    def worst_tile(self, basal_step_id: int, order_col: str, min: bool) -> pd.DataFrame:
+        direction = "asc" if min else "desc"
         return self.query(
             f"""
             select * from results
                 where step_id <= {basal_step_id}
                     and inactivation_step > {basal_step_id}
-                order by {order_col} limit 1
+                order by {order_col} {direction} limit 1
             """
         )
 

@@ -120,6 +120,9 @@ def check():
 
 
 def setup_worker(dask_worker, worker_args=None):
+    import os
+
+    os.system("pip install line_profiler")
     (
         algo_type,
         model_type,
@@ -167,6 +170,16 @@ def dask_process_tiles(tiles_df, refine_deepen, report):
         ip.grid.worker_id = worker_id
 
     dask_worker = distributed.get_worker()
+    # Little hack... wait for the setup_worker function to run on the worker.
+    # This shouldn't be necessary though!
+    for i in range(100):
+        if hasattr(dask_worker, "algo"):
+            break
+        else:
+            import time
+
+            time.sleep(0.1)
+
     lb = LocalBackend()
     lb.algo = dask_worker.algo
     out = lb.sync_submit_tiles(tiles_df, refine_deepen, report)

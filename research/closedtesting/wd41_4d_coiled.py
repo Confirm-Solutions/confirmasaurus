@@ -45,12 +45,12 @@ def f():
         std_target=0.002,
         n_K_double=6,
         calibration_min_idx=70,
-        step_size=2**17,
+        step_size=2**21,
         packet_size=2**27,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
         backend=coiled_backend.CoiledBackend(n_workers=16),
-        n_steps=10,
+        n_steps=1000,
     )
     print("Done inner")
     prof.print_stats(output_unit=1e-3)

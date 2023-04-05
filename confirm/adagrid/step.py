@@ -99,17 +99,14 @@ def line_profile(extra_functions=None):
     return inner
 
 
-@report_line_profile()
 def process_tiles(algo, df, refine_deepen: bool, report: dict):
-    insert = prof(algo.db.insert)
-
     start = time.time()
     if refine_deepen:
         tiles_df, inactive_df = refine_and_deepen(
             df, algo.model.null_hypos, algo.cfg["max_K"]
         )
-        insert("tiles", inactive_df, create=False)
-        insert("done", inactive_df, create=False)
+        algo.db.insert("tiles", inactive_df, create=False)
+        algo.db.insert("done", inactive_df, create=False)
         report["runtime_refine_deepen"] = time.time() - start
         n_inactive = inactive_df.shape[0]
     else:
@@ -117,7 +114,7 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
         n_inactive = 0
 
     step_id = df.iloc[0]["step_id"]
-    insert("tiles", tiles_df, create=step_id == 0)
+    algo.db.insert("tiles", tiles_df, create=step_id == 0)
 
     tbs = algo.cfg["tile_batch_size"]
     if tbs is None:
@@ -128,7 +125,7 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
     results_df["completion_step"] = MAX_STEP
     results_df["inactivation_step"] = MAX_STEP
 
-    insert("results", results_df, create=step_id == 0)
+    algo.db.insert_results(results_df, create=step_id == 0)
 
     report["step_id"] = step_id
     report["packet_id"] = df.iloc[0]["packet_id"]
@@ -195,7 +192,6 @@ def refine_and_deepen(df, null_hypos, max_K):
     return active_df, inactive_df
 
 
-@profile
 async def new_step(algo, basal_step_id, new_step_id):
     start = time.time()
     status, tiles_df, report, n_inserts = await _new_step(
@@ -218,7 +214,6 @@ async def new_step(algo, basal_step_id, new_step_id):
     return status, tiles_df, n_inserts
 
 
-@profile
 async def _new_step(algo, basal_step_id, new_step_id):
     db = algo.db
     select_task = asyncio.create_task(algo.select_tiles(basal_step_id, new_step_id))

@@ -1,4 +1,4 @@
-from pprint import pprint
+from typing import List
 
 import dotenv
 import typer
@@ -11,13 +11,13 @@ def main(
     y: bool = False,
     list: bool = False,
     service: str = "TEST",
+    exclude: List[str] = None,
 ):
     dotenv.load_dotenv()
     ch_client = ch.get_ch_client(service=service)
-    if list:
-        print("All databases: ")
-        pprint(ch.list_dbs(ch_client))
-    ch.clear_dbs(ch_client, prefix=prefix, names=None, yes=y)
+    ch.clear_dbs(
+        ch_client, list=list, prefix=prefix, names=None, yes=y, exclude=exclude
+    )
 
 
 if __name__ == "__main__":

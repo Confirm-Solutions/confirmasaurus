@@ -138,7 +138,6 @@ class AdaCalibrate:
         )
         return pd.concat((tiles_df, lams_df), axis=1)
 
-    @profile
     async def convergence_criterion(self, basal_step_id):
         ########################################
         # Step 2: Convergence criterion! In terms of:
@@ -149,10 +148,10 @@ class AdaCalibrate:
         # The bias and standard deviation are calculated using the bootstrap.
         ########################################
         impossible_task = self.db.launch_thread(
-            self.db.worst_tile, basal_step_id, "impossible"
+            self.db.worst_tile, basal_step_id, "impossible", min=False
         )
         worst_tile_task = self.db.launch_thread(
-            self.db.worst_tile, basal_step_id, "lams"
+            self.db.worst_tile, basal_step_id, "lams", min=True
         )
         B_lamss_task = self.db.launch_thread(
             self.db.bootstrap_lamss, basal_step_id, self.cfg["nB"]
@@ -207,10 +206,9 @@ class AdaCalibrate:
         )
         return report["converged"], report
 
-    @profile
     async def select_tiles(self, basal_step_id, new_step_id):
         twb_worst_task = self.db.launch_thread(
-            self.db.worst_tile, basal_step_id, "twb_mean_lams"
+            self.db.worst_tile, basal_step_id, "twb_mean_lams", min=True
         )
         tiles_task = self.db.launch_thread(
             self.db.next, basal_step_id, new_step_id, self.cfg["step_size"], "orderer"

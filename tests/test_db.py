@@ -8,7 +8,6 @@ import imprint as ip
 from confirm.adagrid.db import DatabaseLogging
 from confirm.adagrid.db import DuckDBTiles
 from confirm.adagrid.db import PandasTiles
-from confirm.adagrid.init import _serialize_null_hypos
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +50,7 @@ class DBTester:
         return g, pd_tiles, db_tiles
 
     def init_grid(self, db, g):
-        db.init_grid(
-            g.df, _serialize_null_hypos(g.null_hypos), pd.DataFrame([dict(a=1)])
-        )
+        db.init_grid(g.df, pd.DataFrame([dict(a=1)]))
 
     def insert_fake_results(self, db, zone_id=0):
         work = db.get_tiles().nsmallest(100, "theta0")

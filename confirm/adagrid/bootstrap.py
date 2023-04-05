@@ -125,7 +125,9 @@ class BootstrapCalibrate:
                 cols.append(f"B_lams{i}")
             for i in range(self.nB):
                 cols.append(f"twb_lams{i}")
-            lams_df = pd.DataFrame(bootstrap_lams, index=K_df.index, columns=cols)
+            lams_df = pd.DataFrame(
+                bootstrap_lams.astype(np.float32), index=K_df.index, columns=cols
+            )
 
             lams_df.insert(
                 0, "twb_min_lams", bootstrap_lams[:, 1 + self.nB :].min(axis=1)
