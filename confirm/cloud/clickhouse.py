@@ -404,10 +404,9 @@ class ClickhouseTiles(SQLTiles):
         partitioner = {
             "done": "active_at_birth, active",
             "results": "step_id",
-            "results_orderer": "step_id",
         }
 
-        orderer = {"done": "step_id", "results": "id", "results_orderer": "orderer"}
+        orderer = {"done": "step_id", "results": "group_id, id"}
 
         def _inner():
             if create and table not in self._table_exists:
@@ -464,23 +463,10 @@ class ClickhouseTiles(SQLTiles):
         """
         )
 
-    def insert_results(self, df: pd.DataFrame, create: bool) -> None:
-        self.insert("results", df, create=True)
-        df_orderer = df[["id", "step_id", "orderer"]]
-        self.insert("results_orderer", df_orderer, create=True)
-
     def wait_for_results(self, step_id):
         self.wait_for_table(
             "Adagrid",
             "results",
-            step_id,
-            self.expected_counts[step_id]["results"],
-            0.1,
-            step_id == 0,
-        )
-        self.wait_for_table(
-            "Adagrid",
-            "results_orderer",
             step_id,
             self.expected_counts[step_id]["results"],
             0.1,
@@ -603,6 +589,14 @@ class ClickhouseTiles(SQLTiles):
                     if not (c.startswith("B_lams") or c.startswith("twb_lams"))
                 ]
             )
+            # TODO:
+            # TODO:
+            # TODO:
+            # TODO:
+            # TODO:
+            # TODO:
+            # TODO:
+            # TODO:
             return self.query(
                 f"""
                 with results_ids as (select id from results_orderer
@@ -623,25 +617,6 @@ class ClickhouseTiles(SQLTiles):
 
         self.ready_to_verify = basal_step_id
         self.verify_stop = False
-        # if self._verify_task is None:
-
-        #     def verify_task():
-        #         last_verified = -1
-        #         while not self.verify_stop or self.ready_to_verify > last_verified:
-        #             if self.ready_to_verify > last_verified:
-        #                 last_verified = self.ready_to_verify
-        #                 self.verify(
-        #                     last_verified,
-        #                     sleep_time=3.0,
-        #                 )
-        #             else:
-        #                 time.sleep(2.0)
-
-        #     self._verify_task = asyncio.create_task(asyncio.to_thread(verify_task))
-        #     await asyncio.sleep(0)
-        # else:
-        #     if self._verify_task.done():
-        #         self._verify_task.result()
 
     def next(
         self,

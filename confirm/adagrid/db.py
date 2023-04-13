@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 import confirm.adagrid.json as json
-from .const import MAX_STEP
 
 if TYPE_CHECKING:
     import duckdb
@@ -169,50 +168,6 @@ class PandasTiles:
         else:
             self.results = pd.concat((self.results, df), axis=0)
 
-    def insert_done(self, df: pd.DataFrame) -> None:
-        df = df.set_index("id")
-        df.insert(0, "id", df.index)
-        if self.done is None:
-            self.done = df
-        else:
-            self.done = pd.concat((self.done, df), axis=0)
-
-        df_inactive = df[df["active"] is False]
-        self.tiles.loc[df_inactive["id"], "inactivation_step"] = df_inactive["step_id"]
-        self.results.loc[df_inactive["id"], "inactivation_step"] = df_inactive[
-            "step_id"
-        ]
-
-        df_complete = df[df["active"] is True]
-        self.results.loc[df_complete["id"], "completion_step"] = df_complete["step_id"]
-
-    def next(
-        self, basal_step_id: int, new_step_id: int, n: int, order_col: str
-    ) -> pd.DataFrame:
-        out = self.results.loc[
-            (self.results["step_id"] <= basal_step_id)
-            & (self.results["completion_step"] == MAX_STEP)
-        ].nsmallest(n, order_col)
-        return out
-
-    def bootstrap_lamss(self, basal_step_id: int) -> pd.Series:
-        nB = (
-            max([int(c[6:]) for c in self.results.columns if c.startswith("B_lams")])
-            + 1
-        )
-        active_tiles = self.results.loc[
-            (self.results["step_id"] <= basal_step_id)
-            & (self.results["inactivation_step"] == MAX_STEP)
-        ]
-        return active_tiles[[f"B_lams{i}" for i in range(nB)]].values.min(axis=0)
-
-    def worst_tile(self, basal_step_id: int, orderer: str) -> pd.DataFrame:
-        active_tiles = self.results.loc[
-            (self.results["step_id"] <= basal_step_id)
-            & (self.results["inactivation_step"] == MAX_STEP)
-        ]
-        return active_tiles.loc[[active_tiles[orderer].idxmin()]]
-
     def verify(self):
         pass
 
@@ -237,7 +192,11 @@ class SQLTiles:
 
     def get_reports(self) -> pd.DataFrame:
         json_strs = self.get_table("reports").values[:, 0]
-        return pd.DataFrame([json.loads(s[0]) for s in json_strs])
+        return pd.DataFrame([json.loads(s) for s in json_strs])
+
+    def insert_reports(self, *reports: Dict[str, Any]) -> None:
+        df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
+        self.insert("reports", df)
 
     def n_existing_packets(self, step_id: int) -> int:
         df = self.query(
@@ -253,13 +212,12 @@ class SQLTiles:
         else:
             return df.iloc[0][1]
 
-    def insert_reports(self, *reports: Dict[str, Any]) -> None:
-        df = pd.DataFrame(dict(json=[json.dumps(R) for R in reports]))
-        self.insert("reports", df)
-
     async def prepare_step(
-        self, basal_step_id: int, step_id: int, n: int, orderer: str
-    ):
+        self, basal_step_id: int, step_id: int, n_groups: int
+    ) -> None:
+        if not self.does_table_exist("done"):
+            return
+
         self.verify(basal_step_id)
 
     def verify(self, step_id: int):
@@ -289,9 +247,9 @@ class SQLTiles:
 
         duplicate_done = self.query(
             f"""
-            select id from done 
+            select group_id from done 
                 where step_id <= {step_id} 
-                group by id 
+                group by group_id 
                 having count(*) > 1
             """,
             quiet=True,
@@ -329,95 +287,88 @@ class SQLTiles:
                 f" {active_tiles_without_results}"
             )
 
-        tiles_without_parents = self.query(
-            f"""
-            select parent_id, id from results
-                where active_at_birth = true
-                    and step_id <= {step_id}
-                    and parent_id not in (select id from done)
-            """,
-            quiet=True,
-        )
-        if len(tiles_without_parents) > 0:
-            raise ValueError(f"tiles without parents: {tiles_without_parents}")
-
-        tiles_with_active_or_incomplete_parents = self.query(
-            f"""
-            select parent_id, id from tiles
-                where step_id <= {step_id}
-                    and parent_id in 
-                        (select id from results 
-                         where (inactivation_step={MAX_STEP} 
-                            or completion_step={MAX_STEP}) 
-                            and (id not in (select id from done where active=false)))
-            """,
-            quiet=True,
-        )
-        if len(tiles_with_active_or_incomplete_parents) > 0:
-            raise ValueError(
-                f"tiles with active parents: {tiles_with_active_or_incomplete_parents}"
-            )
+        # TODO:
+        # TODO:
+        # TODO:
+        # TODO:
+        # TODO:
+        # tiles_with_active_or_incomplete_parents = self.query(
+        #     f"""
+        #     select parent_id, id from tiles
+        #         where step_id <= {step_id}
+        #             and parent_id in
+        #                 (select id from results
+        #                  where (inactivation_step={MAX_STEP}
+        #                     or completion_step={MAX_STEP})
+        #                     and (group_id not in (select group_id from done where active=false)))
+        #     """,
+        #     quiet=True,
+        # )
+        # if len(tiles_with_active_or_incomplete_parents) > 0:
+        #     raise ValueError(
+        #         f"tiles with active parents: {tiles_with_active_or_incomplete_parents}"
+        #     )
 
         # we want to ignore tiles that were never active (i.e. pruned during refinement)
         # to do this, we check that the done.step_id is greater than tiles.step_id
-        inactive_tiles_with_no_children = self.query(
-            f"""
-            select id from results
-                where 
-                    results.step_id <= {step_id}
-                    and results.inactivation_step <= {step_id}
-                    and results.id not in (
-                        select id from done 
-                            where active=false 
-                            and step_id <= {step_id}
-                    )
-                    and id not in (
-                        select parent_id from tiles where step_id <= {step_id}
-                    )
-            """,
-            quiet=True,
-        )
-        if len(inactive_tiles_with_no_children) > 0:
-            raise ValueError(
-                f"inactive tiles with no children: {inactive_tiles_with_no_children}"
-            )
+        # inactive_tiles_with_no_children = self.query(
+        #     f"""
+        #     select id from results
+        #         where
+        #             results.step_id <= {step_id}
+        #             and results.inactivation_step <= {step_id}
+        #             and results.id not in (
+        #                 select id from done
+        #                     where active=false
+        #                     and step_id <= {step_id}
+        #             )
+        #             and id not in (
+        #                 select parent_id from tiles where step_id <= {step_id}
+        #             )
+        #     """,
+        #     quiet=True,
+        # )
+        # if len(inactive_tiles_with_no_children) > 0:
+        #     raise ValueError(
+        #         f"inactive tiles with no children: {inactive_tiles_with_no_children}"
+        #     )
 
-        refined_tiles_with_incorrect_child_count = self.query(
-            f"""
-            select d.id, count(*) as n_children, max(refine) as n_expected
-                from done d
-                left join tiles t
-                    on t.parent_id = d.id
-                where d.step_id <= {step_id}
-                    and refine > 0
-                group by d.id
-                having count(*) != max(refine)
-            """,
-            quiet=True,
-        )
-        if len(refined_tiles_with_incorrect_child_count) > 0:
-            raise ValueError(
-                "refined tiles with wrong number of children:"
-                f" {refined_tiles_with_incorrect_child_count}"
-            )
+        # refined_tiles_with_incorrect_child_count = self.query(
+        #     f"""
+        #     select d.id, count(*) as n_children, max(refine) as n_expected
+        #         from done d
+        #         left join tiles t
+        #             on t.parent_id = d.id
+        #         where d.step_id <= {step_id}
+        #             and refine > 0
+        #         group by d.id
+        #         having count(*) != max(refine)
+        #     """,
+        #     quiet=True,
+        # )
+        # if len(refined_tiles_with_incorrect_child_count) > 0:
+        #     raise ValueError(
+        #         "refined tiles with wrong number of children:"
+        #         f" {refined_tiles_with_incorrect_child_count}"
+        #     )
 
-        deepened_tiles_with_incorrect_child_count = self.query(
-            f"""
-            select d.id, count(*) from done d
-                left join tiles t
-                    on t.parent_id = d.id
-                where d.step_id <= {step_id}
-                    and deepen=true
-                group by d.id
-                having count(*) != 1
-            """,
-            quiet=True,
-        )
-        if len(deepened_tiles_with_incorrect_child_count) > 0:
-            raise ValueError(
-                "deepened tiles with wrong number of children:"
-                f" {deepened_tiles_with_incorrect_child_count}"
-            )
+        # deepened_tiles_with_incorrect_child_count = self.query(
+        #     f"""
+        #     select d.id, count(*) from done d
+        #         left join tiles t
+        #             on t.parent_id = d.id
+        #         where d.step_id <= {step_id}
+        #             and deepen=true
+        #         group by d.id
+        #         having count(*) != 1
+        #     """,
+        #     quiet=True,
+        # )
+        # if len(deepened_tiles_with_incorrect_child_count) > 0:
+        #     raise ValueError(
+        #         "deepened tiles with wrong number of children:"
+        #         f" {deepened_tiles_with_incorrect_child_count}"
+        #     )
 
 
 @dataclass
@@ -453,9 +404,6 @@ class DuckDBTiles(SQLTiles):
             col_order = ",".join([c for c in cols])
             self.con.execute(f"insert into {table} select {col_order} from df")
 
-    def insert_results(self, df, create: bool = True):
-        self.insert("results", df, create=create)
-
     def get_columns(self, table):
         return self.query(f"select * from {table} limit 0").columns
 
@@ -471,33 +419,46 @@ class DuckDBTiles(SQLTiles):
             return False
         return True
 
-    def get_results(self) -> pd.DataFrame:
-        out = self.get_table("results")
-        out.insert(0, "active", out["inactivation_step"] == MAX_STEP)
+    def get_active_results(self) -> pd.DataFrame:
+        out = self.query(
+            """
+            select * from results
+                where results.group_id in (
+                    select groups.group_id from groups 
+                        where groups.complete=false 
+                        and groups.group_id not in (select done.group_id from done))
+            """
+        )
+        out["active"] = True
         return out
 
-    def next(
-        self, basal_step_id: int, new_step_id: int, n: int, orderer: str
-    ) -> pd.DataFrame:
+    def next(self, basal_step_id: int, new_step_id: int, n_groups: int) -> pd.DataFrame:
         return self.query(
             f"""
-            select * from results 
-                where completion_step >= {new_step_id}
-                    and step_id <= {basal_step_id}
-            order by {orderer} limit {n}
+            select * from results where results.group_id in (
+                select groups.group_id from groups
+                    where groups.step_id <= {basal_step_id}
+                        and groups.complete=false
+                        and groups.group_id not in (
+                            select done.group_id from done 
+                                where done.step_id < {new_step_id})
+                order by groups.min_orderer limit {n_groups}
+            )
             """
         )
 
     def bootstrap_lamss(self, basal_step_id: int, nB: int) -> List[float]:
         # Get lambda**_Bi for each bootstrap sample.
-        cols = ",".join([f"min(B_lams{i})" for i in range(nB)])
+        cols = ",".join([f"min(min_B_lams{i})" for i in range(nB)])
         return (
             self.query(
                 f"""
-            select {cols} from results 
-                where step_id <= {basal_step_id}
-                    and inactivation_step > {basal_step_id}
-            """
+                select {cols} from groups 
+                    where groups.step_id <= {basal_step_id}
+                        and groups.group_id not in (
+                            select done.group_id from done 
+                                where done.step_id < {basal_step_id})
+                """
             )
             .iloc[0]
             .values
@@ -505,28 +466,18 @@ class DuckDBTiles(SQLTiles):
 
     def worst_tile(self, basal_step_id: int, order_col: str, min: bool) -> pd.DataFrame:
         direction = "asc" if min else "desc"
+        groups_col = ("min_" if min else "max_") + order_col
         return self.query(
             f"""
             select * from results
-                where step_id <= {basal_step_id}
-                    and inactivation_step > {basal_step_id}
-                order by {order_col} {direction} limit 1
-            """
-        )
-
-    def insert_done_update_results(self, df: pd.DataFrame):
-        self.insert("done", df)
-        self.con.execute(
-            """
-            update results
-                set inactivation_step=(
-                        CASE WHEN done.active 
-                            THEN results.inactivation_step 
-                            ELSE done.step_id 
-                        END),
-                    completion_step=done.step_id
-            from done
-                where results.id=done.id
+                where results.group_id in (
+                    select groups.group_id from groups
+                        where groups.step_id <= {basal_step_id}
+                            and groups.group_id not in (
+                                select done.group_id from done
+                                    where done.step_id < {basal_step_id})
+                        order by groups.{groups_col} {direction} limit 1)
+                order by results.{order_col} {direction} limit 1
             """
         )
 

@@ -378,8 +378,8 @@ orderer_df = self.con.query(
 ```
 
 ```python
-wait = np.searchsorted(orderer_df["orderer"], worst5000_df["orderer"])
-wait
+_wait = np.searchsorted(orderer_df["orderer"], worst5000_df["orderer"])
+_wait
 
 ```
 

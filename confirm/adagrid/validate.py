@@ -6,7 +6,6 @@ import pandas as pd
 import imprint as ip
 from .adagrid import pass_control_to_backend
 from .adagrid import print_report
-from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +40,6 @@ class AdaValidate:
             self._driver = ip.driver.Driver(self.model)
         return self._driver
 
-    def get_orderer(self):
-        return "total_cost_order, tie_bound_order"
-
     def process_tiles(self, *, tiles_df, tile_batch_size):
         # TODO: bring back transformations?? in a more general way?
         # if transformation is None:
@@ -70,10 +66,9 @@ class AdaValidate:
             tile_batch_size=tile_batch_size,
         )
         rej_df.insert(0, "processing_time", ip.timer.simple_timer())
-        rej_df.insert(1, "completion_step", MAX_STEP)
-        rej_df.insert(2, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
-        rej_df.insert(3, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
-        rej_df.insert(4, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])
+        rej_df.insert(1, "grid_cost", rej_df["tie_bound"] - rej_df["tie_cp_bound"])
+        rej_df.insert(2, "sim_cost", rej_df["tie_cp_bound"] - rej_df["tie_est"])
+        rej_df.insert(3, "total_cost", rej_df["grid_cost"] + rej_df["sim_cost"])
 
         # The orderer for validation consists of a tuple
         # total_cost_order: the first entry is the total_cost thresholded by
@@ -89,12 +84,12 @@ class AdaValidate:
         # This allows for having a global acceptable slack with global_target
         # and then a separate tighter criterion near the maximum tie_bound.
         rej_df.insert(
-            5,
+            4,
             "total_cost_order",
             -rej_df["total_cost"] * (rej_df["total_cost"] > self.cfg["global_target"]),
         )
         rej_df.insert(
-            6,
+            5,
             "tie_bound_order",
             -rej_df["tie_bound"] * (rej_df["total_cost"] > self.cfg["max_target"]),
         )
@@ -131,7 +126,7 @@ class AdaValidate:
         raw_tiles = self.db.next(
             basal_step_id,
             new_step_id,
-            self.cfg["step_size"],
+            self.cfg["n_groups_per_step"],
             "total_cost_order, tie_bound_order",
         )
         max_tie_est = self.db.worst_tile(basal_step_id, "tie_est desc")["tie_est"].iloc[
@@ -178,8 +173,9 @@ def ada_validate(
     global_target=0.005,
     n_steps: int = 100,
     timeout: int = 60 * 60 * 12,
-    step_size=2**10,
+    n_groups_per_step=2**10,
     packet_size: int = 2**25,
+    group_size: int = 2**11,
     n_parallel_steps: int = 1,
     record_system: bool = True,
     clickhouse_service: str = None,
@@ -221,13 +217,15 @@ def ada_validate(
             Type I Error. Defaults to 0.005.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
         timeout: The maximum number of seconds to run for. Defaults to 12 hours.
-        step_size: The number of tiles in an Adagrid step produced by a single
-           Adagrid tile selection step. This is different from
-           packet_size because we select tiles once and then run many
-           simulation "iterations" in parallel each processing one
-           packet of tiles. Defaults to 2**10.
-        packet_size: The number of simulations to process per iteration. Defaults to
-            2**25=~33 million.
+        n_groups_per_step: The number of tile groups in an Adagrid step
+            produced by a single Adagrid tile selection step. This is different
+            from packet_size because we select tiles once and then run many
+            simulation "iterations" in parallel each processing one packet of
+            tiles. Defaults to 2**10.
+        packet_size: The number of simulations to process per worker task.
+            Defaults to 2**25=~33 million.
+        group_size: The number of simulations to group together for database
+            lookup efficiency. Defaults to 2**11 = 2048.
         n_parallel_steps: The number of Adagrid steps to run in parallel.
             Setting this parameter to anything greater than 1 will cause the steps
             to be based on lagged data. For example, with n_parallel_steps=2,

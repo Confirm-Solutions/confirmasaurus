@@ -1,4 +1,5 @@
 import abc
+import asyncio
 import contextlib
 import logging
 import queue
@@ -54,6 +55,20 @@ def entrypoint(backend, algo_type, kwargs):
 
     db = setup_db(backend, kwargs, require_fresh=True)
     with DatabaseLogging(db) as db_logging:
+        try:
+            asyncio.get_running_loop()
+            nest = True
+        except RuntimeError:
+            nest = False
+
+        # If an event loop is already running, we need to use nest_asyncio to
+        # layer our event loop inside. This is not a good thing to do, but
+        # it's expedient for now.
+        if nest:
+            import nest_asyncio
+
+            nest_asyncio.apply()
+
         with Runner() as runner:
             try:
                 runner.run(async_entrypoint(backend, db, algo_type, kwargs))
@@ -67,41 +82,40 @@ def entrypoint(backend, algo_type, kwargs):
                 # messages have been sent to the database.
                 db_logging.flush()
                 runner.run(db.finalize())
+
     return db
 
 
 async def async_entrypoint(backend, db, algo_type, kwargs):
     entry_time = time.time()
     with timer("init"):
-        algo, initial_tiles_df, db.expected_counts[0] = init(db, algo_type, kwargs)
+        algo, initial_tiles_df = init(db, algo_type, kwargs)
     next_step = 1
 
     start = time.time()
     async with backend.setup(algo):
         logger.debug(f"backend.setup() took {time.time() - start:.2f} seconds")
 
-        with timer("process_initial_incompletes"):
-            n_inserts = await wait_for_packets(
-                backend,
-                algo,
-                await submit_packet_df(
-                    backend, algo, initial_tiles_df, refine_deepen=False
-                ),
-            )
+        async def _wait(tasks_step_id, tasks):
+            n_inserts = await wait_for_packets(backend, algo, tasks)
             for k in n_inserts:
-                db.expected_counts[0][k] += n_inserts[k]
+                db.expected_counts[tasks_step_id][k] += n_inserts[k]
+
+        with timer("process_initial_incompletes"):
+            tasks = await submit_packet_df(
+                backend, algo, initial_tiles_df, refine_deepen=False
+            )
+            await _wait(0, tasks)
 
         stopping_indicator = 0
         n_parallel_steps = algo.cfg["n_parallel_steps"]
         processing_tasks = queue.Queue()
+
         for step_id in range(next_step, algo.cfg["n_steps"]):
             basal_step_id = max(step_id - n_parallel_steps, 0)
             with timer("wait for basal step"):
                 await db.prepare_step(
-                    basal_step_id,
-                    step_id,
-                    algo.cfg["step_size"],
-                    algo.get_orderer(),
+                    basal_step_id, step_id, algo.cfg["n_groups_per_step"]
                 )
 
             if time.time() - entry_time > kwargs["timeout"]:
@@ -114,7 +128,12 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
                     algo, basal_step_id, step_id
                 )
                 if tiles_df is None:
-                    db.expected_counts[step_id] = {"tiles": 0, "results": 0, "done": 0}
+                    db.expected_counts[step_id] = {
+                        "tiles": 0,
+                        "results": 0,
+                        "done": 0,
+                        "groups": 0,
+                    }
 
             if status in [WorkerStatus.CONVERGED, WorkerStatus.EMPTY_STEP]:
                 stopping_indicator += 1
@@ -142,18 +161,11 @@ async def async_entrypoint(backend, db, algo_type, kwargs):
 
             with timer("wait for packets"):
                 if processing_tasks.qsize() > n_parallel_steps - 1:
-                    tasks_step_id, tasks = processing_tasks.get()
-                    n_inserts = await wait_for_packets(backend, algo, tasks)
-                    for k in n_inserts:
-                        db.expected_counts[tasks_step_id][k] += n_inserts[k]
+                    await _wait(*processing_tasks.get())
 
         with timer("process final packets"):
             while not processing_tasks.empty():
-                # TODO: duplicated above, refactor
-                tasks_step_id, tasks = processing_tasks.get()
-                n_inserts = await wait_for_packets(backend, algo, tasks)
-                for k in n_inserts:
-                    db.expected_counts[tasks_step_id][k] += n_inserts[k]
+                await _wait(*processing_tasks.get())
 
         with timer("verify"):
             db.verify(step_id)
@@ -195,6 +207,7 @@ class Backend(abc.ABC):
         "job_name",
         "model_seed",
         "model_kwargs",
+        "group_size",
     ]
 
     def entrypoint(self, algo_type, kwargs):

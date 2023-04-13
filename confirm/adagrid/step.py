@@ -5,10 +5,10 @@ import time
 from enum import Enum
 
 import jax
+import numpy as np
 import pandas as pd
 
 import imprint as ip
-from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def wait_for_packets(backend, algo, packets):
         n_inserts, reports = zip(*outs)
     logger.debug("Packets finished.")
     algo.db.insert_reports(*reports)
-    out_n_inserts = dict(tiles=0, results=0, done=0)
+    out_n_inserts = dict(tiles=0, results=0, done=0, groups=0)
     for n in n_inserts:
         for k in n:
             out_n_inserts[k] += n[k]
@@ -105,8 +105,9 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
         tiles_df, inactive_df = refine_and_deepen(
             df, algo.model.null_hypos, algo.cfg["max_K"]
         )
+        # group_id = 0 is a stand-in for initially inactive tiles.
+        tiles_df["group_id"] = 0
         algo.db.insert("tiles", inactive_df, create=False)
-        algo.db.insert("done", inactive_df, create=False)
         report["runtime_refine_deepen"] = time.time() - start
         n_inactive = inactive_df.shape[0]
     else:
@@ -122,15 +123,26 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
     report["sim_start_time"] = time.time()
     results_df = algo.process_tiles(tiles_df=tiles_df, tile_batch_size=tbs)
     report["sim_done_time"] = time.time()
-    results_df["completion_step"] = MAX_STEP
-    results_df["inactivation_step"] = MAX_STEP
 
-    algo.db.insert_results(results_df, create=step_id == 0)
+    results_df.sort_values(by="orderer", inplace=True)
+
+    # Assign groups for fast lookups.
+    n_tiles = results_df.shape[0]
+    group_idx = np.floor(np.arange(n_tiles) / algo.cfg["group_size"]).astype(int)
+    group_uuids = ip.grid._gen_short_uuids(np.max(group_idx) + 1)
+    if "group_id" in results_df.columns:
+        results_df["group_id"] = group_uuids[group_idx]
+    else:
+        results_df.insert(1, "group_id", group_uuids[group_idx])
+    group_df = prep_groups(results_df, algo, step_id)
+
+    algo.db.insert("results", results_df, create=step_id == 0)
+    algo.db.insert("groups", group_df, create=step_id == 0)
 
     report["step_id"] = step_id
     report["packet_id"] = df.iloc[0]["packet_id"]
     report["n_parent_tiles"] = df.shape[0]
-    report["n_tiles"] = tiles_df.shape[0]
+    report["n_tiles"] = n_tiles
     report["n_inactive_tiles"] = n_inactive
     report["tile_batch_size"] = tbs
     report["n_total_sims"] = results_df["K"].sum()
@@ -144,6 +156,7 @@ def process_tiles(algo, df, refine_deepen: bool, report: dict):
         tiles=tiles_df.shape[0] + n_inactive,
         done=n_inactive,
         results=results_df.shape[0],
+        groups=group_df.shape[0],
     )
     report["runtime_process_tiles"] = time.time() - start
     return n_inserts, report
@@ -288,7 +301,22 @@ async def _new_step(algo, basal_step_id, new_step_id):
 
     selection_df["packet_id"] = assign_packets(selection_df, algo.cfg["packet_size"])
     selection_df["step_id"] = new_step_id
-    db.insert_done_update_results(selection_df)
+
+    done_df = (
+        selection_df.groupby("group_id").agg(count=("group_id", "count")).reset_index()
+    )
+    done_df["step_id"] = new_step_id
+    db.insert("done", done_df)
+
+    complete_df = selection_df[selection_df["active"]].copy()
+    if complete_df.shape[0] > 0:
+        complete_df["group_id"] = ip.grid._gen_short_uuids(1)
+        complete_groups_df = prep_groups(complete_df, algo, new_step_id)
+        complete_groups_df["complete"] = True
+        db.insert("groups", complete_groups_df)
+        n_complete_groups = complete_groups_df.shape[0]
+    else:
+        n_complete_groups = 0
 
     report["time"] = time.time()
     report["n_new_tiles"] = (
@@ -301,13 +329,39 @@ async def _new_step(algo, basal_step_id, new_step_id):
         f"Starting step {new_step_id}"
         f" with {report['n_new_tiles']} tiles to simulate."
     )
-    n_inserts = dict(tiles=0, done=selection_df.shape[0], results=0)
+    n_inserts = dict(
+        tiles=0,
+        done=selection_df.shape[0],
+        results=0,
+        groups=n_complete_groups,
+    )
     return WorkerStatus.NEW_STEP, selection_df, report, n_inserts
 
 
 def assign_packets(df, packet_size):
     cum_sims = (df["K"] * (df["refine"] + df["deepen"])).cumsum()
     return pd.Series((cum_sims // packet_size).astype(int), df.index)
+
+
+def prep_groups(df, algo, step_id):
+    # Compute group-level bootstrap minima.
+    # - count
+    # - B_lams min
+    # - orderer min
+    # - lams min
+    agg_dict = {}
+    for i in range(algo.cfg["nB"]):
+        agg_dict[f"min_B_lams{i}"] = pd.NamedAgg(column=f"B_lams{i}", aggfunc="min")
+    agg_dict["min_orderer"] = pd.NamedAgg(column="orderer", aggfunc="min")
+    agg_dict["min_lams"] = pd.NamedAgg(column="lams", aggfunc="min")
+    agg_dict["min_twb_mean_lams"] = pd.NamedAgg(column="twb_mean_lams", aggfunc="min")
+    agg_dict["max_impossible"] = pd.NamedAgg(column="impossible", aggfunc="max")
+    agg_dict["count"] = pd.NamedAgg(column="group_id", aggfunc="count")
+
+    group_df = df.groupby("group_id").agg(**agg_dict).reset_index()
+    group_df["step_id"] = step_id
+    group_df["complete"] = False
+    return group_df
 
 
 class WorkerStatus(Enum):

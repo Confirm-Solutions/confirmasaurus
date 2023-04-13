@@ -46,11 +46,18 @@ def cal_tester(snapshot, ignore_story=True, record_system=False, **kwargs):
             theta_min=[-1], theta_max=[1], null_hypos=[ip.hypo("x0 < 0")]
         )
         out_db = ada.ada_calibrate(
-            ZTest1D, g=g, nB=5, tile_batch_size=1, record_system=record_system, **kwargs
+            ZTest1D,
+            g=g,
+            nB=5,
+            tile_batch_size=1,
+            group_size=1,
+            record_system=record_system,
+            **kwargs
         )
 
+    g = ip.Grid(out_db.get_active_results(), None)
     ip.testing.check_imprint_results(
-        ip.Grid(out_db.get_results(), None).prune_inactive(),
+        g,
         snapshot,
         ignore_story=ignore_story,
     )
@@ -106,7 +113,7 @@ def test_distributed_coiled(ch_db, snapshot):
 
 @pytest.mark.slow
 def test_two_parallel_steps(snapshot):
-    cal_tester(snapshot, n_parallel_steps=2, step_size=1, packet_size=1)
+    cal_tester(snapshot, n_parallel_steps=2, n_groups_per_step=1, packet_size=1)
 
 
 @pytest.mark.slow

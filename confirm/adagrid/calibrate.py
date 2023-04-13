@@ -55,7 +55,6 @@ import pandas as pd
 from . import bootstrap
 from .adagrid import pass_control_to_backend
 from .adagrid import print_report
-from .const import MAX_STEP
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +91,6 @@ class AdaCalibrate:
             )
         return self._driver
 
-    def get_orderer(self):
-        return "orderer"
-
-    @staticmethod
-    def get_columns(self):
-        return (
-            [
-                "orderer",
-                "idx",
-                "alpha0",
-                "impossible",
-                "twb_max_lams",
-                "twb_mean_lams",
-                "twb_min_lams",
-                "lams",
-            ]
-            + [f"B_lams{i}" for i in range(self.cfg["nB"])]
-            + [f"twb_lams{i}" for i in range(self.cfg["nB"])]
-        )
-
     def process_tiles(self, *, tiles_df, tile_batch_size):
         # This method actually runs the calibration and bootstrapping.
         # It is called once per iteration.
@@ -124,9 +103,8 @@ class AdaCalibrate:
             calibration_min_idx=self.cfg["calibration_min_idx"],
             tile_batch_size=tile_batch_size,
         )
-        lams_df.insert(0, "completion_step", MAX_STEP)
         lams_df.insert(
-            1,
+            0,
             "orderer",
             # Where calibration is impossible due to either small K or small alpha0,
             # the orderer is set to -inf so that such tiles are guaranteed to
@@ -211,13 +189,12 @@ class AdaCalibrate:
             self.db.worst_tile, basal_step_id, "twb_mean_lams", min=True
         )
         tiles_task = self.db.launch_thread(
-            self.db.next, basal_step_id, new_step_id, self.cfg["step_size"], "orderer"
+            self.db.next, basal_step_id, new_step_id, self.cfg["n_groups_per_step"]
         )
 
         ########################################
         # Is deepening likely to be enough?
         ########################################
-
         # When we are deciding to refine or deepen, it's helpful to know
         # whether a tile is ever going to "important". That is, will the
         # tile ever be the worst tile?
@@ -254,8 +231,9 @@ class AdaCalibrate:
         logger.info(f"Preparing new step with {tiles_df.shape[0]} parent tiles.")
         if tiles_df.shape[0] == 0:
             return None, {}
+
         deepen_likely_to_work = (
-            tiles_df["twb_mean_lams"] > twb_worst_tile_mean_lams
+            tiles_df["twb_min_lams"] > twb_worst_tile_mean_lams
         ) & (~tiles_df["impossible"])
 
         ########################################
@@ -272,7 +250,10 @@ class AdaCalibrate:
         )
         tiles_df["deepen"] = (~tiles_df["refine"]) & (~at_max_K)
 
-        report = dict(n_impossible=tiles_df["impossible"].sum())
+        report = dict(
+            n_impossible=tiles_df["impossible"].sum(),
+            twb_worst_tile_mean_lams=twb_worst_tile_mean_lams,
+        )
         return tiles_df, report
 
 
@@ -294,8 +275,9 @@ def ada_calibrate(
     calibration_min_idx: int = 40,
     n_steps: int = 100,
     timeout: int = 60 * 60 * 12,
-    step_size: int = 2**10,
+    n_groups_per_step: int = 2**10,
     packet_size: int = 2**25,
+    group_size: int = 2**11,
     n_parallel_steps: int = 1,
     record_system: bool = True,
     clickhouse_service: str = None,
@@ -336,13 +318,15 @@ def ada_calibrate(
             alpha0 will need to be larger. Defaults to 40.
         n_steps: The number of Adagrid steps to run. Defaults to 100.
         timeout: The maximum number of seconds to run for. Defaults to 12 hours.
-        step_size: The number of tiles in an Adagrid step produced by a single
-           Adagrid tile selection step. This is different from
-           packet_size because we select tiles once and then run many
-           simulation "iterations" in parallel each processing one
-           packet of tiles. Defaults to 2**10.
-        packet_size: The number of simulations to process per iteration. Defaults to
-            2**25=~33 million.
+        n_groups_per_step: The number of tile groups in an Adagrid step
+            produced by a single Adagrid tile selection step. This is different
+            from packet_size because we select tiles once and then run many
+            simulation "iterations" in parallel each processing one packet of
+            tiles. Defaults to 2**10.
+        packet_size: The number of simulations to process per worker task.
+            Defaults to 2**25=~33 million.
+        group_size: The number of simulations to group together for database
+            lookup efficiency. Defaults to 2**11 = 2048.
         n_parallel_steps: The number of Adagrid steps to run in parallel.
             Setting this parameter to anything greater than 1 will cause the steps
             to be based on lagged data. For example, with n_parallel_steps=2,

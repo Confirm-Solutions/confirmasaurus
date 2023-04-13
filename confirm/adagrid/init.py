@@ -20,7 +20,7 @@ def init(db, algo_type, kwargs):
 
     add_system_cfg(cfg)
 
-    tiles_df, expected_counts = init_grid(g, db, cfg)
+    tiles_df = init_grid(g, db, cfg)
 
     cfg_copy = copy.copy(cfg)
     for k in ["git_diff", "conda_list", "nvidia_smi", "pip_freeze"]:
@@ -31,7 +31,9 @@ def init(db, algo_type, kwargs):
     cfg["model_kwargs"] = json.loads(cfg["model_kwargs_json"])
     algo = algo_type(kwargs["model_type"], db, cfg, kwargs["callback"])
 
-    return algo, tiles_df, expected_counts
+    db.expected_counts[0] = dict(tiles=0, results=0, done=0, groups=0)
+
+    return algo, tiles_df
 
 
 def first(kwargs):
@@ -138,24 +140,18 @@ def init_grid(g, db, cfg):
     df["packet_id"] = assign_packets(df, cfg["packet_size"])
     df.rename(columns={"active": "active_at_birth"}, inplace=True)
 
-    # these tiles have no parents. poor sad tiles :(
-    # we need to put these absent parents into the done table
-    absent_parents = pd.DataFrame(df["parent_id"].unique()[:, None], columns=["id"])
-    done_cols = [
-        "step_id",
-        "packet_id",
-        "id",
-        "active",
-        "active_at_birth",
-        "refine",
-        "deepen",
-        "split",
-    ]
-    for c in done_cols:
-        if c not in absent_parents.columns:
-            absent_parents[c] = 0
-    db.insert("done", absent_parents[done_cols], create=True)
+    # ID 0 is reserved for parents of the initial tiles.
+    df["parent_id"] = 0
+
     db.insert("config", pd.DataFrame([cfg]), create=True)
+    done_df = pd.DataFrame(
+        {
+            "step_id": pd.Series(dtype="int"),
+            "group_id": pd.Series(dtype="int"),
+            "count": pd.Series(dtype="int"),
+        }
+    )
+    db.insert("done", done_df)
 
     n_packets = df["packet_id"].nunique()
     logger.debug(
@@ -167,7 +163,7 @@ def init_grid(g, db, cfg):
         cfg["packet_size"],
     )
 
-    return df, dict(tiles=0, results=0, done=absent_parents.shape[0])
+    return df
 
 
 def assign_packets(df, packet_size):
