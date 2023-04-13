@@ -44,15 +44,15 @@ if use_clickhouse:
 ```
 
 ```python
-ch.command(ch_db.client,'alter table results_orderer delete where id in (select id from done where active_at_birth=true and step_id < 49)', settings={'allow_nondeterministic_mutations': 1})
-```
-
-```python
 query('select count(*)/1000000 from results')
 ```
 
 ```python
 query('select sum(K)/1e12 from results')
+```
+
+```python
+query('select median(K) from results')
 ```
 
 ```python
@@ -70,42 +70,6 @@ for m in query("select * from logs where message LIKE '%Command took%'")['messag
 ```
 
 ```python
-{Query=1, SelectQuery=1, FileOpen=884, Seek=68,
-ReadBufferFromFileDescriptorRead=483,
-ReadBufferFromFileDescriptorReadBytes=46947132,
-WriteBufferFromFileDescriptorWrite=558,
-WriteBufferFromFileDescriptorWriteBytes=170270807,
-ReadCompressedBytes=208726409, CompressedReadBufferBlocks=46759,
-CompressedReadBufferBytes=2096992592, OpenedFileCacheHits=53,
-OpenedFileCacheMisses=414, IOBufferAllocs=2040, IOBufferAllocBytes=825897988,
-ArenaAllocChunks=1853, ArenaAllocBytes=7589888, FunctionExecute=6548,
-MarkCacheHits=99, MarkCacheMisses=45, CreatedReadBufferOrdinary=467,
-DiskReadElapsedMicroseconds=14076, DiskWriteElapsedMicroseconds=133093,
-SelectedParts=64, SelectedRanges=64, SelectedMarks=15307,
-SelectedRows=124762503, SelectedBytes=2096992592,
-WaitMarksLoadMicroseconds=1313843, BackgroundLoadingMarksTasks=144,
-ContextLock=755, RWLockAcquiredReadLocks=4, RealTimeMicroseconds=79290017,
-UserTimeMicroseconds=9144162, SystemTimeMicroseconds=854946,
-SoftPageFaults=71393, OSCPUWaitMicroseconds=896021,
-OSCPUVirtualTimeMicroseconds=9998555, OSWriteBytes=171438080,
-OSReadChars=221404858, OSWriteChars=171828370, CreatedHTTPConnections=470,
-QueryProfilerRuns=89, S3ReadMicroseconds=22474609, S3ReadRequestsCount=470,
-DiskS3ReadMicroseconds=22474609, DiskS3ReadRequestsCount=470, S3GetObject=470,
-DiskS3GetObject=470, ReadBufferFromS3Microseconds=25258233,
-ReadBufferFromS3Bytes=170270807,
-CachedReadBufferReadFromSourceMicroseconds=25258754,
-CachedReadBufferReadFromCacheMicroseconds=13256,
-CachedReadBufferReadFromSourceBytes=170270807,
-CachedReadBufferReadFromCacheBytes=46929732,
-CachedReadBufferCacheWriteBytes=170270807,
-CachedReadBufferCacheWriteMicroseconds=222139, RemoteFSSeeks=458,
-RemoteFSPrefetches=685, RemoteFSPrefetchedReads=685,
-RemoteFSUnprefetchedReads=90, RemoteFSSeeksWithReset=458, RemoteFSBuffers=266,
-ThreadpoolReaderTaskMicroseconds=24226064, ThreadpoolReaderReadBytes=208726409,
-ThreadpoolReaderSubmit=91019, AsynchronousRemoteReadWaitMicroseconds=19313139}
-```
-
-```python
 for m in query("select * from logs where message LIKE '%Query took%'")['message'].values:
     print(m)
 ```
@@ -118,7 +82,7 @@ import json
 reports = [json.loads(v) for v in query("select * from reports")["json"].values]
 report_df = pd.DataFrame(reports)
 working_reports = report_df[report_df["status"] == "WORKING"].dropna(axis=1, how="all")
-new_step_reports = report_df[report_df["status"] == "NEW_STEP"].dropna(
+new_step_reports = report_df[(report_df["status"] == "NEW_STEP") | (report_df['status'] == 'CONVERGED')].dropna(
     axis=1, how="all"
 )
 new_step_reports.set_index("step_id", inplace=True)
@@ -487,6 +451,14 @@ working_reports["runtime_simulating"].sum()
 
 ```python
 new_step_reports
+```
+
+```python
+new_step_reports['n_deepen'].sum() / 1e6
+```
+
+```python
+new_step_reports['n_refine'].sum() / 1e6
 ```
 
 ```python

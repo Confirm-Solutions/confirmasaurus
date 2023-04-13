@@ -134,10 +134,7 @@ class WD41(ip.Model):
             in_axes=(None, 0, 0),
         )
 
-        self.null_hypos = [
-            ip.hypo("theta0 > theta1"),
-            WD41Null(self.true_frac_tnbc),
-        ]
+        self.null_hypos = [ip.hypo("theta0 > theta1"), WD41Null(self.true_frac_tnbc)]
         self.family = "binomial"
         self.n_max_tnbc = (
             self.n_tnbc_first_stage_per_arm + self.n_tnbc_only_second_stage
@@ -389,7 +386,7 @@ class WD41(ip.Model):
             unifs, p[..., 0], p[..., 1], p[..., 2], p[..., 3], detailed=False
         )
         rejected = jnp.array((tnbc_stat, full_stat))
-        stat = jnp.min(jnp.where(null_truth, rejected, 1e9))
+        stat = jnp.min(jnp.where(null_truth[..., :2], rejected, 1e9))
         return stat
 
     def sim_batch(

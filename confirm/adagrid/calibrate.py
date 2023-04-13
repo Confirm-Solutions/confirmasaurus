@@ -350,9 +350,9 @@ def ada_calibrate(
         record_system: If True, we will collection extra system
             configuration info. Setting this to False will make startup time
             a bit faster.
-        clickhouse_service: If 'PROD', we mirror all database inserts to a the
-            prod Clickhouse service. If 'TEST' we mirror to the test service. If
-            None, we do not mirror inserts. Default is None.
+        clickhouse_service: If 'PROD', we use the prod Clickhouse service. If
+            'TEST' we use the test service. If None, we do not mirror inserts.
+            Default is None.
         job_name_prefix: A prefix to use for the job name. This is useful for
             grouping jobs together. Defaults to None. If job_name is set, this is
             ignored. If job_name is not set, this is used to generate a job

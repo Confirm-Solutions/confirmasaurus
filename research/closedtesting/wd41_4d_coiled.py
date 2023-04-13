@@ -26,8 +26,8 @@ def f():
 
     model = wd41.WD41(0, 1, ignore_intersection=True)
     grid = ip.cartesian_grid(
-        [-2.0, -2.0, -2.0, -2.0],
-        [1.0, 1.0, 1.0, 1.0],
+        [-1.0, -1.0, -1.0, -1.0],
+        [-0.5, -0.5, -0.5, -0.5],
         n=[10, 10, 10, 10],
         null_hypos=model.null_hypos,
     )
@@ -40,16 +40,17 @@ def f():
         clickhouse_service="PROD",
         g=grid,
         alpha=0.025,
-        bias_target=0.001,
-        grid_target=0.001,
+        bias_target=0.002,
+        grid_target=0.002,
         std_target=0.002,
-        n_K_double=6,
+        init_K=2**15,
+        n_K_double=4,
         calibration_min_idx=70,
         step_size=2**21,
-        packet_size=2**27,
+        packet_size=2**30,
         n_parallel_steps=2,
         model_kwargs={"ignore_intersection": True},
-        backend=coiled_backend.CoiledBackend(n_workers=16),
+        backend=coiled_backend.CoiledBackend(n_workers=32),
         n_steps=1000,
     )
     print("Done inner")

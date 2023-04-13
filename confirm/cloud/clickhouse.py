@@ -348,6 +348,22 @@ def clear_dbs(
                 command(ch_client, cmd)
 
 
+# Lots of remaining performance improvements:
+# - [ ] need to be able to throw out large portions of the results table. there
+# are two pieces to this.
+# 	- [ ] need to permanently apply the done filter to the results table and
+# 	remove rows that are irrelevant.
+# 	- [ ] algorithm for guessing at a conservative orderer_max and filter the
+# 	query by that value!
+# - [ ] the B_lams minimum query can also be made much faster by filtering out tiles
+# that have no chance of winning. use twb_min_lams and twb_max_lams.
+# - [ ] the lams query can use a separate table with just id and lams and use
+# the index on that?? same with the twb_mean_lams query.
+#
+# https://engineering.contentsquare.com/2022/tools-to-analyse-slow-query-clickhouse/
+# https://www.slideshare.net/Altinity/clickhouse-query-performance-tips-and-tricks-by-robert-hodges-altinity-ceo
+
+
 @dataclass
 class ClickhouseTiles(SQLTiles):
     connection_details: Dict[str, str]
@@ -531,33 +547,6 @@ class ClickhouseTiles(SQLTiles):
 
         self._done_task = asyncio.create_task(wait_for_done())
 
-    def alter_update(self, step_id):
-        command(
-            self.client,
-            f"""
-            alter table results_orderer delete
-                where id in (
-                    select id from done 
-                        where active_at_birth=true 
-                        and step_id = {step_id})
-            """,
-            settings=dict(allow_nondeterministic_mutations=1),
-        )
-        for order_col in ["lams", "twb_mean_lams"]:
-            command(
-                self.client,
-                f"""
-                alter table results_{order_col} delete
-                    where id in (
-                        select id from done 
-                            where active_at_birth=true 
-                            and active=false
-                            and step_id = {step_id})
-                """,
-                settings=dict(allow_nondeterministic_mutations=1),
-            )
-        return step_id
-
     async def prepare_step(
         self, basal_step_id: int, step_id: int, n: int, orderer: str
     ) -> None:
@@ -565,25 +554,6 @@ class ClickhouseTiles(SQLTiles):
         if self._done_task is not None:
             self.ready_to_update = await self._done_task
             self._done_task = None
-
-            # update pattern duplicated with verify below.
-            if self._update_task is None:
-                self.update_stop = False
-
-                def update_task():
-                    last_updated = -1
-                    while not self.update_stop or self.ready_to_update > last_updated:
-                        if self.ready_to_update > last_updated:
-                            last_updated += 1
-                            self.max_done_step = self.alter_update(last_updated)
-                        else:
-                            time.sleep(2.0)
-
-                self._update_task = asyncio.create_task(asyncio.to_thread(update_task))
-                await asyncio.sleep(0)
-            else:
-                if self._update_task.done():
-                    self._update_task.result()
 
         def min_query():
             self.wait_for_results(basal_step_id)

@@ -176,6 +176,7 @@ def refine_and_deepen(df, null_hypos, max_K):
     # inactive. This means that we will have a full history of grid
     # construction.
     g_refine = g_refine.add_null_hypos(null_hypos, inherit_cols)
+
     g_refine.df.loc[g_refine._which_alternative(), "active"] = False
 
     g_new = g_refine.concat(g_deepen)
@@ -189,6 +190,11 @@ def refine_and_deepen(df, null_hypos, max_K):
     inactive_df["active"] = False
 
     active_df = g_new.df[g_new.df["active_at_birth"]]
+    # TODO: TEMPORARY TO GET WD41 TO WORK
+    # include = (active_df["theta1"] - active_df["theta0"] < 0.25) & (
+    #     active_df["theta3"] - active_df["theta2"] < 0.25
+    # )
+    # active_df = active_df[include]
     return active_df, inactive_df
 
 
