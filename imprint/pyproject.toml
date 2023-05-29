@@ -36,7 +36,7 @@ version = "^3.2.0"
 optional = true
 
 [tool.poetry.group.dev.dependencies]
-poetry = "1.4.0"
+poetry = "1.5.1"
 line-profiler = "^3.5.1"
 jupytext = "^1.14.5"
 reorder-python-imports = "^3.9.0"
