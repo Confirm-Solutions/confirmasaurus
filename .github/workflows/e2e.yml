@@ -2,9 +2,9 @@
 name: E2E
 
 on:
-  schedule:
+  #schedule:
     # Runs at 02:57am every day.
-    - cron: '57 2 * * *'
+  #  - cron: '57 2 * * *'
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
