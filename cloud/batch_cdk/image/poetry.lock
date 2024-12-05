@@ -320,18 +320,18 @@ tests-no-zope = ["cloudpickle", "hypothesis", "mypy (>=1.1.1)", "pympler", "pyte
 
 [[package]]
 name = "aws-cdk-asset-awscli-v1"
-version = "2.2.173"
+version = "2.2.198"
 description = "A library that contains the AWS CLI for use in Lambda Layers"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-awscli-v1-2.2.173.tar.gz", hash = "sha256:8fbda70421638a0cbe66386e1977c1deb9562881ab1e46b6145ad66c266e2a38"},
-    {file = "aws_cdk.asset_awscli_v1-2.2.173-py3-none-any.whl", hash = "sha256:c6a0590a31284bc9fc586f00765d73526ab99817d3547e25597cd3d18bc2e9f3"},
+    {file = "aws-cdk.asset-awscli-v1-2.2.198.tar.gz", hash = "sha256:6a78b63439a2041fea59c73bb751b87b3415d4451e41a61a852b71ad99fa0e6b"},
+    {file = "aws_cdk.asset_awscli_v1-2.2.198-py3-none-any.whl", hash = "sha256:14a1e917a69e59ddbe559f35cf611b2a7421e42c3544cc7a5ab224387d41f3ab"},
 ]
 
 [package.dependencies]
-jsii = ">=1.81.0,<2.0.0"
+jsii = ">=1.84.0,<2.0.0"
 publication = ">=0.0.3"
 typeguard = ">=2.13.3,<2.14.0"
 
@@ -354,58 +354,58 @@ typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-asset-node-proxy-agent-v5"
-version = "2.0.146"
+version = "2.0.165"
 description = "@aws-cdk/asset-node-proxy-agent-v5"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.146.tar.gz", hash = "sha256:9aac36a3f69e9d7d99fc403192be41369ff0d0307a3e4c028a3a70e0108ac63c"},
-    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.146-py3-none-any.whl", hash = "sha256:cec187b3e2db5f90839598511c002bb4fda1d1728b81ebcae58c13c901681583"},
+    {file = "aws-cdk.asset-node-proxy-agent-v5-2.0.165.tar.gz", hash = "sha256:e1afb5773d185cf5f335e4c2dd8dd09967a5e700b45eddf5559b24d7e665628d"},
+    {file = "aws_cdk.asset_node_proxy_agent_v5-2.0.165-py3-none-any.whl", hash = "sha256:96afc5747276d21fc25a4aacdb361e3b1cb9a53b2a87a2affa20bbfbe87a0c65"},
 ]
 
 [package.dependencies]
-jsii = ">=1.81.0,<2.0.0"
+jsii = ">=1.84.0,<2.0.0"
 publication = ">=0.0.3"
 typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-aws-batch-alpha"
-version = "2.79.1a0"
+version = "2.85.0a0"
 description = "The CDK Construct Library for AWS::Batch"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk.aws-batch-alpha-2.79.1a0.tar.gz", hash = "sha256:c30cbf890046a829849df540a506b043fb4b5906e3c4d977483cc618621b5704"},
-    {file = "aws_cdk.aws_batch_alpha-2.79.1a0-py3-none-any.whl", hash = "sha256:52df0de77400247047d3d983e1b409b5a60cac06fc811f2232b77bd5410bb3ea"},
+    {file = "aws-cdk.aws-batch-alpha-2.85.0a0.tar.gz", hash = "sha256:ff40e6c47a22982ddfdb7d7b85c19cffd57e48cd6f2dc2ed1bff00841f53289a"},
+    {file = "aws_cdk.aws_batch_alpha-2.85.0a0-py3-none-any.whl", hash = "sha256:92a620ced2c6ec7b41909ca51d351a5adbace7fbbe0bda04a05418591bbc4754"},
 ]
 
 [package.dependencies]
-aws-cdk-lib = "2.79.1"
+aws-cdk-lib = "2.85.0"
 constructs = ">=10.0.0,<11.0.0"
-jsii = ">=1.80.0,<2.0.0"
+jsii = ">=1.82.0,<2.0.0"
 publication = ">=0.0.3"
 typeguard = ">=2.13.3,<2.14.0"
 
 [[package]]
 name = "aws-cdk-lib"
-version = "2.79.1"
+version = "2.85.0"
 description = "Version 2 of the AWS Cloud Development Kit library"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "aws-cdk-lib-2.79.1.tar.gz", hash = "sha256:7d88118827ed42025c7b661547b38c54b89afef2cd54214459df51104a1034c3"},
-    {file = "aws_cdk_lib-2.79.1-py3-none-any.whl", hash = "sha256:89f51117cc9c2cb2561605fdd5641ceb705ebe0185276dab799193783a70123b"},
+    {file = "aws-cdk-lib-2.85.0.tar.gz", hash = "sha256:cbd13ec361a841077db0a0acb1d84c44c030ff198ad0a8e6d47760b3f8362ed4"},
+    {file = "aws_cdk_lib-2.85.0-py3-none-any.whl", hash = "sha256:b5b388c0478b39820d8facee6ed7b07a1e1e1e7c01dded3d17f86797fb8dddb3"},
 ]
 
 [package.dependencies]
-"aws-cdk.asset-awscli-v1" = ">=2.2.165,<3.0.0"
+"aws-cdk.asset-awscli-v1" = ">=2.2.177,<3.0.0"
 "aws-cdk.asset-kubectl-v20" = ">=2.1.1,<3.0.0"
-"aws-cdk.asset-node-proxy-agent-v5" = ">=2.0.139,<3.0.0"
+"aws-cdk.asset-node-proxy-agent-v5" = ">=2.0.148,<3.0.0"
 constructs = ">=10.0.0,<11.0.0"
-jsii = ">=1.80.0,<2.0.0"
+jsii = ">=1.82.0,<2.0.0"
 publication = ">=0.0.3"
 typeguard = ">=2.13.3,<2.14.0"
 
@@ -1863,19 +1863,19 @@ files = [
 
 [[package]]
 name = "jsii"
-version = "1.81.0"
+version = "1.84.0"
 description = "Python client for jsii runtime"
 category = "dev"
 optional = false
 python-versions = "~=3.7"
 files = [
-    {file = "jsii-1.81.0-py3-none-any.whl", hash = "sha256:6d12cd881053bafbac19d2a28fc616497479739784e017534e4cf128ff977b62"},
-    {file = "jsii-1.81.0.tar.gz", hash = "sha256:585f6bedd9b586f48ce058451d24f362ee52936179987dd897a100f5355f228f"},
+    {file = "jsii-1.84.0-py3-none-any.whl", hash = "sha256:7748205665d079112721d6eb23a37fa084722ab675f65e8a6514ec908660bd57"},
+    {file = "jsii-1.84.0.tar.gz", hash = "sha256:29f8352525e980e126d5d0fd3510fff9a81a8dbc36249f99d922907f2e6bf4c3"},
 ]
 
 [package.dependencies]
 attrs = ">=21.2,<24.0"
-cattrs = ">=1.8,<22.3"
+cattrs = ">=1.8,<23.2"
 importlib-resources = ">=5.2.0"
 publication = ">=0.0.3"
 python-dateutil = "*"
